@@ -112,7 +112,6 @@ export default function EndpointsTab() {
       <div class="key-row">
         <input
           ref={keyEl}
-          type="password"
           placeholder={
             keyCleared()
               ? 'Will be removed on save'
