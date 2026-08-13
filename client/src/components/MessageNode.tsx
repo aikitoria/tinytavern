@@ -319,9 +319,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     <article
       ref={(element) => {
         element.addEventListener('click', revealImageControlsOnFirstTap, true);
-        onCleanup(() =>
-          element.removeEventListener('click', revealImageControlsOnFirstTap, true),
-        );
+        onCleanup(() => element.removeEventListener('click', revealImageControlsOnFirstTap, true));
       }}
       class="msg"
       classList={{
@@ -555,8 +553,16 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 <textarea
                   ref={editArea}
                   onInput={(e) => {
-                    e.currentTarget.style.height = 'auto';
-                    e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                    // Collapsing to auto to measure shrinks the scroller's content,
+                    // and the browser clamps scrollTop to the smaller maximum before
+                    // the full height is restored. Put the position back, or a
+                    // taller-than-viewport edit box scrolls itself off screen.
+                    const el = e.currentTarget;
+                    const scroller = el.closest('.chat');
+                    const top = scroller?.scrollTop;
+                    el.style.height = 'auto';
+                    el.style.height = `${el.scrollHeight}px`;
+                    if (scroller && top !== undefined) scroller.scrollTop = top;
                   }}
                   onKeyDown={(e) => {
                     if (e.isComposing) return; // IME candidate confirmation, not a command
