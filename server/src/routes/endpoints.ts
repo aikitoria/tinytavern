@@ -136,9 +136,14 @@ route.get('/api/endpoints/:id/models', async ({ params }) => {
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
+    // undici hides the real failure (ECONNREFUSED, ENOTFOUND, TLS, ...) in err.cause
+    // behind a generic "fetch failed" TypeError.
+    const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+    const reason = err instanceof Error ? err.message : String(err);
+    const detail = cause?.code ?? cause?.message;
     throw new HttpError(
       502,
-      `upstream /models failed: ${err instanceof Error ? err.message : err}`,
+      `upstream /models failed for ${endpoint.baseUrl}: ${reason}${detail ? ` (${detail})` : ''}`,
     );
   }
   if (!res.ok) throw new HttpError(502, `upstream /models returned ${res.status}`);
