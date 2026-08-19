@@ -2,7 +2,7 @@ import { Show, createEffect, createSignal, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import type { Settings } from '@minitavern/shared';
 import { api, ApiError } from '../../state/api.ts';
-import { applySettings, setState, state } from '../../state/store.ts';
+import { applySettings, deleteAllConversations, setState, state } from '../../state/store.ts';
 import { createSavedFlash, errorMessage } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
 
@@ -23,6 +23,7 @@ export default function GeneralTab() {
   const [error, setError] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [removePassword, setRemovePassword] = createSignal(false);
+  const [deletingChats, setDeletingChats] = createSignal(false);
 
   const passwordDirty = () => password() !== '' || removePassword();
   const isDirty = () => SETTING_KEYS.some((key) => dirty[key]) || passwordDirty();
@@ -84,6 +85,25 @@ export default function GeneralTab() {
     setPassword('');
     setRemovePassword(false);
     setError('');
+  };
+
+  const deleteChats = async () => {
+    if (
+      state.conversations.length === 0 ||
+      !confirm(
+        'Delete all chats? This permanently deletes every conversation and its generated images. This cannot be undone.',
+      )
+    )
+      return;
+    setDeletingChats(true);
+    try {
+      await deleteAllConversations();
+      setError('');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDeletingChats(false);
+    }
   };
 
   useSettingsGuard({ isDirty, save, discard });
@@ -152,6 +172,21 @@ export default function GeneralTab() {
       <Show when={error()}>
         <p class="hint">{error()}</p>
       </Show>
+
+      <label>Chat history</label>
+      <p class="hint">
+        Permanently delete every conversation and its generated images. Characters and settings are
+        kept.
+      </p>
+      <div class="form-actions">
+        <button
+          class="danger-btn"
+          disabled={deletingChats() || state.conversations.length === 0}
+          onClick={() => void deleteChats()}
+        >
+          {deletingChats() ? 'Deleting…' : 'Delete all chats'}
+        </button>
+      </div>
     </div>
   );
 }

@@ -3374,6 +3374,18 @@ async function main() {
     searchSeed.close();
   }
 
+  console.log('== delete all conversations ==');
+  const bulkDelete = await req<{ deleted: number }>('DELETE', '/api/conversations');
+  assert(bulkDelete.deleted > 0, 'bulk delete reports the number of deleted conversations');
+  assert(
+    (await req<unknown[]>('GET', '/api/conversations')).length === 0,
+    'bulk delete removes every conversation',
+  );
+  assert(
+    (await fetch(`${BASE}${imageUrl}`)).status === 404,
+    'bulk delete removes generated images',
+  );
+
   ws.close();
 
   console.log('== optional password authentication ==');

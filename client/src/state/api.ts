@@ -195,6 +195,7 @@ export const api = {
   logout: () => request<{ authenticated: boolean }>('POST', '/api/auth/logout'),
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
+  deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),
   patchConversation: (

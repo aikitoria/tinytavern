@@ -201,6 +201,7 @@ const fetchSeq = new SuccessfulFetchSequence<InvalidateEntity>();
 // request resolves. Remember locally initiated deletes so that refresh can't
 // mistake that race for a deletion performed by another client.
 const locallyDeletingConversationIds = new Set<number>();
+let locallyDeletingAllConversations = false;
 
 function loader<T>(
   entity: InvalidateEntity,
@@ -228,7 +229,7 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
     ) {
       const deletedId = state.selectedId;
       selectConversation(null);
-      if (!locallyDeletingConversationIds.has(deletedId)) {
+      if (!locallyDeletingAllConversations && !locallyDeletingConversationIds.has(deletedId)) {
         toast('This conversation was deleted on another device.');
       }
     }
@@ -601,6 +602,18 @@ export async function deleteConversation(id: number): Promise<void> {
     if (state.selectedId === id) selectConversation(null);
   } finally {
     locallyDeletingConversationIds.delete(id);
+  }
+}
+
+export async function deleteAllConversations(): Promise<number> {
+  locallyDeletingAllConversations = true;
+  try {
+    const result = await api.deleteAllConversations();
+    if (state.selectedId != null) selectConversation(null);
+    setState('conversations', []);
+    return result.deleted;
+  } finally {
+    locallyDeletingAllConversations = false;
   }
 }
 

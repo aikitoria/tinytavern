@@ -276,6 +276,20 @@ route.get('/api/conversations', () => {
   return rows.map(toConversation);
 });
 
+route.del('/api/conversations', () => {
+  const ids = (stmt('SELECT id FROM conversations').all() as unknown as { id: number }[]).map(
+    (row) => row.id,
+  );
+  cancelSpeculativeRetries();
+  for (const id of ids) stopConversationGenerations(id);
+  const doomedImages = ids.flatMap(collectConversationImages);
+  const result = stmt('DELETE FROM conversations').run();
+  for (const id of ids) takeDirtyMessageIds(id);
+  deleteImageFiles(doomedImages);
+  invalidate('conversations');
+  return { deleted: Number(result.changes) };
+});
+
 route.post('/api/conversations', ({ body }) => {
   const b = objectBody(body);
   const characterId = optionalNullableId(b, 'characterId') ?? null;
