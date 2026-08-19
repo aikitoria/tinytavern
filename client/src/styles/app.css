@@ -1798,6 +1798,7 @@ textarea.mono,
    and the detail form each get their own scrollbar instead. */
 .modal-body:has(> .master-detail) {
   display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 0;
 }
@@ -2083,6 +2084,28 @@ textarea.mono,
 .avatar-row .avatar-fallback {
   width: 56px;
   height: 56px;
+}
+
+/* Global "active/default X" picker above an entity CRUD tab, so activating an
+   entry lives on the same page as creating it. */
+.global-select-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.global-select-bar > label {
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.global-select-bar .select-btn {
+  min-width: 240px;
+  min-height: 40px;
 }
 
 .master-detail {

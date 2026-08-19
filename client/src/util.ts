@@ -14,6 +14,9 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
   /** Server-side copy of the saved row (secrets and files included). */
   duplicate: (id: number) => Promise<T>;
   deletePrompt: string;
+  /** Initial selection for a freshly mounted editor (e.g. the tab's global
+   * default): a valid id starts on that item instead of the blank "new" form. */
+  initialId?: () => number | null;
 }
 
 export function errorMessage(err: unknown): string {
@@ -95,10 +98,19 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     setSelectedId(item.id);
     load(item);
   };
-  // Seed the initial "new entity" form once the refs exist: raw DOM defaults
-  // diverge from load(undefined) (e.g. a Select with no '' option stays '').
+  // Seed the initial form once the refs exist: the configured default entity
+  // when one resolves (selected directly, without opening the mobile detail
+  // view), else the "new entity" form. Raw DOM defaults diverge from
+  // load(undefined) (e.g. a Select with no '' option stays '').
   onMount(() => {
-    if (selectedId() === 'new') load(undefined);
+    if (selectedId() !== 'new') return;
+    const initialId = options.initialId?.();
+    const item =
+      initialId != null
+        ? options.items().find((candidate) => candidate.id === initialId)
+        : undefined;
+    if (item) setSelectedId(item.id);
+    load(item);
   });
 
   // Invalidation refetches reconcile the selected DTO in-place. Keep a clean

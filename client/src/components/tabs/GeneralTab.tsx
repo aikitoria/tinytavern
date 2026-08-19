@@ -1,10 +1,9 @@
 import { Show, createEffect, createSignal, untrack } from 'solid-js';
-import Select from '../Select.tsx';
 import { createStore, reconcile } from 'solid-js/store';
 import type { Settings } from '@minitavern/shared';
 import { api, ApiError } from '../../state/api.ts';
 import { applySettings, setState, state } from '../../state/store.ts';
-import { createSavedFlash, errorMessage, numberOrNull } from '../../util.ts';
+import { createSavedFlash, errorMessage } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
 
 function snapshot(): Settings {
@@ -12,14 +11,7 @@ function snapshot(): Settings {
 }
 
 type SettingKey = Exclude<keyof Settings, 'revision' | 'hasPassword' | 'pluginSettings'>;
-const SETTING_KEYS: SettingKey[] = [
-  'activeEndpointId',
-  'defaultPresetId',
-  'defaultPersonaId',
-  'defaultTemplateId',
-  'autoExpandThinking',
-  'backgroundSwipeGeneration',
-];
+const SETTING_KEYS: SettingKey[] = ['autoExpandThinking', 'backgroundSwipeGeneration'];
 
 export default function GeneralTab() {
   const [draft, setDraft] = createStore<Settings>(snapshot());
@@ -98,19 +90,6 @@ export default function GeneralTab() {
 
   return (
     <div class="form">
-      <label>Active endpoint (all generations go through this)</label>
-      <Select
-        value={draft.activeEndpointId?.toString() ?? ''}
-        onChange={(v) => change('activeEndpointId', numberOrNull(v))}
-        options={[
-          { value: '', label: '— none —' },
-          ...state.endpoints.map((ep) => ({ value: String(ep.id), label: ep.name })),
-        ]}
-      />
-      <p class="hint">
-        Model and sampling settings are configured per endpoint in the Endpoints tab.
-      </p>
-
       <label for="settings-access-password">Access password</label>
       <input
         id="settings-access-password"
@@ -142,36 +121,6 @@ export default function GeneralTab() {
           Remove the access password
         </label>
       </Show>
-
-      <label>Default system prompt preset</label>
-      <Select
-        value={draft.defaultPresetId?.toString() ?? ''}
-        onChange={(v) => change('defaultPresetId', numberOrNull(v))}
-        options={[
-          { value: '', label: '— none —' },
-          ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
-        ]}
-      />
-
-      <label>Default persona</label>
-      <Select
-        value={draft.defaultPersonaId?.toString() ?? ''}
-        onChange={(v) => change('defaultPersonaId', numberOrNull(v))}
-        options={[
-          { value: '', label: '— none —' },
-          ...state.personas.map((p) => ({ value: String(p.id), label: p.name })),
-        ]}
-      />
-
-      <label>Default prompt template</label>
-      <Select
-        value={draft.defaultTemplateId?.toString() ?? ''}
-        onChange={(v) => change('defaultTemplateId', numberOrNull(v))}
-        options={[
-          { value: '', label: '— built-in default —' },
-          ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
-        ]}
-      />
 
       <label class="check-row">
         <input

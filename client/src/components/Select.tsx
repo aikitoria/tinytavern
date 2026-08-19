@@ -1,6 +1,10 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
+const MENU_GAP = 4;
+const VIEWPORT_GUTTER = 8;
+const MAX_MENU_HEIGHT = 320;
+
 export interface SelectOption {
   value: string;
   label: string;
@@ -27,7 +31,13 @@ export default function Select(props: {
   const [current, setCurrent] = createSignal(props.value ?? '');
   const [open, setOpen] = createSignal(false);
   const [highlighted, setHighlighted] = createSignal(0);
-  const [pos, setPos] = createSignal({ left: 0, top: 0, width: 0, up: false });
+  const [pos, setPos] = createSignal({
+    left: 0,
+    top: 0,
+    width: 0,
+    maxHeight: MAX_MENU_HEIGHT,
+    up: false,
+  });
   let button!: HTMLButtonElement;
   let menu: HTMLDivElement | undefined;
 
@@ -49,9 +59,17 @@ export default function Select(props: {
 
   const reposition = () => {
     const rect = button.getBoundingClientRect();
-    const height = Math.min(props.options.length * 34 + 12, 320);
-    const up = rect.bottom + height + 8 > window.innerHeight && rect.top > height + 8;
-    setPos({ left: rect.left, top: up ? rect.top : rect.bottom, width: rect.width, up });
+    const naturalHeight = Math.min(props.options.length * 34 + 12, MAX_MENU_HEIGHT);
+    const spaceAbove = Math.max(0, rect.top - MENU_GAP - VIEWPORT_GUTTER);
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - MENU_GAP - VIEWPORT_GUTTER);
+    const up = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
+    const maxHeight = Math.min(MAX_MENU_HEIGHT, up ? spaceAbove : spaceBelow);
+    const width = Math.min(rect.width, window.innerWidth - VIEWPORT_GUTTER * 2);
+    const left = Math.min(
+      Math.max(rect.left, VIEWPORT_GUTTER),
+      window.innerWidth - VIEWPORT_GUTTER - width,
+    );
+    setPos({ left, top: up ? rect.top : rect.bottom, width, maxHeight, up });
   };
 
   const openMenu = () => {
@@ -134,9 +152,10 @@ export default function Select(props: {
             style={{
               left: `${pos().left}px`,
               width: `${pos().width}px`,
+              'max-height': `${pos().maxHeight}px`,
               ...(pos().up
-                ? { bottom: `${window.innerHeight - pos().top + 4}px` }
-                : { top: `${pos().top + 4}px` }),
+                ? { bottom: `${window.innerHeight - pos().top + MENU_GAP}px` }
+                : { top: `${pos().top + MENU_GAP}px` }),
             }}
           >
             <For each={props.options}>

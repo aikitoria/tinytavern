@@ -7,6 +7,7 @@ import { createEntityEditor } from '../../util.ts';
 import Avatar from '../Avatar.tsx';
 import AvatarRow from '../AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
+import GlobalSelect, { NONE_LABEL } from '../GlobalSelect.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
 
@@ -27,49 +28,61 @@ export default function PersonasTab() {
     remove: api.deletePersona,
     duplicate: api.duplicatePersona,
     deletePrompt: 'Delete this persona?',
+    initialId: () => state.settings.defaultPersonaId,
   });
 
   return (
-    <EntityEditorPane
-      editor={editor}
-      items={state.personas}
-      itemLabel={(persona) => (
-        <>
-          <Avatar src={persona.avatar} name={persona.name} /> {persona.name}
-        </>
-      )}
-      newLabel="+ New persona"
-    >
-      <Show when={editor.selectedId() !== 'new'}>
-        <AvatarRow
-          src={editor.selected()?.avatar}
-          name={editor.selected()?.name ?? '?'}
-          upload={(file) => api.uploadPersonaAvatar(editor.selectedId() as number, file)}
-          remove={() => api.deletePersonaAvatar(editor.selectedId() as number)}
-          generate={
-            avatarGenerationAvailable()
-              ? async () => {
-                  setAvatarGen(true);
-                }
-              : undefined
-          }
-          onDone={editor.flashSaved}
-          onError={editor.setStatus}
-        />
-        <Show when={avatarGen()}>
-          <AvatarGenerateModal
-            kind="persona"
-            id={editor.selectedId() as number}
-            onClose={() => setAvatarGen(false)}
+    <>
+      <GlobalSelect
+        label="Default persona"
+        settingKey="defaultPersonaId"
+        items={state.personas}
+        noneLabel={NONE_LABEL}
+      />
+      <EntityEditorPane
+        editor={editor}
+        items={state.personas}
+        itemLabel={(persona) => (
+          <>
+            <Avatar src={persona.avatar} name={persona.name} /> {persona.name}
+          </>
+        )}
+        newLabel="+ New persona"
+      >
+        <Show when={editor.selectedId() !== 'new'}>
+          <AvatarRow
+            src={editor.selected()?.avatar}
+            name={editor.selected()?.name ?? '?'}
+            upload={(file) => api.uploadPersonaAvatar(editor.selectedId() as number, file)}
+            remove={() => api.deletePersonaAvatar(editor.selectedId() as number)}
+            generate={
+              avatarGenerationAvailable()
+                ? async () => {
+                    setAvatarGen(true);
+                  }
+                : undefined
+            }
+            onDone={editor.flashSaved}
+            onError={editor.setStatus}
           />
+          <Show when={avatarGen()}>
+            <AvatarGenerateModal
+              kind="persona"
+              id={editor.selectedId() as number}
+              onClose={() => setAvatarGen(false)}
+            />
+          </Show>
         </Show>
-      </Show>
-      <label>Name (used as {'{{user}}'})</label>
-      <input ref={nameEl} placeholder="Your name" />
-      <label>
-        Description (injected into the prompt) <MacroHelp />
-      </label>
-      <MacroTextarea ref={descriptionEl} placeholder="A few sentences about {{user}} (optional)" />
-    </EntityEditorPane>
+        <label>Name (used as {'{{user}}'})</label>
+        <input ref={nameEl} placeholder="Your name" />
+        <label>
+          Description (injected into the prompt) <MacroHelp />
+        </label>
+        <MacroTextarea
+          ref={descriptionEl}
+          placeholder="A few sentences about {{user}} (optional)"
+        />
+      </EntityEditorPane>
+    </>
   );
 }
