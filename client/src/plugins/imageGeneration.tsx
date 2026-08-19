@@ -306,6 +306,15 @@ const ImageIcon = () => (
   </svg>
 );
 
+/** "Name (copy)", then "Name (copy 2)", ...: names are the item identity in
+ * these lists (active selections refer to one), so a copy must never collide. */
+function copyName(base: string, taken: (name: string) => boolean): string {
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? `${base} (copy)` : `${base} (copy ${n})`;
+    if (!taken(candidate)) return candidate;
+  }
+}
+
 interface PromptPresetEditorHandle {
   value: ImagePromptPresetSet;
 }
@@ -388,6 +397,18 @@ function PromptPresetEditor(props: {
     });
   };
 
+  const duplicate = () => {
+    const idx = selected();
+    if (idx === -1) return;
+    stash();
+    const source = presets()[idx]!;
+    const name = copyName(source.name, (candidate) =>
+      presets().some((preset) => preset.name === candidate),
+    );
+    setPresets((list) => [...list, { ...source, name }]);
+    showPreset(presets().length - 1);
+  };
+
   const remove = () => {
     const idx = selected();
     if (idx === -1) return;
@@ -437,6 +458,7 @@ function PromptPresetEditor(props: {
         />
         <button onClick={add}>+ New</button>
         <Show when={selected() !== -1}>
+          <button onClick={duplicate}>Duplicate</button>
           <button onClick={rename}>Rename</button>
           <button class="danger-btn" onClick={remove}>
             Delete
@@ -538,6 +560,18 @@ function SettingsPage() {
       while (list.some((workflow) => workflow.name === `Workflow ${n}`)) n++;
       return [...list, { name: `Workflow ${n}`, json: '' }];
     });
+    showWorkflow(workflows().length - 1);
+  };
+
+  const duplicateWorkflow = () => {
+    const idx = selected();
+    if (idx === -1) return;
+    stash();
+    const source = workflows()[idx]!;
+    const name = copyName(source.name, (candidate) =>
+      workflows().some((workflow) => workflow.name === candidate),
+    );
+    setWorkflows((list) => [...list, { name, json: source.json }]);
     showWorkflow(workflows().length - 1);
   };
 
@@ -740,6 +774,7 @@ function SettingsPage() {
         />
         <button onClick={addWorkflow}>+ Add</button>
         <Show when={selected() !== -1}>
+          <button onClick={duplicateWorkflow}>Duplicate</button>
           <button class="danger-btn" onClick={deleteWorkflow}>
             Delete
           </button>

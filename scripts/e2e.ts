@@ -448,6 +448,29 @@ async function main() {
     { genParams: { reasoningEffort: 'extreme' } },
     400,
   );
+
+  console.log('== endpoint duplicate carries the secret key ==');
+  const endpointCopy = await req<{
+    id: number;
+    name: string;
+    apiKey: string;
+    hasApiKey: boolean;
+    model: string | null;
+  }>('POST', `/api/endpoints/${endpoint.id}/duplicate`);
+  assert(
+    endpointCopy.name === 'mock (copy)' &&
+      endpointCopy.apiKey === '' &&
+      endpointCopy.hasApiKey &&
+      endpointCopy.model === 'mock-large',
+    'endpoint duplicate copies fields and redacts the copied secret',
+  );
+  await req<string[]>('GET', `/api/endpoints/${endpointCopy.id}/models`);
+  assert(
+    (await modelAuthorization()) === 'Bearer test-key',
+    'duplicated endpoint fetches models with the copied key',
+  );
+  await req('DELETE', `/api/endpoints/${endpointCopy.id}`);
+
   await putSettings({ activeEndpointId: endpoint.id });
 
   console.log('== private persistence + online backup ==');
@@ -1391,9 +1414,34 @@ async function main() {
     headers: { 'content-type': 'application/octet-stream' },
     body: new Uint8Array(await exportRes.arrayBuffer()),
   });
-  const reimported = (await reimportRes.json()) as { name: string; personality: string };
+  const reimported = (await reimportRes.json()) as {
+    id: number;
+    name: string;
+    personality: string;
+  };
   assert(reimported.name === 'Card Imported Hero', 'exported card reimports with same name');
   assert(reimported.personality.includes('brave'), 'exported card keeps personality text');
+
+  console.log('== character duplicate copies the avatar file ==');
+  const characterCopy = await req<{
+    id: number;
+    name: string;
+    personality: string;
+    avatar: string | null;
+  }>('POST', `/api/characters/${reimported.id}/duplicate`);
+  assert(
+    characterCopy.name === 'Card Imported Hero (copy)',
+    'duplicate appends (copy) to the name',
+  );
+  assert(characterCopy.personality.includes('brave'), 'duplicate copies entity fields');
+  assert(
+    characterCopy.avatar != null && characterCopy.avatar.includes(`character-${characterCopy.id}.`),
+    'duplicate points at its own avatar file, not the source file',
+  );
+  await req('DELETE', `/api/characters/${reimported.id}`);
+  const copyAvatarRes = await fetch(`${BASE}${characterCopy.avatar}`);
+  assert(copyAvatarRes.ok, 'copied avatar survives deleting the source character');
+  await req('DELETE', `/api/characters/${characterCopy.id}`);
 
   await req('PATCH', `/api/characters/${character.id}`, { customPrompt: null });
   const clearedExportRes = await fetch(`${BASE}/api/characters/${character.id}/card`);

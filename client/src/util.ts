@@ -11,6 +11,8 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
   create: (data: D) => Promise<T>;
   patch: (id: number, data: Partial<D>) => Promise<T>;
   remove: (id: number) => Promise<void>;
+  /** Server-side copy of the saved row (secrets and files included). */
+  duplicate: (id: number) => Promise<T>;
   deletePrompt: string;
 }
 
@@ -163,6 +165,22 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       return false;
     }
   };
+  // Copies the saved server state, so unsaved edits first go through the
+  // navigation guard (save/discard prompt) like any selection change.
+  const duplicate = () => {
+    const id = selectedId();
+    if (id === 'new') return;
+    requestNavigation(() => {
+      void (async () => {
+        try {
+          adopt(await options.duplicate(id));
+          flashSaved();
+        } catch (err) {
+          setStatus(errorMessage(err));
+        }
+      })();
+    });
+  };
   const remove = async () => {
     const id = selectedId();
     if (id === 'new' || !confirm(options.deletePrompt)) return;
@@ -205,6 +223,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     save,
     discard,
     remove,
+    duplicate,
     flashSaved,
   };
 }

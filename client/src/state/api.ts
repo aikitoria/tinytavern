@@ -410,6 +410,7 @@ export const api = {
   patchCharacter: (id: number, data: Partial<Character>) =>
     request<Character>('PATCH', `/api/characters/${id}`, data),
   deleteCharacter: (id: number) => request<void>('DELETE', `/api/characters/${id}`),
+  duplicateCharacter: (id: number) => request<Character>('POST', `/api/characters/${id}/duplicate`),
   uploadCharacterAvatar: (id: number, file: File) =>
     request<Character>('PUT', `/api/characters/${id}/avatar`, undefined, {
       rawBody: file,
@@ -435,18 +436,21 @@ export const api = {
   patchTemplate: (id: number, data: Partial<Template>) =>
     request<Template>('PATCH', `/api/templates/${id}`, data),
   deleteTemplate: (id: number) => request<void>('DELETE', `/api/templates/${id}`),
+  duplicateTemplate: (id: number) => request<Template>('POST', `/api/templates/${id}/duplicate`),
 
   presets: () => request<Preset[]>('GET', '/api/presets'),
   createPreset: (data: Partial<Preset>) => request<Preset>('POST', '/api/presets', data),
   patchPreset: (id: number, data: Partial<Preset>) =>
     request<Preset>('PATCH', `/api/presets/${id}`, data),
   deletePreset: (id: number) => request<void>('DELETE', `/api/presets/${id}`),
+  duplicatePreset: (id: number) => request<Preset>('POST', `/api/presets/${id}/duplicate`),
 
   personas: () => request<Persona[]>('GET', '/api/personas'),
   createPersona: (data: Partial<Persona>) => request<Persona>('POST', '/api/personas', data),
   patchPersona: (id: number, data: Partial<Persona>) =>
     request<Persona>('PATCH', `/api/personas/${id}`, data),
   deletePersona: (id: number) => request<void>('DELETE', `/api/personas/${id}`),
+  duplicatePersona: (id: number) => request<Persona>('POST', `/api/personas/${id}/duplicate`),
   uploadPersonaAvatar: (id: number, file: File) =>
     request<Persona>('PUT', `/api/personas/${id}/avatar`, undefined, {
       rawBody: file,
@@ -463,6 +467,7 @@ export const api = {
   patchEndpoint: (id: number, data: Partial<Endpoint>) =>
     request<Endpoint>('PATCH', `/api/endpoints/${id}`, data),
   deleteEndpoint: (id: number) => request<void>('DELETE', `/api/endpoints/${id}`),
+  duplicateEndpoint: (id: number) => request<Endpoint>('POST', `/api/endpoints/${id}/duplicate`),
   fetchModels: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
 
   settings: () => request<Settings>('GET', '/api/settings'),

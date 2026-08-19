@@ -78,6 +78,7 @@ export default function EndpointsTab() {
       return endpoint;
     },
     remove: api.deleteEndpoint,
+    duplicate: api.duplicateEndpoint,
     deletePrompt: 'Delete this endpoint?',
   });
 

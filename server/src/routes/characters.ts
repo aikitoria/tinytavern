@@ -7,6 +7,7 @@ import type { Ctx } from '../router.ts';
 import { optionalBoolean, optionalString, positiveId } from '../validation.ts';
 import type { JsonObject } from '../validation.ts';
 import {
+  copyAvatarFiles,
   deleteAvatarFiles,
   deleteObsoleteAvatarFiles,
   readAvatarFile,
@@ -60,6 +61,11 @@ defineEntityRoutes<Character>({
   ],
   invalidateOnDelete: ['conversations'],
   onDelete: (id) => deleteAvatarFiles('character', id),
+  onDuplicate: (sourceId, newId) => {
+    // Also clears a stale avatar URL when the source's file is missing.
+    const avatar = copyAvatarFiles('character', sourceId, newId);
+    stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(avatar, newId);
+  },
 });
 
 route.put(

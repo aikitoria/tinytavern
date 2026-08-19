@@ -41,6 +41,7 @@ export default function TemplatesTab() {
     create: api.createTemplate,
     patch: api.patchTemplate,
     remove: api.deleteTemplate,
+    duplicate: api.duplicateTemplate,
     deletePrompt: 'Delete this template?',
   });
 

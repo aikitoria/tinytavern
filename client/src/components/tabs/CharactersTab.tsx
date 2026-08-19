@@ -91,6 +91,7 @@ export default function CharactersTab() {
     create: api.createCharacter,
     patch: api.patchCharacter,
     remove: api.deleteCharacter,
+    duplicate: api.duplicateCharacter,
     deletePrompt: 'Delete this character?',
   });
 

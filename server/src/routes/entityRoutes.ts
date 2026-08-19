@@ -38,6 +38,8 @@ export interface EntityConfig<T extends { id: number }> {
   /** Entities that denormalize references to this one, re-fetched after a delete. */
   invalidateOnDelete?: InvalidateEntity[];
   onDelete?: (id: number) => void;
+  /** Copies side-band state (e.g. avatar files) after a row was duplicated. */
+  onDuplicate?: (sourceId: number, newId: number) => void;
 }
 
 export function nameField<T>(get: (cur: T) => string): EntityField<T> {
@@ -105,6 +107,26 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     const result = stmt(insertSql).run(...values, Date.now());
     invalidate(cfg.table);
     return publish(cfg.toDto(rowById(cfg.table, Number(result.lastInsertRowid))));
+  });
+
+  // Duplicates the full row (not just the field spec), so columns outside the
+  // editable surface (secrets like api_key, import blobs like card_json) carry
+  // over. The copy is referenced by nothing, so prompts are unaffected.
+  route.post(`/api/${cfg.table}/:id/duplicate`, ({ params }) => {
+    const id = positiveId(params.id);
+    const row = rowById(cfg.table, id);
+    const copyColumns = Object.keys(row).filter((c) => c !== 'id' && c !== 'created_at');
+    const values = copyColumns.map((c) =>
+      c === 'name' ? `${String(row.name)} (copy)` : (row[c] as string | number | null),
+    );
+    const result = stmt(
+      `INSERT INTO ${cfg.table} (${copyColumns.join(', ')}, created_at)
+       VALUES (${copyColumns.map(() => '?').join(', ')}, ?)`,
+    ).run(...values, Date.now());
+    const newId = Number(result.lastInsertRowid);
+    cfg.onDuplicate?.(id, newId);
+    invalidate(cfg.table);
+    return publish(cfg.toDto(rowById(cfg.table, newId)));
   });
 
   route.patch(`/api/${cfg.table}/:id`, ({ params, body }) => {

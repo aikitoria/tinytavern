@@ -1,5 +1,6 @@
 import {
   closeSync,
+  copyFileSync,
   fsyncSync,
   openSync,
   readFileSync,
@@ -58,6 +59,25 @@ export function deleteObsoleteAvatarFiles(kind: AvatarKind, id: number, keepExt 
       }
     }
   }
+}
+
+/** Copies the stored avatar file (any legacy extension) to another entity id.
+ * Files are keyed by id, so a row copy must not share the source's file: the
+ * source's delete would strand the copy. Returns the copy's avatar URL, or
+ * null when the source has no file. */
+export function copyAvatarFiles(kind: AvatarKind, fromId: number, toId: number): string | null {
+  for (const ext of IMAGE_EXTS) {
+    try {
+      copyFileSync(
+        join(AVATAR_DIR, `${kind}-${fromId}.${ext}`),
+        join(AVATAR_DIR, `${kind}-${toId}.${ext}`),
+      );
+      return `/avatars/${kind}-${toId}.${ext}?v=${Date.now()}`;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+  return null;
 }
 
 /** Reads the stored avatar file regardless of extension (legacy avatars may

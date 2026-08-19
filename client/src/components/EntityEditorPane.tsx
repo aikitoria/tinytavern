@@ -12,6 +12,7 @@ interface PaneEditor {
   save: () => Promise<boolean>;
   discard: () => void;
   remove: () => Promise<void>;
+  duplicate: () => void;
 }
 
 /**
@@ -83,6 +84,7 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
           </button>
           <button onClick={editor.discard}>Discard</button>
           <Show when={editor.selectedId() !== 'new'}>
+            <button onClick={editor.duplicate}>Duplicate</button>
             {props.extraActions}
             <button class="danger-btn" onClick={() => void editor.remove()}>
               Delete

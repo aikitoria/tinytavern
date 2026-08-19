@@ -4,7 +4,12 @@ import { invalidate } from '../events.ts';
 import { route, HttpError } from '../router.ts';
 import type { Ctx } from '../router.ts';
 import { positiveId } from '../validation.ts';
-import { deleteAvatarFiles, deleteObsoleteAvatarFiles, saveAvatar } from './avatarStore.ts';
+import {
+  copyAvatarFiles,
+  deleteAvatarFiles,
+  deleteObsoleteAvatarFiles,
+  saveAvatar,
+} from './avatarStore.ts';
 import { defineEntityRoutes, nameField, textField } from './entityRoutes.ts';
 import { rowById } from './entityUtils.ts';
 
@@ -18,6 +23,11 @@ defineEntityRoutes<Persona>({
   settingsRef: 'defaultPersonaId',
   invalidateOnDelete: ['conversations'],
   onDelete: (id) => deleteAvatarFiles('persona', id),
+  onDuplicate: (sourceId, newId) => {
+    // Also clears a stale avatar URL when the source's file is missing.
+    const avatar = copyAvatarFiles('persona', sourceId, newId);
+    stmt('UPDATE personas SET avatar = ? WHERE id = ?').run(avatar, newId);
+  },
 });
 
 route.put(

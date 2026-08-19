@@ -25,6 +25,7 @@ export default function PersonasTab() {
     create: api.createPersona,
     patch: api.patchPersona,
     remove: api.deletePersona,
+    duplicate: api.duplicatePersona,
     deletePrompt: 'Delete this persona?',
   });
 

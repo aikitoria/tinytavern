@@ -18,6 +18,7 @@ export default function PresetsTab() {
     create: api.createPreset,
     patch: api.patchPreset,
     remove: api.deletePreset,
+    duplicate: api.duplicatePreset,
     deletePrompt: 'Delete this preset?',
   });
 
