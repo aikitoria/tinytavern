@@ -160,6 +160,27 @@ export default function GeneralTab() {
         Background Swipe Generation (keep one unread assistant swipe prepared ahead)
       </label>
 
+      <Show when={error()}>
+        <p class="hint">{error()}</p>
+      </Show>
+
+      <section class="danger-zone">
+        <div>
+          <span class="danger-zone-title">Chat history</span>
+          <p class="hint">
+            Permanently delete every conversation and its generated images. Characters and settings
+            are kept.
+          </p>
+        </div>
+        <button
+          class="danger-btn"
+          disabled={deletingChats() || state.conversations.length === 0}
+          onClick={() => void deleteChats()}
+        >
+          {deletingChats() ? 'Deleting…' : 'Delete all chats'}
+        </button>
+      </section>
+
       <div class="form-actions">
         <button class="primary-btn" onClick={() => void save()}>
           Save
@@ -168,24 +189,6 @@ export default function GeneralTab() {
         <Show when={saved()}>
           <span class="saved-flash">✓ Saved</span>
         </Show>
-      </div>
-      <Show when={error()}>
-        <p class="hint">{error()}</p>
-      </Show>
-
-      <label>Chat history</label>
-      <p class="hint">
-        Permanently delete every conversation and its generated images. Characters and settings are
-        kept.
-      </p>
-      <div class="form-actions">
-        <button
-          class="danger-btn"
-          disabled={deletingChats() || state.conversations.length === 0}
-          onClick={() => void deleteChats()}
-        >
-          {deletingChats() ? 'Deleting…' : 'Delete all chats'}
-        </button>
       </div>
     </div>
   );
