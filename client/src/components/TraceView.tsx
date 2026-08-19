@@ -35,8 +35,20 @@ export default function TraceView() {
             </For>
             <Show when={t().namePrefill}>
               <div class="trace-msg">
-                <span class="trace-role trace-assistant">assistant (prefill)</span>
+                <span class="trace-role trace-assistant">assistant name (prefill)</span>
                 <pre class="trace-content">{t().namePrefill}</pre>
+              </div>
+            </Show>
+            <Show when={t().reasoningPrefill}>
+              <div class="trace-msg">
+                <span class="trace-role trace-assistant">assistant reasoning (prefill)</span>
+                <pre class="trace-content">{t().reasoningPrefill}</pre>
+              </div>
+            </Show>
+            <Show when={t().messagePrefill}>
+              <div class="trace-msg">
+                <span class="trace-role trace-assistant">assistant message (prefill)</span>
+                <pre class="trace-content">{t().messagePrefill}</pre>
               </div>
             </Show>
           </>

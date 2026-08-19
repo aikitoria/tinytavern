@@ -48,6 +48,8 @@ defineEntityRoutes<Character>({
         const custom: CustomTemplate = {
           content: optionalString(t, 'content') ?? '',
           userPrologue: optionalString(t, 'userPrologue') ?? '',
+          reasoningPrefill: optionalString(t, 'reasoningPrefill') ?? '',
+          messagePrefill: optionalString(t, 'messagePrefill') ?? '',
           prefixNames: optionalBoolean(t, 'prefixNames') ?? false,
           usesPersonas: optionalBoolean(t, 'usesPersonas') ?? true,
           steerTemplate: optionalString(t, 'steerTemplate') ?? '',

@@ -10,6 +10,8 @@ defineEntityRoutes<Template>({
     nameField((cur) => cur.name),
     textField('content', 'content', (cur) => cur.content),
     textField('userPrologue', 'user_prologue', (cur) => cur.userPrologue),
+    textField('reasoningPrefill', 'reasoning_prefill', (cur) => cur.reasoningPrefill),
+    textField('messagePrefill', 'message_prefill', (cur) => cur.messagePrefill),
     {
       column: 'prefix_names',
       value: (b, cur) => ((optionalBoolean(b, 'prefixNames') ?? cur?.prefixNames ?? false) ? 1 : 0),

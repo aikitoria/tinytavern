@@ -227,10 +227,12 @@ export const api = {
       `/api/search?q=${encodeURIComponent(q)}`,
     ),
   trace: (id: number) =>
-    request<{ messages: { role: string; content: string }[]; namePrefill: string | null }>(
-      'GET',
-      `/api/conversations/${id}/trace`,
-    ),
+    request<{
+      messages: { role: string; content: string; reasoning_content?: string }[];
+      reasoningPrefill: string | null;
+      messagePrefill: string | null;
+      namePrefill: string | null;
+    }>('GET', `/api/conversations/${id}/trace`),
   send: (
     conversationId: number,
     content: string,

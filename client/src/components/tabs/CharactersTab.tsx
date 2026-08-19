@@ -30,6 +30,8 @@ export default function CharactersTab() {
   let templateEl!: SelectHandle;
   let customTemplateEl!: HTMLTextAreaElement;
   let customPrologueEl!: HTMLTextAreaElement;
+  let customReasoningPrefillEl!: HTMLTextAreaElement;
+  let customMessagePrefillEl!: HTMLTextAreaElement;
   let customPrefixEl!: HTMLInputElement;
   let customUsesPersonasEl!: HTMLInputElement;
   let customSteerEl!: HTMLTextAreaElement;
@@ -51,6 +53,8 @@ export default function CharactersTab() {
         character?.customTemplate != null ? 'custom' : String(character?.templateId ?? '');
       customTemplateEl.value = character?.customTemplate?.content ?? '';
       customPrologueEl.value = character?.customTemplate?.userPrologue ?? '';
+      customReasoningPrefillEl.value = character?.customTemplate?.reasoningPrefill ?? '';
+      customMessagePrefillEl.value = character?.customTemplate?.messagePrefill ?? '';
       customPrefixEl.checked = character?.customTemplate?.prefixNames ?? false;
       customUsesPersonasEl.checked = character?.customTemplate?.usesPersonas ?? true;
       customSteerEl.value = character?.customTemplate?.steerTemplate ?? DEFAULT_STEER_TEMPLATE;
@@ -75,6 +79,8 @@ export default function CharactersTab() {
             ? {
                 content: customTemplateEl.value,
                 userPrologue: customPrologueEl.value,
+                reasoningPrefill: customReasoningPrefillEl.value,
+                messagePrefill: customMessagePrefillEl.value,
                 prefixNames: customPrefixEl.checked,
                 usesPersonas: customUsesPersonasEl.checked,
                 steerTemplate: customSteerEl.value,
@@ -421,6 +427,36 @@ export default function CharactersTab() {
         classList={{ hidden: !customTemplate() }}
         placeholder="Leave empty to send no fake user message"
       />
+      <Show when={customTemplate()}>
+        <label>
+          Custom template — reasoning prefill (optional) <MacroHelp template />
+        </label>
+      </Show>
+      <MacroTextarea
+        ref={customReasoningPrefillEl}
+        template
+        class="mono"
+        classList={{ hidden: !customTemplate() }}
+        placeholder="Leave empty to let the model start reasoning"
+      />
+      <Show when={customTemplate()}>
+        <label>
+          Custom template — assistant message prefill (optional) <MacroHelp template />
+        </label>
+      </Show>
+      <MacroTextarea
+        ref={customMessagePrefillEl}
+        template
+        class="mono"
+        classList={{ hidden: !customTemplate() }}
+        placeholder="Leave empty to let the model start the visible reply"
+      />
+      <Show when={customTemplate()}>
+        <p class="hint">
+          A reasoning prefill continues the model's reasoning. Adding a message prefill continues
+          the visible reply from that text. Both become part of the saved response.
+        </p>
+      </Show>
       <label class="check-row" classList={{ hidden: !customTemplate() }}>
         <input ref={customPrefixEl} type="checkbox" />
         Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill the

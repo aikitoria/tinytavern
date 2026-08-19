@@ -208,6 +208,8 @@ const tree = (id: number) => req<TreeSnapshot>('GET', `/api/conversations/${id}/
 const fetchTrace = (id: number) =>
   req<{
     messages: { role: string; content: string; reasoning_content?: string }[];
+    reasoningPrefill: string | null;
+    messagePrefill: string | null;
     namePrefill: string | null;
   }>('GET', `/api/conversations/${id}/trace`);
 
@@ -1753,6 +1755,8 @@ async function main() {
     name: 'e2e-prefix',
     content: '{{system}}',
     userPrologue: 'You are playing {{char}}.',
+    reasoningPrefill: 'Reason first as {{char}} for {{user}}.',
+    messagePrefill: 'Seeded reply to {{user}}: ',
     prefixNames: true,
   });
   const prevSettings = await req<{ defaultTemplateId: number | null }>('GET', '/api/settings');
@@ -1766,8 +1770,14 @@ async function main() {
     'template prologue emitted as fake user turn',
   );
   assert(trace.namePrefill === 'Ari:', 'name prefill uses the /char speaker');
+  assert(
+    trace.reasoningPrefill === 'Reason first as Assistant for Aiki.' &&
+      trace.messagePrefill === 'Seeded reply to Aiki:',
+    'template reasoning and message prefills render macros independently',
+  );
 
   ws.sub(conv2.id);
+  await fetch(`${MOCK_CONTROL}/control/clear-completions`, { method: 'POST' });
   const sent = await sendMessage(conv2.id, '  prefix check  ');
   await ws.waitFor(
     (e) => e.t === 'final' && e.message.id === sent.assistantMessageId,
@@ -1776,6 +1786,27 @@ async function main() {
   let snap2 = await tree(conv2.id);
   const reply = snap2.messages.find((m) => m.id === sent.assistantMessageId)!;
   assert(reply.name === 'Ari', 'reply stamped with the /char speaker name');
+  assert(
+    reply.reasoning?.startsWith('Reason first as Assistant for Aiki.') === true &&
+      reply.content.startsWith('Seeded reply to Aiki:'),
+    'template prefills become part of the saved reasoning and message',
+  );
+  const seededCompletions = (await (await fetch(`${MOCK_CONTROL}/control/completions`)).json()) as {
+    completions: {
+      messages: { role: string; content: string; reasoning_content?: string }[];
+    }[];
+  };
+  assert(
+    seededCompletions.completions.some((completion) => {
+      const prefill = completion.messages.at(-1);
+      return (
+        prefill?.role === 'assistant' &&
+        prefill.content === 'Ari: Seeded reply to Aiki:' &&
+        prefill.reasoning_content === 'Reason first as Assistant for Aiki.'
+      );
+    }),
+    'fresh generation sends reasoning_content and visible content in one final assistant prefill',
+  );
   assert(
     reply.content.includes('Aiki: prefix check'),
     'history prefixed with persona name upstream',
@@ -1838,6 +1869,50 @@ async function main() {
       Boolean(resumedCompletion.completion.messages.at(-1)?.reasoning_content),
     'continuation prefill replays reasoning_content with assistant content',
   );
+
+  console.log('== reasoning-only template prefill ==');
+  await req('PATCH', `/api/templates/${tpl.id}`, {
+    prefixNames: false,
+    messagePrefill: '',
+  });
+  await fetch(`${MOCK_CONTROL}/control/clear-completions`, { method: 'POST' });
+  const reasoningOnlyPrefillSend = await sendMessage(conv2.id, 'continue from hidden reasoning');
+  const reasoningOnlyPrefillFinal = await ws.waitFor(
+    (event) =>
+      event.t === 'final' && event.message.id === reasoningOnlyPrefillSend.assistantMessageId,
+    'reasoning-only prefill generation finished',
+  );
+  assert(
+    reasoningOnlyPrefillFinal.t === 'final' &&
+      reasoningOnlyPrefillFinal.message.reasoning?.startsWith(
+        'Reason first as Assistant for Aiki.',
+      ) === true &&
+      reasoningOnlyPrefillFinal.message.content.length > 0,
+    'reasoning-only prefill is saved before newly generated reasoning and message content',
+  );
+  const reasoningOnlyPrefillRequests = (await (
+    await fetch(`${MOCK_CONTROL}/control/completions`)
+  ).json()) as {
+    completions: {
+      messages: { role: string; content: string; reasoning_content?: string }[];
+    }[];
+  };
+  assert(
+    reasoningOnlyPrefillRequests.completions.some((completion) => {
+      const prefill = completion.messages.at(-1);
+      return (
+        prefill?.role === 'assistant' &&
+        prefill.content === '' &&
+        prefill.reasoning_content === 'Reason first as Assistant for Aiki.'
+      );
+    }),
+    'reasoning-only prefill sends an empty visible assistant content with reasoning_content',
+  );
+  await req('PATCH', `/api/templates/${tpl.id}`, {
+    prefixNames: true,
+    reasoningPrefill: '',
+    messagePrefill: '',
+  });
 
   console.log('== endpoint can disable assistant prefills ==');
   await req('PATCH', `/api/endpoints/${endpoint.id}`, { prefillMode: 'disabled' });
@@ -1925,6 +2000,8 @@ async function main() {
     customTemplate: {
       content: '{{system}} INLINE {{char}} + {{user}}',
       userPrologue: 'Inline prologue for {{char}}.',
+      reasoningPrefill: 'Inline reasoning for {{char}}.',
+      messagePrefill: 'Inline answer for {{user}}:',
       prefixNames: true,
       usesPersonas: false,
     },
@@ -1946,6 +2023,11 @@ async function main() {
     'inline template emits its prologue',
   );
   assert(inlineTrace.namePrefill === 'Inline Hero:', 'inline template enables name prefixing');
+  assert(
+    inlineTrace.reasoningPrefill === 'Inline reasoning for Inline Hero.' &&
+      inlineTrace.messagePrefill === 'Inline answer for User:',
+    'inline custom templates expose and macro-render both assistant prefills',
+  );
 
   console.log('== terminal SSE data without a newline is preserved ==');
   await makeNextMockResponseEndWithoutNewline();

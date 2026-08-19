@@ -60,7 +60,7 @@ interface CompletionRecord {
   system: string | null;
   user: string | null;
   assistantMessages: string[];
-  messages: { role: string; content: string; reasoning_content?: string }[];
+  messages: { role: string; content: string; reasoning_content?: string; prefix?: boolean }[];
   model: string | null;
   hasModel: boolean;
   maxTokens: number | null;
@@ -310,7 +310,7 @@ const server = http.createServer((req, res) => {
       let parsed: {
         model?: string;
         max_tokens?: number;
-        messages: { role: string; content: string; reasoning_content?: string }[];
+        messages: { role: string; content: string; reasoning_content?: string; prefix?: boolean }[];
         stream?: boolean;
         reasoning_effort?: string;
         continue_final_message?: boolean;
@@ -330,7 +330,8 @@ const server = http.createServer((req, res) => {
         parsed.messages.some(
           (message, index) =>
             typeof message.content !== 'string' ||
-            !message.content.trim() ||
+            (!message.content.trim() &&
+              !(message.role === 'assistant' && message.reasoning_content?.trim())) ||
             (message.role === 'system' && firstNonSystem !== -1 && index >= firstNonSystem),
         ) ||
         conversational.some(

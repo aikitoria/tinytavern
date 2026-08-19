@@ -10,6 +10,8 @@ export default function TemplatesTab() {
   let nameEl!: HTMLInputElement;
   let contentEl!: HTMLTextAreaElement;
   let prologueEl!: HTMLTextAreaElement;
+  let reasoningPrefillEl!: HTMLTextAreaElement;
+  let messagePrefillEl!: HTMLTextAreaElement;
   let prefixEl!: HTMLInputElement;
   let usesPersonasEl!: HTMLInputElement;
   let steerEl!: HTMLTextAreaElement;
@@ -20,6 +22,8 @@ export default function TemplatesTab() {
       nameEl.value = template?.name ?? '';
       contentEl.value = template?.content ?? DEFAULT_PROMPT_TEMPLATE;
       prologueEl.value = template?.userPrologue ?? '';
+      reasoningPrefillEl.value = template?.reasoningPrefill ?? '';
+      messagePrefillEl.value = template?.messagePrefill ?? '';
       prefixEl.checked = template?.prefixNames ?? false;
       usesPersonasEl.checked = template?.usesPersonas ?? true;
       steerEl.value = template?.steerTemplate ?? DEFAULT_STEER_TEMPLATE;
@@ -28,6 +32,8 @@ export default function TemplatesTab() {
       name: nameEl.value,
       content: contentEl.value,
       userPrologue: prologueEl.value,
+      reasoningPrefill: reasoningPrefillEl.value,
+      messagePrefill: messagePrefillEl.value,
       prefixNames: prefixEl.checked,
       usesPersonas: usesPersonasEl.checked,
       steerTemplate: steerEl.value,
@@ -61,6 +67,28 @@ export default function TemplatesTab() {
         class="mono"
         placeholder="Leave empty to send no fake user message"
       />
+      <label>
+        Reasoning prefill (optional) <MacroHelp template />
+      </label>
+      <MacroTextarea
+        ref={reasoningPrefillEl}
+        template
+        class="mono"
+        placeholder="Leave empty to let the model start reasoning"
+      />
+      <label>
+        Assistant message prefill (optional) <MacroHelp template />
+      </label>
+      <MacroTextarea
+        ref={messagePrefillEl}
+        template
+        class="mono"
+        placeholder="Leave empty to let the model start the visible reply"
+      />
+      <p class="hint">
+        A reasoning prefill continues the model's reasoning. Adding a message prefill continues
+        the visible reply from that text. Both become part of the saved response.
+      </p>
       <label class="check-row">
         <input ref={prefixEl} type="checkbox" />
         Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill the

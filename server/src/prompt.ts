@@ -14,6 +14,7 @@ import { getSettings } from './settingsStore.ts';
 export interface ChatMessage {
   /** Upstream chat roles only — 'tool' messages never leave the server. */
   role: Exclude<Role, 'tool'>;
+  /** Empty only for a reasoning-only assistant prefill. */
   content: string;
   /** Preserve model reasoning when replaying assistant history/continuations. */
   reasoning_content?: string;
@@ -149,6 +150,10 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
 
 export interface BuiltPrompt {
   messages: ChatMessage[];
+  /** Hidden reasoning to seed on a fresh assistant generation. */
+  reasoningPrefill: string | null;
+  /** Visible assistant content to seed on a fresh generation. */
+  messagePrefill: string | null;
   /** "Name:" to prefill the assistant turn with, when the template prefixes speaker names. */
   namePrefill: string | null;
   /** Hidden fallback appended to the final user turn when prefills are disabled. */
@@ -202,6 +207,16 @@ export function buildChatMessages(
   // Optional fake first user message (e.g. introducing the character); empty = not emitted.
   const prologueSource = custom ? custom.userPrologue : (template?.userPrologue ?? '');
   const prologue = prologueSource.trim() ? renderTemplate(prologueSource, vars) : '';
+  const reasoningPrefillSource = custom
+    ? custom.reasoningPrefill
+    : (template?.reasoningPrefill ?? '');
+  const reasoningPrefill = reasoningPrefillSource.trim()
+    ? renderTemplate(reasoningPrefillSource, vars)
+    : '';
+  const messagePrefillSource = custom ? custom.messagePrefill : (template?.messagePrefill ?? '');
+  const messagePrefill = messagePrefillSource.trim()
+    ? renderTemplate(messagePrefillSource, vars)
+    : '';
 
   const prefixNames = custom ? custom.prefixNames : (template?.prefixNames ?? false);
   const speakerFor = (msg: Message) =>
@@ -244,6 +259,8 @@ export function buildChatMessages(
       (currentSpeaker === charName && previousSpeaker != null && previousSpeaker !== charName));
   return {
     messages,
+    reasoningPrefill: reasoningPrefill || null,
+    messagePrefill: messagePrefill || null,
     namePrefill: prefixNames ? `${currentSpeaker}:` : null,
     disabledPrefillSpeakerNote: needsDisabledPrefillSpeakerNote
       ? `<Note: Reply as ${currentSpeaker}>`
@@ -286,7 +303,13 @@ export function buildToolPrompt(
     role: 'user',
     content: substituteMacros(prompt.trim(), built.charName, built.userName),
   });
-  return { ...built, namePrefill: null, disabledPrefillSpeakerNote: null };
+  return {
+    ...built,
+    reasoningPrefill: null,
+    messagePrefill: null,
+    namePrefill: null,
+    disabledPrefillSpeakerNote: null,
+  };
 }
 
 /**
@@ -345,5 +368,11 @@ export function buildSteeredToolPrompt(
       `The immediately preceding assistant message contains the original image prompt.\n\n` +
       `<revision_instruction>\n${instruction.trim()}\n</revision_instruction>`,
   });
-  return { ...built, namePrefill: null, disabledPrefillSpeakerNote: null };
+  return {
+    ...built,
+    reasoningPrefill: null,
+    messagePrefill: null,
+    namePrefill: null,
+    disabledPrefillSpeakerNote: null,
+  };
 }

@@ -713,6 +713,8 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
   const prefillDisabled = endpointRow?.prefill_mode === 'disabled';
   return {
     messages: prefillDisabled ? withDisabledPrefillSpeakerNote(built) : built.messages,
+    reasoningPrefill: prefillDisabled ? null : built.reasoningPrefill,
+    messagePrefill: prefillDisabled ? null : built.messagePrefill,
     namePrefill: prefillDisabled ? null : built.namePrefill,
   };
 });

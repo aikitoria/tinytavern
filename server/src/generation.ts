@@ -425,27 +425,42 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   const { endpoint, built } = context;
   gen.model = endpoint.model;
 
+  // A fresh character reply starts with the template's assistant seed in both
+  // the persisted buffers and the upstream trailing assistant message. A
+  // retry/resume already carries the complete accumulated buffers, so never
+  // apply the template twice. Disabled endpoints ignore all assistant seeds.
+  if (endpoint.prefillMode !== 'disabled' && !isResume) {
+    if (built.reasoningPrefill) gen.reasoning = built.reasoningPrefill;
+    if (built.messagePrefill) gen.content = built.messagePrefill;
+    if (built.reasoningPrefill || built.messagePrefill) gen.dirty = true;
+  }
+
   // Copy the snapshotted list because continuation flags are added per attempt.
   const messages =
     endpoint.prefillMode === 'disabled'
       ? withDisabledPrefillSpeakerNote(built)
       : built.messages.map((message) => ({ ...message }));
   const namePrefill = built.namePrefill;
-  // Prefill-style trailing assistant message (resume content and/or "Name:").
+  // Prefill-style trailing assistant message (template seed, resumed content,
+  // reasoning, and/or "Name:"). A reasoning-only prefill deliberately has an
+  // empty content field: compatible reasoning APIs use reasoning_content to
+  // decide that they should continue thinking rather than start the answer.
   // Not part of the official OpenAI spec — 'disabled' omits it entirely,
   // 'none' lets the backend interpret it without extra flags, and
   // 'vllm'/'deepseek' send their native continuation flags.
   let prefilled = false;
   if (
     endpoint.prefillMode !== 'disabled' &&
-    isResume &&
+    (isResume || built.reasoningPrefill || built.messagePrefill) &&
     (gen.content.length > 0 || gen.reasoning.length > 0)
   ) {
     appendChatMessage(messages, {
       role: 'assistant',
       content: namePrefill
-        ? `${namePrefill} ${gen.content}`
-        : gen.content || '(No visible response)',
+        ? gen.content
+          ? `${namePrefill} ${gen.content}`
+          : namePrefill
+        : gen.content,
       ...(gen.reasoning ? { reasoning_content: gen.reasoning } : {}),
     });
     prefilled = true;

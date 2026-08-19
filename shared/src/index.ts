@@ -83,7 +83,7 @@ export interface Character {
   presetId: number | null;
   customPrompt: string | null;
   templateId: number | null;
-  /** Inline template override; replaces templateId with the same three settings. */
+  /** Inline template override; replaces templateId with the same settings. */
   customTemplate: CustomTemplate | null;
   createdAt: number;
 }
@@ -98,6 +98,10 @@ export interface CharacterFolder {
 export interface CustomTemplate {
   content: string;
   userPrologue: string;
+  /** Hidden reasoning used to seed the final assistant turn. */
+  reasoningPrefill: string;
+  /** Visible content used to seed the final assistant turn. */
+  messagePrefill: string;
   prefixNames: boolean;
   usesPersonas: boolean;
   steerTemplate: string;
@@ -117,6 +121,10 @@ export interface Template {
   content: string;
   /** Optional fake first user message (e.g. introducing the character); empty = not emitted. */
   userPrologue: string;
+  /** Hidden reasoning used to seed the final assistant turn; empty = start reasoning normally. */
+  reasoningPrefill: string;
+  /** Visible content used to seed the final assistant turn; empty = generate from the start. */
+  messagePrefill: string;
   /** Prefix speaker names into message contents ("User: …", "Char: …") and prefill "Char:" for the reply. */
   prefixNames: boolean;
   /** When false, chats using this template ignore personas entirely ({{user}} = "User"). */

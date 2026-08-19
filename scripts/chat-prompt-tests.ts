@@ -26,6 +26,8 @@ assert(
 
 const rootPrompt: BuiltPrompt = {
   messages: [{ role: 'system', content: 'system' }],
+  reasoningPrefill: null,
+  messagePrefill: null,
   namePrefill: 'Guest:',
   disabledPrefillSpeakerNote: '<Note: Reply as Guest>',
   charName: 'Assistant',

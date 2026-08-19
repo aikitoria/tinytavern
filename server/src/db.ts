@@ -388,6 +388,18 @@ if (version < 20) {
   `);
 }
 
+// Templates can seed both parts of a reasoning-model assistant turn. Keeping
+// them separate maps directly onto OpenAI-compatible content/reasoning_content.
+if (version < 21) {
+  db.exec(`
+    BEGIN;
+    ALTER TABLE templates ADD COLUMN reasoning_prefill TEXT NOT NULL DEFAULT '';
+    ALTER TABLE templates ADD COLUMN message_prefill TEXT NOT NULL DEFAULT '';
+    PRAGMA user_version = 21;
+    COMMIT;
+  `);
+}
+
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 db.prepare(
@@ -440,6 +452,8 @@ function parseCustomTemplate(raw: string | null): CustomTemplate | null {
     return {
       content: typeof parsed.content === 'string' ? parsed.content : '',
       userPrologue: typeof parsed.userPrologue === 'string' ? parsed.userPrologue : '',
+      reasoningPrefill: typeof parsed.reasoningPrefill === 'string' ? parsed.reasoningPrefill : '',
+      messagePrefill: typeof parsed.messagePrefill === 'string' ? parsed.messagePrefill : '',
       prefixNames: parsed.prefixNames === true,
       usesPersonas: parsed.usesPersonas !== false,
       // Old blobs predate this key; empty resolves to DEFAULT_STEER_TEMPLATE.
@@ -450,6 +464,8 @@ function parseCustomTemplate(raw: string | null): CustomTemplate | null {
     return {
       content: raw,
       userPrologue: '',
+      reasoningPrefill: '',
+      messagePrefill: '',
       prefixNames: false,
       usesPersonas: true,
       steerTemplate: '',
@@ -536,6 +552,8 @@ export function toTemplate(r: Row): Template {
     name: r.name as string,
     content: r.content as string,
     userPrologue: r.user_prologue as string,
+    reasoningPrefill: r.reasoning_prefill as string,
+    messagePrefill: r.message_prefill as string,
     prefixNames: (r.prefix_names as number) !== 0,
     usesPersonas: (r.uses_personas as number) !== 0,
     steerTemplate: r.steer_template as string,
