@@ -1,17 +1,10 @@
 import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
-import {
-  activePath,
-  newConversation,
-  selectedConversation,
-  state,
-  streamingMessage,
-  swipeToSibling,
-} from '../state/store.ts';
+import { activePath, newConversation, selectedConversation, state } from '../state/store.ts';
+import { swipeMessage } from '../messageSwipe.ts';
 import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from './TreeMap.tsx';
 import TreeView from './TreeView.tsx';
-import { findMessageView } from '../plugins/index.ts';
 
 export default function ChatView() {
   let scroller!: HTMLDivElement;
@@ -88,20 +81,7 @@ export default function ChatView() {
     const last = path[path.length - 1];
     if (!last) return;
     const dir = event.key === 'ArrowLeft' ? -1 : 1;
-    const pluginSwipe = findMessageView(last)?.swipe;
-    if (pluginSwipe) {
-      pluginSwipe(last, dir);
-      event.preventDefault();
-      return;
-    }
-    if (last.role !== 'assistant') return;
-    if (event.key === 'ArrowLeft') {
-      if (last.status === 'streaming' || streamingMessage()) return;
-      void swipeToSibling(last, -1);
-    } else {
-      void swipeToSibling(last, 1);
-    }
-    event.preventDefault();
+    if (swipeMessage(last, dir)) event.preventDefault();
   };
 
   onMount(() => document.addEventListener('keydown', onKey));

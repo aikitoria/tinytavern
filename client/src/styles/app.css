@@ -959,8 +959,9 @@ textarea.mono,
 }
 
 /* Keep vertical chat scrolling native while reserving horizontal assistant
-   card swipes for branch navigation (including an in-flight reply). */
-.msg-assistant {
+   and plugin-tool card swipes for navigation (including in-flight prompts). */
+.msg-assistant,
+.msg-tool {
   touch-action: pan-y;
 }
 

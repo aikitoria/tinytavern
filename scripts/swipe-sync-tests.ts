@@ -35,9 +35,27 @@ const messageNode = readFileSync(
   new URL('../client/src/components/MessageNode.tsx', import.meta.url),
   'utf8',
 );
-assert.match(messageNode, /onTouchCancel=\{props\.inMap \? undefined : onTouchCancel\}/);
-assert.doesNotMatch(messageNode, /onTouchCancel=\{props\.inMap \? undefined : onTouchEnd\}/);
+assert.match(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPointerCancel\}/);
+assert.doesNotMatch(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPointerUp\}/);
+assert.match(messageNode, /setPointerCapture\(e\.pointerId\)/);
 assert.match(messageNode, /ancestorNavigationBlocked\(\)/);
 assert.match(messageNode, /<Show when=\{siblings\(\)\.length > 1\}>/); // TREE-02 guard survives
+assert.match(messageNode, /swipeMessage\(props\.message, dir\)/);
+assert.equal(messageNode.match(/swipeMessage\(props\.message, [^)]+\)/g)?.length, 3);
+assert.match(chatView, /swipeMessage\(last, dir\)/);
+
+const messageSwipe = readFileSync(
+  new URL('../client/src/messageSwipe.ts', import.meta.url),
+  'utf8',
+);
+assert.match(messageSwipe, /pluginSwipe\(message, dir\)/);
+assert.match(messageSwipe, /swipeToSibling\(message, dir\)/);
+
+const imageGeneration = readFileSync(
+  new URL('../client/src/plugins/imageGeneration.tsx', import.meta.url),
+  'utf8',
+);
+assert.match(imageGeneration, /if \(message\.status === 'streaming'\)/);
+assert.match(imageGeneration, /api\.stopGeneration\(message\.id, message\.generationToken\)/);
 
 console.log('swipe sync tests passed');

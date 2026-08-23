@@ -158,6 +158,15 @@ export default function Composer() {
     const m = text().match(/^\/(\w+)\s/);
     return m ? COMMANDS.find((c) => c.name === m[1]!.toLowerCase()) : undefined;
   };
+  const parallelCommand = () => {
+    const m = text()
+      .trim()
+      .match(/^\/(\w+)(?:\s|$)/);
+    return m
+      ? COMMANDS.find((command) => command.name === m[1]!.toLowerCase())?.allowDuringGeneration ===
+          true
+      : false;
+  };
 
   createEffect(() => {
     void text();
@@ -392,9 +401,20 @@ export default function Composer() {
         <Show
           when={!streamingMessage() && !draftCompletionActive()}
           fallback={
-            <button class="send-btn stop-btn" title="Stop generating" onClick={stop}>
-              <StopIcon />
-            </button>
+            <>
+              <Show when={streamingMessage() && !draftCompletionActive() && parallelCommand()}>
+                <button
+                  class="send-btn"
+                  title="Start another image generation"
+                  onClick={() => void send()}
+                >
+                  <SendIcon />
+                </button>
+              </Show>
+              <button class="send-btn stop-btn" title="Stop generating" onClick={stop}>
+                <StopIcon />
+              </button>
+            </>
           }
         >
           <Show when={text().trim() || resumable()}>

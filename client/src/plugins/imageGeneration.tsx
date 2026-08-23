@@ -852,6 +852,27 @@ const canRenderImage = (message: Message) =>
 
 /** Shared by header buttons and ChatView's Left/Right shortcut. */
 async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
+  // A forward swipe during prompt writing means "skip this one", matching an
+  // assistant reply's swipe-past behavior. Stopping clears imagePending, so a
+  // partial prompt never proceeds into ComfyUI.
+  if (message.status === 'streaming') {
+    if (
+      dir !== 1 ||
+      message.generationToken == null ||
+      imageSwipeBusy.has(message.id) ||
+      state.treeNavigationPending
+    )
+      return;
+    imageSwipeBusy.add(message.id);
+    try {
+      await api.stopGeneration(message.id, message.generationToken);
+    } catch (err) {
+      toast(errorMessage(err));
+    } finally {
+      imageSwipeBusy.delete(message.id);
+    }
+    return;
+  }
   const activeImage = Math.min(message.activeImage, message.images.length - 1);
   const index = activeImage + dir;
   if (index < 0 || imageSwipeBusy.has(message.id) || state.treeNavigationPending) return;
@@ -1040,6 +1061,7 @@ export const imageGenerationPlugin: Plugin = {
       params: '<instruction>',
       description:
         'Generate an image from the generic instruction prompt; {{instruction}} expands to the command argument',
+      allowDuringGeneration: true,
       // Returning navigateTree's result keeps the composer text on failure.
       run: (args) => generate('instruction', args.trim()),
     },
@@ -1047,6 +1069,7 @@ export const imageGenerationPlugin: Plugin = {
       name: 'imagechar',
       params: '[instruction]',
       description: 'Generate a character image, optionally using the character-instruction prompt',
+      allowDuringGeneration: true,
       run: (args) => {
         const instruction = args.trim();
         return generate(instruction ? 'characterInstruction' : 'describe', instruction);
@@ -1056,6 +1079,7 @@ export const imageGenerationPlugin: Plugin = {
       name: 'imageface',
       params: '[instruction]',
       description: 'Generate a face image, optionally using the face-instruction prompt',
+      allowDuringGeneration: true,
       run: (args) => {
         const instruction = args.trim();
         return generate(instruction ? 'faceInstruction' : 'face', instruction);

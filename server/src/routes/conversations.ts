@@ -32,6 +32,7 @@ import { clearSettingReference, getSettings } from '../settingsStore.ts';
 import {
   chatCompletionOnce,
   hasActiveGeneration,
+  hasActiveNonToolGeneration,
   hasForegroundGeneration,
   mergeLiveBuffers,
   startGeneration,
@@ -670,7 +671,11 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   // once the tool output is the leaf, the previous reply can't be swiped
   // without a branch switch, which restarts speculation on its own.
   cancelBackgroundSwipe(id);
-  if (hasActiveGeneration(id))
+  // Tool prompts are immutable snapshots and tool output is excluded from
+  // chat history, so multiple image/tool prompts can stream independently.
+  // A normal assistant reply still conflicts: its incomplete row is part of
+  // the conversational turn this tool would otherwise be appended beneath.
+  if (hasActiveNonToolGeneration(id))
     throw new HttpError(409, 'a generation is already running in this conversation');
 
   // Build from the pre-tool history: the tool message itself must not appear

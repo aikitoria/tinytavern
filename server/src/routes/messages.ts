@@ -20,7 +20,9 @@ import {
   spliceMessage,
 } from '../tree.ts';
 import {
+  activeGenerationMessageIds,
   hasActiveGeneration,
+  hasActiveNonToolGeneration,
   hasForegroundGeneration,
   isBackgroundGeneration,
   promoteBackgroundGeneration,
@@ -57,6 +59,39 @@ function requireIdle(conversationId: number): void {
   cancelBackgroundSwipe(conversationId);
   if (hasActiveGeneration(conversationId)) {
     throw new HttpError(409, 'a generation is already running in this conversation');
+  }
+}
+
+/** Deleting completed messages may overlap route-time-snapshotted tool
+ * prompts. Normal assistant generations still require a stable tree. */
+function requireDeleteCompatible(conversationId: number): void {
+  cancelBackgroundSwipe(conversationId);
+  if (hasActiveNonToolGeneration(conversationId)) {
+    throw new HttpError(409, 'a generation is already running in this conversation');
+  }
+}
+
+/** A block splice deletes the selected row and every sibling subtree, but its
+ * own descendants survive and move up one level. Stop only active tool streams
+ * that fall inside that exact deletion set. */
+function stopGenerationsDeletedBySplice(message: ReturnType<typeof requireMessage>): void {
+  for (const mid of activeGenerationMessageIds(message.conversationId)) {
+    if (mid === message.id) {
+      stopGeneration(mid);
+      continue;
+    }
+    const path = getPathToMessage(mid);
+    if (path.some((node) => node.id === message.id)) continue;
+    if (path.some((node) => node.parentId === message.parentId && node.id !== message.id)) {
+      stopGeneration(mid);
+    }
+  }
+}
+
+/** Delete-swipe removes the selected row and its entire subtree. */
+function stopGenerationsInSubtree(message: ReturnType<typeof requireMessage>): void {
+  for (const mid of activeGenerationMessageIds(message.conversationId)) {
+    if (getPathToMessage(mid).some((node) => node.id === message.id)) stopGeneration(mid);
   }
 }
 
@@ -334,7 +369,8 @@ route.del('/api/messages/:id', ({ params, req }) => {
     expected,
     rawRevision == null ? undefined : Number(rawRevision),
   );
-  requireIdle(msg.conversationId);
+  requireDeleteCompatible(msg.conversationId);
+  stopGenerationsDeletedBySplice(msg);
   // Removing a block changes the context every prepared swipe was generated for.
   discardSpeculativeSwipes(msg.conversationId);
   // Splice, not subtree-delete: the tree below reattaches to the parent.
@@ -368,11 +404,12 @@ route.del('/api/messages/:id/swipe', ({ params, req }) => {
   // A true sole-child rejection must be side-effect free: in particular, do
   // not cancel an unrelated background generation before returning 400.
   if (!findAlternative()) throw new HttpError(400, 'message has no other swipe to activate');
-  requireIdle(msg.conversationId);
-  // requireIdle may remove an in-flight prepared sibling (or the requested
-  // speculative message itself), so validate the post-cleanup sibling group.
+  requireDeleteCompatible(msg.conversationId);
+  // Compatibility cleanup may remove an in-flight prepared sibling (or the
+  // requested speculative message itself), so validate the post-cleanup group.
   msg = requireMessage(msg.id);
   if (!findAlternative()) throw new HttpError(400, 'message has no other swipe to activate');
+  stopGenerationsInSubtree(msg);
   deleteMessage(msg.id);
   touchConversation(msg.conversationId);
   broadcastTree(msg.conversationId);

@@ -15,6 +15,9 @@ export interface PluginCommand {
   name: string;
   params: string;
   description: string;
+  /** The command starts independent work and remains available while a chat
+   * generation is streaming (for example, parallel image prompts). */
+  allowDuringGeneration?: boolean;
   /** Return false to keep the composer text (e.g. validation failed upstream). */
   run: (args: string) => Promise<boolean | void>;
 }

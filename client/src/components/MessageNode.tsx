@@ -15,8 +15,8 @@ import {
   siblingsOf,
   state,
   streamingMessage,
-  swipeToSibling,
 } from '../state/store.ts';
+import { messageSupportsSwipe, swipeMessage } from '../messageSwipe.ts';
 import { findMessageView } from '../plugins/index.ts';
 import Avatar from './Avatar.tsx';
 import Markdown from './Markdown.tsx';
@@ -119,12 +119,15 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   };
   const slideOut = (dir: 1 | -1) => `translateX(${dir === 1 ? -105 : 105}%)`;
 
-  // SillyTavern-style swipe gesture on the last assistant message: swipe left
-  // for the next sibling (generating a new one past the end), right for the previous.
+  // SillyTavern-style swipe gesture on the last assistant or plugin-owned
+  // message: swipe left for the next alternative, right for the previous.
+  // Plugins receive the same direction callback as the desktop arrow keys.
   const [dragX, setDragX] = createSignal(0);
   const [dragging, setDragging] = createSignal(false);
-  let touchX = 0;
-  let touchY = 0;
+  let pointerX = 0;
+  let pointerY = 0;
+  let pointerId: number | null = null;
+  let pointerTarget: HTMLElement | null = null;
   let horizontal = false;
 
   // Optionally show the reasoning live while the model thinks with no answer text yet.
@@ -132,53 +135,68 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     showReasoning() || (state.settings.autoExpandThinking && streaming() && !props.message.content);
 
   const swipeable = () =>
-    isAssistant() &&
+    messageSupportsSwipe(props.message) &&
     !editing() &&
     !state.treeNavigationPending &&
     state.tree.activeLeafId === props.message.id;
 
-  const onTouchStart = (e: TouchEvent) => {
-    if (!swipeable() || e.touches.length !== 1) return;
-    touchX = e.touches[0]!.clientX;
-    touchY = e.touches[0]!.clientY;
+  const resetPointerSwipe = () => {
+    if (pointerTarget != null && pointerId != null && pointerTarget.hasPointerCapture(pointerId)) {
+      pointerTarget.releasePointerCapture(pointerId);
+    }
+    pointerId = null;
+    pointerTarget = null;
+    setDragging(false);
+    setDragX(0);
+    horizontal = false;
+  };
+
+  // Pointer capture keeps the gesture alive while streaming deltas resize and
+  // autoscroll the message beneath the finger. Touch events alone can be
+  // cancelled by that layout movement on mobile browsers.
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch' || !swipeable() || pointerId != null) return;
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+    pointerId = e.pointerId;
+    pointerTarget = e.currentTarget as HTMLElement;
+    pointerTarget.setPointerCapture(e.pointerId);
     horizontal = false;
     setDragging(true);
   };
 
-  const onTouchMove = (e: TouchEvent) => {
-    if (!dragging()) return;
-    const dx = e.touches[0]!.clientX - touchX;
-    const dy = e.touches[0]!.clientY - touchY;
+  const onPointerMove = (e: PointerEvent) => {
+    if (!dragging() || e.pointerId !== pointerId) return;
+    const dx = e.clientX - pointerX;
+    const dy = e.clientY - pointerY;
     if (!horizontal) {
       if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {
-        setDragging(false); // vertical scroll wins
+        resetPointerSwipe(); // vertical scroll wins
         return;
       }
       horizontal = Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5;
     }
-    if (horizontal) setDragX(Math.max(-64, Math.min(64, dx)));
+    if (horizontal) {
+      e.preventDefault();
+      setDragX(Math.max(-64, Math.min(64, dx)));
+    }
   };
 
-  const onTouchEnd = () => {
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.pointerId !== pointerId) return;
     if (dragging() && horizontal) {
+      e.preventDefault();
       const dx = dragX();
-      if (dx <= -48) {
-        void swipeToSibling(props.message, 1);
-      } else if (dx >= 48 && !streaming()) {
-        void swipeToSibling(props.message, -1);
-      }
+      const dir = dx <= -48 ? 1 : dx >= 48 ? -1 : null;
+      if (dir != null) swipeMessage(props.message, dir);
     }
-    setDragging(false);
-    setDragX(0);
-    horizontal = false;
+    resetPointerSwipe();
   };
 
   // A browser/system cancellation is not a completed gesture, even if the
   // drag had already crossed the navigation threshold.
-  const onTouchCancel = () => {
-    setDragging(false);
-    setDragX(0);
-    horizontal = false;
+  const onPointerCancel = (e: PointerEvent) => {
+    if (e.pointerId === pointerId) resetPointerSwipe();
   };
 
   const revealImageControlsOnFirstTap = (event: MouseEvent) => {
@@ -336,10 +354,10 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       onClick={() => {
         if (!props.inMap) setTouchedId(props.message.id);
       }}
-      onTouchStart={props.inMap ? undefined : onTouchStart}
-      onTouchMove={props.inMap ? undefined : onTouchMove}
-      onTouchEnd={props.inMap ? undefined : onTouchEnd}
-      onTouchCancel={props.inMap ? undefined : onTouchCancel}
+      onPointerDown={props.inMap ? undefined : onPointerDown}
+      onPointerMove={props.inMap ? undefined : onPointerMove}
+      onPointerUp={props.inMap ? undefined : onPointerUp}
+      onPointerCancel={props.inMap ? undefined : onPointerCancel}
     >
       <Show when={!isTool()} fallback={<span class="avatar avatar-fallback">⚙</span>}>
         <Avatar src={avatarSrc()} name={name()} />
@@ -399,7 +417,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     editing() ||
                     siblingIndex() <= 0
                   }
-                  onClick={() => void swipeToSibling(props.message, -1)}
+                  onClick={() => swipeMessage(props.message, -1)}
                 >
                   ‹
                 </button>
@@ -417,7 +435,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       ? 'Regenerate'
                       : undefined
                   }
-                  onClick={() => void swipeToSibling(props.message, 1)}
+                  onClick={() => swipeMessage(props.message, 1)}
                 >
                   ›
                 </button>

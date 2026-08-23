@@ -39,6 +39,27 @@ export function hasActiveGeneration(conversationId: number): boolean {
   return false;
 }
 
+/** Tool prompts are route-time snapshots and tool rows never enter later chat
+ * history, so they may safely overlap each other. Structural actions use this
+ * stricter predicate when only a normal assistant stream should conflict. */
+export function hasActiveNonToolGeneration(conversationId: number): boolean {
+  for (const gen of active.values()) {
+    if (gen.conversationId !== conversationId) continue;
+    // A missing row is an unexpected transitional state; treat it as
+    // conflicting rather than allowing a second kind of generation through.
+    if (getMessage(gen.mid)?.role !== 'tool') return true;
+  }
+  return false;
+}
+
+/** Active message ids in one conversation. Used by structural mutations to
+ * stop only streams whose rows are actually about to be removed. */
+export function activeGenerationMessageIds(conversationId: number): number[] {
+  return [...active.values()]
+    .filter((gen) => gen.conversationId === conversationId)
+    .map((gen) => gen.mid);
+}
+
 export function hasForegroundGeneration(conversationId: number): boolean {
   for (const gen of active.values()) {
     if (gen.conversationId === conversationId && !gen.background) return true;
