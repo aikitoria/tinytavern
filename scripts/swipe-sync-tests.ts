@@ -39,9 +39,10 @@ assert.match(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPoint
 assert.doesNotMatch(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPointerUp\}/);
 assert.match(messageNode, /setPointerCapture\(e\.pointerId\)/);
 assert.match(messageNode, /ancestorNavigationBlocked\(\)/);
-assert.match(messageNode, /<Show when=\{siblings\(\)\.length > 1\}>/); // TREE-02 guard survives
+assert.match(messageNode, /siblings\(\)\.length > 1/); // TREE-02 guard survives
 assert.match(messageNode, /swipeMessage\(props\.message, dir\)/);
 assert.equal(messageNode.match(/swipeMessage\(props\.message, [^)]+\)/g)?.length, 3);
+assert.match(messageNode, /claimedView\(\)\?\.canDeleteSwipe/);
 assert.match(chatView, /swipeMessage\(last, dir\)/);
 
 const messageSwipe = readFileSync(
@@ -62,5 +63,7 @@ const imageGeneration = readFileSync(
 );
 assert.match(imageGeneration, /if \(message\.status === 'streaming'\)/);
 assert.match(imageGeneration, /api\.stopGeneration\(message\.id, message\.generationToken\)/);
+assert.match(imageGeneration, /canDeleteSwipe:/);
+assert.match(imageGeneration, /api\.deleteImage/);
 
 console.log('swipe sync tests passed');

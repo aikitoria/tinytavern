@@ -577,6 +577,47 @@ route.post('/api/messages/:id/active-image', ({ params, body }) => {
   broadcastTree(msg.conversationId);
 });
 
+/** Removes one generated image alternative while preserving the prompt and
+ * message row. The selected index moves to the next image at the same slot,
+ * or the previous image when the deleted one was last. */
+route.post('/api/messages/:id/delete-image', ({ params, body }) => {
+  const msg = requireMessage(positiveId(params.id));
+  const b = objectBody(body);
+  requireExpectedLeaf(msg, b);
+  if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
+    throw new HttpError(400, 'message is not on the active branch');
+  }
+  if (msg.imagePending) {
+    throw new HttpError(409, 'an image render is running for this message');
+  }
+  const index = b.index;
+  if (
+    typeof index !== 'number' ||
+    !Number.isSafeInteger(index) ||
+    index < 0 ||
+    index >= msg.images.length
+  ) {
+    throw new HttpError(400, 'index out of range');
+  }
+  const images = [...msg.images];
+  const [removed] = images.splice(index, 1);
+  const activeImage = images.length > 0 ? Math.min(index, images.length - 1) : 0;
+  transaction(() => {
+    stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
+      JSON.stringify(images),
+      activeImage,
+      msg.id,
+    );
+    bumpConversationRevision(msg.conversationId);
+    touchConversation(msg.conversationId);
+  });
+  markMessageDirty(msg.conversationId, msg.id);
+  deleteImageFiles([removed!]);
+  broadcastTree(msg.conversationId);
+  invalidate('conversations');
+  return getMessage(msg.id);
+});
+
 route.post('/api/generations/:id/stop', ({ params, body }) => {
   const mid = positiveId(params.id);
   const b = objectBody(body);

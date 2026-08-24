@@ -270,9 +270,14 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     );
   };
   const removeSwipe = () => {
-    void navigateTree(() =>
-      api.deleteSwipe(props.message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-    );
+    const pluginDelete = claimedView()?.deleteSwipe;
+    if (pluginDelete && claimedView()?.canDeleteSwipe?.(props.message)) {
+      void navigateTree(() => pluginDelete(props.message));
+    } else {
+      void navigateTree(() =>
+        api.deleteSwipe(props.message.id, state.tree.activeLeafId, state.tree.mutationRevision),
+      );
+    }
   };
 
   const copy = () => void navigator.clipboard.writeText(props.message.content);
@@ -514,7 +519,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       >
                         Move down
                       </button>
-                      <Show when={siblings().length > 1}>
+                      <Show
+                        when={
+                          claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1
+                        }
+                      >
                         <button
                           class="danger"
                           onClick={() => {

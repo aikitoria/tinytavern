@@ -2808,6 +2808,42 @@ async function main() {
     'deleting the inserted revision restores the original chain',
   );
 
+  const sourceBeforeImageSwipeDelete = restoredChain.messages.find(
+    (message) => message.id === imgRes.toolMessageId,
+  )!;
+  const removedImageUrl =
+    sourceBeforeImageSwipeDelete.images[sourceBeforeImageSwipeDelete.activeImage]!;
+  const survivingImageUrl = sourceBeforeImageSwipeDelete.images.find(
+    (_, index) => index !== sourceBeforeImageSwipeDelete.activeImage,
+  )!;
+  await req('POST', `/api/messages/${imgRes.toolMessageId}/delete-image`, {
+    index: sourceBeforeImageSwipeDelete.activeImage,
+    expectedActiveLeafId: restoredChain.activeLeafId,
+    expectedMutationRevision: restoredChain.mutationRevision,
+  });
+  await expectStatus(
+    'POST',
+    `/api/messages/${imgRes.toolMessageId}/delete-image`,
+    {
+      index: 0,
+      expectedActiveLeafId: restoredChain.activeLeafId,
+      expectedMutationRevision: restoredChain.mutationRevision,
+    },
+    409,
+  );
+  const afterImageSwipeDelete = await tree(conv2.id);
+  const sourceAfterImageSwipeDelete = afterImageSwipeDelete.messages.find(
+    (message) => message.id === imgRes.toolMessageId,
+  )!;
+  assert(
+    sourceAfterImageSwipeDelete.images.length === 1 &&
+      sourceAfterImageSwipeDelete.images[0] === survivingImageUrl &&
+      sourceAfterImageSwipeDelete.activeImage === 0 &&
+      (await fetch(`${BASE}${removedImageUrl}`)).status === 404 &&
+      (await fetch(`${BASE}${survivingImageUrl}`)).status === 200,
+    'Delete swipe removes only the selected image file and selects the nearest survivor',
+  );
+
   const imgParent = chainSnap.messages.find((m) => m.id === imgRes.toolMessageId)!.parentId;
   await req(
     'DELETE',

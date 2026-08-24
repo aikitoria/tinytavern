@@ -34,6 +34,10 @@ export interface PluginMessageView {
   currentImageConfig?: () => { workflow: string; comfyUrl: string } | undefined;
   /** Optional Left/Right action when this is the last message above the composer. */
   swipe?: (message: Message, dir: 1 | -1) => void;
+  /** Optional plugin-owned swipe deletion (for alternatives stored inside one
+   * message rather than as sibling message rows). */
+  canDeleteSwipe?: (message: Message) => boolean;
+  deleteSwipe?: (message: Message) => Promise<unknown>;
   create: (
     message: () => Message,
     ctx: { streaming: () => boolean },

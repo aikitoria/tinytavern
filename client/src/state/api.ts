@@ -3,6 +3,7 @@ import type {
   CharacterFolder,
   Conversation,
   Endpoint,
+  Message,
   Persona,
   Preset,
   Settings,
@@ -315,6 +316,17 @@ export const api = {
     expectedMutationRevision: number,
   ) =>
     request<void>('POST', `/api/messages/${messageId}/active-image`, {
+      index,
+      expectedActiveLeafId,
+      expectedMutationRevision,
+    }),
+  deleteImage: (
+    messageId: number,
+    index: number,
+    expectedActiveLeafId: number | null,
+    expectedMutationRevision: number,
+  ) =>
+    request<Message>('POST', `/api/messages/${messageId}/delete-image`, {
       index,
       expectedActiveLeafId,
       expectedMutationRevision,

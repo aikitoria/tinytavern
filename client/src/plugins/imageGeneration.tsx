@@ -915,6 +915,15 @@ const messageView: PluginMessageView = {
   swipe: (message, dir) => {
     void swipeImage(message, dir);
   },
+  canDeleteSwipe: (message) =>
+    message.images.length > 0 && !message.imagePending && imageOnActivePath(message),
+  deleteSwipe: (message) =>
+    api.deleteImage(
+      message.id,
+      Math.min(message.activeImage, message.images.length - 1),
+      state.tree.activeLeafId,
+      state.tree.mutationRevision,
+    ),
   create: (message, ctx) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
