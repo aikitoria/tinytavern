@@ -5,6 +5,8 @@ let currentSub: number | null = null;
 let retryDelay = 500;
 let started = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+let lifecycleListenersInstalled = false;
 
 // Set lazily to break the import cycle with store.ts.
 let onEvent: ((ev: ServerEvent) => void) | null = null;
@@ -24,11 +26,25 @@ export function configureWs(handlers: {
   onUnauthorized = handlers.onUnauthorized;
 }
 
+function scheduleReconnect(): void {
+  if (!started || reconnectTimer != null) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 5000);
+}
+
 function connect(): void {
+  if (!started) return;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   sock = ws;
   ws.onopen = () => {
+    if (sock !== ws || !started) {
+      ws.close();
+      return;
+    }
     retryDelay = 500;
     onStatus?.(true);
     // Resync: state may have changed while disconnected.
@@ -36,6 +52,7 @@ function connect(): void {
     if (currentSub != null) send({ sub: currentSub });
   };
   ws.onmessage = (event) => {
+    if (sock !== ws) return;
     try {
       onEvent?.(JSON.parse(event.data as string) as ServerEvent);
     } catch (err) {
@@ -43,19 +60,58 @@ function connect(): void {
     }
   };
   ws.onclose = (event) => {
+    // A deliberately replaced socket may close after its successor has
+    // already opened. Never let that stale callback clear or reconnect over
+    // the current connection.
+    if (sock !== ws) return;
     onStatus?.(false);
     sock = null;
     if (event.code === 4001) onUnauthorized?.();
-    if (!started) return;
-    reconnectTimer = setTimeout(connect, retryDelay);
-    retryDelay = Math.min(retryDelay * 2, 5000);
+    scheduleReconnect();
   };
   ws.onerror = () => ws.close();
+}
+
+/** Replace even an apparently OPEN socket. Mobile browsers can retain that
+ * readyState while the suspended PWA's underlying connection is already dead. */
+export function refreshWs(): void {
+  if (!started) return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  retryDelay = 500;
+  const previous = sock;
+  sock = null;
+  previous?.close();
+  onStatus?.(false);
+  connect();
+}
+
+function queueResumeRefresh(): void {
+  if (!started || resumeTimer != null) return;
+  // visibilitychange and online/pageshow can arrive together. Collapse the
+  // burst so a newly created replacement is not immediately replaced again.
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    refreshWs();
+  }, 50);
+}
+
+function installLifecycleListeners(): void {
+  if (lifecycleListenersInstalled) return;
+  lifecycleListenersInstalled = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') queueResumeRefresh();
+  });
+  window.addEventListener('online', queueResumeRefresh);
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) queueResumeRefresh();
+  });
 }
 
 export function startWs(): void {
   if (started) return;
   started = true;
+  installLifecycleListeners();
   connect();
 }
 
@@ -63,6 +119,8 @@ export function stopWs(): void {
   started = false;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = null;
   const current = sock;
   sock = null;
   current?.close();

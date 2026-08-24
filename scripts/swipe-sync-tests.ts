@@ -51,6 +51,11 @@ const messageSwipe = readFileSync(
 assert.match(messageSwipe, /pluginSwipe\(message, dir\)/);
 assert.match(messageSwipe, /swipeToSibling\(message, dir\)/);
 
+const store = readFileSync(new URL('../client/src/state/store.ts', import.meta.url), 'utf8');
+assert.match(store, /if \(pendingSwipe\(\)\?\.token === token\) refreshWs\(\)/);
+assert.match(store, /\}, 750\)/);
+assert.match(store, /setTimeout\(\(\) => clearPendingSwipe\(token\), 5000\)/);
+
 const imageGeneration = readFileSync(
   new URL('../client/src/plugins/imageGeneration.tsx', import.meta.url),
   'utf8',

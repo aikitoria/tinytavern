@@ -2479,6 +2479,23 @@ async function main() {
     },
   );
   const imageOffPath = await tree(conv2.id);
+  const sourceBeforeImageCopy = beforeImageBranchSwitch.messages.find(
+    (message) => message.id === imgRes.toolMessageId,
+  )!;
+  const duplicatedImageMessage = imageOffPath.messages.find(
+    (message) => message.id === inactiveAlternative.messageId,
+  )!;
+  const duplicatedImageUrls = duplicatedImageMessage.images;
+  assert(
+    duplicatedImageUrls.length === sourceBeforeImageCopy.images.length &&
+      duplicatedImageUrls.every(
+        (image, index) =>
+          image !== sourceBeforeImageCopy.images[index] && image.startsWith('/images/'),
+      ) &&
+      duplicatedImageMessage.activeImage === sourceBeforeImageCopy.activeImage &&
+      (await fetch(`${BASE}${duplicatedImageUrls[0]}`)).status === 200,
+    'message duplicate copies generated images and the active selection to independent files',
+  );
   await expectStatus(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/render-image`,
@@ -2515,6 +2532,15 @@ async function main() {
       `/api/messages/${inactiveAlternative.messageId}/swipe`,
       imgRes.toolMessageId,
     ),
+  );
+  assert(
+    (await Promise.all(duplicatedImageUrls.map((image) => fetch(`${BASE}${image}`)))).every(
+      (response) => response.status === 404,
+    ) &&
+      (
+        await Promise.all(sourceBeforeImageCopy.images.map((image) => fetch(`${BASE}${image}`)))
+      ).every((response) => response.status === 200),
+    'deleting a duplicated image message removes only its copied image files',
   );
 
   await setNextComfyOutput('html');

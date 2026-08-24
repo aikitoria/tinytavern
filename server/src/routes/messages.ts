@@ -4,7 +4,8 @@
 // other and against generation/streaming callbacks. A single future `await`
 // mid-handler reopens the double-generation and active-leaf races the guards
 // below protect against.
-import { stmt } from '../db.ts';
+import { randomUUID } from 'node:crypto';
+import { stmt, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {
   activateMessage,
@@ -48,6 +49,7 @@ import { discardSpeculativeSwipes, markSwipeRead, nextUnreadSibling } from '../s
 import { parseImageConfig, startImageRender } from '../comfy.ts';
 import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../prompt.ts';
 import { bumpConversationRevision } from '../conversationRevision.ts';
+import { copyImage, deleteImageFiles } from '../images.ts';
 
 function requireMessage(id: number) {
   const msg = getMessage(id);
@@ -440,8 +442,8 @@ route.post('/api/messages/:id/move', ({ params, body }) => {
   return { activeLeafId: getActiveLeafId(msg.conversationId) };
 });
 
-/** Duplicates a message as a new activated sibling swipe (content, name,
- * reasoning and image render config; generated images are not shared). */
+/** Duplicates a message as a new activated sibling swipe. Generated images
+ * are copied to independent files so hard-deleting either row is safe. */
 route.post('/api/messages/:id/duplicate', ({ params, body }) => {
   let msg = requireMessage(positiveId(params.id));
   requireExpectedLeaf(msg, body);
@@ -453,29 +455,55 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
     throw new HttpError(400, 'only completed messages can be duplicated');
   }
   discardSpeculativeSwipes(msg.conversationId);
-  const copy = appendMessage(
-    msg.conversationId,
-    msg.role,
-    msg.content,
-    msg.parentId,
-    'done',
-    msg.model,
-    msg.name,
-    false,
-  );
-  const renderRow = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
-    image_render_json: string | null;
-  };
-  stmt('UPDATE messages SET reasoning = ?, image_render_json = ? WHERE id = ?').run(
-    msg.reasoning,
-    renderRow.image_render_json,
-    copy.id,
-  );
-  activateMessage(copy.id);
-  touchConversation(msg.conversationId);
-  broadcastTree(msg.conversationId);
-  invalidate('conversations');
-  return { messageId: copy.id, activeLeafId: copy.id };
+  const copiedImages: string[] = [];
+  let copiedActiveImage = 0;
+  try {
+    for (const [sourceIndex, imagePath] of msg.images.entries()) {
+      const ext = imagePath.includes('.') ? imagePath.slice(imagePath.lastIndexOf('.')) : '.png';
+      const copied = copyImage(imagePath, `msg-copy-${randomUUID()}${ext}`);
+      if (copied == null) {
+        console.warn(`[messages] duplicate: source image ${imagePath} is missing`);
+        continue;
+      }
+      if (sourceIndex === msg.activeImage) copiedActiveImage = copiedImages.length;
+      copiedImages.push(copied);
+    }
+    const copy = transaction(() => {
+      const appended = appendMessage(
+        msg.conversationId,
+        msg.role,
+        msg.content,
+        msg.parentId,
+        'done',
+        msg.model,
+        msg.name,
+        false,
+      );
+      const renderRow = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
+        image_render_json: string | null;
+      };
+      stmt(
+        `UPDATE messages
+         SET reasoning = ?, image_render_json = ?, images_json = ?, active_image = ?
+         WHERE id = ?`,
+      ).run(
+        msg.reasoning,
+        renderRow.image_render_json,
+        JSON.stringify(copiedImages),
+        copiedActiveImage,
+        appended.id,
+      );
+      activateMessage(appended.id);
+      touchConversation(msg.conversationId);
+      return appended;
+    });
+    broadcastTree(msg.conversationId);
+    invalidate('conversations');
+    return { messageId: copy.id, activeLeafId: copy.id };
+  } catch (err) {
+    deleteImageFiles(copiedImages);
+    throw err;
+  }
 });
 
 /** Renders another image alternative with the message's current content and a

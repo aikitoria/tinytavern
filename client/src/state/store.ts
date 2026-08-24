@@ -15,7 +15,7 @@ import type {
 } from '@minitavern/shared';
 import { DEFAULT_SETTINGS } from '@minitavern/shared';
 import { api, ApiError } from './api.ts';
-import { subscribe } from './ws.ts';
+import { refreshWs, subscribe } from './ws.ts';
 import {
   applyImageProgress,
   retainPendingImageProgress,
@@ -556,11 +556,17 @@ export async function swipeToSibling(message: Message, dir: 1 | -1): Promise<voi
     clearPendingSwipe(token); // spring back, unless a newer swipe has replaced this one
     return;
   }
-  // Normally the matching tree frame consumes the operation. Keep a timeout
-  // only as a fail-safe for a successful HTTP mutation whose WS frame is lost.
+  // Normally the matching tree frame consumes the operation almost
+  // immediately. If the HTTP mutation succeeded but its frame went to a stale
+  // mobile-PWA socket, replace the connection while keeping the outgoing side
+  // held until the reconnect snapshot mounts the authoritative branch.
   setTimeout(() => {
-    clearPendingSwipe(token);
-  }, 2000);
+    if (pendingSwipe()?.token === token) refreshWs();
+  }, 750);
+  // A truly offline client must eventually spring back rather than leave the
+  // old side held offscreen forever. A successful reconnect consumes this
+  // operation from its full tree frame long before this fallback.
+  setTimeout(() => clearPendingSwipe(token), 5000);
 }
 
 export async function newConversation(characterId: number | null): Promise<void> {
