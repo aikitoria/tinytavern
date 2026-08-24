@@ -1186,6 +1186,31 @@ async function main() {
       snap.activeLeafId === mv.assistantMessageId,
     'moving back restores the original order',
   );
+  const middleDup = await req<{ messageId: number; activeLeafId: number }>(
+    'POST',
+    `/api/messages/${mv.userMessageId}/duplicate`,
+    await branchBodyAt(conv.id, mv.assistantMessageId),
+  );
+  snap = await tree(conv.id);
+  const middleDupMsg = snap.messages.find((message) => message.id === middleDup.messageId)!;
+  assert(
+    middleDupMsg.parentId === mv.userMessageId &&
+      middleDupMsg.activeChildId === mv.assistantMessageId &&
+      snap.messages.find((message) => message.id === mv.assistantMessageId)?.parentId ===
+        middleDup.messageId &&
+      snap.activeLeafId === mv.assistantMessageId,
+    'duplicating a middle message inserts the copy without losing its active continuation',
+  );
+  await req(
+    'DELETE',
+    await branchPath(conv.id, `/api/messages/${middleDup.messageId}`, mv.assistantMessageId),
+  );
+  snap = await tree(conv.id);
+  assert(
+    snap.messages.find((message) => message.id === mv.assistantMessageId)?.parentId ===
+      mv.userMessageId && snap.activeLeafId === mv.assistantMessageId,
+    'deleting the inserted middle copy restores the original chain',
+  );
   const dup = await req<{ messageId: number; activeLeafId: number }>(
     'POST',
     `/api/messages/${mv.assistantMessageId}/duplicate`,
@@ -1194,10 +1219,11 @@ async function main() {
   snap = await tree(conv.id);
   const dupMsg = snap.messages.find((m) => m.id === dup.messageId);
   assert(
-    dupMsg?.parentId === mv.userMessageId &&
+    dupMsg?.parentId === mv.assistantMessageId &&
       dupMsg.content === snap.messages.find((m) => m.id === mv.assistantMessageId)!.content &&
+      snap.messages.find((m) => m.id === mv.assistantMessageId)?.activeChildId === dup.messageId &&
       snap.activeLeafId === dup.messageId,
-    'duplicate creates an activated sibling copy',
+    'duplicating the leaf inserts its copy directly below the source',
   );
   const sourceById = new Map(snap.messages.map((message) => [message.id, message]));
   const sourceBranchPath: Message[] = [];
@@ -2466,11 +2492,11 @@ async function main() {
     'deleting a branched conversation removes only its copied image files',
   );
 
-  // A branch guard rejects an old client snapshot, while a current snapshot
-  // still cannot spend render work (or change image selection) on an inactive
-  // message exposed in the tree map.
+  // A duplicate is inserted immediately after its source with independent
+  // image files. Removing it restores the source as the leaf without touching
+  // the source files.
   const beforeImageBranchSwitch = await tree(conv2.id);
-  const inactiveAlternative = await req<{ messageId: number }>(
+  const imageDuplicate = await req<{ messageId: number }>(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/duplicate`,
     {
@@ -2483,7 +2509,7 @@ async function main() {
     (message) => message.id === imgRes.toolMessageId,
   )!;
   const duplicatedImageMessage = imageOffPath.messages.find(
-    (message) => message.id === inactiveAlternative.messageId,
+    (message) => message.id === imageDuplicate.messageId,
   )!;
   const duplicatedImageUrls = duplicatedImageMessage.images;
   assert(
@@ -2493,8 +2519,12 @@ async function main() {
           image !== sourceBeforeImageCopy.images[index] && image.startsWith('/images/'),
       ) &&
       duplicatedImageMessage.activeImage === sourceBeforeImageCopy.activeImage &&
+      duplicatedImageMessage.parentId === imgRes.toolMessageId &&
+      imageOffPath.messages.find((message) => message.id === imgRes.toolMessageId)
+        ?.activeChildId === imageDuplicate.messageId &&
+      imageOffPath.activeLeafId === imageDuplicate.messageId &&
       (await fetch(`${BASE}${duplicatedImageUrls[0]}`)).status === 200,
-    'message duplicate copies generated images and the active selection to independent files',
+    'image duplicate inserts below its source with copied images and active selection',
   );
   await expectStatus(
     'POST',
@@ -2505,12 +2535,41 @@ async function main() {
     },
     409,
   );
+  await req(
+    'DELETE',
+    await branchPath(
+      conv2.id,
+      `/api/messages/${imageDuplicate.messageId}`,
+      imageDuplicate.messageId,
+    ),
+  );
+  const afterImageDuplicateDelete = await tree(conv2.id);
+  assert(
+    (await Promise.all(duplicatedImageUrls.map((image) => fetch(`${BASE}${image}`)))).every(
+      (response) => response.status === 404,
+    ) &&
+      (
+        await Promise.all(sourceBeforeImageCopy.images.map((image) => fetch(`${BASE}${image}`)))
+      ).every((response) => response.status === 200) &&
+      afterImageDuplicateDelete.activeLeafId === imgRes.toolMessageId,
+    'deleting an inserted image duplicate restores the source and removes only copied files',
+  );
+
+  // A branch guard rejects an old client snapshot, while a current snapshot
+  // still cannot spend render work (or change image selection) on an inactive
+  // image message exposed in the tree map.
+  const inactiveImageBranch = await req<{ messageId: number }>(
+    'POST',
+    `/api/messages/${imgRes.toolMessageId}/edit-branch`,
+    await branchBodyAt(conv2.id, imgRes.toolMessageId, { content: 'Inactive image branch' }),
+  );
+  const inactiveImageSnap = await tree(conv2.id);
   await expectStatus(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/render-image`,
     {
-      expectedActiveLeafId: imageOffPath.activeLeafId,
-      expectedMutationRevision: imageOffPath.mutationRevision,
+      expectedActiveLeafId: inactiveImageSnap.activeLeafId,
+      expectedMutationRevision: inactiveImageSnap.mutationRevision,
     },
     400,
   );
@@ -2519,8 +2578,8 @@ async function main() {
     `/api/messages/${imgRes.toolMessageId}/active-image`,
     {
       index: 1,
-      expectedActiveLeafId: imageOffPath.activeLeafId,
-      expectedMutationRevision: imageOffPath.mutationRevision,
+      expectedActiveLeafId: inactiveImageSnap.activeLeafId,
+      expectedMutationRevision: inactiveImageSnap.mutationRevision,
     },
     400,
   );
@@ -2529,18 +2588,9 @@ async function main() {
     'DELETE',
     await branchPath(
       conv2.id,
-      `/api/messages/${inactiveAlternative.messageId}/swipe`,
+      `/api/messages/${inactiveImageBranch.messageId}/swipe`,
       imgRes.toolMessageId,
     ),
-  );
-  assert(
-    (await Promise.all(duplicatedImageUrls.map((image) => fetch(`${BASE}${image}`)))).every(
-      (response) => response.status === 404,
-    ) &&
-      (
-        await Promise.all(sourceBeforeImageCopy.images.map((image) => fetch(`${BASE}${image}`)))
-      ).every((response) => response.status === 200),
-    'deleting a duplicated image message removes only its copied image files',
   );
 
   await setNextComfyOutput('html');

@@ -442,8 +442,9 @@ route.post('/api/messages/:id/move', ({ params, body }) => {
   return { activeLeafId: getActiveLeafId(msg.conversationId) };
 });
 
-/** Duplicates a message as a new activated sibling swipe. Generated images
- * are copied to independent files so hard-deleting either row is safe. */
+/** Inserts a duplicate immediately after the selected message. Existing
+ * children move beneath the copy so the visible continuation and active leaf
+ * survive. Generated images use independent files for safe hard deletion. */
 route.post('/api/messages/:id/duplicate', ({ params, body }) => {
   let msg = requireMessage(positiveId(params.id));
   requireExpectedLeaf(msg, body);
@@ -469,15 +470,14 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
       copiedImages.push(copied);
     }
     const copy = transaction(() => {
-      const appended = appendMessage(
+      const inserted = insertMessageAfter(
         msg.conversationId,
         msg.role,
         msg.content,
-        msg.parentId,
+        msg.id,
         'done',
         msg.model,
         msg.name,
-        false,
       );
       const renderRow = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
         image_render_json: string | null;
@@ -491,15 +491,14 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
         renderRow.image_render_json,
         JSON.stringify(copiedImages),
         copiedActiveImage,
-        appended.id,
+        inserted.id,
       );
-      activateMessage(appended.id);
       touchConversation(msg.conversationId);
-      return appended;
+      return inserted;
     });
     broadcastTree(msg.conversationId);
     invalidate('conversations');
-    return { messageId: copy.id, activeLeafId: copy.id };
+    return { messageId: copy.id, activeLeafId: getActiveLeafId(msg.conversationId) };
   } catch (err) {
     deleteImageFiles(copiedImages);
     throw err;
