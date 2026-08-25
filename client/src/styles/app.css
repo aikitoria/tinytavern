@@ -11,11 +11,11 @@
   --accent-text: #171717;
   --danger: #e05b5b;
   --code-bg: #101010;
-  /* Chat text accents: gray body text, warm italics, orange dialogue. */
-  --md-body: #a6a69a;
-  --md-em: #dcdcd2;
-  --md-strong: #f4f4ea;
-  --md-quote: #e3a04c;
+  /* Chat typography: neutral prose, sand narration, amber dialogue. */
+  --md-body: #c9c7be;
+  --md-em: #d5bea0;
+  --md-strong: #f3f0e8;
+  --md-quote: #e5a052;
   /* Layout uses a 4px rhythm; nested corners step control → panel → modal. */
   --space-1: 4px;
   --space-2: 8px;
@@ -47,10 +47,10 @@
     --accent: #b56a10;
     --accent-text: #ffffff;
     --code-bg: #1c1c1c;
-    --md-body: #6f6c62;
-    --md-em: #23211c;
-    --md-strong: #17150f;
-    --md-quote: #a55f0a;
+    --md-body: #34322c;
+    --md-em: #735e45;
+    --md-strong: #191812;
+    --md-quote: #98570e;
   }
 }
 
