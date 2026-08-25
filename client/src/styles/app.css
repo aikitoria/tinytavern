@@ -11,8 +11,9 @@
   --accent-text: #171717;
   --danger: #e05b5b;
   --code-bg: #101010;
-  /* chat text accents (SillyTavern-style: gray italics, orange dialogue) */
-  --md-em: #a6a69a;
+  /* Chat text accents: gray body text, warm italics, orange dialogue. */
+  --md-body: #a6a69a;
+  --md-em: #dcdcd2;
   --md-strong: #f4f4ea;
   --md-quote: #e3a04c;
   /* Layout uses a 4px rhythm; nested corners step control → panel → modal. */
@@ -46,7 +47,8 @@
     --accent: #b56a10;
     --accent-text: #ffffff;
     --code-bg: #1c1c1c;
-    --md-em: #6f6c62;
+    --md-body: #6f6c62;
+    --md-em: #23211c;
     --md-strong: #17150f;
     --md-quote: #a55f0a;
   }
@@ -1347,6 +1349,7 @@ textarea.mono,
 
 .md {
   overflow-wrap: break-word;
+  color: var(--md-body);
 }
 
 .md > :first-child {

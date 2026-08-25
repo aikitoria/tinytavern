@@ -40,6 +40,10 @@ assert.doesNotMatch(messageNode, /onPointerCancel=\{props\.inMap \? undefined : 
 assert.match(messageNode, /setPointerCapture\(e\.pointerId\)/);
 assert.match(messageNode, /ancestorNavigationBlocked\(\)/);
 assert.match(messageNode, /siblings\(\)\.length > 1/); // TREE-02 guard survives
+assert.match(
+  messageNode,
+  /isUser\(\) && siblings\(\)\.length > 1 && !ancestorNavigationBlocked\(\)/,
+);
 assert.match(messageNode, /swipeMessage\(props\.message, dir\)/);
 assert.equal(messageNode.match(/swipeMessage\(props\.message, [^)]+\)/g)?.length, 3);
 assert.match(messageNode, /claimedView\(\)\?\.canDeleteSwipe/);
@@ -51,6 +55,8 @@ const messageSwipe = readFileSync(
 );
 assert.match(messageSwipe, /pluginSwipe\(message, dir\)/);
 assert.match(messageSwipe, /swipeToSibling\(message, dir\)/);
+assert.match(messageSwipe, /message\.role === 'assistant' \|\|\s+message\.role === 'user'/);
+assert.match(messageSwipe, /message\.role !== 'assistant' && message\.role !== 'user'/);
 
 const store = readFileSync(new URL('../client/src/state/store.ts', import.meta.url), 'utf8');
 assert.match(store, /if \(pendingSwipe\(\)\?\.token === token\) refreshWs\(\)/);

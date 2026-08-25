@@ -2,10 +2,14 @@ import type { Message } from '@minitavern/shared';
 import { findMessageView } from './plugins/index.ts';
 import { streamingMessage, swipeToSibling } from './state/store.ts';
 
-/** Whether the message has ordinary assistant alternatives or a plugin-owned
- * alternative action. Shared by keyboard and pointer gesture entry points. */
+/** Whether the message has ordinary chat alternatives or a plugin-owned
+ * alternative action. Shared by pointer, button, and keyboard entry points. */
 export function messageSupportsSwipe(message: Message): boolean {
-  return message.role === 'assistant' || findMessageView(message)?.swipe != null;
+  return (
+    message.role === 'assistant' ||
+    message.role === 'user' ||
+    findMessageView(message)?.swipe != null
+  );
 }
 
 /** One swipe dispatcher for desktop Left/Right and mobile horizontal gestures.
@@ -19,7 +23,7 @@ export function swipeMessage(message: Message, dir: 1 | -1): boolean {
     pluginSwipe(message, dir);
     return true;
   }
-  if (message.role !== 'assistant') return false;
+  if (message.role !== 'assistant' && message.role !== 'user') return false;
   if (dir === -1 && (message.status === 'streaming' || streamingMessage())) return false;
   void swipeToSibling(message, dir);
   return true;

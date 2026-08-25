@@ -119,9 +119,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   };
   const slideOut = (dir: 1 | -1) => `translateX(${dir === 1 ? -105 : 105}%)`;
 
-  // SillyTavern-style swipe gesture on the last assistant or plugin-owned
-  // message: swipe left for the next alternative, right for the previous.
-  // Plugins receive the same direction callback as the desktop arrow keys.
+  // SillyTavern-style swipe gesture: swipe left for the next alternative,
+  // right for the previous. Assistant/plugin gestures stay on the active leaf;
+  // user forks can be ancestors because saving one immediately adds a reply.
   const [dragX, setDragX] = createSignal(0);
   const [dragging, setDragging] = createSignal(false);
   let pointerX = 0;
@@ -134,11 +134,18 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   const reasoningOpen = () =>
     showReasoning() || (state.settings.autoExpandThinking && streaming() && !props.message.content);
 
+  // An active descendant generation makes switching this ancestor incompatible
+  // with the server's foreground-generation guard. Preserve the intentional
+  // forward action on the active streaming leaf ("swipe past generation").
+  const ancestorNavigationBlocked = () =>
+    streamingMessage() != null && state.tree.activeLeafId !== props.message.id;
+
   const swipeable = () =>
     messageSupportsSwipe(props.message) &&
     !editing() &&
     !state.treeNavigationPending &&
-    state.tree.activeLeafId === props.message.id;
+    (state.tree.activeLeafId === props.message.id ||
+      (isUser() && siblings().length > 1 && !ancestorNavigationBlocked()));
 
   const resetPointerSwipe = () => {
     if (pointerTarget != null && pointerId != null && pointerTarget.hasPointerCapture(pointerId)) {
@@ -214,12 +221,6 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       setTouchedId(props.message.id);
     }
   };
-
-  // An active descendant generation makes switching this ancestor incompatible
-  // with the server's foreground-generation guard. Preserve the intentional
-  // forward action on the active streaming leaf ("swipe past generation").
-  const ancestorNavigationBlocked = () =>
-    streamingMessage() != null && state.tree.activeLeafId !== props.message.id;
 
   const startEdit = () => {
     if (props.message.imagePending) return;
