@@ -31,9 +31,9 @@ const sourceImages = [
 ];
 const now = Date.now();
 const convResult = stmt(
-  `INSERT INTO conversations (title, speaker_name, created_at, updated_at)
-   VALUES (?, ?, ?, ?)`,
-).run('Portable tree', 'Narrator', now - 1000, now);
+  `INSERT INTO conversations (title, speaker_name, scenario_override, created_at, updated_at)
+   VALUES (?, ?, ?, ?, ?)`,
+).run('Portable tree', 'Narrator', 'A portable scenario', now - 1000, now);
 const sourceConversationId = Number(convResult.lastInsertRowid);
 const insert = stmt(
   `INSERT INTO messages
@@ -132,6 +132,10 @@ assert(
   portable.format === 'minitavern-conversation' && portable.version === 1,
   'schema is versioned',
 );
+assert(
+  portable.conversation.scenarioOverride === 'A portable scenario',
+  'conversation scenario override is exported',
+);
 assert(portable.assets.length === 2, 'all image alternatives are embedded');
 assert(
   portable.messages
@@ -164,6 +168,10 @@ assert(
 );
 
 const imported = importPortableConversation(portable);
+assert(
+  imported.scenarioOverride === 'A portable scenario',
+  'conversation scenario override is imported',
+);
 const importedRows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
   imported.id,
 ) as Record<string, unknown>[];

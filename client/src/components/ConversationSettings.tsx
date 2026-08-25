@@ -6,6 +6,8 @@ import { openModal, selectedConversation, state } from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';
 import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import Modal from './Modal.tsx';
+import MacroHelp from './MacroHelp.tsx';
+import MacroTextarea from './MacroTextarea.tsx';
 import Select from './Select.tsx';
 import type { SettingsSectionActions } from './SettingsGuard.tsx';
 
@@ -15,6 +17,7 @@ interface Draft {
   personaId: number | null;
   endpointId: number | null;
   speakerName: string | null;
+  scenarioOverride: string | null;
 }
 
 function snapshot(conv: Conversation): Draft {
@@ -24,6 +27,7 @@ function snapshot(conv: Conversation): Draft {
     personaId: conv.personaId,
     endpointId: conv.endpointId,
     speakerName: conv.speakerName,
+    scenarioOverride: conv.scenarioOverride,
   };
 }
 
@@ -31,6 +35,7 @@ function Editor(props: {
   conv: Conversation;
   register: (actions: SettingsSectionActions) => () => void;
 }) {
+  let scenarioEl: HTMLTextAreaElement | undefined;
   let base = snapshot(props.conv);
   const [draft, setDraft] = createStore<Draft>({ ...base });
   const [saved, flashSaved] = createSavedFlash();
@@ -38,6 +43,14 @@ function Editor(props: {
   const [conflicts, setConflicts] = createSignal<(keyof Draft)[]>([]);
 
   const isDirty = () => !sameValue(draft, base);
+
+  const inheritedScenario = () =>
+    state.characters.find((character) => character.id === draft.characterId)?.scenario ?? '';
+
+  createEffect(() => {
+    const value = draft.scenarioOverride;
+    if (value != null && scenarioEl && scenarioEl.value !== value) scenarioEl.value = value;
+  });
 
   createEffect(() => {
     const latest = snapshot(props.conv);
@@ -146,6 +159,31 @@ function Editor(props: {
           ...state.endpoints.map((ep) => ({ value: String(ep.id), label: ep.name })),
         ]}
       />
+
+      <label class="check-row">
+        <input
+          type="checkbox"
+          checked={draft.scenarioOverride !== null}
+          onChange={(e) =>
+            setDraft('scenarioOverride', e.currentTarget.checked ? inheritedScenario() : null)
+          }
+        />
+        <span>Override the character scenario for this conversation</span>
+      </label>
+
+      <Show when={draft.scenarioOverride !== null}>
+        <label>
+          Conversation scenario <MacroHelp />
+        </label>
+        <MacroTextarea
+          ref={(el) => {
+            scenarioEl = el;
+            el.value = draft.scenarioOverride ?? '';
+          }}
+          placeholder="Leave empty to omit the scenario from this conversation"
+          onText={(text) => setDraft('scenarioOverride', text)}
+        />
+      </Show>
 
       <div class="form-actions">
         <button class="primary-btn" onClick={() => void save()}>

@@ -32,6 +32,7 @@ interface TransferConversation {
   persona: TransferReference | null;
   endpoint: TransferReference | null;
   speakerName: string | null;
+  scenarioOverride: string | null;
   activeLeafId: number | null;
   createdAt: number;
   updatedAt: number;
@@ -238,6 +239,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
       persona: namedReference('personas', conv.personaId),
       endpoint: namedReference('endpoints', conv.endpointId),
       speakerName: conv.speakerName,
+      scenarioOverride: conv.scenarioOverride,
       activeLeafId: conv.activeLeafId,
       createdAt: conv.createdAt,
       updatedAt: conv.updatedAt,
@@ -285,6 +287,12 @@ function parsePortableConversation(raw: unknown): {
     persona: parseReference(sourceConversation.persona, 'conversation.persona'),
     endpoint: parseReference(sourceConversation.endpoint, 'conversation.endpoint'),
     speakerName: nullableString(sourceConversation.speakerName, 'conversation.speakerName'),
+    // Additive V1 field: exports from before scenario overrides omit it and
+    // therefore import with the original inherited behavior.
+    scenarioOverride: nullableString(
+      sourceConversation.scenarioOverride,
+      'conversation.scenarioOverride',
+    ),
     activeLeafId: nullablePositiveInteger(
       sourceConversation.activeLeafId,
       'conversation.activeLeafId',
@@ -460,15 +468,16 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
       const conv = parsed.conversation;
       const result = stmt(
         `INSERT INTO conversations
-           (title, character_id, persona_id, endpoint_id, speaker_name, active_leaf_id,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+           (title, character_id, persona_id, endpoint_id, speaker_name, scenario_override,
+            active_leaf_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
       ).run(
         conv.title,
         resolveReference('characters', conv.character),
         resolveReference('personas', conv.persona),
         resolveReference('endpoints', conv.endpoint),
         conv.speakerName,
+        conv.scenarioOverride,
         conv.createdAt,
         conv.updatedAt,
       );

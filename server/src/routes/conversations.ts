@@ -349,6 +349,7 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
   const personaId = optionalNullableId(b, 'personaId');
   const endpointId = optionalNullableId(b, 'endpointId');
   const speakerName = optionalNullableString(b, 'speakerName');
+  const scenarioOverride = optionalNullableString(b, 'scenarioOverride');
   if (characterId != null && !getCharacter(characterId)) {
     throw new HttpError(400, 'characterId does not exist');
   }
@@ -360,7 +361,8 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
     (characterId !== undefined && characterId !== conv.characterId) ||
     (personaId !== undefined && personaId !== conv.personaId) ||
     (endpointId !== undefined && endpointId !== conv.endpointId) ||
-    (speakerName !== undefined && (speakerName?.trim() || null) !== conv.speakerName);
+    (speakerName !== undefined && (speakerName?.trim() || null) !== conv.speakerName) ||
+    (scenarioOverride !== undefined && scenarioOverride !== conv.scenarioOverride);
   // Only prompt-affecting changes conflict with an in-flight reply; a title
   // rename is always safe (the endpoint too is resolved once at gen start).
   if (contextChanged && hasForegroundGeneration(id))
@@ -369,7 +371,8 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
   // No updated_at bump: metadata edits are not "new content" and must not
   // reorder the sidebar (same doctrine as setActiveLeaf).
   stmt(
-    `UPDATE conversations SET title = ?, character_id = ?, persona_id = ?, endpoint_id = ?, speaker_name = ?
+    `UPDATE conversations SET title = ?, character_id = ?, persona_id = ?, endpoint_id = ?, speaker_name = ?,
+      scenario_override = ?
      WHERE id = ?`,
   ).run(
     title !== undefined ? title.trim() : conv.title,
@@ -377,6 +380,7 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
     personaId !== undefined ? personaId : conv.personaId,
     endpointId !== undefined ? endpointId : conv.endpointId,
     speakerName !== undefined ? speakerName?.trim() || null : conv.speakerName,
+    scenarioOverride !== undefined ? scenarioOverride : conv.scenarioOverride,
     id,
   );
   bumpConversationRevision(id);
@@ -460,9 +464,20 @@ route.post('/api/conversations/:id/duplicate', ({ params }) => {
   try {
     const newId = transaction(() => {
       const convResult = stmt(
-        `INSERT INTO conversations (title, character_id, persona_id, endpoint_id, speaker_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(title, conv.characterId, conv.personaId, conv.endpointId, conv.speakerName, now, now);
+        `INSERT INTO conversations
+           (title, character_id, persona_id, endpoint_id, speaker_name, scenario_override,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        title,
+        conv.characterId,
+        conv.personaId,
+        conv.endpointId,
+        conv.speakerName,
+        conv.scenarioOverride,
+        now,
+        now,
+      );
       const newConvId = Number(convResult.lastInsertRowid);
       const idMap = new Map<number, number>();
       for (const row of rows) {
@@ -572,9 +587,20 @@ route.post('/api/messages/:id/branch-conversation', ({ params }) => {
   try {
     const newId = transaction(() => {
       const convResult = stmt(
-        `INSERT INTO conversations (title, character_id, persona_id, endpoint_id, speaker_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(title, conv.characterId, conv.personaId, conv.endpointId, conv.speakerName, now, now);
+        `INSERT INTO conversations
+           (title, character_id, persona_id, endpoint_id, speaker_name, scenario_override,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        title,
+        conv.characterId,
+        conv.personaId,
+        conv.endpointId,
+        conv.speakerName,
+        conv.scenarioOverride,
+        now,
+        now,
+      );
       const newConvId = Number(convResult.lastInsertRowid);
       let parentId: number | null = null;
 

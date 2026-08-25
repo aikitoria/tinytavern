@@ -195,7 +195,7 @@ export function buildChatMessages(
     system: sub(systemPrompt),
     personality: sub(character?.personality ?? ''),
     persona: sub(persona?.description ?? ''),
-    scenario: sub(character?.scenario ?? ''),
+    scenario: sub(conversation.scenarioOverride ?? character?.scenario ?? ''),
     examples: sub(character?.examples ?? ''),
     char: charName,
     user: userName,

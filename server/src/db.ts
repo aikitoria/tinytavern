@@ -400,6 +400,17 @@ if (version < 21) {
   `);
 }
 
+// A conversation can replace its character's scenario without mutating the
+// shared character. NULL inherits; an empty string deliberately removes it.
+if (version < 22) {
+  db.exec(`
+    BEGIN;
+    ALTER TABLE conversations ADD COLUMN scenario_override TEXT;
+    PRAGMA user_version = 22;
+    COMMIT;
+  `);
+}
+
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 db.prepare(
@@ -504,6 +515,7 @@ export function toConversation(r: Row): Conversation {
     personaId: r.persona_id as number | null,
     endpointId: r.endpoint_id as number | null,
     speakerName: r.speaker_name as string | null,
+    scenarioOverride: (r.scenario_override as string | null) ?? null,
     activeLeafId: r.active_leaf_id as number | null,
     mutationRevision: (r.mutation_revision as number) ?? 0,
     createdAt: r.created_at as number,

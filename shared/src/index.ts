@@ -61,6 +61,8 @@ export interface Conversation {
   endpointId: number | null;
   /** Current assistant speaker name (set via /char); null = character's name. */
   speakerName: string | null;
+  /** Scenario override for this conversation; null = the character's scenario. */
+  scenarioOverride: string | null;
   activeLeafId: number | null;
   /** Monotonic optimistic-concurrency token for conversation state. */
   mutationRevision: number;

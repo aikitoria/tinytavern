@@ -13,7 +13,7 @@ const TEMPLATE: [string, string][] = [
   ],
   ['{{personality}}', "The character's personality text"],
   ['{{persona}}', "The persona's description text"],
-  ['{{scenario}}', "The character's scenario text"],
+  ['{{scenario}}', "The conversation override, otherwise the character's scenario text"],
   ['{{examples}}', "The character's example conversations"],
   [
     '{{#if x}}…{{/if}}',

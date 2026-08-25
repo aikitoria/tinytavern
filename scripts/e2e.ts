@@ -1233,6 +1233,7 @@ async function main() {
     id = message.parentId;
   }
   sourceBranchPath.reverse();
+  await patchConversation(conv.id, { scenarioOverride: 'A scenario kept by branches' });
   const sourceConversation = (await req<Conversation[]>('GET', '/api/conversations')).find(
     (conversation) => conversation.id === conv.id,
   )!;
@@ -1262,6 +1263,7 @@ async function main() {
       branchedConversation.personaId === sourceConversation.personaId &&
       branchedConversation.endpointId === sourceConversation.endpointId &&
       branchedConversation.speakerName === sourceConversation.speakerName &&
+      branchedConversation.scenarioOverride === sourceConversation.scenarioOverride &&
       branchedConversation.title.endsWith(' (branch)'),
     'branched conversation preserves source configuration and gets a branch title',
   );
@@ -2101,6 +2103,76 @@ async function main() {
     inlineTrace.reasoningPrefill === 'Inline reasoning for Inline Hero.' &&
       inlineTrace.messagePrefill === 'Inline answer for User:',
     'inline custom templates expose and macro-render both assistant prefills',
+  );
+
+  console.log('== per-conversation scenario override ==');
+  const scenarioChar = await req<{ id: number }>('POST', '/api/characters', {
+    name: 'Scenario Hero',
+    scenario: 'The character scenario for {{char}}.',
+    customTemplate: {
+      content: '{{#if scenario}}Scene: {{scenario}}{{/if}}',
+      userPrologue: '',
+      reasoningPrefill: '',
+      messagePrefill: '',
+      prefixNames: false,
+      usesPersonas: true,
+    },
+  });
+  const scenarioConv = await req<Conversation>('POST', '/api/conversations', {
+    characterId: scenarioChar.id,
+  });
+  let scenarioTrace = await fetchTrace(scenarioConv.id);
+  assert(
+    scenarioTrace.messages.some(
+      (message) =>
+        message.role === 'system' &&
+        message.content === 'Scene: The character scenario for Scenario Hero.',
+    ),
+    'conversation inherits the character scenario by default',
+  );
+  const scenarioUpdated = (await patchConversation(scenarioConv.id, {
+    scenarioOverride: 'A private scene for {{char}}.',
+  })) as Conversation;
+  assert(
+    scenarioUpdated.scenarioOverride === 'A private scene for {{char}}.',
+    'scenario override persists on the conversation',
+  );
+  scenarioTrace = await fetchTrace(scenarioConv.id);
+  assert(
+    scenarioTrace.messages.some(
+      (message) =>
+        message.role === 'system' &&
+        message.content === 'Scene: A private scene for Scenario Hero.',
+    ),
+    'prompt assembly uses the conversation scenario override',
+  );
+  const scenarioCopy = await req<Conversation>(
+    'POST',
+    `/api/conversations/${scenarioConv.id}/duplicate`,
+  );
+  assert(
+    scenarioCopy.scenarioOverride === scenarioUpdated.scenarioOverride,
+    'conversation duplication preserves the scenario override',
+  );
+  const emptyScenario = (await patchConversation(scenarioConv.id, {
+    scenarioOverride: '',
+  })) as Conversation;
+  scenarioTrace = await fetchTrace(scenarioConv.id);
+  assert(
+    emptyScenario.scenarioOverride === '' &&
+      !scenarioTrace.messages.some((message) => message.role === 'system'),
+    'an empty override deliberately suppresses the scenario',
+  );
+  const inheritedScenario = (await patchConversation(scenarioConv.id, {
+    scenarioOverride: null,
+  })) as Conversation;
+  scenarioTrace = await fetchTrace(scenarioConv.id);
+  assert(
+    inheritedScenario.scenarioOverride === null &&
+      scenarioTrace.messages.some((message) =>
+        message.content.includes('The character scenario for Scenario Hero.'),
+      ),
+    'clearing the override restores the character scenario',
   );
 
   console.log('== terminal SSE data without a newline is preserved ==');
