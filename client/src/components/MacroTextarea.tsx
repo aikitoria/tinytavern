@@ -125,7 +125,7 @@ export default function MacroTextarea(props: {
       </div>
       <textarea
         ref={attach}
-        rows={props.rows ?? 6}
+        rows={props.rows ?? 8}
         class={props.class}
         placeholder={props.placeholder}
         onInput={(e) => setText(e.currentTarget.value)}

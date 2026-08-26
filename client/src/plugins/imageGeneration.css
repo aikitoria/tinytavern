@@ -75,6 +75,52 @@
 
 /* Workflow details use the same quiet card language as rename/check controls
  * elsewhere in Settings. */
+/* Give plugin-owned navigation a real top slot in the scrolling detail pane.
+ * The mobile Back control remains above it, then scrolls away naturally. */
+.master-detail > .form:has(> .image-settings-tabs) {
+  padding-top: 0;
+}
+
+.image-settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: var(--space-1);
+  flex: none;
+  min-width: 0;
+  margin: 0 calc(-1 * var(--space-4)) var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  scrollbar-width: none;
+}
+
+.image-settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-modal .form .image-settings-tab {
+  min-height: 34px;
+  border-color: transparent;
+}
+
+.image-settings-panel {
+  margin-top: 0 !important;
+}
+
+.master-detail > .form > .image-settings-notice {
+  order: 0;
+}
+
+.image-settings-panel .prompt-preset-editor:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
 .workflow-detail {
   display: flex;
   flex-direction: column;

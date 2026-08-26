@@ -1,4 +1,4 @@
-import { Show, createSignal, onMount, type JSX } from 'solid-js';
+import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
 import { workflowValidationError, type Message } from '@minitavern/shared';
 import type { Plugin, PluginMessageView, PluginTool } from './api.ts';
 import { pluginSettings } from './api.ts';
@@ -63,6 +63,23 @@ interface ImagePromptPresetSet {
 
 type ImagePromptKind =
   'describe' | 'characterInstruction' | 'face' | 'faceInstruction' | 'instruction' | 'avatar';
+
+const IMAGE_SETTINGS_TABS = [
+  { key: 'character', label: 'Character' },
+  { key: 'face', label: 'Face' },
+  { key: 'generic', label: 'Generic' },
+  { key: 'avatar', label: 'Avatar' },
+  { key: 'rendering', label: 'Rendering' },
+] as const;
+type ImageSettingsTab = (typeof IMAGE_SETTINGS_TABS)[number]['key'];
+const PROMPT_SETTINGS_TAB: Record<ImagePromptKind, ImageSettingsTab> = {
+  describe: 'character',
+  characterInstruction: 'character',
+  face: 'face',
+  faceInstruction: 'face',
+  instruction: 'generic',
+  avatar: 'avatar',
+};
 
 interface ImageGenSettings extends Record<string, unknown> {
   /** Independently selected saved prompts for chat image and avatar generation. */
@@ -479,7 +496,6 @@ function PromptPresetEditor(props: {
       </Show>
       <MacroTextarea
         ref={promptEl}
-        rows={4}
         extraKeys={props.extraKeys}
         classList={{ 'prompt-default': selected() === -1 }}
       />
@@ -487,7 +503,6 @@ function PromptPresetEditor(props: {
         <label>{props.contextLabel ?? 'Context'}</label>
         <MacroTextarea
           ref={contextEl}
-          rows={4}
           extraKeys={props.contextExtraKeys}
           classList={{ 'prompt-default': selected() === -1 }}
         />
@@ -511,6 +526,8 @@ function SettingsPage() {
   let workflowEl!: HTMLTextAreaElement;
   let pickerEl!: SelectHandle;
   let avatarPickerEl!: SelectHandle;
+  let settingsTabsEl!: HTMLDivElement;
+  const [settingsTab, setSettingsTab] = createSignal<ImageSettingsTab>('character');
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
   const [workflows, setWorkflows] = createSignal<ImageWorkflow[]>([]);
@@ -525,6 +542,27 @@ function SettingsPage() {
    * fields; saving must still use this base or a stale form could pass with the
    * newly received revision and silently overwrite another client's work. */
   let baseRevision = state.settings.revision;
+
+  const switchSettingsTab = (key: ImageSettingsTab, focus = false) => {
+    setSettingsTab(key);
+    queueMicrotask(() => {
+      settingsTabsEl.parentElement?.scrollTo({ top: 0 });
+      if (focus) document.getElementById(`image-settings-tab-${key}`)?.focus();
+    });
+  };
+
+  const onSettingsTabKeyDown = (event: KeyboardEvent, index: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? IMAGE_SETTINGS_TABS.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + IMAGE_SETTINGS_TABS.length) %
+            IMAGE_SETTINGS_TABS.length;
+    switchSettingsTab(IMAGE_SETTINGS_TABS[nextIndex]!.key, true);
+  };
 
   /** Read the editable fields back into the workflows list before switching/saving. */
   const stash = () => {
@@ -634,22 +672,26 @@ function SettingsPage() {
     for (const [kind, selection] of Object.entries(values.promptPresets)) {
       const names = selection.presets.map((preset) => preset.name);
       if (new Set(names).size !== names.length) {
+        switchSettingsTab(PROMPT_SETTINGS_TAB[kind as ImagePromptKind]);
         setError(`${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`);
         return false;
       }
       if (names.some((name) => name.toLowerCase() === 'default')) {
+        switchSettingsTab(PROMPT_SETTINGS_TAB[kind as ImagePromptKind]);
         setError('“Default” is reserved for the built-in prompt. Choose another preset name.');
         return false;
       }
     }
     const names = values.workflows.map((workflow) => workflow.name);
     if (new Set(names).size !== names.length) {
+      switchSettingsTab('rendering');
       setError('Workflow names must be unique — the selected name identifies the /image workflow.');
       return false;
     }
     for (const workflow of values.workflows) {
       const invalid = workflowError(workflow.json);
       if (invalid) {
+        switchSettingsTab('rendering');
         setError(`Workflow "${workflow.name}" ${invalid}`);
         return false;
       }
@@ -691,8 +733,46 @@ function SettingsPage() {
 
   return (
     <>
-      <section class="settings-section">
-        <h3>Prompt generation</h3>
+      <div
+        ref={settingsTabsEl}
+        class="image-settings-tabs"
+        role="tablist"
+        aria-label="Image generation settings"
+      >
+        <For each={IMAGE_SETTINGS_TABS}>
+          {(item, index) => (
+            <button
+              id={`image-settings-tab-${item.key}`}
+              class="tab image-settings-tab"
+              classList={{ active: settingsTab() === item.key }}
+              role="tab"
+              aria-selected={settingsTab() === item.key}
+              aria-controls={`image-settings-panel-${item.key}`}
+              tabIndex={settingsTab() === item.key ? 0 : -1}
+              onKeyDown={(event) => onSettingsTabKeyDown(event, index())}
+              onClick={() => switchSettingsTab(item.key)}
+            >
+              {item.label}
+            </button>
+          )}
+        </For>
+      </div>
+
+      <Show when={error()}>
+        <p class="notice notice-error image-settings-notice" role="alert">
+          {error()}
+        </p>
+      </Show>
+
+      <section
+        id="image-settings-panel-character"
+        class="settings-section image-settings-panel"
+        classList={{ hidden: settingsTab() !== 'character' }}
+        role="tabpanel"
+        aria-labelledby="image-settings-tab-character"
+      >
+        <h3>Character images</h3>
+        <p class="hint">Prompts used by `/imagechar`, with and without an instruction.</p>
         <PromptPresetEditor
           ref={describeEditor}
           defaultPrompt={DEFAULT_PROMPTS.describe}
@@ -714,6 +794,17 @@ function SettingsPage() {
             </>
           }
         />
+      </section>
+
+      <section
+        id="image-settings-panel-face"
+        class="settings-section image-settings-panel"
+        classList={{ hidden: settingsTab() !== 'face' }}
+        role="tabpanel"
+        aria-labelledby="image-settings-tab-face"
+      >
+        <h3>Face images</h3>
+        <p class="hint">Prompts used by `/imageface`, with and without an instruction.</p>
         <PromptPresetEditor
           ref={faceEditor}
           defaultPrompt={DEFAULT_PROMPTS.face}
@@ -734,6 +825,17 @@ function SettingsPage() {
             </>
           }
         />
+      </section>
+
+      <section
+        id="image-settings-panel-generic"
+        class="settings-section image-settings-panel"
+        classList={{ hidden: settingsTab() !== 'generic' }}
+        role="tabpanel"
+        aria-labelledby="image-settings-tab-generic"
+      >
+        <h3>Generic images</h3>
+        <p class="hint">The instruction-based prompt used by `/image`.</p>
         <PromptPresetEditor
           ref={instructionEditor}
           defaultPrompt={DEFAULT_PROMPTS.instruction}
@@ -745,6 +847,17 @@ function SettingsPage() {
             </>
           }
         />
+      </section>
+
+      <section
+        id="image-settings-panel-avatar"
+        class="settings-section image-settings-panel"
+        classList={{ hidden: settingsTab() !== 'avatar' }}
+        role="tabpanel"
+        aria-labelledby="image-settings-tab-avatar"
+      >
+        <h3>Avatars</h3>
+        <p class="hint">Prompt, context, and rendering workflow used by Generate avatar.</p>
         <PromptPresetEditor
           ref={avatarEditor}
           defaultPrompt={DEFAULT_PROMPTS.avatar}
@@ -759,10 +872,29 @@ function SettingsPage() {
             </>
           }
         />
+
+        <label>Avatar workflow</label>
+        <p class="hint">Defaults to the selected `/image` workflow.</p>
+        <Select
+          ref={avatarPickerEl}
+          ariaLabel="Avatar image workflow"
+          onChange={(value) => setAvatarSel(value)}
+          options={[
+            { value: '', label: '— same as /image workflow —' },
+            ...workflows().map((workflow) => ({ value: workflow.name, label: workflow.name })),
+          ]}
+        />
       </section>
 
-      <section class="settings-section">
+      <section
+        id="image-settings-panel-rendering"
+        class="settings-section image-settings-panel"
+        classList={{ hidden: settingsTab() !== 'rendering' }}
+        role="tabpanel"
+        aria-labelledby="image-settings-tab-rendering"
+      >
         <h3>Image rendering</h3>
+        <p class="hint">ComfyUI connection and workflow used for chat images.</p>
         <label>ComfyUI URL</label>
         <input ref={comfyUrlEl} placeholder={DEFAULTS.comfyUrl} />
 
@@ -821,25 +953,8 @@ function SettingsPage() {
             </div>
           </Show>
         </div>
-
-        <label>Avatar workflow</label>
-        <p class="hint">Defaults to the selected `/image` workflow.</p>
-        <Select
-          ref={avatarPickerEl}
-          ariaLabel="Avatar image workflow"
-          onChange={(value) => setAvatarSel(value)}
-          options={[
-            { value: '', label: '— same as /image workflow —' },
-            ...workflows().map((workflow) => ({ value: workflow.name, label: workflow.name })),
-          ]}
-        />
       </section>
 
-      <Show when={error()}>
-        <p class="notice notice-error" role="alert">
-          {error()}
-        </p>
-      </Show>
       <div class="form-actions">
         <button class="primary-btn" onClick={() => void save()}>
           Save
