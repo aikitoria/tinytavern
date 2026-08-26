@@ -9,6 +9,7 @@ import type {
   Settings,
   Template,
 } from '@minitavern/shared';
+import { prepareEndpointPatch } from './endpointSync.ts';
 
 interface RequestOptions {
   rawBody?: BodyInit;
@@ -478,7 +479,14 @@ export const api = {
   endpoints: () => request<Endpoint[]>('GET', '/api/endpoints'),
   createEndpoint: (data: Partial<Endpoint>) => request<Endpoint>('POST', '/api/endpoints', data),
   patchEndpoint: (id: number, data: Partial<Endpoint>) =>
-    request<Endpoint>('PATCH', `/api/endpoints/${id}`, data),
+    request<Endpoint>(
+      'PATCH',
+      `/api/endpoints/${id}`,
+      // The endpoint editor submits the complete visible sampling form. Mark
+      // genParams as a replacement here, after generic dirty-field reduction,
+      // so clearing the last parameter persists instead of merging with it.
+      prepareEndpointPatch(data),
+    ),
   deleteEndpoint: (id: number) => request<void>('DELETE', `/api/endpoints/${id}`),
   duplicateEndpoint: (id: number) => request<Endpoint>('POST', `/api/endpoints/${id}/duplicate`),
   fetchModels: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),

@@ -33,6 +33,10 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
   extraActions?: JSX.Element;
   /** Custom hierarchy for lists that are not flat (e.g. character folders). */
   listContent?: JSX.Element;
+  /** Current global/default entity for editors whose selection also controls use. */
+  activeId?: number | null;
+  /** Virtual list row for a nullable built-in/none setting. */
+  defaultOption?: { label: string; description: string };
   children: JSX.Element;
 }) {
   const editor = props.editor;
@@ -55,16 +59,39 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
           </div>
         </Show>
         {props.listSearch}
+        <Show when={props.defaultOption}>
+          {(option) => (
+            <button
+              class="entity-default-btn"
+              classList={{
+                active: editor.selectedId() === 'default',
+                'in-use': props.activeId === null,
+              }}
+              onClick={() => editor.select('default')}
+            >
+              <span class="entity-list-label">{option().label}</span>
+              <Show when={props.activeId === null}>
+                <span class="entity-active-mark">Active</span>
+              </Show>
+            </button>
+          )}
+        </Show>
         <Show
           when={props.listContent}
           fallback={
             <For each={props.items}>
               {(item) => (
                 <button
-                  classList={{ active: editor.selectedId() === item.id }}
+                  classList={{
+                    active: editor.selectedId() === item.id,
+                    'in-use': props.activeId === item.id,
+                  }}
                   onClick={() => editor.select(item.id)}
                 >
-                  {props.itemLabel(item)}
+                  <span class="entity-list-label">{props.itemLabel(item)}</span>
+                  <Show when={props.activeId === item.id}>
+                    <span class="entity-active-mark">Active</span>
+                  </Show>
                 </button>
               )}
             </For>
@@ -77,23 +104,37 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
         <button class="detail-back" onClick={editor.nav.closeDetail}>
           ‹ Back to list
         </button>
-        {props.children}
-        <div class="form-actions">
-          <button class="primary-btn" onClick={() => void editor.save()}>
-            {editor.selectedId() === 'new' ? 'Create' : 'Save'}
-          </button>
-          <button onClick={editor.discard}>Discard</button>
-          <Show when={editor.selectedId() !== 'new'}>
-            <button onClick={editor.duplicate}>Duplicate</button>
-            {props.extraActions}
-            <button class="danger-btn" onClick={() => void editor.remove()}>
-              Delete
-            </button>
-          </Show>
-          <Show when={editor.saved()}>
-            <span class="saved-flash">✓ Saved</span>
-          </Show>
-        </div>
+        <Show
+          when={editor.selectedId() === 'default' && props.defaultOption}
+          fallback={
+            <>
+              {props.children}
+              <div class="form-actions">
+                <button class="primary-btn" onClick={() => void editor.save()}>
+                  {editor.selectedId() === 'new' ? 'Create' : 'Save'}
+                </button>
+                <button onClick={editor.discard}>Discard</button>
+                <Show when={editor.selectedId() !== 'new'}>
+                  <button onClick={editor.duplicate}>Duplicate</button>
+                  {props.extraActions}
+                  <button class="danger-btn" onClick={() => void editor.remove()}>
+                    Delete
+                  </button>
+                </Show>
+                <Show when={editor.saved()}>
+                  <span class="saved-flash">✓ Saved</span>
+                </Show>
+              </div>
+            </>
+          }
+        >
+          {(option) => (
+            <div class="entity-default-detail">
+              <h3>{option().label}</h3>
+              <p>{option().description}</p>
+            </div>
+          )}
+        </Show>
         <Show when={editor.status()}>
           <p class="hint">{editor.status()}</p>
         </Show>

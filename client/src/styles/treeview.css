@@ -30,7 +30,7 @@
   flex: 1;
   background: none;
   border: none;
-  border-radius: 18px;
+  border-radius: var(--radius-pill);
   padding: 9px var(--space-3);
 }
 
@@ -62,7 +62,7 @@
 .treeview-children {
   margin-left: 7px;
   padding-left: var(--space-3);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid color-mix(in srgb, var(--accent-hot) 18%, var(--border));
 }
 
 .treeview-item {
@@ -79,7 +79,7 @@
   max-width: 100%;
   padding: var(--space-1) var(--space-2);
   border: 1px solid transparent;
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-control);
   background: none;
   color: var(--text);
   font: inherit;
@@ -106,11 +106,11 @@
 
 /* Same role colors as the trace view. */
 .treeview-role-user {
-  background: #6fa8dc;
+  background: var(--role-user);
 }
 
 .treeview-role-assistant {
-  background: #4caf7d;
+  background: var(--role-assistant);
 }
 
 .treeview-role-system {
@@ -144,8 +144,8 @@
 
 /* The active path stands out; the leaf gets the accent fill. */
 .treeview-on-path {
-  border-color: var(--border);
-  background: var(--bg-raised);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
 }
 
 .treeview-on-path .treeview-name,

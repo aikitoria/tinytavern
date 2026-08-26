@@ -1,22 +1,35 @@
-/* SillyTavern default palette: neutral charcoal, warm off-white text, orange accent. */
+/* Graphite blue: near-black surfaces, crisp blue controls, and a warm assistant rail. */
 :root {
-  --bg: #171717;
-  --bg-panel: #1c1c1c;
-  --bg-raised: #2a2a2a;
-  --bg-hover: #343434;
-  --border: #3a3a3a;
-  --text: #dcdcd2;
-  --text-dim: #9a9a90;
-  --accent: #e18a24;
-  --accent-text: #171717;
-  --danger: #e05b5b;
-  --code-bg: #101010;
-  /* Chat typography: neutral prose, sand narration, amber dialogue. */
-  --md-body: #c9c7be;
-  --md-em: #d5bea0;
-  --md-strong: #f3f0e8;
-  --md-quote: #e5a052;
-  /* Layout uses a 4px rhythm; nested corners step control → panel → modal. */
+  color-scheme: dark;
+  --bg: #111113;
+  --bg-panel: #1a1b1d;
+  --bg-raised: #303135;
+  --bg-hover: #3d3f44;
+  --border: #404248;
+  --text: #f2f3f5;
+  --text-dim: #a9abb2;
+  --text-muted: #747780;
+  --accent: #3488f6;
+  --accent-hot: #5aa2ff;
+  --accent-text: #ffffff;
+  --secondary: #85bdf5;
+  --role-user: #74acf0;
+  --role-assistant: #aab2bc;
+  --role-assistant-line: #df9447;
+  --success: #46b97a;
+  --danger: #eb6874;
+  --code-bg: #101114;
+  --shadow: #07080a;
+  /* Cool neutral prose with blue reserved for dialogue and active states. */
+  --md-body: #d8d9dd;
+  --md-em: #bec5cf;
+  --md-strong: #f7f7f8;
+  --md-quote: #7db6f7;
+  --message-surface: color-mix(in srgb, var(--bg-raised) 34%, var(--bg-panel));
+  --user-message-surface: color-mix(in srgb, var(--role-user) 9%, var(--bg-panel));
+  --thinking-surface: color-mix(in srgb, var(--secondary) 8%, var(--bg-panel));
+  /* Layout uses a 4px rhythm: 8px controls, 12px surfaces, 16px dialogs.
+     Wrappers derive their radius from the child radius plus inset and border. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -27,7 +40,8 @@
   --radius-control: 8px;
   --radius-panel: 12px;
   --radius-modal: 16px;
-  --radius-media: calc(var(--radius-panel) + var(--space-3));
+  /* 8px child + 4px wrapper padding + 1px wrapper border. */
+  --radius-control-group: calc(var(--radius-control) + var(--space-1) + 1px);
   --radius-pill: 999px;
   /* Backwards-compatible panel radius for plugin-owned styles. */
   --radius: var(--radius-panel);
@@ -35,29 +49,15 @@
   --bar-h: 46px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f2ec;
-    --bg-panel: #fdfcf8;
-    --bg-raised: #ece9e0;
-    --bg-hover: #e3dfd4;
-    --border: #d5d1c4;
-    --text: #23211c;
-    --text-dim: #6f6c62;
-    --accent: #b56a10;
-    --accent-text: #ffffff;
-    --code-bg: #1c1c1c;
-    --md-body: #34322c;
-    --md-em: #735e45;
-    --md-strong: #191812;
-    --md-quote: #98570e;
-  }
-}
-
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
-  scrollbar-color: var(--bg-hover) transparent;
+  scrollbar-color: color-mix(in srgb, var(--accent) 28%, var(--bg-hover)) transparent;
+}
+
+::selection {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-hot) 42%, var(--bg-raised));
 }
 
 html,
@@ -99,7 +99,9 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-modal);
-  box-shadow: 0 20px 70px rgb(0 0 0 / 0.35);
+  box-shadow:
+    0 24px 80px color-mix(in srgb, var(--shadow) 72%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
 }
 
 .password-card img {
@@ -138,10 +140,17 @@ button {
   border-radius: var(--radius-control);
   padding: var(--control-pad-y) var(--space-3);
   cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
 }
 
 button:hover {
   background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
 }
 
 button:disabled {
@@ -159,6 +168,12 @@ textarea {
   border-radius: var(--radius-control);
   padding: var(--control-pad-y) var(--space-3);
   width: 100%;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
 }
 
 input:focus,
@@ -238,16 +253,16 @@ textarea {
 }
 
 .macro-valid {
-  background: rgb(255 149 0 / 0.3);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* {{#if x}} / {{/if}} conditionals */
 .macro-cond {
-  background: rgb(64 156 255 / 0.32);
+  background: color-mix(in srgb, var(--secondary) 28%, transparent);
 }
 
 .macro-invalid {
-  background: rgb(255 32 32 / 0.42);
+  background: color-mix(in srgb, var(--danger) 38%, transparent);
 }
 
 /* ---- Custom select (native popups close on scroll; this one repositions) ---- */
@@ -294,12 +309,13 @@ textarea {
   z-index: 300;
   max-height: 320px;
   overflow-y: auto;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  /* 8px options + 4px inset = a concentric 12px outer corner. */
-  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--bg-panel) 94%, var(--accent-hot));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-control-group);
   padding: var(--space-1);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 0.4);
+  box-shadow:
+    0 14px 44px color-mix(in srgb, var(--shadow) 76%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
 }
 
 .select-option {
@@ -389,11 +405,11 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .trace-user {
-  color: #6fa8dc;
+  color: var(--role-user);
 }
 
 .trace-assistant {
-  color: #4caf7d;
+  color: var(--role-assistant);
 }
 
 .trace-content {
@@ -413,8 +429,9 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .primary-btn:hover {
-  filter: brightness(1.08);
-  background: var(--accent);
+  filter: none;
+  background: var(--accent-hot);
+  border-color: var(--accent-hot);
 }
 
 .danger-btn {
@@ -474,10 +491,12 @@ textarea.mono,
 }
 
 .boot-dots i:nth-child(2) {
+  background: var(--accent-hot);
   animation-delay: 0.2s;
 }
 
 .boot-dots i:nth-child(3) {
+  background: var(--secondary);
   animation-delay: 0.4s;
 }
 
@@ -533,6 +552,7 @@ textarea.mono,
 .app {
   display: flex;
   height: 100dvh;
+  isolation: isolate;
 }
 
 .main {
@@ -541,6 +561,7 @@ textarea.mono,
   flex-direction: column;
   min-width: 0;
   position: relative; /* anchors the mobile header overlay */
+  background: var(--bg);
 }
 
 /* ---- Sidebar ---- */
@@ -585,7 +606,7 @@ textarea.mono,
 }
 
 .conn-dot.ok {
-  background: #4caf7d;
+  background: var(--success);
 }
 
 .new-chat-wrap {
@@ -597,6 +618,15 @@ textarea.mono,
   width: 100%;
   text-align: left;
   font-weight: 600;
+  background: var(--bg-raised);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.new-chat-btn:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow: none;
 }
 
 .new-chat-menu {
@@ -698,6 +728,12 @@ textarea.mono,
   border-radius: var(--radius-control);
   cursor: pointer;
   user-select: none;
+  border: 1px solid transparent;
+  transition:
+    color 0.14s ease,
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 
 /* Sidebar rows share the same 8px grid: text edges line up at 16px. */
@@ -709,11 +745,14 @@ textarea.mono,
 }
 
 .conv-item:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--bg-hover) 78%, transparent);
+  border-color: color-mix(in srgb, var(--accent-hot) 12%, var(--border));
 }
 
 .conv-item.active {
   background: var(--bg-raised);
+  border-color: var(--border);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .conv-body {
@@ -820,9 +859,11 @@ textarea.mono,
   gap: var(--space-3);
   padding: var(--space-1) var(--space-4);
   min-height: var(--bar-h);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-hot) 16%, var(--border));
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
   padding-top: calc(var(--space-1) + env(safe-area-inset-top));
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--shadow) 22%, transparent);
+  backdrop-filter: blur(18px) saturate(1.18);
 }
 
 .header .avatar,
@@ -878,8 +919,8 @@ textarea.mono,
 }
 
 .chip {
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
+  border: 1px solid color-mix(in srgb, var(--accent-hot) 12%, var(--border));
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
   border-radius: var(--radius-pill);
   padding: 0 var(--space-2);
   font-size: 11px;
@@ -891,8 +932,8 @@ textarea.mono,
 
 .chip:hover {
   color: var(--text);
-  border-color: var(--accent);
-  background: var(--bg-raised);
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
 }
 
 .chip-warn {
@@ -936,6 +977,8 @@ textarea.mono,
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--text-dim) 24%, var(--border));
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--shadow) 38%, transparent);
 }
 
 .avatar-fallback {
@@ -960,6 +1003,57 @@ textarea.mono,
   min-width: 0;
 }
 
+/* Conversation roles stay distinguishable without turning into colorful chat bubbles. */
+.msg-user > .msg-body,
+.msg-assistant > .msg-body {
+  padding: var(--space-2) var(--space-3);
+  border-left: 1px solid;
+  border-radius: 2px var(--radius-panel) var(--radius-panel) 2px;
+}
+
+.msg-user > .msg-body {
+  background: var(--user-message-surface);
+  border-left-color: var(--role-user);
+}
+
+.msg-assistant > .msg-body {
+  background: var(--message-surface);
+  border-left-color: var(--role-assistant-line);
+}
+
+.msg-user .md,
+.msg-assistant .md {
+  color: var(--md-em);
+}
+
+.msg-user .md em,
+.msg-assistant .md em {
+  color: var(--text-dim);
+}
+
+.msg-user .md > :last-child,
+.msg-assistant .md > :last-child {
+  margin-bottom: 0;
+}
+
+.msg-user > .avatar,
+.msg-user > .avatar-fallback {
+  border-color: color-mix(in srgb, var(--role-user) 54%, var(--border));
+}
+
+.msg-assistant > .avatar,
+.msg-assistant > .avatar-fallback {
+  border-color: color-mix(in srgb, var(--role-assistant) 48%, var(--border));
+}
+
+.msg-user .msg-name {
+  color: var(--role-user);
+}
+
+.msg-assistant .msg-name {
+  color: var(--role-assistant);
+}
+
 /* Keep vertical chat scrolling native while reserving horizontal assistant
    and plugin-tool card swipes for navigation (including in-flight prompts). */
 .msg-assistant,
@@ -970,11 +1064,11 @@ textarea.mono,
 /* Plugin tool output: visibly part of the chat, but not a character reply. */
 .msg-tool .msg-body {
   background: var(--bg-panel);
-  border: 1px dashed var(--border);
-  /* Generated media uses a 12px radius. A uniform 12px inset keeps its
-     bottom corners concentric with the card: 12px inner + 12px inset. */
-  border-radius: var(--radius-media);
+  border: 1px dashed color-mix(in srgb, var(--secondary) 34%, var(--border));
+  /* Keep the pending shell aligned with regular and completed image messages. */
+  border-radius: var(--radius-panel);
   padding: var(--space-3);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
 }
 
 .msg-tool .msg-name {
@@ -996,7 +1090,7 @@ textarea.mono,
   overflow: hidden;
   background: transparent;
   border: none;
-  border-radius: var(--radius-media);
+  border-radius: var(--radius-panel);
 }
 
 .msg-tool.msg-full-bleed .msg-head {
@@ -1041,7 +1135,7 @@ textarea.mono,
 .msg-tool.msg-full-bleed:hover .msg-tools-top,
 .msg-tool.msg-full-bleed:focus-within .msg-tools-top,
 .msg-tool.msg-full-bleed .msg-tools-top:has(.msg-image-pending) {
-  background: rgb(8 10 14 / 0.78);
+  background: rgb(10 12 15 / 0.78);
   border-color: rgb(255 255 255 / 0.22);
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.45);
   backdrop-filter: blur(6px);
@@ -1053,7 +1147,7 @@ textarea.mono,
   opacity: 0;
   pointer-events: none;
   padding: 2px var(--space-1);
-  background: rgb(8 10 14 / 0.78);
+  background: rgb(10 12 15 / 0.78);
   border: 1px solid rgb(255 255 255 / 0.22);
   border-radius: var(--radius-pill);
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.45);
@@ -1072,7 +1166,7 @@ textarea.mono,
   color: var(--text-dim);
   background: none;
   border: none;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   font-size: 15px;
   line-height: 1;
 }
@@ -1083,7 +1177,7 @@ textarea.mono,
 }
 
 .msg-tool.msg-hide-name .msg-tools-left .reasoning-chip.chip-active {
-  color: var(--accent);
+  color: var(--secondary);
 }
 
 .msg-tool.msg-hide-name:hover .msg-tools-left,
@@ -1095,7 +1189,7 @@ textarea.mono,
 
 @media (pointer: coarse) {
   .msg-tool.msg-full-bleed.touched .msg-tools-top {
-    background: rgb(8 10 14 / 0.78);
+    background: rgb(10 12 15 / 0.78);
     border-color: rgb(255 255 255 / 0.22);
     box-shadow: 0 2px 12px rgb(0 0 0 / 0.45);
     backdrop-filter: blur(6px);
@@ -1117,10 +1211,8 @@ textarea.mono,
   margin-bottom: 0;
 }
 
-/* Generation and image-fetch failures can be the card's final child. Match
-   media's 12px corner so the shared 24px card radius stays concentric. */
-.msg-tool .msg-error {
-  border-radius: var(--radius-panel);
+.msg-tool.msg-full-bleed .msg-tools-top .icon-btn {
+  border-radius: var(--radius-pill);
 }
 
 /* Fullscreen pan/zoom viewer. */
@@ -1150,8 +1242,7 @@ textarea.mono,
   transform: translate(-50%, -50%);
   max-width: 92vw;
   max-height: 92dvh;
-  /* Match the image message and its loading card. */
-  border-radius: var(--radius-media);
+  border-radius: var(--radius-panel);
   will-change: transform;
   cursor: grab;
 }
@@ -1294,6 +1385,16 @@ textarea.mono,
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+}
+
+.reasoning-chip:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--secondary) 7%, var(--bg-raised));
+  border-color: transparent;
 }
 
 .icon-chip {
@@ -1325,15 +1426,22 @@ textarea.mono,
   border-color: var(--accent);
 }
 
+.reasoning-chip.chip-active {
+  color: var(--secondary);
+  background: color-mix(in srgb, var(--secondary) 12%, var(--bg-raised));
+  border-color: transparent;
+}
+
 .reasoning-text {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--secondary) 20%, var(--border));
+  border-left: 3px solid var(--secondary);
   border-radius: var(--radius-control);
   margin: var(--space-1) 0 var(--space-2);
   padding: var(--space-2) var(--space-3);
   font-size: 13px;
   color: var(--text-dim);
   white-space: pre-wrap;
+  background: var(--thinking-surface);
 }
 
 /* Waiting for the first token from the API; sits in the name row. */
@@ -1366,27 +1474,37 @@ textarea.mono,
 
 .md pre {
   background: var(--code-bg);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 20%, var(--border));
   border-radius: var(--radius-control);
-  padding: var(--space-3);
+  padding: var(--space-3) 14px 14px;
   overflow-x: hidden;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 13px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--text) 72%, var(--text-dim));
 }
 
 .md .code-block-wrap {
   position: relative;
   margin: 0.8em 0;
+  overflow: hidden;
+  background: var(--code-bg);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 20%, var(--border));
+  border-radius: var(--radius-control);
 }
 
 .md .code-block-wrap pre {
   margin: 0;
+  padding-right: 42px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
-/* Highlight.js themes style code as a second blue-black padded box inside
-   our pre. Keep token colors, but let the pre own the block surface. */
+/* Let the wrapper own the surface and replace GitHub's blue-heavy syntax
+   palette with restrained theme colors. */
 .md pre code.hljs {
   display: block;
   padding: 0;
@@ -1410,18 +1528,89 @@ textarea.mono,
   padding: 0;
   color: var(--text-dim);
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   font-size: 15px;
   line-height: 1;
 }
 
 .md .code-copy-btn:hover {
   color: var(--text);
-  background: transparent;
+  background: var(--bg-hover);
+  border-color: transparent;
 }
 
 .md .code-copy-btn.copied {
-  color: #4caf7d;
+  color: var(--success);
+}
+
+.md .hljs-doctag,
+.md .hljs-keyword,
+.md .hljs-meta .hljs-keyword,
+.md .hljs-template-tag,
+.md .hljs-template-variable,
+.md .hljs-type,
+.md .hljs-variable.language_ {
+  color: var(--accent-hot);
+}
+
+.md .hljs-title,
+.md .hljs-title.class_,
+.md .hljs-title.class_.inherited__,
+.md .hljs-title.function_ {
+  color: var(--role-user);
+}
+
+.md .hljs-attr,
+.md .hljs-attribute,
+.md .hljs-literal,
+.md .hljs-meta,
+.md .hljs-number,
+.md .hljs-operator,
+.md .hljs-variable,
+.md .hljs-selector-attr,
+.md .hljs-selector-class,
+.md .hljs-selector-id,
+.md .hljs-built_in,
+.md .hljs-symbol,
+.md .hljs-bullet {
+  color: var(--accent);
+}
+
+.md .hljs-regexp,
+.md .hljs-string,
+.md .hljs-meta .hljs-string,
+.md .hljs-name,
+.md .hljs-quote,
+.md .hljs-selector-tag,
+.md .hljs-selector-pseudo {
+  color: var(--secondary);
+}
+
+.md .hljs-comment,
+.md .hljs-code,
+.md .hljs-formula {
+  color: var(--text-muted);
+}
+
+.md .hljs-subst,
+.md .hljs-emphasis,
+.md .hljs-strong {
+  color: inherit;
+}
+
+.md .hljs-section {
+  color: var(--role-user);
+}
+
+.md .hljs-addition {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.md .hljs-deletion {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .md code {
@@ -1430,8 +1619,8 @@ textarea.mono,
 }
 
 .md :not(pre) > code {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent-hot) 4%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--accent-hot) 14%, var(--border));
   border-radius: 4px;
   padding: 0 var(--space-1);
 }
@@ -1491,15 +1680,24 @@ textarea.mono,
   max-width: 788px;
   margin: 0 auto var(--space-3);
   padding: 4px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  /* concentric with the round send button: 19px button radius + 4px padding */
-  border-radius: 23px;
-  transition: border-color 0.15s;
+  background: color-mix(in srgb, var(--bg-panel) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  /* 19px control radius + 4px padding + 1px border = concentric 24px corners. */
+  border-radius: 24px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 45%, transparent);
+  backdrop-filter: blur(18px) saturate(1.12);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    border-radius 0.15s;
 }
 
 .composer:focus-within {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 76%, var(--accent-hot));
+}
+
+.composer.composer-multiline {
+  border-radius: var(--radius-panel);
 }
 
 .composer textarea {
@@ -1511,12 +1709,17 @@ textarea.mono,
   overflow-y: hidden;
   background: none;
   border: none;
-  border-radius: 18px;
-  padding: 8px var(--space-3);
+  border-radius: var(--radius-pill);
+  padding: 7px var(--space-3);
+  line-height: 24px;
 }
 
 .composer textarea:focus {
   outline: none;
+}
+
+.composer textarea.composer-input-multiline {
+  border-radius: var(--radius-control);
 }
 
 .msg-edit textarea {
@@ -1535,18 +1738,41 @@ textarea.mono,
   color: var(--accent-text);
   border: none;
   flex-shrink: 0;
+  box-shadow:
+    0 5px 14px color-mix(in srgb, var(--shadow) 58%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.3);
 }
 
-/* Neutral round tools button left of the input; its menu opens upward. */
+.send-btn:hover {
+  background: var(--accent-hot);
+  box-shadow:
+    0 7px 18px color-mix(in srgb, var(--shadow) 62%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.34);
+  transform: translateY(-1px);
+}
+
+/* Quiet secondary controls beside the composer input. */
 .tools-btn {
-  background: none;
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
   color: var(--text-dim);
+  border: 1px solid color-mix(in srgb, var(--text-dim) 20%, var(--border));
+  box-shadow: none;
 }
 
-.tools-btn:hover,
-.tools-btn-open {
-  background: var(--bg-hover);
+.tools-btn:hover {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-raised));
   color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  box-shadow: none;
+  transform: none;
+}
+
+.tools-btn-open {
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-raised));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+  box-shadow: none;
+  transform: none;
 }
 
 /* Exists only on mobile (component-level mount guard), beside the tools button. */
@@ -1622,7 +1848,7 @@ textarea.mono,
 }
 
 .stop-btn {
-  background: var(--danger);
+  background: linear-gradient(135deg, var(--danger), var(--accent-hot));
   color: #fff;
 }
 
@@ -1700,7 +1926,8 @@ textarea.mono,
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.55);
+  background: rgb(7 8 10 / 0.8);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1709,8 +1936,8 @@ textarea.mono,
 }
 
 .modal {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 95%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
   border-radius: var(--radius-modal);
   width: min(860px, 100%);
   /* fixed height so switching tabs never resizes/re-centers the dialog */
@@ -1719,6 +1946,10 @@ textarea.mono,
   flex-direction: column;
   transform-origin: top center;
   animation: modal-in 0.1s ease-out;
+  backdrop-filter: blur(20px) saturate(1.08);
+  box-shadow:
+    0 28px 90px color-mix(in srgb, var(--shadow) 80%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 /* Settings has enough dense editors to benefit from a larger desktop canvas;
@@ -1732,13 +1963,17 @@ textarea.mono,
 
 .settings-modal {
   overflow: hidden;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.48);
+  box-shadow: 0 30px 100px color-mix(in srgb, var(--shadow) 82%, transparent);
 }
 
 .settings-modal .modal-head {
   min-height: 58px;
   padding: var(--space-2) var(--space-4);
-  background: var(--bg-panel);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 5%, var(--bg-panel)),
+    color-mix(in srgb, var(--secondary) 3%, var(--bg-panel))
+  );
 }
 
 .settings-modal .modal-title {
@@ -1837,9 +2072,9 @@ textarea.mono,
   align-self: center;
   margin-left: var(--space-3);
   padding: var(--space-1);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-hot) 10%, var(--border));
+  border-radius: var(--radius-control-group);
 }
 
 .tab {
@@ -1867,7 +2102,7 @@ textarea.mono,
 .tab.active {
   background: var(--bg-raised);
   color: var(--accent);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* ---- Forms ---- */
@@ -1940,7 +2175,7 @@ textarea.mono,
   margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--border));
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
@@ -1977,7 +2212,7 @@ textarea.mono,
 }
 
 .saved-flash {
-  color: #4caf7d;
+  color: var(--success);
   font-size: 13px;
 }
 
@@ -2120,28 +2355,6 @@ textarea.mono,
   height: 56px;
 }
 
-/* Global "active/default X" picker above an entity CRUD tab, so activating an
-   entry lives on the same page as creating it. */
-.global-select-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.global-select-bar > label {
-  font-size: 13.5px;
-  font-weight: 550;
-}
-
-.global-select-bar .select-btn {
-  min-width: 240px;
-  min-height: 40px;
-}
-
 .master-detail {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -2191,6 +2404,39 @@ textarea.mono,
   background: var(--bg-hover);
 }
 
+.entity-list-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entity-active-mark {
+  flex: none;
+  padding: 1px 6px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-pill);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.entity-list .entity-default-btn {
+  margin-bottom: var(--space-1);
+  color: var(--text-dim);
+}
+
+.entity-list button.in-use .entity-list-label {
+  color: var(--text);
+}
+
 .entity-list-actions {
   display: flex;
   gap: var(--space-2);
@@ -2206,6 +2452,24 @@ textarea.mono,
   background: var(--bg-raised);
   color: var(--text);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.entity-default-detail {
+  max-width: 480px;
+  margin: auto;
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.entity-default-detail h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-size: 17px;
+}
+
+.entity-default-detail p {
+  margin: 0;
 }
 
 .entity-list .entity-new-btn {
@@ -2434,20 +2698,32 @@ textarea.mono,
   }
 
   /* No floating pill on mobile: flat full-width bar docked to the bottom.
-     Equal padding around the input on all sides. */
-  .composer {
-    width: 100%;
+     Let flexbox stretch it instead of rounding width: 100% to the physical
+     viewport, and draw the divider inside its composited surface so Mobile
+     Safari cannot clip its final device pixels. */
+  .composer,
+  .composer.composer-multiline {
+    width: auto;
+    max-width: none;
+    align-self: stretch;
+    flex-shrink: 0;
     margin: 0;
-    padding: 4px;
-    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    padding: 4px calc(4px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
+      calc(4px + env(safe-area-inset-left));
+    background: var(--bg-panel);
     border: none;
-    border-top: 1px solid var(--border);
     border-radius: 0;
+    box-shadow: inset 0 1px 0 var(--border);
+    backdrop-filter: none;
   }
 
   .composer textarea {
     background: var(--bg-raised);
-    border-radius: 18px;
+    border-radius: var(--radius-pill);
+  }
+
+  .composer textarea.composer-input-multiline {
+    border-radius: var(--radius-control);
   }
 
   .composer textarea {

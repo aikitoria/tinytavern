@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { prepareEndpointPatch } from '../client/src/state/endpointSync.ts';
 import { changedFields, mergeRemoteDraft } from '../client/src/state/editorSync.ts';
 import {
   isCurrentSettingsRevision,
@@ -39,6 +40,12 @@ assert.deepEqual(
   ),
   { name: 'B' },
 );
+
+assert.deepEqual(prepareEndpointPatch({ genParams: {} }), {
+  genParams: {},
+  replaceGenParams: true,
+});
+assert.deepEqual(prepareEndpointPatch({ name: 'renamed' }), { name: 'renamed' });
 
 const merged = mergeRemoteDraft(
   { title: 'old', personaId: 1, endpointId: 1 },

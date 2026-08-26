@@ -181,6 +181,14 @@ export default function Composer() {
   const resize = () => {
     if (!area) return;
     area.style.height = 'auto';
+    const style = getComputedStyle(area);
+    const singleLineHeight =
+      Number.parseFloat(style.lineHeight) +
+      Number.parseFloat(style.paddingTop) +
+      Number.parseFloat(style.paddingBottom);
+    const multiline = area.scrollHeight > singleLineHeight + 1;
+    area.classList.toggle('composer-input-multiline', multiline);
+    area.closest('.composer')?.classList.toggle('composer-multiline', multiline);
     area.style.height = `${Math.min(area.scrollHeight, 200)}px`;
     // Only scroll once the max height is actually reached; otherwise sub-pixel
     // rounding makes the browser show a scrollbar on a single line.

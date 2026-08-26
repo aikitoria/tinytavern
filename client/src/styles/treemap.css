@@ -53,6 +53,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   cursor: pointer;
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 38%, transparent);
 }
 
 /* Low-zoom tiles clip instead of scrolling — wheel over them must zoom. */
@@ -62,7 +63,7 @@
 
 /* The active path stands out; the active leaf gets the accent outline. */
 .treemap-card.treemap-on-path {
-  border-color: var(--text-dim);
+  border-color: color-mix(in srgb, var(--secondary) 45%, var(--border));
 }
 
 .treemap-card.treemap-active-leaf {
@@ -113,11 +114,11 @@
 }
 
 .treemap-role-user {
-  background: #6fa8dc;
+  background: var(--role-user);
 }
 
 .treemap-role-assistant {
-  background: #4caf7d;
+  background: var(--role-assistant);
 }
 
 .treemap-role-system {
@@ -160,9 +161,11 @@
   display: flex;
   gap: var(--space-1);
   padding: var(--space-1);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-control-group);
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 45%, transparent);
+  backdrop-filter: blur(14px);
 }
 
 .treemap-empty {

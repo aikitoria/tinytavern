@@ -1,10 +1,10 @@
 import { Show, createSignal } from 'solid-js';
 import type { Endpoint, GenParams } from '@minitavern/shared';
 import { api } from '../../state/api.ts';
+import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';
 import { createEntityEditor, errorMessage } from '../../util.ts';
 import EntityEditorPane from '../EntityEditorPane.tsx';
-import GlobalSelect, { NONE_LABEL } from '../GlobalSelect.tsx';
 import Select from '../Select.tsx';
 import type { SelectHandle } from '../Select.tsx';
 
@@ -63,7 +63,6 @@ export default function EndpointsTab() {
           : {}),
         model: model() || null,
         genParams,
-        replaceGenParams: true,
         prefillMode: prefillEl.value as Endpoint['prefillMode'],
       };
     },
@@ -82,11 +81,12 @@ export default function EndpointsTab() {
     duplicate: api.duplicateEndpoint,
     deletePrompt: 'Delete this endpoint?',
     initialId: () => state.settings.activeEndpointId,
+    activate: (id) => selectSettingsEntity('activeEndpointId', id),
   });
 
   const fetchModels = async () => {
     const id = editor.selectedId();
-    if (id === 'new') return;
+    if (typeof id !== 'number') return;
     editor.setStatus('Fetching models…');
     try {
       const models = await api.fetchModels(id);
@@ -100,127 +100,124 @@ export default function EndpointsTab() {
   const models = () => editor.selected()?.models ?? [];
 
   return (
-    <>
-      <GlobalSelect
-        label="Active endpoint (all generations go through this)"
-        settingKey="activeEndpointId"
-        items={state.endpoints}
-        noneLabel={NONE_LABEL}
-      />
-      <EntityEditorPane
-        editor={editor}
-        items={state.endpoints}
-        itemLabel={(ep) => ep.name}
-        newLabel="+ New endpoint"
-        extraActions={<button onClick={() => void fetchModels()}>Fetch models</button>}
-      >
-        <label>Name</label>
-        <input ref={nameEl} placeholder="Local llama.cpp" />
-        <label>Base URL (OpenAI-compatible, up to /v1)</label>
-        <input ref={urlEl} placeholder="http://192.168.1.10:8080/v1" />
-        <label>API key (optional)</label>
-        <div class="key-row">
-          <input
-            ref={keyEl}
-            placeholder={
-              keyCleared()
-                ? 'Will be removed on save'
-                : editor.selected()?.hasApiKey
-                  ? 'Configured — enter to replace'
-                  : 'sk-…'
-            }
-          />
-          <Show when={editor.selected()?.hasApiKey && !keyCleared()}>
-            <button
-              onClick={() => {
-                keyEl.value = '';
-                setKeyCleared(true);
-              }}
-            >
-              Clear key
-            </button>
-          </Show>
-        </div>
-
-        <label>Model (optional; blank uses the endpoint default)</label>
-        <Show
-          when={models().length > 0}
-          fallback={
-            <input
-              value={model()}
-              onChange={(e) => setModel(e.currentTarget.value)}
-              placeholder="model id (blank uses endpoint default)"
-            />
+    <EntityEditorPane
+      editor={editor}
+      items={state.endpoints}
+      itemLabel={(ep) => ep.name}
+      newLabel="+ New endpoint"
+      activeId={state.settings.activeEndpointId}
+      defaultOption={{
+        label: 'No active endpoint',
+        description: 'Select or create an endpoint before starting a generation.',
+      }}
+      extraActions={<button onClick={() => void fetchModels()}>Fetch models</button>}
+    >
+      <label>Name</label>
+      <input ref={nameEl} placeholder="Local llama.cpp" />
+      <label>Base URL (OpenAI-compatible, up to /v1)</label>
+      <input ref={urlEl} placeholder="http://192.168.1.10:8080/v1" />
+      <label>API key (optional)</label>
+      <div class="key-row">
+        <input
+          ref={keyEl}
+          placeholder={
+            keyCleared()
+              ? 'Will be removed on save'
+              : editor.selected()?.hasApiKey
+                ? 'Configured — enter to replace'
+                : 'sk-…'
           }
-        >
-          <Select
-            value={model()}
-            onChange={setModel}
-            options={[
-              { value: '', label: '— endpoint default —' },
-              ...(model() && !models().includes(model())
-                ? [{ value: model(), label: `${model()} (custom)` }]
-                : []),
-              ...models().map((m) => ({ value: m, label: m })),
-            ]}
-          />
+        />
+        <Show when={editor.selected()?.hasApiKey && !keyCleared()}>
+          <button
+            onClick={() => {
+              keyEl.value = '';
+              setKeyCleared(true);
+            }}
+          >
+            Clear key
+          </button>
         </Show>
+      </div>
 
-        <label>Sampling</label>
-        <div class="param-grid">
-          <div>
-            <label>Temperature</label>
-            <input ref={tempEl} type="number" step="0.05" min="0" max="2" />
-          </div>
-          <div>
-            <label>Top P</label>
-            <input ref={topPEl} type="number" step="0.05" min="0" max="1" />
-          </div>
-          <div>
-            <label>Min P</label>
-            <input ref={minPEl} type="number" step="0.01" min="0" max="1" />
-          </div>
-          <div>
-            <label>Max tokens</label>
-            <input ref={maxTokEl} type="number" step="1" min="1" />
-          </div>
-          <div>
-            <label>Freq. penalty</label>
-            <input ref={freqEl} type="number" step="0.05" min="-2" max="2" />
-          </div>
-          <div>
-            <label>Pres. penalty</label>
-            <input ref={presEl} type="number" step="0.05" min="-2" max="2" />
-          </div>
-          <div>
-            <label>Reasoning effort</label>
-            <Select
-              ref={effortEl}
-              options={[
-                { value: '', label: '— omit —' },
-                { value: 'none', label: 'none' },
-                { value: 'minimal', label: 'minimal' },
-                { value: 'low', label: 'low' },
-                { value: 'medium', label: 'medium' },
-                { value: 'high', label: 'high' },
-                { value: 'max', label: 'max' },
-              ]}
-            />
-          </div>
-        </div>
-        <p class="hint">Empty fields are omitted from requests (backend defaults apply).</p>
-
-        <label>Prefill support (resume, speaker name, and template prefills)</label>
+      <label>Model (optional; blank uses the endpoint default)</label>
+      <Show
+        when={models().length > 0}
+        fallback={
+          <input
+            value={model()}
+            onChange={(e) => setModel(e.currentTarget.value)}
+            placeholder="model id (blank uses endpoint default)"
+          />
+        }
+      >
         <Select
-          ref={prefillEl}
+          value={model()}
+          onChange={setModel}
           options={[
-            { value: 'disabled', label: 'Disabled (do not send prefills)' },
-            { value: 'none', label: 'Generic (trailing assistant message)' },
-            { value: 'vllm', label: 'vLLM (continue_final_message)' },
-            { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
+            { value: '', label: '— endpoint default —' },
+            ...(model() && !models().includes(model())
+              ? [{ value: model(), label: `${model()} (custom)` }]
+              : []),
+            ...models().map((m) => ({ value: m, label: m })),
           ]}
         />
-      </EntityEditorPane>
-    </>
+      </Show>
+
+      <label>Sampling</label>
+      <div class="param-grid">
+        <div>
+          <label>Temperature</label>
+          <input ref={tempEl} type="number" step="0.05" min="0" max="2" />
+        </div>
+        <div>
+          <label>Top P</label>
+          <input ref={topPEl} type="number" step="0.05" min="0" max="1" />
+        </div>
+        <div>
+          <label>Min P</label>
+          <input ref={minPEl} type="number" step="0.01" min="0" max="1" />
+        </div>
+        <div>
+          <label>Max tokens</label>
+          <input ref={maxTokEl} type="number" step="1" min="1" />
+        </div>
+        <div>
+          <label>Freq. penalty</label>
+          <input ref={freqEl} type="number" step="0.05" min="-2" max="2" />
+        </div>
+        <div>
+          <label>Pres. penalty</label>
+          <input ref={presEl} type="number" step="0.05" min="-2" max="2" />
+        </div>
+        <div>
+          <label>Reasoning effort</label>
+          <Select
+            ref={effortEl}
+            options={[
+              { value: '', label: '— omit —' },
+              { value: 'none', label: 'none' },
+              { value: 'minimal', label: 'minimal' },
+              { value: 'low', label: 'low' },
+              { value: 'medium', label: 'medium' },
+              { value: 'high', label: 'high' },
+              { value: 'max', label: 'max' },
+            ]}
+          />
+        </div>
+      </div>
+      <p class="hint">Empty fields are omitted from requests (backend defaults apply).</p>
+
+      <label>Prefill support (resume, speaker name, and template prefills)</label>
+      <Select
+        ref={prefillEl}
+        options={[
+          { value: 'disabled', label: 'Disabled (do not send prefills)' },
+          { value: 'none', label: 'Generic (trailing assistant message)' },
+          { value: 'vllm', label: 'vLLM (continue_final_message)' },
+          { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
+        ]}
+      />
+    </EntityEditorPane>
   );
 }

@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-j
 import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
 
-export type EditorId = number | 'new';
+export type EditorId = number | 'new' | 'default';
 
 interface EntityEditorOptions<T extends { id: number }, D extends Record<string, unknown>> {
   items: () => readonly T[];
@@ -17,6 +17,9 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
   /** Initial selection for a freshly mounted editor (e.g. the tab's global
    * default): a valid id starts on that item instead of the blank "new" form. */
   initialId?: () => number | null;
+  /** Selecting a saved row also selects it for use. `null` represents the
+   * editor's virtual built-in/none row; new drafts activate after creation. */
+  activate?: (id: number | null) => Promise<void>;
 }
 
 export function errorMessage(err: unknown): string {
@@ -64,6 +67,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   let baseline: D | null = null;
   let loadedItem = '';
   let remoteConflict = false;
+  let activationSequence = 0;
 
   const captureBaseline = () => {
     baseline = structuredClone(options.data());
@@ -77,15 +81,27 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
 
   const selected = () => options.items().find((item) => item.id === selectedId());
   const isDirty = () => baseline != null && !sameValue(options.data(), baseline);
-  const applySelection = (id: EditorId) => {
+  const activate = (id: EditorId) => {
+    if (!options.activate || id === 'new') return;
+    const sequence = ++activationSequence;
+    void options.activate(id === 'default' ? null : id).catch((err) => {
+      if (sequence === activationSequence) {
+        setStatus(`Could not select for use: ${errorMessage(err)}`);
+      }
+    });
+  };
+  const applySelection = (id: EditorId, shouldActivate = true) => {
     rawNav.openDetail();
     setSelectedId(id);
     setStatus('');
     load(options.items().find((item) => item.id === id));
+    if (shouldActivate) activate(id);
   };
   const select = (id: EditorId) => {
     if (id === selectedId()) {
       rawNav.openDetail();
+      setStatus('');
+      activate(id);
       return;
     }
     requestNavigation(() => applySelection(id));
@@ -97,11 +113,13 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     rawNav.openDetail();
     setSelectedId(item.id);
     load(item);
+    activate(item.id);
   };
   // Seed the initial form once the refs exist: the configured default entity
   // when one resolves (selected directly, without opening the mobile detail
-  // view), else the "new entity" form. Raw DOM defaults diverge from
-  // load(undefined) (e.g. a Select with no '' option stays '').
+  // view), else the built-in/none choice for activating editors or the "new"
+  // form for ordinary editors. Raw DOM defaults diverge from load(undefined)
+  // (e.g. a Select with no '' option stays '').
   onMount(() => {
     if (selectedId() !== 'new') return;
     const initialId = options.initialId?.();
@@ -110,6 +128,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
         ? options.items().find((candidate) => candidate.id === initialId)
         : undefined;
     if (item) setSelectedId(item.id);
+    else if (options.activate) setSelectedId('default');
     load(item);
   });
 
@@ -128,7 +147,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
           remoteConflict = true;
           setStatus('This item was deleted on another device. Discard this draft to continue.');
         } else {
-          applySelection('new');
+          applySelection(options.activate ? 'default' : 'new', false);
           rawNav.closeDetail();
           setStatus('This item was deleted on another device.');
         }
@@ -144,6 +163,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   const save = async () => {
     try {
       const id = selectedId();
+      if (id === 'default') return true;
       if (remoteConflict) {
         setStatus('This item changed on another device. Discard to load it before saving.');
         return false;
@@ -170,6 +190,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       // Reload the server's representation so normalized values (and secrets
       // such as an endpoint key) do not immediately look dirty after saving.
       load(item);
+      if (id === 'new') activate(item.id);
       flashSaved();
       return true;
     } catch (err) {
@@ -181,7 +202,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   // navigation guard (save/discard prompt) like any selection change.
   const duplicate = () => {
     const id = selectedId();
-    if (id === 'new') return;
+    if (typeof id !== 'number') return;
     requestNavigation(() => {
       void (async () => {
         try {
@@ -195,10 +216,10 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   };
   const remove = async () => {
     const id = selectedId();
-    if (id === 'new' || !confirm(options.deletePrompt)) return;
+    if (typeof id !== 'number' || !confirm(options.deletePrompt)) return;
     try {
       await options.remove(id);
-      applySelection('new');
+      applySelection(options.activate ? 'default' : 'new', false);
       rawNav.closeDetail();
     } catch (err) {
       setStatus(errorMessage(err));
@@ -207,8 +228,8 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   const discard = () => {
     const id = selectedId();
     const item = options.items().find((candidate) => candidate.id === id);
-    if (id !== 'new' && !item) {
-      applySelection('new');
+    if (typeof id === 'number' && !item) {
+      applySelection(options.activate ? 'default' : 'new', false);
       rawNav.closeDetail();
       setStatus('This item was deleted on another device.');
     } else {
