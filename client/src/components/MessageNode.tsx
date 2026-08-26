@@ -365,7 +365,14 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       onPointerUp={props.inMap ? undefined : onPointerUp}
       onPointerCancel={props.inMap ? undefined : onPointerCancel}
     >
-      <Show when={!isTool()} fallback={<span class="avatar avatar-fallback">⚙</span>}>
+      <Show
+        when={!isTool()}
+        fallback={
+          <span class="avatar avatar-fallback tool-avatar">
+            {pluginView()?.RailIcon?.() ?? '⚙'}
+          </span>
+        }
+      >
         <Avatar src={avatarSrc()} name={name()} />
       </Show>
       <div
@@ -416,6 +423,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               <span class="branch-nav">
                 <button
                   class="icon-btn"
+                  title="Previous swipe"
+                  aria-label="Previous swipe"
                   disabled={
                     state.treeNavigationPending ||
                     ancestorNavigationBlocked() ||
@@ -427,7 +436,12 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 >
                   ‹
                 </button>
-                {siblingIndex() + 1}/{siblings().length}
+                <span
+                  class="branch-count"
+                  aria-label={`Swipe ${siblingIndex() + 1} of ${siblings().length}`}
+                >
+                  {siblingIndex() + 1}/{siblings().length}
+                </span>
                 <button
                   class="icon-btn"
                   disabled={
@@ -439,7 +453,12 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                   title={
                     isAssistant() && siblingIndex() >= siblings().length - 1
                       ? 'Regenerate'
-                      : undefined
+                      : 'Next swipe'
+                  }
+                  aria-label={
+                    isAssistant() && siblingIndex() >= siblings().length - 1
+                      ? 'Regenerate'
+                      : 'Next swipe'
                   }
                   onClick={() => swipeMessage(props.message, 1)}
                 >
@@ -449,24 +468,14 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             </Show>
             <Show when={!streaming() && !editing()}>
               <span class="msg-actions">
-                <button class="icon-btn" title="Copy" onClick={copy}>
-                  ⧉
-                </button>
-                <button
-                  class="icon-btn"
-                  title={
-                    props.message.imagePending ? 'Wait for the image render to finish' : 'Edit'
-                  }
-                  disabled={props.message.imagePending}
-                  onClick={startEdit}
-                >
-                  ✎
-                </button>
                 <span class="msg-more-wrap">
                   <button
                     class="icon-btn"
                     classList={{ 'icon-btn-active': menuOpen() }}
                     title="More"
+                    aria-label="More message actions"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen()}
                     onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
                   >
                     ⋯
@@ -475,9 +484,30 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     <div
                       class="msg-more-menu popover-surface popover-menu"
                       ref={(el) => queueMicrotask(() => el.scrollIntoView({ block: 'nearest' }))}
+                      role="menu"
                     >
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          closeMenu();
+                          copy();
+                        }}
+                      >
+                        Copy
+                      </button>
+                      <button
+                        role="menuitem"
+                        disabled={props.message.imagePending}
+                        onClick={() => {
+                          closeMenu();
+                          startEdit();
+                        }}
+                      >
+                        Edit
+                      </button>
                       <Show when={isAssistant() || (isTool() && claimedView() != null)}>
                         <button
+                          role="menuitem"
                           onClick={() => {
                             closeMenu();
                             openSteer();
@@ -487,6 +517,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         </button>
                       </Show>
                       <button
+                        role="menuitem"
                         onClick={() => {
                           closeMenu();
                           duplicate();
@@ -495,6 +526,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         Duplicate
                       </button>
                       <button
+                        role="menuitem"
                         onClick={() => {
                           closeMenu();
                           branchToConversation();
@@ -503,6 +535,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         Branch to new conversation
                       </button>
                       <button
+                        role="menuitem"
                         disabled={!canMoveUp()}
                         onClick={() => {
                           closeMenu();
@@ -512,6 +545,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         Move up
                       </button>
                       <button
+                        role="menuitem"
                         disabled={!canMoveDown()}
                         onClick={() => {
                           closeMenu();
@@ -527,6 +561,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       >
                         <button
                           class="danger"
+                          role="menuitem"
                           onClick={() => {
                             closeMenu();
                             removeSwipe();
@@ -537,6 +572,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       </Show>
                       <button
                         class="danger"
+                        role="menuitem"
                         onClick={() => {
                           closeMenu();
                           remove();

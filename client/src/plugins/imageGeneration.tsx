@@ -250,7 +250,7 @@ async function generate(
   presetName?: string | null,
 ): Promise<boolean> {
   if (state.selectedId == null) {
-    toast('No conversation selected.');
+    toast('No conversation selected.', 'warning');
     return false;
   }
   return navigateTree(() =>
@@ -447,6 +447,7 @@ function PromptPresetEditor(props: {
       <div class="key-row prompt-preset-toolbar">
         <Select
           ref={pickerEl}
+          ariaLabel="Prompt preset"
           onChange={(value) => pick(Number(value))}
           options={[
             { value: '-1', label: 'Default' },
@@ -690,139 +691,155 @@ function SettingsPage() {
 
   return (
     <>
-      <PromptPresetEditor
-        ref={describeEditor}
-        defaultPrompt={DEFAULT_PROMPTS.describe}
-        label={
-          <>
-            Character image prompt (sent to the model to describe the character and scene){' '}
-            <MacroHelp />
-          </>
-        }
-      />
-      <PromptPresetEditor
-        ref={characterInstructionEditor}
-        defaultPrompt={DEFAULT_PROMPTS.characterInstruction}
-        extraKeys={['instruction']}
-        label={
-          <>
-            Character image prompt with instruction — used by /imagechar{' '}
-            <MacroHelp extra={[['{{instruction}}', 'The /imagechar command argument']]} />
-          </>
-        }
-      />
-      <PromptPresetEditor
-        ref={faceEditor}
-        defaultPrompt={DEFAULT_PROMPTS.face}
-        label={
-          <>
-            Face image prompt (sent to the model to describe a close-up portrait) <MacroHelp />
-          </>
-        }
-      />
-      <PromptPresetEditor
-        ref={faceInstructionEditor}
-        defaultPrompt={DEFAULT_PROMPTS.faceInstruction}
-        extraKeys={['instruction']}
-        label={
-          <>
-            Face image prompt with instruction — used by /imageface{' '}
-            <MacroHelp extra={[['{{instruction}}', 'The /imageface command argument']]} />
-          </>
-        }
-      />
-      <PromptPresetEditor
-        ref={instructionEditor}
-        defaultPrompt={DEFAULT_PROMPTS.instruction}
-        extraKeys={['instruction']}
-        label={
-          <>
-            Generic instruction prompt for /image — {'{{instruction}}'} expands to the command
-            argument <MacroHelp extra={[['{{instruction}}', 'The /image command argument']]} />
-          </>
-        }
-      />
-      <PromptPresetEditor
-        ref={avatarEditor}
-        defaultPrompt={DEFAULT_PROMPTS.avatar}
-        extraKeys={['name', 'description', 'personality', 'scenario', 'firstMessage']}
-        defaultContext={DEFAULT_AVATAR_CONTEXT}
-        contextExtraKeys={['name', 'description', 'personality', 'scenario', 'firstMessage']}
-        contextLabel="Character context"
-        label={
-          <>
-            Avatar prompt — system instruction and context for the Generate avatar button{' '}
-            <MacroHelp extra={AVATAR_MACROS} />
-          </>
-        }
-      />
-      <label>ComfyUI URL</label>
-      <input ref={comfyUrlEl} placeholder={DEFAULTS.comfyUrl} />
+      <section class="settings-section">
+        <h3>Prompt generation</h3>
+        <PromptPresetEditor
+          ref={describeEditor}
+          defaultPrompt={DEFAULT_PROMPTS.describe}
+          label={
+            <>
+              Character image prompt (sent to the model to describe the character and scene){' '}
+              <MacroHelp />
+            </>
+          }
+        />
+        <PromptPresetEditor
+          ref={characterInstructionEditor}
+          defaultPrompt={DEFAULT_PROMPTS.characterInstruction}
+          extraKeys={['instruction']}
+          label={
+            <>
+              Character image prompt with instruction — used by /imagechar{' '}
+              <MacroHelp extra={[['{{instruction}}', 'The /imagechar command argument']]} />
+            </>
+          }
+        />
+        <PromptPresetEditor
+          ref={faceEditor}
+          defaultPrompt={DEFAULT_PROMPTS.face}
+          label={
+            <>
+              Face image prompt (sent to the model to describe a close-up portrait) <MacroHelp />
+            </>
+          }
+        />
+        <PromptPresetEditor
+          ref={faceInstructionEditor}
+          defaultPrompt={DEFAULT_PROMPTS.faceInstruction}
+          extraKeys={['instruction']}
+          label={
+            <>
+              Face image prompt with instruction — used by /imageface{' '}
+              <MacroHelp extra={[['{{instruction}}', 'The /imageface command argument']]} />
+            </>
+          }
+        />
+        <PromptPresetEditor
+          ref={instructionEditor}
+          defaultPrompt={DEFAULT_PROMPTS.instruction}
+          extraKeys={['instruction']}
+          label={
+            <>
+              Generic instruction prompt for /image — {'{{instruction}}'} expands to the command
+              argument <MacroHelp extra={[['{{instruction}}', 'The /image command argument']]} />
+            </>
+          }
+        />
+        <PromptPresetEditor
+          ref={avatarEditor}
+          defaultPrompt={DEFAULT_PROMPTS.avatar}
+          extraKeys={['name', 'description', 'personality', 'scenario', 'firstMessage']}
+          defaultContext={DEFAULT_AVATAR_CONTEXT}
+          contextExtraKeys={['name', 'description', 'personality', 'scenario', 'firstMessage']}
+          contextLabel="Character context"
+          label={
+            <>
+              Avatar prompt — system instruction and context for the Generate avatar button{' '}
+              <MacroHelp extra={AVATAR_MACROS} />
+            </>
+          }
+        />
+      </section>
 
-      <label>Workflow used by /image (ComfyUI API format; none = describe only, no image)</label>
-      <div class="key-row">
+      <section class="settings-section">
+        <h3>Image rendering</h3>
+        <label>ComfyUI URL</label>
+        <input ref={comfyUrlEl} placeholder={DEFAULTS.comfyUrl} />
+
+        <label>Workflow used by /image</label>
+        <p class="hint">Choose none to generate descriptions without rendering an image.</p>
+        <div class="key-row">
+          <Select
+            ref={pickerEl}
+            ariaLabel="Image workflow"
+            onChange={(value) => pick(Number(value))}
+            options={[
+              { value: '-1', label: '— none (describe only) —' },
+              ...workflows().map((workflow, i) => ({
+                value: String(i),
+                label: workflow.name || `Workflow ${i + 1}`,
+              })),
+            ]}
+          />
+          <button onClick={addWorkflow}>+ Add</button>
+          <Show when={selected() !== -1}>
+            <button onClick={duplicateWorkflow}>Duplicate</button>
+            <button class="danger-btn" onClick={deleteWorkflow}>
+              Delete
+            </button>
+          </Show>
+        </div>
+
+        {/* Stays mounted (hidden by class) so the imperative refs survive selection changes. */}
+        <div class="workflow-detail" classList={{ hidden: selected() === -1 }}>
+          <label>Name</label>
+          <input ref={nameEl} placeholder="Workflow name" />
+          <label>
+            Workflow JSON — export via ComfyUI's "Save (API Format)"{' '}
+            <MacroHelp rows={WORKFLOW_MACROS} />
+          </label>
+          <MacroTextarea
+            ref={workflowEl}
+            keys={['prompt', 'seed']}
+            class="mono"
+            rows={12}
+            onText={setWorkflowText}
+            placeholder='{"3": {"class_type": "KSampler", "inputs": {"seed": {{seed}}, …}}, "6": {"inputs": {"text": "{{prompt}}", …}}, …}'
+          />
+          <Show when={workflowText().trim()}>
+            <div class="macro-checks">
+              <span classList={{ warn: !hasPrompt() }}>
+                {hasPrompt()
+                  ? '✓ {{prompt}} found'
+                  : '✗ {{prompt}} missing — the generated description would not be used'}
+              </span>
+              <span classList={{ soft: !hasSeed() }}>
+                {hasSeed()
+                  ? '✓ {{seed}} found'
+                  : "△ {{seed}} missing — every render will reuse the workflow's fixed seed"}
+              </span>
+            </div>
+          </Show>
+        </div>
+
+        <label>Avatar workflow</label>
+        <p class="hint">Defaults to the selected `/image` workflow.</p>
         <Select
-          ref={pickerEl}
-          onChange={(value) => pick(Number(value))}
+          ref={avatarPickerEl}
+          ariaLabel="Avatar image workflow"
+          onChange={(value) => setAvatarSel(value)}
           options={[
-            { value: '-1', label: '— none (describe only) —' },
-            ...workflows().map((workflow, i) => ({
-              value: String(i),
-              label: workflow.name || `Workflow ${i + 1}`,
-            })),
+            { value: '', label: '— same as /image workflow —' },
+            ...workflows().map((workflow) => ({ value: workflow.name, label: workflow.name })),
           ]}
         />
-        <button onClick={addWorkflow}>+ Add</button>
-        <Show when={selected() !== -1}>
-          <button onClick={duplicateWorkflow}>Duplicate</button>
-          <button class="danger-btn" onClick={deleteWorkflow}>
-            Delete
-          </button>
-        </Show>
-      </div>
+      </section>
 
-      {/* Stays mounted (hidden by class) so the imperative refs survive selection changes. */}
-      <div class="workflow-detail" classList={{ hidden: selected() === -1 }}>
-        <label>Name</label>
-        <input ref={nameEl} placeholder="Workflow name" />
-        <label>
-          Workflow JSON — export via ComfyUI's "Save (API Format)"{' '}
-          <MacroHelp rows={WORKFLOW_MACROS} />
-        </label>
-        <MacroTextarea
-          ref={workflowEl}
-          keys={['prompt', 'seed']}
-          class="mono"
-          rows={12}
-          onText={setWorkflowText}
-          placeholder='{"3": {"class_type": "KSampler", "inputs": {"seed": {{seed}}, …}}, "6": {"inputs": {"text": "{{prompt}}", …}}, …}'
-        />
-        <Show when={workflowText().trim()}>
-          <div class="macro-checks">
-            <span classList={{ warn: !hasPrompt() }}>
-              {hasPrompt()
-                ? '✓ {{prompt}} found'
-                : '✗ {{prompt}} missing — the generated description would not be used'}
-            </span>
-            <span classList={{ soft: !hasSeed() }}>
-              {hasSeed()
-                ? '✓ {{seed}} found'
-                : "△ {{seed}} missing — every render will reuse the workflow's fixed seed"}
-            </span>
-          </div>
-        </Show>
-      </div>
-
-      <label>Workflow used for avatar generation (defaults to the /image workflow)</label>
-      <Select
-        ref={avatarPickerEl}
-        onChange={(value) => setAvatarSel(value)}
-        options={[
-          { value: '', label: '— same as /image workflow —' },
-          ...workflows().map((workflow) => ({ value: workflow.name, label: workflow.name })),
-        ]}
-      />
-
+      <Show when={error()}>
+        <p class="notice notice-error" role="alert">
+          {error()}
+        </p>
+      </Show>
       <div class="form-actions">
         <button class="primary-btn" onClick={() => void save()}>
           Save
@@ -832,9 +849,6 @@ function SettingsPage() {
           <span class="saved-flash">✓ Saved</span>
         </Show>
       </div>
-      <Show when={error()}>
-        <p class="hint">{error()}</p>
-      </Show>
     </>
   );
 }
@@ -989,12 +1003,19 @@ const messageView: PluginMessageView = {
           <span class="branch-nav">
             <button
               class="icon-btn"
+              title="Previous image"
+              aria-label="Previous image"
               disabled={state.treeNavigationPending || !onActivePath() || activeImage() <= 0}
               onClick={() => void swipeImage(message(), -1)}
             >
               ‹
             </button>
-            {activeImage() + 1}/{images().length}
+            <span
+              class="branch-count"
+              aria-label={`Image ${activeImage() + 1} of ${images().length}`}
+            >
+              {activeImage() + 1}/{images().length}
+            </span>
             <button
               class="icon-btn"
               disabled={
@@ -1005,7 +1026,12 @@ const messageView: PluginMessageView = {
               title={
                 activeImage() >= images().length - 1
                   ? 'Generate another image (same prompt, new seed)'
-                  : undefined
+                  : 'Next image'
+              }
+              aria-label={
+                activeImage() >= images().length - 1
+                  ? 'Generate another image with a new seed'
+                  : 'Next image'
               }
               onClick={() => void swipeImage(message(), 1)}
             >
@@ -1050,6 +1076,7 @@ const messageView: PluginMessageView = {
     );
 
     return {
+      RailIcon: ImageIcon,
       Header,
       HeaderTools,
       Body,
@@ -1059,6 +1086,8 @@ const messageView: PluginMessageView = {
   },
 };
 
+// Keep the registry contract explicit: the dev-module smoke test verifies this
+// named export as well as the production bundle.
 export const imageGenerationPlugin: Plugin = {
   id: ID,
   name: 'Image Generation',

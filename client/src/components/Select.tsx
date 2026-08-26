@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 const MENU_GAP = 4;
@@ -27,7 +27,10 @@ export default function Select(props: {
   onChange?: (value: string) => void;
   ref?: SelectHandle | ((handle: SelectHandle) => void);
   class?: string;
+  ariaLabel?: string;
 }) {
+  const id = createUniqueId();
+  const listboxId = `select-listbox-${id}`;
   const [current, setCurrent] = createSignal(props.value ?? '');
   const [open, setOpen] = createSignal(false);
   const [highlighted, setHighlighted] = createSignal(0);
@@ -138,6 +141,12 @@ export default function Select(props: {
         type="button"
         class={`select-btn ${props.class ?? ''}`}
         ref={button}
+        role="combobox"
+        aria-label={props.ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open()}
+        aria-controls={listboxId}
+        aria-activedescendant={open() ? `select-option-${id}-${highlighted()}` : undefined}
         onClick={() => (open() ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
       >
@@ -149,6 +158,9 @@ export default function Select(props: {
           <div
             class="select-menu popover-surface popover-menu"
             ref={menu}
+            id={listboxId}
+            role="listbox"
+            aria-label={props.ariaLabel}
             style={{
               left: `${pos().left}px`,
               width: `${pos().width}px`,
@@ -163,6 +175,10 @@ export default function Select(props: {
                 <button
                   type="button"
                   class="select-option"
+                  id={`select-option-${id}-${i()}`}
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={option.value === current()}
                   classList={{
                     highlighted: i() === highlighted(),
                     selected: option.value === current(),

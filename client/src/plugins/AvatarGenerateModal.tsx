@@ -214,7 +214,9 @@ export default function AvatarGenerateModal(props: {
           <button onClick={props.onClose}>Cancel</button>
         </div>
         <Show when={error()}>
-          <p class="hint">{error()}</p>
+          <p class="notice notice-error" role="alert">
+            {error()}
+          </p>
         </Show>
       </div>
     </Modal>

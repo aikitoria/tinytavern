@@ -124,6 +124,7 @@ function Editor(props: {
       <label>Character</label>
       <Select
         value={draft.characterId?.toString() ?? ''}
+        ariaLabel="Conversation character"
         onChange={(v) => setDraft('characterId', numberOrNull(v))}
         options={[
           { value: '', label: 'Assistant (none)' },
@@ -143,6 +144,7 @@ function Editor(props: {
       <label>Persona</label>
       <Select
         value={draft.personaId?.toString() ?? ''}
+        ariaLabel="Conversation persona"
         onChange={(v) => setDraft('personaId', numberOrNull(v))}
         options={[
           { value: '', label: '— none —' },
@@ -153,6 +155,7 @@ function Editor(props: {
       <label>Endpoint (overrides the global active endpoint for this conversation)</label>
       <Select
         value={draft.endpointId?.toString() ?? ''}
+        ariaLabel="Conversation endpoint"
         onChange={(v) => setDraft('endpointId', numberOrNull(v))}
         options={[
           { value: '', label: '— global default —' },
@@ -185,6 +188,11 @@ function Editor(props: {
         />
       </Show>
 
+      <Show when={error()}>
+        <p class="notice notice-error" role="alert">
+          {error()}
+        </p>
+      </Show>
       <div class="form-actions">
         <button class="primary-btn" onClick={() => void save()}>
           Save
@@ -197,9 +205,6 @@ function Editor(props: {
           <span class="saved-flash">✓ Saved</span>
         </Show>
       </div>
-      <Show when={error()}>
-        <p class="hint">{error()}</p>
-      </Show>
     </div>
   );
 }
@@ -243,30 +248,29 @@ export default function ConversationSettings() {
         )}
       </Show>
       <Show when={promptOpen()}>
-        <div class="modal-backdrop settings-prompt-backdrop">
-          <div
-            class="settings-prompt"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="conversation-save-prompt-title"
-          >
-            <span class="modal-title" id="conversation-save-prompt-title">
-              Save changes?
-            </span>
-            <p>You have unsaved conversation settings.</p>
-            <div class="form-actions">
-              <button class="primary-btn" disabled={saving()} onClick={() => void saveAndClose()}>
-                {saving() ? 'Saving…' : 'Save'}
-              </button>
-              <button disabled={saving()} onClick={discardAndClose}>
-                Discard
-              </button>
-              <button disabled={saving()} onClick={() => setPromptOpen(false)}>
-                Cancel
-              </button>
-            </div>
+        <Modal
+          title="Save changes?"
+          class="confirm-modal"
+          backdropClass="confirm-backdrop"
+          onClose={() => setPromptOpen(false)}
+        >
+          <p class="confirm-message">You have unsaved conversation settings.</p>
+          <div class="form-actions confirm-actions">
+            <button class="primary-btn" disabled={saving()} onClick={() => void saveAndClose()}>
+              {saving() ? 'Saving…' : 'Save'}
+            </button>
+            <button disabled={saving()} onClick={discardAndClose}>
+              Discard
+            </button>
+            <button
+              data-modal-initial-focus
+              disabled={saving()}
+              onClick={() => setPromptOpen(false)}
+            >
+              Cancel
+            </button>
           </div>
-        </div>
+        </Modal>
       </Show>
     </>
   );

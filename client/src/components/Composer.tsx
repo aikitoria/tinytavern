@@ -204,7 +204,7 @@ export default function Composer() {
       const m = content.match(/^\/(\w+)\s*([\s\S]*)$/);
       const cmd = m ? COMMANDS.find((c) => c.name === m[1]!.toLowerCase()) : undefined;
       if (!cmd) {
-        toast(`Unknown command: ${content.split(/\s/)[0]}`);
+        toast(`Unknown command: ${content.split(/\s/)[0]}`, 'warning');
         return;
       }
       try {
@@ -371,16 +371,20 @@ export default function Composer() {
           <button
             class="send-btn tools-btn"
             title="Tools"
+            aria-label="Composer tools"
+            aria-haspopup="menu"
+            aria-expanded={toolsOpen()}
             classList={{ 'tools-btn-open': toolsOpen() }}
             onClick={() => setToolsOpen(!toolsOpen())}
           >
             <WrenchIcon />
           </button>
           <Show when={toolsOpen()}>
-            <div class="tools-menu popover-surface popover-menu">
+            <div class="tools-menu popover-surface popover-menu" role="menu">
               <For each={pluginTools()}>
                 {(tool) => (
                   <button
+                    role="menuitem"
                     onClick={() => {
                       setToolsOpen(false);
                       tool.run();

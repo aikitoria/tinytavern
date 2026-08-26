@@ -44,6 +44,8 @@ export interface PluginMessageView {
   ) => {
     /** Rendered among the chips in the message header. */
     Header?: () => JSX.Element;
+    /** Visual identity in the message rail; defaults to the generic tool gear. */
+    RailIcon?: () => JSX.Element;
     /** Rendered in the right-aligned group with swipe and action controls. */
     HeaderTools?: () => JSX.Element;
     /** Suppress the normal message-name label (the plugin supplies its own visual identity). */

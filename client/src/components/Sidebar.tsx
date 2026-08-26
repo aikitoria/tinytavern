@@ -12,6 +12,7 @@ import {
   toggleGroupByCharacter,
 } from '../state/store.ts';
 import { errorMessage, useDismiss } from '../util.ts';
+import { confirmAction } from '../state/confirm.ts';
 import Avatar from './Avatar.tsx';
 import GearIcon from './GearIcon.tsx';
 import GroupIcon from './GroupIcon.tsx';
@@ -121,7 +122,15 @@ export default function Sidebar() {
 
   const remove = async (id: number, event: MouseEvent) => {
     event.stopPropagation();
-    if (!confirm('Delete this conversation?')) return;
+    if (
+      !(await confirmAction({
+        title: 'Delete conversation?',
+        message: 'This permanently deletes the conversation and its generated images.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await deleteConversation(id);
     } catch (err) {
@@ -168,34 +177,43 @@ export default function Sidebar() {
         active: props.conv.id === state.selectedId,
         'search-result': props.expanded,
       }}
-      onClick={() => selectConversation(props.conv.id)}
     >
-      <Show
-        when={characterOf(props.conv.characterId)}
-        fallback={<span class="avatar avatar-fallback">A</span>}
+      <button
+        class="conv-select"
+        aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
+        onClick={() => selectConversation(props.conv.id)}
       >
-        {(character) => <Avatar src={character().avatar} name={character().name} />}
-      </Show>
-      <span class="conv-body">
-        <span class="conv-title">{props.conv.title}</span>
-        <Show when={props.snippet}>
-          <span class="conv-snippet">{props.snippet}</span>
+        <Show
+          when={characterOf(props.conv.characterId)}
+          fallback={<span class="avatar avatar-fallback">A</span>}
+        >
+          {(character) => <Avatar src={character().avatar} name={character().name} />}
         </Show>
+        <span class="conv-body">
+          <span class="conv-title">{props.conv.title}</span>
+          <Show when={props.snippet}>
+            <span class="conv-snippet">{props.snippet}</span>
+          </Show>
+        </span>
+      </button>
+      <span class="conv-actions" aria-label={`Actions for ${props.conv.title}`}>
+        <button
+          class="icon-btn conv-duplicate"
+          title="Duplicate"
+          aria-label={`Duplicate ${props.conv.title}`}
+          onClick={(e) => void duplicate(props.conv.id, e)}
+        >
+          ⧉
+        </button>
+        <button
+          class="icon-btn conv-delete"
+          title="Delete"
+          aria-label={`Delete ${props.conv.title}`}
+          onClick={(e) => void remove(props.conv.id, e)}
+        >
+          ✕
+        </button>
       </span>
-      <button
-        class="icon-btn conv-duplicate"
-        title="Duplicate"
-        onClick={(e) => void duplicate(props.conv.id, e)}
-      >
-        ⧉
-      </button>
-      <button
-        class="icon-btn conv-delete"
-        title="Delete"
-        onClick={(e) => void remove(props.conv.id, e)}
-      >
-        ✕
-      </button>
     </div>
   );
 
@@ -208,6 +226,8 @@ export default function Sidebar() {
             class="conn-dot"
             classList={{ ok: state.connected }}
             title={state.connected ? 'Connected' : 'Disconnected'}
+            role="status"
+            aria-label={state.connected ? 'Connected' : 'Disconnected'}
           />
         </span>
         <span class="sidebar-head-actions">
@@ -215,11 +235,18 @@ export default function Sidebar() {
             class="icon-btn"
             classList={{ 'icon-btn-active': state.groupByCharacter }}
             title="Group by character"
+            aria-label="Group conversations by character"
+            aria-pressed={state.groupByCharacter}
             onClick={toggleGroupByCharacter}
           >
             <GroupIcon />
           </button>
-          <button class="icon-btn" title="Settings" onClick={() => openModal('settings')}>
+          <button
+            class="icon-btn"
+            title="Settings"
+            aria-label="Open settings"
+            onClick={() => openModal('settings')}
+          >
             <GearIcon />
           </button>
         </span>

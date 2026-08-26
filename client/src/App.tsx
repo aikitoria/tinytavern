@@ -8,6 +8,7 @@ import { TreeSearch } from './components/TreeView.tsx';
 import SettingsModal from './components/SettingsModal.tsx';
 import ConversationSettings from './components/ConversationSettings.tsx';
 import PasswordGate from './components/PasswordGate.tsx';
+import ConfirmDialogHost from './components/ConfirmDialogHost.tsx';
 import { authPhase } from './state/auth.ts';
 
 export default function App() {
@@ -48,8 +49,15 @@ export default function App() {
         <Show when={state.modal === 'conversation'}>
           <ConversationSettings />
         </Show>
-        <div class="toasts">
-          <For each={state.toasts}>{(t) => <div class="toast">{t.text}</div>}</For>
+        <ConfirmDialogHost />
+        <div class="toasts" aria-live="polite" aria-atomic="false">
+          <For each={state.toasts}>
+            {(t) => (
+              <div class={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
+                {t.text}
+              </div>
+            )}
+          </For>
         </div>
       </div>
     </Show>

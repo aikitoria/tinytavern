@@ -64,7 +64,7 @@ interface AppState {
    * 'tree'/'map' show the conversation tree as an outline / zoomable 2D map. */
   viewMode: 'chat' | 'trace' | 'tree' | 'map';
   treeNavigationPending: boolean;
-  toasts: { id: number; text: string }[];
+  toasts: { id: number; text: string; kind: ToastKind }[];
   tree: TreeState;
 }
 
@@ -90,11 +90,12 @@ export const [state, setState] = createStore<AppState>({
 });
 
 let toastCounter = 0;
+export type ToastKind = 'error' | 'warning' | 'info' | 'success';
 
 /** Transient error/info notification, bottom corner, auto-dismisses. */
-export function toast(text: string): void {
+export function toast(text: string, kind: ToastKind = 'error'): void {
   const id = ++toastCounter;
-  setState('toasts', (toasts) => [...toasts, { id, text }]);
+  setState('toasts', (toasts) => [...toasts, { id, text, kind }]);
   setTimeout(() => setState('toasts', (toasts) => toasts.filter((t) => t.id !== id)), 4500);
 }
 
@@ -230,7 +231,7 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
       const deletedId = state.selectedId;
       selectConversation(null);
       if (!locallyDeletingAllConversations && !locallyDeletingConversationIds.has(deletedId)) {
-        toast('This conversation was deleted on another device.');
+        toast('This conversation was deleted on another device.', 'warning');
       }
     }
   }),

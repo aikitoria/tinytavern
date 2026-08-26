@@ -13,11 +13,13 @@ import { readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocket as HeaderWebSocket } from 'ws';
+import { createServer as createViteServer } from 'vite';
 import { expandWorkflowTemplate, workflowValidationError } from '@minitavern/shared';
 import type {
   Character,
   CharacterFolder,
   Conversation,
+  GenParams,
   Message,
   ServerEvent,
   Settings,
@@ -43,6 +45,49 @@ function assert(cond: unknown, label: string): asserts cond {
   if (!cond) throw new Error(`ASSERT FAILED: ${label}`);
   passed++;
   console.log(`  ok: ${label}`);
+}
+
+/** Exercise Vite's development transform, not just the production bundle.
+ * This catches broken client entry modules and import/export contract drift in
+ * the plugin registry before an otherwise healthy API deployment. */
+async function assertClientDevModules(): Promise<void> {
+  const clientRoot = join(process.cwd(), 'client');
+  const vite = await createViteServer({
+    root: clientRoot,
+    configFile: join(clientRoot, 'vite.config.ts'),
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+  try {
+    const paths = [
+      '/src/index.tsx',
+      '/src/App.tsx',
+      '/src/plugins/index.ts',
+      '/src/plugins/imageGeneration.tsx',
+    ];
+    const transformed = new Map<string, string>();
+    for (const path of paths) {
+      const result = await vite.transformRequest(path);
+      assert(result != null && result.code.length > 0, `Vite transforms ${path}`);
+      // Ignore the inline source map: it embeds the original source text and
+      // must not make a missing runtime export look present.
+      transformed.set(path, result!.code.split('\n//# sourceMappingURL=', 1)[0]!);
+    }
+    assert(
+      /import\s*\{\s*imageGenerationPlugin\s*\}\s*from\s*["'][^"']*imageGeneration\.tsx(?:\?[^"']*)?["']/.test(
+        transformed.get('/src/plugins/index.ts')!,
+      ),
+      'the development plugin registry imports imageGenerationPlugin',
+    );
+    assert(
+      /export\s+const\s+imageGenerationPlugin\b|export\s*\{[^}]*\bimageGenerationPlugin\b[^}]*\}/.test(
+        transformed.get('/src/plugins/imageGeneration.tsx')!,
+      ),
+      'the transformed image plugin provides the named registry export',
+    );
+  } finally {
+    await vite.close();
+  }
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -326,6 +371,9 @@ function treeLinkShape(snapshot: TreeSnapshot): unknown {
 }
 
 async function main() {
+  console.log('== development client modules ==');
+  await assertClientDevModules();
+
   const unrestricted = createIpAllowlist('   ');
   assert(
     unrestricted.isAllowed('203.0.113.42') && unrestricted.isAllowed('2001:db8::42'),
@@ -442,6 +490,21 @@ async function main() {
       endpointAfterPartialParams.genParams.maxTokens === 321,
     'partial endpoint generation-parameter PATCH preserves unspecified keys',
   );
+  await req('PATCH', `/api/endpoints/${endpoint.id}`, {
+    genParams: {},
+    replaceGenParams: true,
+  });
+  const endpointAfterClearingParams = (
+    await req<{ id: number; genParams: GenParams }[]>('GET', '/api/endpoints')
+  ).find((candidate) => candidate.id === endpoint.id)!;
+  assert(
+    Object.keys(endpointAfterClearingParams.genParams).length === 0,
+    'the first-party replacement marker persists omitted generation parameters',
+  );
+  await req('PATCH', `/api/endpoints/${endpoint.id}`, {
+    genParams: { reasoningEffort: 'high', maxTokens: 321 },
+    replaceGenParams: true,
+  });
   await expectStatus(
     'PATCH',
     `/api/endpoints/${endpoint.id}`,

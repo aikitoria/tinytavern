@@ -5,6 +5,7 @@
    and pans itself, so the chat scroller must not scroll. */
 .chat.chat-map {
   overflow: hidden;
+  scrollbar-gutter: auto;
 }
 
 .chat-map .chat-inner {

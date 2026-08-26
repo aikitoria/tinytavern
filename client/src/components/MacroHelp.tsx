@@ -44,11 +44,18 @@ export default function MacroHelp(props: {
 
   return (
     <span class="macro-help" ref={root}>
-      <button class="help-btn" title="Available macros" onClick={() => setOpen(!open())}>
+      <button
+        class="help-btn"
+        title="Available macros"
+        aria-label="Available macros"
+        aria-haspopup="dialog"
+        aria-expanded={open()}
+        onClick={() => setOpen(!open())}
+      >
         ?
       </button>
       <Show when={open()}>
-        <div class="help-card popover-surface">
+        <div class="help-card popover-surface" role="dialog" aria-label="Available macros">
           <div class="help-title">Available macros</div>
           <For each={rows()}>
             {([macro, description]) => (

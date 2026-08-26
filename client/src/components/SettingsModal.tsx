@@ -92,6 +92,29 @@ export default function SettingsModal() {
     pendingNavigation = action;
     setPromptOpen(true);
   };
+  const chooseTab = (key: string, after?: () => void) => {
+    if (key !== tab())
+      navigate(() => {
+        setTab(key);
+        after?.();
+      });
+  };
+  const onTabKeyDown = (event: KeyboardEvent, index: number) => {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+      return;
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? TABS.length - 1
+          : (index + direction + TABS.length) % TABS.length;
+    const nextKey = TABS[nextIndex]!.key;
+    chooseTab(nextKey, () =>
+      queueMicrotask(() => document.getElementById(`settings-tab-${nextKey}`)?.focus()),
+    );
+  };
 
   const finishNavigation = () => {
     const action = pendingNavigation;
@@ -128,15 +151,18 @@ export default function SettingsModal() {
         headerExtra={
           <div class="tabs" role="tablist" aria-label="Settings sections">
             <For each={TABS}>
-              {(t) => (
+              {(t, index) => (
                 <button
                   class="tab"
                   classList={{ active: tab() === t.key }}
+                  id={`settings-tab-${t.key}`}
                   role="tab"
                   aria-selected={tab() === t.key}
-                  onClick={() => {
-                    if (t.key !== tab()) navigate(() => setTab(t.key));
-                  }}
+                  aria-controls="settings-tab-panel"
+                  data-modal-initial-focus={tab() === t.key ? '' : undefined}
+                  tabIndex={tab() === t.key ? 0 : -1}
+                  onKeyDown={(event) => onTabKeyDown(event, index())}
+                  onClick={() => chooseTab(t.key)}
                 >
                   {t.label}
                 </button>
@@ -145,39 +171,39 @@ export default function SettingsModal() {
           </div>
         }
       >
-        <SettingsGuardProvider register={register} navigate={navigate}>
-          <Dynamic component={activeTab().component} />
-        </SettingsGuardProvider>
+        <div
+          class="settings-content"
+          id="settings-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`settings-tab-${tab()}`}
+        >
+          <SettingsGuardProvider register={register} navigate={navigate}>
+            <Dynamic component={activeTab().component} />
+          </SettingsGuardProvider>
+        </div>
       </Modal>
       <Show when={promptOpen()}>
-        <div class="modal-backdrop settings-prompt-backdrop">
-          <div
-            class="settings-prompt"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-prompt-title"
-          >
-            <span class="modal-title" id="settings-prompt-title">
-              Save changes?
-            </span>
-            <p>You have unsaved changes. Save them before leaving this settings page?</p>
-            <div class="form-actions">
-              <button
-                class="primary-btn"
-                disabled={saving()}
-                onClick={() => void saveAndContinue()}
-              >
-                {saving() ? 'Saving…' : 'Save'}
-              </button>
-              <button disabled={saving()} onClick={discardAndContinue}>
-                Discard
-              </button>
-              <button disabled={saving()} onClick={cancelNavigation}>
-                Cancel
-              </button>
-            </div>
+        <Modal
+          title="Save changes?"
+          class="confirm-modal"
+          backdropClass="confirm-backdrop"
+          onClose={cancelNavigation}
+        >
+          <p class="confirm-message">
+            You have unsaved changes. Save them before leaving this settings page?
+          </p>
+          <div class="form-actions confirm-actions">
+            <button class="primary-btn" disabled={saving()} onClick={() => void saveAndContinue()}>
+              {saving() ? 'Saving…' : 'Save'}
+            </button>
+            <button disabled={saving()} onClick={discardAndContinue}>
+              Discard
+            </button>
+            <button data-modal-initial-focus disabled={saving()} onClick={cancelNavigation}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </Modal>
       </Show>
     </>
   );

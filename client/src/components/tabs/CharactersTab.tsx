@@ -6,11 +6,13 @@ import { state } from '../../state/store.ts';
 import { avatarGenerationAvailable } from '../../plugins/imageGeneration.tsx';
 import AvatarGenerateModal from '../../plugins/AvatarGenerateModal.tsx';
 import { createEntityEditor, download, errorMessage } from '../../util.ts';
+import { confirmAction } from '../../state/confirm.ts';
 import Avatar from '../Avatar.tsx';
 import AvatarRow from '../AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
+import Modal from '../Modal.tsx';
 import Select from '../Select.tsx';
 import type { SelectHandle } from '../Select.tsx';
 
@@ -19,6 +21,10 @@ export default function CharactersTab() {
   const [customTemplate, setCustomTemplate] = createSignal(false);
   const [avatarGen, setAvatarGen] = createSignal(false);
   const [characterQuery, setCharacterQuery] = createSignal('');
+  const [folderDialog, setFolderDialog] = createSignal<{ id: number | null } | null>(null);
+  const [folderName, setFolderName] = createSignal('');
+  const [folderError, setFolderError] = createSignal('');
+  const [folderSaving, setFolderSaving] = createSignal(false);
   let nameEl!: HTMLInputElement;
   let folderEl!: SelectHandle;
   let personalityEl!: HTMLTextAreaElement;
@@ -127,28 +133,40 @@ export default function CharactersTab() {
       0,
     );
 
-  const createFolder = async () => {
-    const name = prompt('Folder name?')?.trim();
-    if (!name) return;
-    try {
-      await api.createCharacterFolder(name);
-    } catch (err) {
-      editor.setStatus(errorMessage(err));
-    }
+  const editFolder = (id: number | null, currentName = '') => {
+    setFolderName(currentName);
+    setFolderError('');
+    setFolderDialog({ id });
   };
 
-  const renameFolder = async (id: number, currentName: string) => {
-    const name = prompt('Rename folder:', currentName)?.trim();
-    if (!name || name === currentName) return;
+  const saveFolder = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const dialog = folderDialog();
+    const name = folderName().trim();
+    if (!dialog || !name || folderSaving()) return;
+    setFolderSaving(true);
+    setFolderError('');
     try {
-      await api.patchCharacterFolder(id, name);
+      if (dialog.id == null) await api.createCharacterFolder(name);
+      else await api.patchCharacterFolder(dialog.id, name);
+      setFolderDialog(null);
     } catch (err) {
-      editor.setStatus(errorMessage(err));
+      setFolderError(errorMessage(err));
+    } finally {
+      setFolderSaving(false);
     }
   };
 
   const deleteFolder = async (id: number, name: string) => {
-    if (!confirm(`Delete the “${name}” folder? Its characters will move to the root.`)) return;
+    if (
+      !(await confirmAction({
+        title: 'Delete folder?',
+        message: `Delete “${name}”? Its characters will move to the root.`,
+        confirmLabel: 'Delete folder',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await api.deleteCharacterFolder(id);
     } catch (err) {
@@ -176,6 +194,7 @@ export default function CharactersTab() {
     for (const [index, file] of files.entries()) {
       editor.setStatus(
         files.length === 1 ? 'Importing…' : `Importing ${index + 1} of ${files.length}…`,
+        'info',
       );
       try {
         imported.push(await api.importCard(file));
@@ -194,295 +213,361 @@ export default function CharactersTab() {
         `${imported.length} imported, ${failed.length} failed. ${failed.join(' · ')}`,
       );
     } else if (imported.length === 1) {
-      editor.setStatus(`Imported ${imported[0]!.name}.`);
+      editor.setStatus(`Imported ${imported[0]!.name}.`, 'success');
     } else {
-      editor.setStatus(`Imported ${imported.length} characters.`);
+      editor.setStatus(`Imported ${imported.length} characters.`, 'success');
     }
   };
 
   return (
-    <EntityEditorPane
-      editor={editor}
-      items={state.characters}
-      itemLabel={(character) => (
-        <>
-          <Avatar src={character.avatar} name={character.name} /> {character.name}
-        </>
-      )}
-      newLabel="New"
-      listActions={
-        <>
-          <button onClick={() => void createFolder()}>Folder</button>
-          <button title="Import character PNGs" onClick={() => cardInput.click()}>
-            Import
-          </button>
-          <input
-            ref={cardInput}
-            type="file"
-            accept=".png,image/png"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = Array.from(e.currentTarget.files ?? []);
-              e.currentTarget.value = '';
-              void importCards(files);
-            }}
-          />
-        </>
-      }
-      listSearch={
-        <div class="entity-list-search">
-          <input
-            class="search-input"
-            placeholder="Search characters…"
-            value={characterQuery()}
-            onInput={(event) => setCharacterQuery(event.currentTarget.value)}
-          />
-        </div>
-      }
-      listContent={
-        <>
-          <For each={state.characterFolders}>
-            {(folder) => (
-              <Show when={!searchActive() || charactersInFolder(folder.id).length > 0}>
-                <section class="character-folder">
-                  <div class="character-folder-row">
-                    <button
-                      class="character-folder-toggle"
-                      aria-expanded={searchActive() || !collapsedFolders().has(folder.id)}
-                      title={
-                        searchActive()
-                          ? 'Matching characters'
-                          : collapsedFolders().has(folder.id)
-                            ? 'Expand folder'
-                            : 'Collapse folder'
-                      }
-                      onClick={() => {
-                        if (!searchActive()) toggleFolder(folder.id);
-                      }}
-                    >
-                      <span class="tree-disclosure">
-                        {searchActive() || !collapsedFolders().has(folder.id) ? '▾' : '▸'}
-                      </span>
-                      <span class="character-folder-name">{folder.name}</span>
-                    </button>
-                    <button
-                      class="character-folder-action"
-                      title="Rename folder"
-                      onClick={() => void renameFolder(folder.id, folder.name)}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      class="character-folder-action"
-                      title="Delete folder"
-                      onClick={() => void deleteFolder(folder.id, folder.name)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <Show when={searchActive() || !collapsedFolders().has(folder.id)}>
-                    <For each={charactersInFolder(folder.id)}>
-                      {(character) => <CharacterButton character={character} child />}
-                    </For>
-                    <Show when={!searchActive() && charactersInFolder(folder.id).length === 0}>
-                      <span class="character-folder-empty">Empty folder</span>
+    <>
+      <EntityEditorPane
+        editor={editor}
+        items={state.characters}
+        itemLabel={(character) => (
+          <>
+            <Avatar src={character.avatar} name={character.name} /> {character.name}
+          </>
+        )}
+        newLabel="New"
+        listActions={
+          <>
+            <button onClick={() => editFolder(null)}>Folder</button>
+            <button title="Import character PNGs" onClick={() => cardInput.click()}>
+              Import
+            </button>
+            <input
+              ref={cardInput}
+              type="file"
+              accept=".png,image/png"
+              multiple
+              hidden
+              onChange={(e) => {
+                const files = Array.from(e.currentTarget.files ?? []);
+                e.currentTarget.value = '';
+                void importCards(files);
+              }}
+            />
+          </>
+        }
+        listSearch={
+          <div class="entity-list-search">
+            <input
+              class="search-input"
+              placeholder="Search characters…"
+              value={characterQuery()}
+              onInput={(event) => setCharacterQuery(event.currentTarget.value)}
+            />
+          </div>
+        }
+        listContent={
+          <>
+            <For each={state.characterFolders}>
+              {(folder) => (
+                <Show when={!searchActive() || charactersInFolder(folder.id).length > 0}>
+                  <section class="character-folder">
+                    <div class="character-folder-row">
+                      <button
+                        class="character-folder-toggle"
+                        aria-expanded={searchActive() || !collapsedFolders().has(folder.id)}
+                        title={
+                          searchActive()
+                            ? 'Matching characters'
+                            : collapsedFolders().has(folder.id)
+                              ? 'Expand folder'
+                              : 'Collapse folder'
+                        }
+                        onClick={() => {
+                          if (!searchActive()) toggleFolder(folder.id);
+                        }}
+                      >
+                        <span class="tree-disclosure">
+                          {searchActive() || !collapsedFolders().has(folder.id) ? '▾' : '▸'}
+                        </span>
+                        <span class="character-folder-name">{folder.name}</span>
+                      </button>
+                      <button
+                        class="character-folder-action"
+                        title="Rename folder"
+                        aria-label={`Rename ${folder.name}`}
+                        onClick={() => editFolder(folder.id, folder.name)}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        class="character-folder-action"
+                        title="Delete folder"
+                        aria-label={`Delete ${folder.name}`}
+                        onClick={() => void deleteFolder(folder.id, folder.name)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <Show when={searchActive() || !collapsedFolders().has(folder.id)}>
+                      <For each={charactersInFolder(folder.id)}>
+                        {(character) => <CharacterButton character={character} child />}
+                      </For>
+                      <Show when={!searchActive() && charactersInFolder(folder.id).length === 0}>
+                        <span class="character-folder-empty">Empty folder</span>
+                      </Show>
                     </Show>
-                  </Show>
-                </section>
-              </Show>
-            )}
-          </For>
-          <For each={rootCharacters()}>
-            {(character) => <CharacterButton character={character} />}
-          </For>
-          <Show when={searchActive() && matchingCharacterCount() === 0}>
-            <p class="hint search-empty">No matches.</p>
+                  </section>
+                </Show>
+              )}
+            </For>
+            <For each={rootCharacters()}>
+              {(character) => <CharacterButton character={character} />}
+            </For>
+            <Show when={searchActive() && matchingCharacterCount() === 0}>
+              <p class="hint search-empty">No matches.</p>
+            </Show>
+          </>
+        }
+        extraActions={
+          <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
+            Export PNG
+          </button>
+        }
+      >
+        <section class="settings-section">
+          <h3>Basics</h3>
+          <Show when={editor.selectedId() !== 'new'}>
+            <AvatarRow
+              src={editor.selected()?.avatar}
+              name={editor.selected()?.name ?? '?'}
+              upload={(file) => api.uploadCharacterAvatar(editor.selectedId() as number, file)}
+              remove={() => api.deleteCharacterAvatar(editor.selectedId() as number)}
+              generate={
+                avatarGenerationAvailable()
+                  ? async () => {
+                      setAvatarGen(true);
+                    }
+                  : undefined
+              }
+              onDone={editor.flashSaved}
+              onError={editor.setStatus}
+            />
+            <Show when={avatarGen()}>
+              <AvatarGenerateModal
+                kind="character"
+                id={editor.selectedId() as number}
+                onClose={() => setAvatarGen(false)}
+              />
+            </Show>
           </Show>
-        </>
-      }
-      extraActions={
-        <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
-          Export PNG
-        </button>
-      }
-    >
-      <Show when={editor.selectedId() !== 'new'}>
-        <AvatarRow
-          src={editor.selected()?.avatar}
-          name={editor.selected()?.name ?? '?'}
-          upload={(file) => api.uploadCharacterAvatar(editor.selectedId() as number, file)}
-          remove={() => api.deleteCharacterAvatar(editor.selectedId() as number)}
-          generate={
-            avatarGenerationAvailable()
-              ? async () => {
-                  setAvatarGen(true);
-                }
-              : undefined
-          }
-          onDone={editor.flashSaved}
-          onError={editor.setStatus}
-        />
-        <Show when={avatarGen()}>
-          <AvatarGenerateModal
-            kind="character"
-            id={editor.selectedId() as number}
-            onClose={() => setAvatarGen(false)}
+
+          <label>Name</label>
+          <input ref={nameEl} placeholder="Character name" />
+          <label>Folder</label>
+          <Select
+            ref={folderEl}
+            ariaLabel="Character folder"
+            options={[
+              { value: '', label: 'No folder' },
+              ...state.characterFolders.map((folder) => ({
+                value: String(folder.id),
+                label: folder.name,
+              })),
+            ]}
           />
-        </Show>
-      </Show>
+        </section>
 
-      <label>Name</label>
-      <input ref={nameEl} placeholder="Character name" />
-      <label>Folder</label>
-      <Select
-        ref={folderEl}
-        options={[
-          { value: '', label: 'No folder' },
-          ...state.characterFolders.map((folder) => ({
-            value: String(folder.id),
-            label: folder.name,
-          })),
-        ]}
-      />
-      <label>
-        Personality <MacroHelp />
-      </label>
-      <MacroTextarea ref={personalityEl} placeholder="Who is {{char}}?" />
-      <label>
-        Scenario <MacroHelp />
-      </label>
-      <MacroTextarea ref={scenarioEl} placeholder="Setting / situation (optional)" />
-      <label>
-        Example conversations <MacroHelp />
-      </label>
-      <MacroTextarea
-        ref={examplesEl}
-        placeholder="Example dialogue between {{user}} and {{char}} (optional; separate with <START>)"
-      />
-      <label>
-        First message <MacroHelp />
-      </label>
-      <MacroTextarea
-        ref={firstMessageEl}
-        placeholder="Greeting sent when a chat starts (optional)"
-      />
+        <section class="settings-section">
+          <h3>Roleplay</h3>
+          <label>
+            Personality <MacroHelp />
+          </label>
+          <MacroTextarea ref={personalityEl} placeholder="Who is {{char}}?" />
+          <label>
+            Scenario <MacroHelp />
+          </label>
+          <MacroTextarea ref={scenarioEl} placeholder="Setting / situation (optional)" />
+          <label>
+            Example conversations <MacroHelp />
+          </label>
+          <MacroTextarea
+            ref={examplesEl}
+            placeholder="Example dialogue between {{user}} and {{char}} (optional; separate with <START>)"
+          />
+          <label>
+            First message <MacroHelp />
+          </label>
+          <MacroTextarea
+            ref={firstMessageEl}
+            placeholder="Greeting sent when a chat starts (optional)"
+          />
+        </section>
 
-      <label>System prompt</label>
-      <Select
-        ref={presetEl}
-        onChange={(value) => setCustomPrompt(value === 'custom')}
-        options={[
-          { value: '', label: 'Global default' },
-          ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
-          { value: 'custom', label: 'Custom prompt…' },
-        ]}
-      />
-      <Show when={customPrompt()}>
-        <label>
-          Custom prompt text <MacroHelp />
-        </label>
-      </Show>
-      <MacroTextarea
-        ref={customEl}
-        classList={{ hidden: !customPrompt() }}
-        placeholder="Custom system prompt for this character"
-      />
+        <section class="settings-section">
+          <h3>Prompting</h3>
+          <label>System prompt</label>
+          <Select
+            ref={presetEl}
+            ariaLabel="Character system prompt"
+            onChange={(value) => setCustomPrompt(value === 'custom')}
+            options={[
+              { value: '', label: 'Global default' },
+              ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
+              { value: 'custom', label: 'Custom prompt…' },
+            ]}
+          />
+          <Show when={customPrompt()}>
+            <label>
+              Custom prompt text <MacroHelp />
+            </label>
+          </Show>
+          <MacroTextarea
+            ref={customEl}
+            classList={{ hidden: !customPrompt() }}
+            placeholder="Custom system prompt for this character"
+          />
 
-      <label>Prompt template</label>
-      <Select
-        ref={templateEl}
-        onChange={(value) => {
-          const custom = value === 'custom';
-          setCustomTemplate(custom);
-          // Start from the built-in template rather than a blank page.
-          if (custom && !customTemplateEl.value) customTemplateEl.value = DEFAULT_PROMPT_TEMPLATE;
-        }}
-        options={[
-          { value: '', label: 'Global default' },
-          ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
-          { value: 'custom', label: 'Custom template…' },
-        ]}
-      />
-      <Show when={customTemplate()}>
-        <label>
-          Custom template — system prompt <MacroHelp template />
-        </label>
+          <label>Prompt template</label>
+          <Select
+            ref={templateEl}
+            ariaLabel="Character prompt template"
+            onChange={(value) => {
+              const custom = value === 'custom';
+              setCustomTemplate(custom);
+              // Start from the built-in template rather than a blank page.
+              if (custom && !customTemplateEl.value)
+                customTemplateEl.value = DEFAULT_PROMPT_TEMPLATE;
+            }}
+            options={[
+              { value: '', label: 'Global default' },
+              ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
+              { value: 'custom', label: 'Custom template…' },
+            ]}
+          />
+        </section>
+
+        <section
+          class="settings-section settings-section-advanced"
+          classList={{ hidden: !customTemplate() }}
+        >
+          <h3>Advanced template overrides</h3>
+          <Show when={customTemplate()}>
+            <label>
+              Custom template — system prompt <MacroHelp template />
+            </label>
+          </Show>
+          <MacroTextarea
+            ref={customTemplateEl}
+            template
+            class="mono"
+            classList={{ hidden: !customTemplate() }}
+          />
+          <Show when={customTemplate()}>
+            <label>
+              First user message (optional — sent as a fake user turn before the history){' '}
+              <MacroHelp template />
+            </label>
+          </Show>
+          <MacroTextarea
+            ref={customPrologueEl}
+            template
+            class="mono"
+            classList={{ hidden: !customTemplate() }}
+            placeholder="Leave empty to send no fake user message"
+          />
+          <Show when={customTemplate()}>
+            <label>
+              Custom template — reasoning prefill (optional) <MacroHelp template />
+            </label>
+          </Show>
+          <MacroTextarea
+            ref={customReasoningPrefillEl}
+            template
+            class="mono"
+            classList={{ hidden: !customTemplate() }}
+            placeholder="Leave empty to let the model start reasoning"
+          />
+          <Show when={customTemplate()}>
+            <label>
+              Custom template — assistant message prefill (optional) <MacroHelp template />
+            </label>
+          </Show>
+          <MacroTextarea
+            ref={customMessagePrefillEl}
+            template
+            class="mono"
+            classList={{ hidden: !customTemplate() }}
+            placeholder="Leave empty to let the model start the visible reply"
+          />
+          <Show when={customTemplate()}>
+            <p class="hint">
+              A reasoning prefill continues the model's reasoning. Adding a message prefill
+              continues the visible reply from that text. Both become part of the saved response.
+            </p>
+          </Show>
+          <label class="check-row" classList={{ hidden: !customTemplate() }}>
+            <input ref={customPrefixEl} type="checkbox" />
+            Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill
+            the reply with the current speaker name (see /char)
+          </label>
+          <label class="check-row" classList={{ hidden: !customTemplate() }}>
+            <input ref={customUsesPersonasEl} type="checkbox" />
+            Uses personas — when off, chats with this character ignore the persona entirely ("
+            {'{{user}}'}" becomes "User", the persona description is not sent)
+          </label>
+          <Show when={customTemplate()}>
+            <label>Custom template — steer template (regenerate with instruction)</label>
+          </Show>
+          <MacroTextarea
+            ref={customSteerEl}
+            keys={['instruction']}
+            rows={2}
+            classList={{ hidden: !customTemplate() }}
+          />
+          <Show when={customTemplate()}>
+            <p class="hint">
+              {'{{instruction}}'} is replaced with your instruction and injected into that
+              regeneration's prompt only. Leave empty to use the built-in default.
+            </p>
+          </Show>
+        </section>
+      </EntityEditorPane>
+      <Show when={folderDialog()}>
+        {(dialog) => (
+          <Modal
+            title={dialog().id == null ? 'Create folder' : 'Rename folder'}
+            class="confirm-modal"
+            backdropClass="confirm-backdrop"
+            onClose={() => setFolderDialog(null)}
+          >
+            <form class="form folder-dialog-form" onSubmit={saveFolder}>
+              <label for="folder-name">Folder name</label>
+              <input
+                id="folder-name"
+                data-modal-initial-focus
+                value={folderName()}
+                onInput={(event) => setFolderName(event.currentTarget.value)}
+              />
+              <Show when={folderError()}>
+                <p class="notice notice-error" role="alert">
+                  {folderError()}
+                </p>
+              </Show>
+              <div class="form-actions confirm-actions">
+                <button
+                  class="primary-btn"
+                  type="submit"
+                  disabled={!folderName().trim() || folderSaving()}
+                >
+                  {folderSaving() ? 'Saving…' : dialog().id == null ? 'Create' : 'Rename'}
+                </button>
+                <button
+                  type="button"
+                  disabled={folderSaving()}
+                  onClick={() => setFolderDialog(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
       </Show>
-      <MacroTextarea
-        ref={customTemplateEl}
-        template
-        class="mono"
-        classList={{ hidden: !customTemplate() }}
-      />
-      <Show when={customTemplate()}>
-        <label>
-          First user message (optional — sent as a fake user turn before the history){' '}
-          <MacroHelp template />
-        </label>
-      </Show>
-      <MacroTextarea
-        ref={customPrologueEl}
-        template
-        class="mono"
-        classList={{ hidden: !customTemplate() }}
-        placeholder="Leave empty to send no fake user message"
-      />
-      <Show when={customTemplate()}>
-        <label>
-          Custom template — reasoning prefill (optional) <MacroHelp template />
-        </label>
-      </Show>
-      <MacroTextarea
-        ref={customReasoningPrefillEl}
-        template
-        class="mono"
-        classList={{ hidden: !customTemplate() }}
-        placeholder="Leave empty to let the model start reasoning"
-      />
-      <Show when={customTemplate()}>
-        <label>
-          Custom template — assistant message prefill (optional) <MacroHelp template />
-        </label>
-      </Show>
-      <MacroTextarea
-        ref={customMessagePrefillEl}
-        template
-        class="mono"
-        classList={{ hidden: !customTemplate() }}
-        placeholder="Leave empty to let the model start the visible reply"
-      />
-      <Show when={customTemplate()}>
-        <p class="hint">
-          A reasoning prefill continues the model's reasoning. Adding a message prefill continues
-          the visible reply from that text. Both become part of the saved response.
-        </p>
-      </Show>
-      <label class="check-row" classList={{ hidden: !customTemplate() }}>
-        <input ref={customPrefixEl} type="checkbox" />
-        Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill the
-        reply with the current speaker name (see /char)
-      </label>
-      <label class="check-row" classList={{ hidden: !customTemplate() }}>
-        <input ref={customUsesPersonasEl} type="checkbox" />
-        Uses personas — when off, chats with this character ignore the persona entirely ("
-        {'{{user}}'}" becomes "User", the persona description is not sent)
-      </label>
-      <Show when={customTemplate()}>
-        <label>Custom template — steer template (regenerate with instruction)</label>
-      </Show>
-      <MacroTextarea
-        ref={customSteerEl}
-        keys={['instruction']}
-        rows={2}
-        classList={{ hidden: !customTemplate() }}
-      />
-      <Show when={customTemplate()}>
-        <p class="hint">
-          {'{{instruction}}'} is replaced with your instruction and injected into that
-          regeneration's prompt only. Leave empty to use the built-in default.
-        </p>
-      </Show>
-    </EntityEditorPane>
+    </>
   );
 }

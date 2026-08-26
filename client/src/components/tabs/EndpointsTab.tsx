@@ -87,10 +87,10 @@ export default function EndpointsTab() {
   const fetchModels = async () => {
     const id = editor.selectedId();
     if (typeof id !== 'number') return;
-    editor.setStatus('Fetching models…');
+    editor.setStatus('Fetching models…', 'info');
     try {
       const models = await api.fetchModels(id);
-      editor.setStatus(`${models.length} models available.`);
+      editor.setStatus(`${models.length} models available.`, 'success');
       if (!model() && models.length > 0) setModel(models[0]!);
     } catch (err) {
       editor.setStatus(errorMessage(err));
@@ -112,112 +112,126 @@ export default function EndpointsTab() {
       }}
       extraActions={<button onClick={() => void fetchModels()}>Fetch models</button>}
     >
-      <label>Name</label>
-      <input ref={nameEl} placeholder="Local llama.cpp" />
-      <label>Base URL (OpenAI-compatible, up to /v1)</label>
-      <input ref={urlEl} placeholder="http://192.168.1.10:8080/v1" />
-      <label>API key (optional)</label>
-      <div class="key-row">
-        <input
-          ref={keyEl}
-          placeholder={
-            keyCleared()
-              ? 'Will be removed on save'
-              : editor.selected()?.hasApiKey
-                ? 'Configured — enter to replace'
-                : 'sk-…'
-          }
-        />
-        <Show when={editor.selected()?.hasApiKey && !keyCleared()}>
-          <button
-            onClick={() => {
-              keyEl.value = '';
-              setKeyCleared(true);
-            }}
-          >
-            Clear key
-          </button>
-        </Show>
-      </div>
-
-      <label>Model (optional; blank uses the endpoint default)</label>
-      <Show
-        when={models().length > 0}
-        fallback={
+      <section class="settings-section">
+        <h3>Connection</h3>
+        <label>Name</label>
+        <input ref={nameEl} placeholder="Local llama.cpp" />
+        <label>Base URL</label>
+        <p class="hint">OpenAI-compatible URL through the `/v1` segment.</p>
+        <input ref={urlEl} placeholder="http://192.168.1.10:8080/v1" />
+        <label>API key</label>
+        <p class="hint">Optional. Stored server-side and never returned to the browser.</p>
+        <div class="key-row">
           <input
-            value={model()}
-            onChange={(e) => setModel(e.currentTarget.value)}
-            placeholder="model id (blank uses endpoint default)"
+            ref={keyEl}
+            placeholder={
+              keyCleared()
+                ? 'Will be removed on save'
+                : editor.selected()?.hasApiKey
+                  ? 'Configured — enter to replace'
+                  : 'sk-…'
+            }
           />
-        }
-      >
-        <Select
-          value={model()}
-          onChange={setModel}
-          options={[
-            { value: '', label: '— endpoint default —' },
-            ...(model() && !models().includes(model())
-              ? [{ value: model(), label: `${model()} (custom)` }]
-              : []),
-            ...models().map((m) => ({ value: m, label: m })),
-          ]}
-        />
-      </Show>
+          <Show when={editor.selected()?.hasApiKey && !keyCleared()}>
+            <button
+              onClick={() => {
+                keyEl.value = '';
+                setKeyCleared(true);
+              }}
+            >
+              Clear key
+            </button>
+          </Show>
+        </div>
 
-      <label>Sampling</label>
-      <div class="param-grid">
-        <div>
-          <label>Temperature</label>
-          <input ref={tempEl} type="number" step="0.05" min="0" max="2" />
-        </div>
-        <div>
-          <label>Top P</label>
-          <input ref={topPEl} type="number" step="0.05" min="0" max="1" />
-        </div>
-        <div>
-          <label>Min P</label>
-          <input ref={minPEl} type="number" step="0.01" min="0" max="1" />
-        </div>
-        <div>
-          <label>Max tokens</label>
-          <input ref={maxTokEl} type="number" step="1" min="1" />
-        </div>
-        <div>
-          <label>Freq. penalty</label>
-          <input ref={freqEl} type="number" step="0.05" min="-2" max="2" />
-        </div>
-        <div>
-          <label>Pres. penalty</label>
-          <input ref={presEl} type="number" step="0.05" min="-2" max="2" />
-        </div>
-        <div>
-          <label>Reasoning effort</label>
+        <label>Model</label>
+        <p class="hint">Optional; leave blank to use the endpoint default.</p>
+        <Show
+          when={models().length > 0}
+          fallback={
+            <input
+              value={model()}
+              onChange={(e) => setModel(e.currentTarget.value)}
+              placeholder="model id (blank uses endpoint default)"
+            />
+          }
+        >
           <Select
-            ref={effortEl}
+            value={model()}
+            ariaLabel="Endpoint model"
+            onChange={setModel}
             options={[
-              { value: '', label: '— omit —' },
-              { value: 'none', label: 'none' },
-              { value: 'minimal', label: 'minimal' },
-              { value: 'low', label: 'low' },
-              { value: 'medium', label: 'medium' },
-              { value: 'high', label: 'high' },
-              { value: 'max', label: 'max' },
+              { value: '', label: '— endpoint default —' },
+              ...(model() && !models().includes(model())
+                ? [{ value: model(), label: `${model()} (custom)` }]
+                : []),
+              ...models().map((m) => ({ value: m, label: m })),
+            ]}
+          />
+        </Show>
+      </section>
+
+      <details class="settings-section settings-disclosure">
+        <summary>Advanced generation</summary>
+        <div class="settings-section-body">
+          <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
+          <div class="param-grid">
+            <div>
+              <label>Temperature</label>
+              <input ref={tempEl} type="number" step="0.05" min="0" max="2" />
+            </div>
+            <div>
+              <label>Top P</label>
+              <input ref={topPEl} type="number" step="0.05" min="0" max="1" />
+            </div>
+            <div>
+              <label>Min P</label>
+              <input ref={minPEl} type="number" step="0.01" min="0" max="1" />
+            </div>
+            <div>
+              <label>Max tokens</label>
+              <input ref={maxTokEl} type="number" step="1" min="1" />
+            </div>
+            <div>
+              <label>Freq. penalty</label>
+              <input ref={freqEl} type="number" step="0.05" min="-2" max="2" />
+            </div>
+            <div>
+              <label>Pres. penalty</label>
+              <input ref={presEl} type="number" step="0.05" min="-2" max="2" />
+            </div>
+            <div>
+              <label>Reasoning effort</label>
+              <Select
+                ref={effortEl}
+                ariaLabel="Reasoning effort"
+                options={[
+                  { value: '', label: '— omit —' },
+                  { value: 'none', label: 'none' },
+                  { value: 'minimal', label: 'minimal' },
+                  { value: 'low', label: 'low' },
+                  { value: 'medium', label: 'medium' },
+                  { value: 'high', label: 'high' },
+                  { value: 'max', label: 'max' },
+                ]}
+              />
+            </div>
+          </div>
+
+          <label>Prefill support</label>
+          <p class="hint">Used by resume, speaker-name, and template prefills.</p>
+          <Select
+            ref={prefillEl}
+            ariaLabel="Prefill support"
+            options={[
+              { value: 'disabled', label: 'Disabled (do not send prefills)' },
+              { value: 'none', label: 'Generic (trailing assistant message)' },
+              { value: 'vllm', label: 'vLLM (continue_final_message)' },
+              { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
             ]}
           />
         </div>
-      </div>
-      <p class="hint">Empty fields are omitted from requests (backend defaults apply).</p>
-
-      <label>Prefill support (resume, speaker name, and template prefills)</label>
-      <Select
-        ref={prefillEl}
-        options={[
-          { value: 'disabled', label: 'Disabled (do not send prefills)' },
-          { value: 'none', label: 'Generic (trailing assistant message)' },
-          { value: 'vllm', label: 'vLLM (continue_final_message)' },
-          { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
-        ]}
-      />
+      </details>
     </EntityEditorPane>
   );
 }

@@ -1,12 +1,13 @@
 import { For, Show } from 'solid-js';
 import type { JSX } from 'solid-js';
-import type { EditorId } from '../util.ts';
+import type { EditorId, NoticeKind } from '../util.ts';
 
 /** The subset of createEntityEditor's return value the pane needs. */
 interface PaneEditor {
   selectedId: () => EditorId;
   saved: () => boolean;
   status: () => string;
+  statusKind: () => NoticeKind;
   nav: { detailOpen: () => boolean; closeDetail: () => void };
   select: (id: EditorId) => void;
   save: () => Promise<boolean>;
@@ -136,7 +137,18 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
           )}
         </Show>
         <Show when={editor.status()}>
-          <p class="hint">{editor.status()}</p>
+          <p
+            class="notice"
+            classList={{
+              'notice-error': editor.statusKind() === 'error',
+              'notice-warning': editor.statusKind() === 'warning',
+              'notice-info': editor.statusKind() === 'info',
+              'notice-success': editor.statusKind() === 'success',
+            }}
+            role={editor.statusKind() === 'error' ? 'alert' : 'status'}
+          >
+            {editor.status()}
+          </p>
         </Show>
       </div>
     </div>

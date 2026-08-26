@@ -1,8 +1,10 @@
 import { createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
+import { confirmAction } from './state/confirm.ts';
 
 export type EditorId = number | 'new' | 'default';
+export type NoticeKind = 'error' | 'warning' | 'info' | 'success';
 
 interface EntityEditorOptions<T extends { id: number }, D extends Record<string, unknown>> {
   items: () => readonly T[];
@@ -61,7 +63,12 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
 ) {
   const [selectedId, setSelectedId] = createSignal<EditorId>('new');
   const [saved, flashSaved] = createSavedFlash();
-  const [status, setStatus] = createSignal('');
+  const [status, setStatusValue] = createSignal('');
+  const [statusKind, setStatusKind] = createSignal<NoticeKind>('error');
+  const setStatus = (message: string, kind: NoticeKind = 'error') => {
+    setStatusValue(message);
+    setStatusKind(kind);
+  };
   const rawNav = createDetailNav();
   const requestNavigation = useSettingsNavigation();
   let baseline: D | null = null;
@@ -145,15 +152,21 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       if (!item) {
         if (isDirty()) {
           remoteConflict = true;
-          setStatus('This item was deleted on another device. Discard this draft to continue.');
+          setStatus(
+            'This item was deleted on another device. Discard this draft to continue.',
+            'warning',
+          );
         } else {
           applySelection(options.activate ? 'default' : 'new', false);
           rawNav.closeDetail();
-          setStatus('This item was deleted on another device.');
+          setStatus('This item was deleted on another device.', 'warning');
         }
       } else if (isDirty()) {
         remoteConflict = true;
-        setStatus('This item changed on another device. Discard to load the latest version.');
+        setStatus(
+          'This item changed on another device. Discard to load the latest version.',
+          'warning',
+        );
       } else {
         load(item);
       }
@@ -165,7 +178,10 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       const id = selectedId();
       if (id === 'default') return true;
       if (remoteConflict) {
-        setStatus('This item changed on another device. Discard to load it before saving.');
+        setStatus(
+          'This item changed on another device. Discard to load it before saving.',
+          'warning',
+        );
         return false;
       }
       const data = options.data();
@@ -182,7 +198,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
         JSON.stringify(latest) !== response
       ) {
         load(latest);
-        setStatus('A newer version arrived while saving; it has been loaded.');
+        setStatus('A newer version arrived while saving; it has been loaded.', 'info');
         return false;
       }
       setSelectedId(item.id);
@@ -216,7 +232,16 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   };
   const remove = async () => {
     const id = selectedId();
-    if (typeof id !== 'number' || !confirm(options.deletePrompt)) return;
+    if (
+      typeof id !== 'number' ||
+      !(await confirmAction({
+        title: options.deletePrompt,
+        message: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await options.remove(id);
       applySelection(options.activate ? 'default' : 'new', false);
@@ -231,7 +256,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     if (typeof id === 'number' && !item) {
       applySelection(options.activate ? 'default' : 'new', false);
       rawNav.closeDetail();
-      setStatus('This item was deleted on another device.');
+      setStatus('This item was deleted on another device.', 'warning');
     } else {
       setStatus('');
       load(item);
@@ -248,6 +273,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     selectedId,
     saved,
     status,
+    statusKind,
     setStatus,
     nav: { detailOpen: rawNav.detailOpen, openDetail: rawNav.openDetail, closeDetail },
     selected,

@@ -5,6 +5,7 @@ import { api, ApiError } from '../../state/api.ts';
 import { applySettings, deleteAllConversations, setState, state } from '../../state/store.ts';
 import { createSavedFlash, errorMessage } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
+import { confirmAction } from '../../state/confirm.ts';
 
 function snapshot(): Settings {
   return { ...state.settings };
@@ -90,9 +91,13 @@ export default function GeneralTab() {
   const deleteChats = async () => {
     if (
       state.conversations.length === 0 ||
-      !confirm(
-        'Delete all chats? This permanently deletes every conversation and its generated images. This cannot be undone.',
-      )
+      !(await confirmAction({
+        title: 'Delete all chats?',
+        message:
+          'This permanently deletes every conversation and its generated images. Characters and settings are kept. This cannot be undone.',
+        confirmLabel: 'Delete all chats',
+        danger: true,
+      }))
     )
       return;
     setDeletingChats(true);
@@ -161,7 +166,9 @@ export default function GeneralTab() {
       </label>
 
       <Show when={error()}>
-        <p class="hint">{error()}</p>
+        <p class="notice notice-error" role="alert">
+          {error()}
+        </p>
       </Show>
 
       <section class="danger-zone">

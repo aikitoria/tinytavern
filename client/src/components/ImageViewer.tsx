@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from 'solid-js';
+import { createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 /**
@@ -22,6 +22,8 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   let lastMidX = 0;
   let lastMidY = 0;
   let enteredFullscreen = false;
+  let previouslyFocused: HTMLElement | null = null;
+  const [zoomPercent, setZoomPercent] = createSignal(100);
 
   const apply = () => {
     img.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${scale})`;
@@ -37,8 +39,11 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     x -= (dx * delta) / scale;
     y -= (dy * delta) / scale;
     scale = clamped;
+    setZoomPercent(Math.round(clamped * 100));
     apply();
   };
+  const zoomStep = (factor: number) =>
+    zoomAt(window.innerWidth / 2, window.innerHeight / 2, scale * factor);
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -131,6 +136,29 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     if (e.key === 'Escape') {
       e.stopPropagation();
       close();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const controls = [
+        ...overlay.querySelectorAll<HTMLElement>('button, [href], [tabindex]'),
+      ].filter(
+        (element) =>
+          element !== overlay && !element.hasAttribute('disabled') && element.tabIndex >= 0,
+      );
+      if (controls.length === 0) {
+        e.preventDefault();
+        overlay.focus();
+        return;
+      }
+      const first = controls[0]!;
+      const last = controls[controls.length - 1]!;
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === overlay)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
 
@@ -155,12 +183,14 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
 
   const reset = () => {
     scale = 1;
+    setZoomPercent(100);
     x = 0;
     y = 0;
     apply();
   };
 
   onMount(() => {
+    previouslyFocused = document.activeElement as HTMLElement | null;
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('mousemove', onMouseMove);
@@ -171,6 +201,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     if (overlay.requestFullscreen) {
       void overlay.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
     }
+    overlay.focus();
   });
   onCleanup(() => {
     document.removeEventListener('keydown', onKey, true);
@@ -180,6 +211,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     if (document.fullscreenElement === overlay) {
       void document.exitFullscreen().catch(() => undefined);
     }
+    if (previouslyFocused?.isConnected) previouslyFocused.focus();
   });
 
   return (
@@ -187,6 +219,10 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
       <div
         ref={overlay}
         class="image-viewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Generated image viewer"
+        tabIndex={-1}
         onClick={(e) => {
           if (e.target === overlay) close();
         }}
@@ -199,10 +235,38 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
         on:touchend={onTouchEnd}
         on:touchcancel={onTouchEnd}
       >
-        <img ref={img} src={props.src} alt="" draggable={false} onMouseDown={onMouseDown} />
-        <button class="icon-btn image-viewer-close" title="Close" onClick={close}>
-          ✕
-        </button>
+        <img
+          ref={img}
+          src={props.src}
+          alt="Generated image"
+          draggable={false}
+          onMouseDown={onMouseDown}
+        />
+        <div class="image-viewer-toolbar" role="toolbar" aria-label="Image viewer controls">
+          <button
+            class="icon-btn"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={() => zoomStep(1 / 1.2)}
+          >
+            −
+          </button>
+          <button class="image-viewer-zoom" title="Reset zoom" onClick={reset}>
+            {zoomPercent()}%
+          </button>
+          <button
+            class="icon-btn"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={() => zoomStep(1.2)}
+          >
+            +
+          </button>
+          <span class="image-viewer-hint">Scroll or pinch to zoom · drag to pan</span>
+          <button class="icon-btn" title="Close" aria-label="Close image viewer" onClick={close}>
+            ✕
+          </button>
+        </div>
       </div>
     </Portal>
   );

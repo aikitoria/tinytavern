@@ -591,16 +591,31 @@ export default function TreeMap() {
         <p class="treemap-empty hint">No messages yet.</p>
       </Show>
       <div class="treemap-toolbar">
-        <button class="icon-btn" title="Zoom in" onClick={() => zoomStep(1.3)}>
+        <button class="icon-btn" title="Zoom in" aria-label="Zoom in" onClick={() => zoomStep(1.3)}>
           +
         </button>
-        <button class="icon-btn" title="Zoom out" onClick={() => zoomStep(1 / 1.3)}>
+        <button
+          class="icon-btn"
+          title="Zoom out"
+          aria-label="Zoom out"
+          onClick={() => zoomStep(1 / 1.3)}
+        >
           −
         </button>
-        <button class="icon-btn" title="Fit the whole tree" onClick={fit}>
+        <button
+          class="icon-btn"
+          title="Fit the whole tree"
+          aria-label="Fit whole tree"
+          onClick={fit}
+        >
           ⛶
         </button>
-        <button class="icon-btn" title="Center on the active message" onClick={centerActive}>
+        <button
+          class="icon-btn"
+          title="Center on the active message"
+          aria-label="Center active message"
+          onClick={centerActive}
+        >
           ◎
         </button>
       </div>
