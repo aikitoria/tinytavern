@@ -1540,15 +1540,19 @@ textarea.mono,
   pointer-events: auto;
 }
 
-.branch-nav .icon-btn {
+.branch-nav .icon-btn,
+.branch-count {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s;
 }
 
 .msg:hover .branch-nav .icon-btn,
+.msg:hover .branch-count,
 .msg:focus-within .branch-nav .icon-btn,
-.branch-nav:focus-within .icon-btn {
+.msg:focus-within .branch-count,
+.branch-nav:focus-within .icon-btn,
+.branch-nav:focus-within .branch-count {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1556,13 +1560,15 @@ textarea.mono,
 /* Touch layouts: tools hidden until the message is tapped. */
 @media (pointer: coarse) {
   .msg-actions,
-  .branch-nav .icon-btn {
+  .branch-nav .icon-btn,
+  .branch-count {
     opacity: 0;
     pointer-events: none;
   }
 
   .msg.touched .msg-actions,
-  .msg.touched .branch-nav .icon-btn {
+  .msg.touched .branch-nav .icon-btn,
+  .msg.touched .branch-count {
     opacity: 1;
     pointer-events: auto;
   }
