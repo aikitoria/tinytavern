@@ -1676,7 +1676,6 @@ textarea.mono,
 
 .reasoning-text {
   border: 1px solid color-mix(in srgb, var(--secondary) 20%, var(--border));
-  border-left: 3px solid var(--secondary);
   border-radius: var(--radius-control);
   margin: var(--space-1) 0 var(--space-2);
   padding: var(--space-2) var(--space-3);
