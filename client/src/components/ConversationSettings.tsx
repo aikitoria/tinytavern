@@ -5,6 +5,7 @@ import { api } from '../state/api.ts';
 import { openModal, selectedConversation, state } from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';
 import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
+import Avatar from './Avatar.tsx';
 import Modal from './Modal.tsx';
 import MacroHelp from './MacroHelp.tsx';
 import MacroTextarea from './MacroTextarea.tsx';
@@ -13,7 +14,6 @@ import type { SettingsSectionActions } from './SettingsGuard.tsx';
 
 interface Draft {
   title: string;
-  characterId: number | null;
   personaId: number | null;
   endpointId: number | null;
   speakerName: string | null;
@@ -23,7 +23,6 @@ interface Draft {
 function snapshot(conv: Conversation): Draft {
   return {
     title: conv.title,
-    characterId: conv.characterId,
     personaId: conv.personaId,
     endpointId: conv.endpointId,
     speakerName: conv.speakerName,
@@ -44,8 +43,12 @@ function Editor(props: {
 
   const isDirty = () => !sameValue(draft, base);
 
-  const inheritedScenario = () =>
-    state.characters.find((character) => character.id === draft.characterId)?.scenario ?? '';
+  const character = () =>
+    props.conv.characterId != null
+      ? state.characters.find((candidate) => candidate.id === props.conv.characterId)
+      : undefined;
+
+  const inheritedScenario = () => character()?.scenario ?? '';
 
   createEffect(() => {
     const value = draft.scenarioOverride;
@@ -122,23 +125,16 @@ function Editor(props: {
       <input value={draft.title} onChange={(e) => setDraft('title', e.currentTarget.value)} />
 
       <label>Character</label>
-      <Select
-        value={draft.characterId?.toString() ?? ''}
-        ariaLabel="Conversation character"
-        onChange={(v) => setDraft('characterId', numberOrNull(v))}
-        options={[
-          { value: '', label: 'Assistant (none)' },
-          ...state.characters.map((ch) => ({ value: String(ch.id), label: ch.name })),
-        ]}
-      />
+      <div class="conversation-character-value">
+        <Avatar src={character()?.avatar} name={character()?.name ?? 'Assistant'} />
+        <span>{character()?.name ?? 'Assistant'}</span>
+      </div>
 
       <label>Speaker name (assistant replies; empty = character's name, also set via /char)</label>
       <input
         value={draft.speakerName ?? ''}
         onChange={(e) => setDraft('speakerName', e.currentTarget.value.trim() || null)}
-        placeholder={
-          state.characters.find((ch) => ch.id === draft.characterId)?.name ?? 'Assistant'
-        }
+        placeholder={character()?.name ?? 'Assistant'}
       />
 
       <label>Persona</label>

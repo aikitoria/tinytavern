@@ -229,7 +229,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       if (!editArea) return;
       editArea.value = props.message.content;
       editArea.style.height = `${editArea.scrollHeight}px`;
-      editArea.focus();
+      editArea.focus({ preventScroll: true });
     });
   };
 
@@ -308,7 +308,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   let steerArea: HTMLTextAreaElement | undefined;
   const openSteer = () => {
     setSteerOpen(true);
-    queueMicrotask(() => steerArea?.focus());
+    queueMicrotask(() => steerArea?.focus({ preventScroll: true }));
   };
   const confirmSteer = async () => {
     const instruction = steerArea?.value.trim() ?? '';

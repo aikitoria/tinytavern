@@ -1480,6 +1480,16 @@ async function main() {
     characterId: character.id,
   });
   const charSnap = await tree(charConv.id);
+  await expectStatus(
+    'PATCH',
+    `/api/conversations/${charConv.id}`,
+    {
+      characterId: null,
+      expectedActiveLeafId: charSnap.activeLeafId,
+      expectedMutationRevision: charSnap.mutationRevision,
+    },
+    400,
+  );
   const greeting = pathOf(charSnap)[0]!;
   assert(
     greeting.role === 'assistant' &&

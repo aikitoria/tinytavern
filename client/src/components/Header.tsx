@@ -7,7 +7,6 @@ import {
   selectedCharacter,
   selectedConversation,
   personasEnabled,
-  selectedPersona,
   setState,
   state,
   toast,
@@ -17,6 +16,7 @@ import { errorMessage, useDismiss } from '../util.ts';
 import Avatar from './Avatar.tsx';
 import GearIcon from './GearIcon.tsx';
 import MapIcon from './MapIcon.tsx';
+import Select from './Select.tsx';
 import TraceIcon from './TraceIcon.tsx';
 import { TreeIcon } from './TreeView.tsx';
 
@@ -43,9 +43,16 @@ const VIEWS = [
   { mode: 'map', label: 'Tree map', icon: MapIcon },
 ] as const;
 
+type ContextField = 'endpointId' | 'personaId';
+
 export default function Header() {
   const [editing, setEditing] = createSignal(false);
   const [viewOpen, setViewOpen] = createSignal(false);
+  const [pendingContext, setPendingContext] = createSignal<{
+    conversationId: number;
+    field: ContextField;
+    value: number | null;
+  } | null>(null);
   let titleInput: HTMLInputElement | undefined;
   let viewRoot: HTMLSpanElement | undefined;
 
@@ -55,10 +62,54 @@ export default function Header() {
     () => setViewOpen(false),
   );
 
+  const contextValue = (field: ContextField) => {
+    const pending = pendingContext();
+    if (
+      pending &&
+      pending.conversationId === selectedConversation()?.id &&
+      pending.field === field
+    ) {
+      return pending.value;
+    }
+    return selectedConversation()?.[field] ?? null;
+  };
+
+  const contextPersona = () => {
+    const id = contextValue('personaId');
+    return id != null ? state.personas.find((persona) => persona.id === id) : undefined;
+  };
+
   // The endpoint generations actually use: conversation override, else global.
   const activeEndpoint = () => {
-    const id = selectedConversation()?.endpointId ?? state.settings.activeEndpointId;
-    return id != null ? state.endpoints.find((e) => e.id === id) : undefined;
+    const id = contextValue('endpointId') ?? state.settings.activeEndpointId;
+    return id != null ? state.endpoints.find((endpoint) => endpoint.id === id) : undefined;
+  };
+
+  const updateContext = async (field: ContextField, rawValue: string) => {
+    const conv = selectedConversation();
+    if (!conv || pendingContext()) return;
+    const value = rawValue ? Number(rawValue) : null;
+    if (conv[field] === value) return;
+    setPendingContext({ conversationId: conv.id, field, value });
+    try {
+      const updated = await api.patchConversation(
+        conv.id,
+        { [field]: value },
+        state.tree.conversationId === conv.id ? state.tree.activeLeafId : conv.activeLeafId,
+        state.tree.conversationId === conv.id ? state.tree.mutationRevision : conv.mutationRevision,
+      );
+      setState('conversations', (conversations) =>
+        conversations.map((conversation) =>
+          conversation.id === updated.id ? updated : conversation,
+        ),
+      );
+    } catch (err) {
+      toast(errorMessage(err));
+    } finally {
+      setPendingContext((pending) =>
+        pending?.conversationId === conv.id && pending.field === field ? null : pending,
+      );
+    }
   };
 
   // On mobile this header sits inside the sidebar: every action here targets
@@ -80,7 +131,7 @@ export default function Header() {
     queueMicrotask(() => {
       if (!titleInput) return;
       titleInput.value = selectedConversation()?.title ?? '';
-      titleInput.focus();
+      titleInput.focus({ preventScroll: true });
       titleInput.select();
     });
   };
@@ -151,53 +202,49 @@ export default function Header() {
                 </Show>
               </div>
               <div class="header-context">
-                <Show when={(selectedCharacter()?.name ?? 'Assistant') !== conv().title}>
-                  <button
-                    class="header-context-item"
-                    title="Conversation character"
-                    onClick={() => show('conversation')}
-                  >
-                    {selectedCharacter()?.name ?? 'Assistant'}
-                  </button>
-                  <span class="header-context-separator" aria-hidden="true">
-                    ·
-                  </span>
-                </Show>
-                <Show when={!activeEndpoint()}>
-                  <button
-                    class="header-context-item header-context-warn"
-                    onClick={() => show('settings')}
-                  >
-                    no endpoint
-                  </button>
-                </Show>
-                <Show when={activeEndpoint()}>
-                  {(endpoint) => (
-                    <button
-                      class="header-context-item"
-                      title="Generation endpoint"
-                      onClick={() => show('settings')}
-                    >
-                      {endpoint().name}
-                    </button>
-                  )}
-                </Show>
-                <Show when={personasEnabled() && selectedPersona()}>
-                  {(persona) => (
-                    <>
-                      <span class="header-context-separator" aria-hidden="true">
-                        ·
-                      </span>
-                      <button
-                        class="header-context-item"
-                        title="Conversation persona"
-                        onClick={() => show('conversation')}
-                      >
-                        as {persona().name}
-                      </button>
-                    </>
-                  )}
-                </Show>
+                <Select
+                  class={`header-context-select ${activeEndpoint() ? '' : 'header-context-warn'}`}
+                  value={String(contextValue('endpointId') ?? '')}
+                  buttonLabel={`Endpoint · ${activeEndpoint()?.name ?? 'None'}`}
+                  ariaLabel="Conversation endpoint"
+                  disabled={pendingContext() != null}
+                  menuMinWidth={220}
+                  menuClass="header-dropdown-menu"
+                  showCheck
+                  onChange={(value) => void updateContext('endpointId', value)}
+                  options={[
+                    {
+                      value: '',
+                      label: `Global default · ${
+                        state.endpoints.find(
+                          (endpoint) => endpoint.id === state.settings.activeEndpointId,
+                        )?.name ?? 'none selected'
+                      }`,
+                    },
+                    ...state.endpoints.map((endpoint) => ({
+                      value: String(endpoint.id),
+                      label: endpoint.name,
+                    })),
+                  ]}
+                />
+                <Select
+                  class="header-context-select"
+                  value={String(contextValue('personaId') ?? '')}
+                  buttonLabel={`Persona · ${personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}`}
+                  ariaLabel="Conversation persona"
+                  disabled={pendingContext() != null || !personasEnabled()}
+                  menuMinWidth={220}
+                  menuClass="header-dropdown-menu"
+                  showCheck
+                  onChange={(value) => void updateContext('personaId', value)}
+                  options={[
+                    { value: '', label: 'No persona' },
+                    ...state.personas.map((persona) => ({
+                      value: String(persona.id),
+                      label: persona.name,
+                    })),
+                  ]}
+                />
               </div>
             </div>
             <span class="header-view-wrap" ref={viewRoot}>
@@ -216,7 +263,10 @@ export default function Header() {
                 </span>
               </button>
               <Show when={viewOpen()}>
-                <div class="header-view-menu popover-surface popover-menu" role="menu">
+                <div
+                  class="header-view-menu header-dropdown-menu popover-surface popover-menu"
+                  role="menu"
+                >
                   <For each={VIEWS}>
                     {(view) => (
                       <button

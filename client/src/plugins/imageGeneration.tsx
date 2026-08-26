@@ -409,7 +409,7 @@ function PromptPresetEditor(props: {
     showPreset(presets().length - 1);
     setRenaming(true);
     queueMicrotask(() => {
-      nameEl.focus();
+      nameEl.focus({ preventScroll: true });
       nameEl.select();
     });
   };
@@ -436,7 +436,7 @@ function PromptPresetEditor(props: {
   const rename = () => {
     setRenaming(true);
     queueMicrotask(() => {
-      nameEl.focus();
+      nameEl.focus({ preventScroll: true });
       nameEl.select();
     });
   };

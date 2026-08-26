@@ -67,12 +67,12 @@ export default function Modal(props: {
         dialog.querySelector<HTMLElement>(
           '.modal-body button, .modal-body [href], .modal-body input, .modal-body select, .modal-body textarea, .modal-body [tabindex]',
         );
-      (preferred ?? focusable()[0] ?? dialog).focus();
+      (preferred ?? focusable()[0] ?? dialog).focus({ preventScroll: true });
     });
   });
   onCleanup(() => {
     document.removeEventListener('keydown', onKeyDown, true);
-    previouslyFocused?.focus();
+    previouslyFocused?.focus({ preventScroll: true });
   });
 
   return (

@@ -24,7 +24,7 @@
   --md-body: #d8d9dd;
   --md-em: #bec5cf;
   --md-strong: #f7f7f8;
-  --md-quote: #7db6f7;
+  --md-quote: var(--md-strong);
   --message-surface: color-mix(in srgb, var(--bg-raised) 34%, var(--bg-panel));
   --user-message-surface: color-mix(in srgb, var(--role-user) 9%, var(--bg-panel));
   --thinking-surface: color-mix(in srgb, var(--secondary) 8%, var(--bg-panel));
@@ -46,7 +46,7 @@
   /* Messages and the composer share this grid: a fixed control/avatar rail,
      one column gap, and one content width inside the composer's shell. */
   --chat-max-width: 820px;
-  --chat-inline-padding: var(--space-5);
+  --chat-inline-padding: var(--space-3);
   --chat-rail-size: 38px;
   --chat-column-gap: var(--space-2);
   --composer-shell-inset: 5px; /* 1px border + 4px padding */
@@ -721,13 +721,23 @@ textarea.mono,
   background: var(--success);
 }
 
-.new-chat-wrap {
-  padding: 0 var(--space-2) var(--space-2);
+.sidebar-tools-row {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.new-chat-wrap {
+  position: static;
+  flex: none;
+  padding: 0;
 }
 
 .new-chat-btn {
-  width: 100%;
+  width: auto;
   text-align: left;
   font-weight: 600;
   background: var(--bg-raised);
@@ -747,6 +757,7 @@ textarea.mono,
   position: absolute;
   left: var(--space-2);
   right: var(--space-2);
+  top: 100%;
   z-index: 30;
   overflow-y: auto;
   max-height: 50dvh;
@@ -815,7 +826,7 @@ textarea.mono,
 .conv-item {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 0;
   padding: var(--space-2);
   border-radius: var(--radius-control);
   cursor: pointer;
@@ -851,17 +862,24 @@ textarea.mono,
 
 .conv-actions {
   display: inline-flex;
-  flex: 0 0 56px;
+  flex: 0 0 auto;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition:
+    max-width 0.12s,
+    margin-left 0.12s,
     opacity 0.12s,
     visibility 0.12s;
 }
 
 .conv-item:hover .conv-actions,
 .conv-item:focus-within .conv-actions {
+  max-width: 72px;
+  margin-left: var(--space-1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -934,8 +952,10 @@ textarea.mono,
 }
 
 .search-wrap {
-  padding: 0 var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
 }
 
 .search-input {
@@ -1066,39 +1086,43 @@ textarea.mono,
 .header-context {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-1);
   min-width: 0;
   max-width: min(45vw, 520px);
-  padding: 2px var(--space-1);
+  padding: 0;
   overflow-x: auto;
-  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-hot) 12%, var(--border));
-  border-radius: var(--radius-control);
+  background: transparent;
+  border: none;
+  border-radius: 0;
   scrollbar-width: none;
 }
 
-.header-context-item {
-  min-height: 24px;
-  padding: 2px var(--space-2);
+.header-context-select {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 180px;
+  min-height: 28px;
+  padding: 2px var(--space-1);
   overflow: hidden;
   color: var(--text-dim);
   background: none;
   border: none;
-  border-radius: calc(var(--radius-control) - 2px);
-  font-size: 12px;
+  border-radius: var(--radius-control);
+  font-size: 13.5px;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-context-item:hover:not(:disabled) {
+.header-context-select:hover:not(:disabled) {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
+  background: var(--bg-hover);
   border-color: transparent;
 }
 
-.header-context-separator {
-  flex: none;
-  color: var(--text-muted);
+.header-context-select .select-caret {
+  display: none;
 }
 
 .header-context-warn {
@@ -1138,14 +1162,31 @@ textarea.mono,
   top: calc(100% + var(--space-2));
   right: 0;
   min-width: 210px;
+}
+
+.header-dropdown-menu {
+  --popover-bg: var(--bg-panel);
+  --popover-border: var(--border);
+  --popover-radius: var(--radius-panel);
+  --popover-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
+
+  padding: 0;
   animation: menu-in 0.1s ease-out;
 }
 
-.header-view-menu button {
+.header-dropdown-menu button {
+  color: var(--text);
+  border-radius: 0;
   font-size: 13.5px;
+  font-weight: 400;
 }
 
-.header-view-menu .view-check {
+.header-dropdown-menu .select-option.selected {
+  color: var(--text);
+  font-weight: 400;
+}
+
+.header-dropdown-menu :is(.view-check, .menu-check) {
   margin-left: auto;
   color: var(--accent);
 }
@@ -1166,7 +1207,7 @@ textarea.mono,
   padding: var(--space-4) var(--chat-inline-padding) var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--chat-inline-padding);
 }
 
 .chat-empty {
@@ -1218,7 +1259,7 @@ textarea.mono,
 .msg-assistant > .msg-body {
   padding: var(--space-2) var(--space-3);
   border-left: 1px solid;
-  border-radius: 2px var(--radius-panel) var(--radius-panel) 2px;
+  border-radius: var(--radius-panel);
 }
 
 .msg-user > .msg-body {
@@ -1231,9 +1272,14 @@ textarea.mono,
   border-left-color: var(--role-assistant-line);
 }
 
-.msg-user .md,
-.msg-assistant .md {
-  color: var(--md-em);
+.msg-user .msg-head,
+.msg-assistant .msg-head {
+  margin-bottom: 0;
+}
+
+.msg-user .md > :first-child,
+.msg-assistant .md > :first-child {
+  margin-top: var(--space-1);
 }
 
 .msg-user .md em,
@@ -1261,7 +1307,7 @@ textarea.mono,
 }
 
 .msg-assistant .msg-name {
-  color: var(--role-assistant);
+  color: var(--role-assistant-line);
 }
 
 /* Keep vertical chat scrolling native while reserving horizontal assistant
@@ -1311,6 +1357,19 @@ textarea.mono,
   left: var(--space-2);
   margin: 0;
   pointer-events: none;
+}
+
+.msg-tool.msg-full-bleed .msg-swipe:has(> .reasoning-text, > .msg-content) {
+  padding-top: 44px;
+  background: var(--bg-panel);
+}
+
+.msg-tool.msg-full-bleed .reasoning-text {
+  margin: 0 var(--space-3) var(--space-2);
+}
+
+.msg-tool.msg-full-bleed .msg-content {
+  padding: 0 var(--space-3) var(--space-3);
 }
 
 .msg-tool.msg-full-bleed .msg-overlay-toolbar {
@@ -1411,6 +1470,10 @@ textarea.mono,
   height: 100dvh;
 }
 
+.image-viewer:focus {
+  outline: none;
+}
+
 .image-viewer::backdrop {
   background: #000;
 }
@@ -1429,44 +1492,6 @@ textarea.mono,
 
 .image-viewer.dragging img {
   cursor: grabbing;
-}
-
-.image-viewer-toolbar {
-  position: fixed;
-  top: max(var(--space-4), env(safe-area-inset-top));
-  right: max(var(--space-4), env(safe-area-inset-right));
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  color: #fff;
-  background: rgb(10 12 15 / 0.76);
-  border: 1px solid rgb(255 255 255 / 0.2);
-  border-radius: var(--radius-control-group);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 0.45);
-  backdrop-filter: blur(10px);
-}
-
-.image-viewer-toolbar .icon-btn {
-  color: #fff;
-}
-
-.image-viewer-zoom {
-  min-width: 58px;
-  height: 28px;
-  padding: 0 var(--space-2);
-  color: var(--text);
-  background: transparent;
-  border-color: transparent;
-  font-size: 12px;
-}
-
-.image-viewer-hint {
-  padding: 0 var(--space-2);
-  color: var(--text-dim);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 /* Incoming side of a sibling swipe: slide in from the direction the swipe came from. */
@@ -1592,23 +1617,23 @@ textarea.mono,
 .branch-nav {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 0;
   font-size: 12.5px;
   color: var(--text-dim);
 }
 
-.branch-count {
-  min-width: 28px;
-  text-align: center;
-  white-space: nowrap;
+.branch-nav .icon-btn {
+  width: 18px;
+  min-width: 18px;
+  height: 24px;
+  font-size: 13px;
 }
 
-.msg-full-bleed .branch-count {
-  padding: 1px var(--space-1);
-  color: #fff;
-  background: rgb(10 12 15 / 0.58);
-  border-radius: var(--radius-pill);
-  text-shadow: 0 1px 2px #000;
+.branch-count {
+  min-width: 0;
+  padding-inline: 2px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .tool-avatar {
@@ -1913,6 +1938,7 @@ textarea.mono,
   overflow-y: hidden;
   background: none;
   border: none;
+  box-shadow: none;
   border-radius: var(--radius-pill);
   padding: 7px var(--space-3);
   line-height: 24px;
@@ -2430,6 +2456,25 @@ textarea.mono,
   align-items: center;
 }
 
+.conversation-character-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--control-pad-y) var(--space-3);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.conversation-character-value .avatar,
+.conversation-character-value .avatar-fallback {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+
 .danger-zone {
   display: flex;
   align-items: center;
@@ -2698,6 +2743,12 @@ textarea.mono,
     height: 36px;
   }
 
+  .branch-nav .icon-btn {
+    width: 20px;
+    min-width: 20px;
+    height: 28px;
+  }
+
   .help-btn {
     width: 36px;
     height: 36px;
@@ -2850,6 +2901,22 @@ textarea.mono,
 /* Mobile layout: narrow viewports, or any touch device up to tablet width
    (large phones and foldables exceed a plain 767px cutoff). */
 @media (max-width: 767px), (pointer: coarse) and (max-width: 1024px) {
+  /* Mobile browsers zoom and pan the visual viewport when text-entry controls
+     render below 16px. Keep every keyboard field at the no-zoom threshold;
+     MacroTextarea's overlay must use the same metrics as its textarea. */
+  input:not([type='checkbox'], [type='radio'], [type='file']),
+  select,
+  textarea,
+  .macro-overlay {
+    font-size: 16px;
+  }
+
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+
   .danger-zone {
     align-items: flex-start;
     flex-direction: column;
@@ -2879,6 +2946,9 @@ textarea.mono,
   }
 
   .conv-actions {
+    max-width: 72px;
+    margin-left: var(--space-1);
+    overflow: visible;
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
@@ -2994,8 +3064,11 @@ textarea.mono,
 
   /* No top overlay remains; only clear the device's safe area. */
   .chat-inner {
-    padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--space-3) var(--space-3);
-    gap: var(--space-2);
+    --chat-inline-padding: var(--space-2);
+
+    padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--chat-inline-padding)
+      var(--space-3);
+    gap: var(--chat-inline-padding);
   }
 
   .master-detail {
@@ -3103,16 +3176,6 @@ textarea.mono,
     border: 1px solid var(--border);
     border-radius: var(--radius-modal);
     padding-top: 0;
-  }
-
-  .image-viewer-toolbar {
-    right: max(var(--space-2), env(safe-area-inset-right));
-    left: max(var(--space-2), env(safe-area-inset-left));
-    justify-content: center;
-  }
-
-  .image-viewer-hint {
-    display: none;
   }
 }
 

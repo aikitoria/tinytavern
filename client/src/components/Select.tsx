@@ -28,6 +28,11 @@ export default function Select(props: {
   ref?: SelectHandle | ((handle: SelectHandle) => void);
   class?: string;
   ariaLabel?: string;
+  buttonLabel?: string;
+  disabled?: boolean;
+  menuMinWidth?: number;
+  menuClass?: string;
+  showCheck?: boolean;
 }) {
   const id = createUniqueId();
   const listboxId = `select-listbox-${id}`;
@@ -58,7 +63,8 @@ export default function Select(props: {
   };
   if (typeof props.ref === 'function') props.ref(handle);
 
-  const label = () => props.options.find((o) => o.value === current())?.label ?? current();
+  const label = () =>
+    props.buttonLabel ?? props.options.find((o) => o.value === current())?.label ?? current();
 
   const reposition = () => {
     const rect = button.getBoundingClientRect();
@@ -67,7 +73,10 @@ export default function Select(props: {
     const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - MENU_GAP - VIEWPORT_GUTTER);
     const up = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
     const maxHeight = Math.min(MAX_MENU_HEIGHT, up ? spaceAbove : spaceBelow);
-    const width = Math.min(rect.width, window.innerWidth - VIEWPORT_GUTTER * 2);
+    const width = Math.min(
+      Math.max(rect.width, props.menuMinWidth ?? 0),
+      window.innerWidth - VIEWPORT_GUTTER * 2,
+    );
     const left = Math.min(
       Math.max(rect.left, VIEWPORT_GUTTER),
       window.innerWidth - VIEWPORT_GUTTER - width,
@@ -76,6 +85,7 @@ export default function Select(props: {
   };
 
   const openMenu = () => {
+    if (props.disabled) return;
     reposition();
     setHighlighted(
       Math.max(
@@ -87,10 +97,11 @@ export default function Select(props: {
   };
 
   const pick = (value: string) => {
+    if (props.disabled) return;
     setCurrent(value);
     setOpen(false);
     props.onChange?.(value);
-    button.focus();
+    button.focus({ preventScroll: true });
   };
 
   const onDocPointerDown = (event: PointerEvent) => {
@@ -147,6 +158,7 @@ export default function Select(props: {
         aria-expanded={open()}
         aria-controls={listboxId}
         aria-activedescendant={open() ? `select-option-${id}-${highlighted()}` : undefined}
+        disabled={props.disabled}
         onClick={() => (open() ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
       >
@@ -156,7 +168,7 @@ export default function Select(props: {
       <Show when={open()}>
         <Portal>
           <div
-            class="select-menu popover-surface popover-menu"
+            class={`select-menu popover-surface popover-menu ${props.menuClass ?? ''}`}
             ref={menu}
             id={listboxId}
             role="listbox"
@@ -182,11 +194,17 @@ export default function Select(props: {
                   classList={{
                     highlighted: i() === highlighted(),
                     selected: option.value === current(),
+                    active: props.showCheck && option.value === current(),
                   }}
                   onPointerEnter={() => setHighlighted(i())}
                   onClick={() => pick(option.value)}
                 >
-                  {option.label}
+                  <span>{option.label}</span>
+                  <Show when={props.showCheck}>
+                    <span class="menu-check" aria-hidden="true">
+                      {option.value === current() ? '✓' : ''}
+                    </span>
+                  </Show>
                 </button>
               )}
             </For>

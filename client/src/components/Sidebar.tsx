@@ -177,11 +177,11 @@ export default function Sidebar() {
         active: props.conv.id === state.selectedId,
         'search-result': props.expanded,
       }}
+      onClick={() => selectConversation(props.conv.id)}
     >
       <button
         class="conv-select"
         aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
-        onClick={() => selectConversation(props.conv.id)}
       >
         <Show
           when={characterOf(props.conv.characterId)}
@@ -252,92 +252,95 @@ export default function Sidebar() {
         </span>
       </div>
 
-      <div class="new-chat-wrap" ref={newChatWrap}>
-        <button
-          class="new-chat-btn"
-          onClick={() => {
-            const open = !newMenuOpen();
-            setNewMenuOpen(open);
-            if (!open) setNewChatQuery('');
-          }}
-        >
-          + New chat
-        </button>
-        <Show when={newMenuOpen()}>
-          <div class="new-chat-menu popover-surface popover-menu">
-            <div class="new-chat-search">
-              <input
-                class="search-input"
-                placeholder="Search characters…"
-                value={newChatQuery()}
-                onInput={(event) => setNewChatQuery(event.currentTarget.value)}
-              />
-            </div>
-            {/* Characterless fallback, only when no characters exist (Assistant is normally a seeded character). */}
-            <Show when={state.characters.length === 0}>
-              <button onClick={() => create(null)}>
-                <span class="avatar avatar-fallback">A</span> Assistant
-              </button>
-            </Show>
-            <For each={state.characterFolders}>
-              {(folder) => (
-                <Show when={charactersInFolder(folder.id).length > 0}>
-                  <div class="new-chat-folder">
-                    <button
-                      class="new-chat-folder-toggle"
-                      aria-expanded={
-                        newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                      }
-                      onClick={() => {
-                        if (!newChatSearchActive()) toggleCharacterFolder(folder.id);
-                      }}
-                    >
-                      <span class="tree-disclosure">
-                        {newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                          ? '▾'
-                          : '▸'}
-                      </span>
-                      <span>{folder.name}</span>
-                    </button>
-                    <Show
-                      when={newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)}
-                    >
-                      <For each={charactersInFolder(folder.id)}>
-                        {(character) => (
-                          <button
-                            class="new-chat-folder-child"
-                            onClick={() => create(character.id)}
-                          >
-                            <Avatar src={character.avatar} name={character.name} /> {character.name}
-                          </button>
-                        )}
-                      </For>
-                    </Show>
-                  </div>
-                </Show>
-              )}
-            </For>
-            <For each={rootCharacters()}>
-              {(character) => (
-                <button onClick={() => create(character.id)}>
-                  <Avatar src={character.avatar} name={character.name} /> {character.name}
+      <div class="sidebar-tools-row">
+        <div class="new-chat-wrap" ref={newChatWrap}>
+          <button
+            class="new-chat-btn"
+            onClick={() => {
+              const open = !newMenuOpen();
+              setNewMenuOpen(open);
+              if (!open) setNewChatQuery('');
+            }}
+          >
+            + New chat
+          </button>
+          <Show when={newMenuOpen()}>
+            <div class="new-chat-menu popover-surface popover-menu">
+              <div class="new-chat-search">
+                <input
+                  class="search-input"
+                  placeholder="Search characters…"
+                  value={newChatQuery()}
+                  onInput={(event) => setNewChatQuery(event.currentTarget.value)}
+                />
+              </div>
+              {/* Characterless fallback, only when no characters exist (Assistant is normally a seeded character). */}
+              <Show when={state.characters.length === 0}>
+                <button onClick={() => create(null)}>
+                  <span class="avatar avatar-fallback">A</span> Assistant
                 </button>
-              )}
-            </For>
-            <Show when={newChatSearchActive() && matchingNewChatCharacters() === 0}>
-              <p class="hint search-empty">No matches.</p>
-            </Show>
-          </div>
-        </Show>
-      </div>
+              </Show>
+              <For each={state.characterFolders}>
+                {(folder) => (
+                  <Show when={charactersInFolder(folder.id).length > 0}>
+                    <div class="new-chat-folder">
+                      <button
+                        class="new-chat-folder-toggle"
+                        aria-expanded={
+                          newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
+                        }
+                        onClick={() => {
+                          if (!newChatSearchActive()) toggleCharacterFolder(folder.id);
+                        }}
+                      >
+                        <span class="tree-disclosure">
+                          {newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
+                            ? '▾'
+                            : '▸'}
+                        </span>
+                        <span>{folder.name}</span>
+                      </button>
+                      <Show
+                        when={newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)}
+                      >
+                        <For each={charactersInFolder(folder.id)}>
+                          {(character) => (
+                            <button
+                              class="new-chat-folder-child"
+                              onClick={() => create(character.id)}
+                            >
+                              <Avatar src={character.avatar} name={character.name} />{' '}
+                              {character.name}
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </Show>
+                )}
+              </For>
+              <For each={rootCharacters()}>
+                {(character) => (
+                  <button onClick={() => create(character.id)}>
+                    <Avatar src={character.avatar} name={character.name} /> {character.name}
+                  </button>
+                )}
+              </For>
+              <Show when={newChatSearchActive() && matchingNewChatCharacters() === 0}>
+                <p class="hint search-empty">No matches.</p>
+              </Show>
+            </div>
+          </Show>
+        </div>
 
-      <div class="search-wrap">
-        <input
-          class="search-input"
-          placeholder="Search…"
-          value={query()}
-          onInput={(e) => onSearchInput(e.currentTarget.value)}
-        />
+        <div class="search-wrap">
+          <input
+            class="search-input"
+            placeholder="Search…"
+            value={query()}
+            onInput={(e) => onSearchInput(e.currentTarget.value)}
+          />
+        </div>
       </div>
 
       <nav class="conv-list">

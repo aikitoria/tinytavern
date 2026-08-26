@@ -175,7 +175,7 @@ export default function Composer() {
 
   const complete = (cmd: PluginCommand) => {
     setText(`/${cmd.name} `);
-    area?.focus();
+    area?.focus({ preventScroll: true });
   };
 
   const resize = () => {
@@ -431,7 +431,7 @@ export default function Composer() {
         >
           <Show when={text().trim() || resumable()}>
             <button
-              class="send-btn resume-btn"
+              class="send-btn tools-btn resume-btn"
               title={
                 text().trim()
                   ? 'Continue writing this message'

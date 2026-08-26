@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from 'solid-js';
+import { onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 /**
@@ -23,8 +23,6 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   let lastMidY = 0;
   let enteredFullscreen = false;
   let previouslyFocused: HTMLElement | null = null;
-  const [zoomPercent, setZoomPercent] = createSignal(100);
-
   const apply = () => {
     img.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${scale})`;
   };
@@ -39,11 +37,8 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     x -= (dx * delta) / scale;
     y -= (dy * delta) / scale;
     scale = clamped;
-    setZoomPercent(Math.round(clamped * 100));
     apply();
   };
-  const zoomStep = (factor: number) =>
-    zoomAt(window.innerWidth / 2, window.innerHeight / 2, scale * factor);
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -183,7 +178,6 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
 
   const reset = () => {
     scale = 1;
-    setZoomPercent(100);
     x = 0;
     y = 0;
     apply();
@@ -242,31 +236,6 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
           draggable={false}
           onMouseDown={onMouseDown}
         />
-        <div class="image-viewer-toolbar" role="toolbar" aria-label="Image viewer controls">
-          <button
-            class="icon-btn"
-            title="Zoom out"
-            aria-label="Zoom out"
-            onClick={() => zoomStep(1 / 1.2)}
-          >
-            −
-          </button>
-          <button class="image-viewer-zoom" title="Reset zoom" onClick={reset}>
-            {zoomPercent()}%
-          </button>
-          <button
-            class="icon-btn"
-            title="Zoom in"
-            aria-label="Zoom in"
-            onClick={() => zoomStep(1.2)}
-          >
-            +
-          </button>
-          <span class="image-viewer-hint">Scroll or pinch to zoom · drag to pan</span>
-          <button class="icon-btn" title="Close" aria-label="Close image viewer" onClick={close}>
-            ✕
-          </button>
-        </div>
       </div>
     </Portal>
   );

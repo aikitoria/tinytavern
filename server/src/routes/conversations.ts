@@ -350,15 +350,14 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
   const endpointId = optionalNullableId(b, 'endpointId');
   const speakerName = optionalNullableString(b, 'speakerName');
   const scenarioOverride = optionalNullableString(b, 'scenarioOverride');
-  if (characterId != null && !getCharacter(characterId)) {
-    throw new HttpError(400, 'characterId does not exist');
+  if (characterId !== undefined && characterId !== conv.characterId) {
+    throw new HttpError(400, 'a conversation character cannot be changed after creation');
   }
   if (personaId != null && !getPersona(personaId)) {
     throw new HttpError(400, 'personaId does not exist');
   }
   requireReference('endpoints', endpointId, 'endpointId');
   const contextChanged =
-    (characterId !== undefined && characterId !== conv.characterId) ||
     (personaId !== undefined && personaId !== conv.personaId) ||
     (endpointId !== undefined && endpointId !== conv.endpointId) ||
     (speakerName !== undefined && (speakerName?.trim() || null) !== conv.speakerName) ||
