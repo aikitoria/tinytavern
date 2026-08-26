@@ -574,7 +574,7 @@ export default function TreeMap() {
                     style={{ 'font-size': `${Math.min(12 / view().scale, 240)}px` }}
                   >
                     <div class="treemap-mini-head">
-                      <span class={`treemap-role treemap-role-${message.role}`} />
+                      <span class={`treemap-role role-indicator role-color-${message.role}`} />
                       <span class="treemap-mini-name">{speakerName(message)}</span>
                     </div>
                     <span class="treemap-mini-snippet">{snippet(message)}</span>

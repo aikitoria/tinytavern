@@ -105,28 +105,11 @@
   min-width: 0;
 }
 
-/* Same role colors as the tree outline and trace view. */
 .treemap-role {
   flex: none;
   width: 0.66em;
   height: 0.66em;
   border-radius: 50%;
-}
-
-.treemap-role-user {
-  background: var(--role-user);
-}
-
-.treemap-role-assistant {
-  background: var(--role-assistant);
-}
-
-.treemap-role-system {
-  background: var(--accent);
-}
-
-.treemap-role-tool {
-  background: var(--text-dim);
 }
 
 .treemap-mini-name {

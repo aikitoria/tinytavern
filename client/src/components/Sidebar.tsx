@@ -237,7 +237,7 @@ export default function Sidebar() {
           + New chat
         </button>
         <Show when={newMenuOpen()}>
-          <div class="new-chat-menu">
+          <div class="new-chat-menu popover-surface popover-menu">
             <div class="new-chat-search">
               <input
                 class="search-input"

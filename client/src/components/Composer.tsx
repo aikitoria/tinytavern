@@ -341,7 +341,7 @@ export default function Composer() {
     >
       <div class="composer">
         <Show when={cmdMatches().length > 0}>
-          <div class="cmd-menu">
+          <div class="cmd-menu popover-surface popover-menu">
             <For each={cmdMatches()}>
               {(cmd, i) => (
                 <button
@@ -359,7 +359,7 @@ export default function Composer() {
         </Show>
         <Show when={activeCmd()}>
           {(cmd) => (
-            <div class="cmd-menu cmd-hint">
+            <div class="cmd-menu cmd-hint popover-surface">
               <span class="cmd-name">/{cmd().name}</span>
               <span class="cmd-params">{cmd().params}</span>
               <span class="cmd-desc">{cmd().description}</span>
@@ -377,7 +377,7 @@ export default function Composer() {
             <WrenchIcon />
           </button>
           <Show when={toolsOpen()}>
-            <div class="tools-menu">
+            <div class="tools-menu popover-surface popover-menu">
               <For each={pluginTools()}>
                 {(tool) => (
                   <button

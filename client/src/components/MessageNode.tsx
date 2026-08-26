@@ -392,11 +392,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
           <Show when={streaming() && !props.message.content && !props.message.reasoning}>
             <span class="spinner spinner-wait" />
           </Show>
-          <span class="msg-tools-left">
+          <span class="msg-tools-left msg-overlay-toolbar">
             <Show when={props.message.reasoning}>
               <button
-                class="chip reasoning-chip icon-chip"
-                classList={{ 'chip-active': reasoningOpen() }}
+                class="reasoning-chip icon-btn"
+                classList={{ 'icon-btn-active': reasoningOpen() }}
                 title={reasoningOpen() ? 'Hide thinking' : 'Show thinking'}
                 aria-label={reasoningOpen() ? 'Hide thinking' : 'Show thinking'}
                 aria-expanded={reasoningOpen()}
@@ -410,7 +410,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             </Show>
             {pluginView()?.Header?.()}
           </span>
-          <span class="msg-tools-top">
+          <span class="msg-tools-top msg-overlay-toolbar">
             {pluginView()?.HeaderTools?.()}
             <Show when={siblings().length > 1 || (isAssistant() && !editing())}>
               <span class="branch-nav">
@@ -473,7 +473,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                   </button>
                   <Show when={menuOpen()}>
                     <div
-                      class="msg-more-menu"
+                      class="msg-more-menu popover-surface popover-menu"
                       ref={(el) => queueMicrotask(() => el.scrollIntoView({ block: 'nearest' }))}
                     >
                       <Show when={isAssistant() || (isTool() && claimedView() != null)}>

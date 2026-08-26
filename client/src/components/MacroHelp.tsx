@@ -48,7 +48,7 @@ export default function MacroHelp(props: {
         ?
       </button>
       <Show when={open()}>
-        <div class="help-card">
+        <div class="help-card popover-surface">
           <div class="help-title">Available macros</div>
           <For each={rows()}>
             {([macro, description]) => (

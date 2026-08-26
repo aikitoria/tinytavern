@@ -104,23 +104,6 @@
   border-radius: 50%;
 }
 
-/* Same role colors as the trace view. */
-.treeview-role-user {
-  background: var(--role-user);
-}
-
-.treeview-role-assistant {
-  background: var(--role-assistant);
-}
-
-.treeview-role-system {
-  background: var(--accent);
-}
-
-.treeview-role-tool {
-  background: var(--text-dim);
-}
-
 .treeview-name {
   flex: none;
   max-width: 40%;

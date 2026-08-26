@@ -96,7 +96,7 @@ function TreeNode(props: { message: Message; activeIds: Set<number>; filter: Tre
         title={`Activate this branch (#${props.message.id})`}
         onClick={() => void activate(props.message)}
       >
-        <span class={`treeview-role treeview-role-${props.message.role}`} />
+        <span class={`treeview-role role-indicator role-color-${props.message.role}`} />
         <span class="treeview-name">{speakerName(props.message)}</span>
         <span class="treeview-snippet">{snippet(props.message)}</span>
         <Show when={props.message.status !== 'done'}>

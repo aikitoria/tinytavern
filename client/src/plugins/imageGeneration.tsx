@@ -947,8 +947,8 @@ const messageView: PluginMessageView = {
     const Header = () => (
       <Show when={promptCollapsed()}>
         <button
-          class="chip reasoning-chip icon-chip"
-          classList={{ 'chip-active': showPrompt() }}
+          class="reasoning-chip icon-btn"
+          classList={{ 'icon-btn-active': showPrompt() }}
           title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
           aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
           aria-expanded={showPrompt()}

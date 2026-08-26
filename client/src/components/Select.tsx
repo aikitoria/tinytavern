@@ -147,7 +147,7 @@ export default function Select(props: {
       <Show when={open()}>
         <Portal>
           <div
-            class="select-menu"
+            class="select-menu popover-surface popover-menu"
             ref={menu}
             style={{
               left: `${pos().left}px`,

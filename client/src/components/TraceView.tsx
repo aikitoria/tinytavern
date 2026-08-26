@@ -26,7 +26,7 @@ export default function TraceView() {
             <For each={t().messages}>
               {(msg) => (
                 <div class="trace-msg">
-                  <span class="trace-role" classList={{ [`trace-${msg.role}`]: true }}>
+                  <span class="trace-role" classList={{ [`role-color-${msg.role}`]: true }}>
                     {msg.role}
                   </span>
                   <pre class="trace-content">{msg.content}</pre>
@@ -35,19 +35,19 @@ export default function TraceView() {
             </For>
             <Show when={t().namePrefill}>
               <div class="trace-msg">
-                <span class="trace-role trace-assistant">assistant name (prefill)</span>
+                <span class="trace-role role-color-assistant">assistant name (prefill)</span>
                 <pre class="trace-content">{t().namePrefill}</pre>
               </div>
             </Show>
             <Show when={t().reasoningPrefill}>
               <div class="trace-msg">
-                <span class="trace-role trace-assistant">assistant reasoning (prefill)</span>
+                <span class="trace-role role-color-assistant">assistant reasoning (prefill)</span>
                 <pre class="trace-content">{t().reasoningPrefill}</pre>
               </div>
             </Show>
             <Show when={t().messagePrefill}>
               <div class="trace-msg">
-                <span class="trace-role trace-assistant">assistant message (prefill)</span>
+                <span class="trace-role role-color-assistant">assistant message (prefill)</span>
                 <pre class="trace-content">{t().messagePrefill}</pre>
               </div>
             </Show>

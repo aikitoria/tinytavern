@@ -163,7 +163,7 @@ export default function Markdown(props: { content: string; streaming: boolean })
       wrap.append(pre);
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'code-copy-btn';
+      button.className = 'icon-btn code-copy-btn';
       button.title = 'Copy code';
       button.setAttribute('aria-label', 'Copy code');
       button.textContent = '⧉';
