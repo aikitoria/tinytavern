@@ -325,6 +325,24 @@ textarea {
   box-shadow: var(--popover-shadow, 0 8px 30px rgb(0 0 0 / 0.35));
 }
 
+.dropdown-surface {
+  position: fixed;
+  z-index: 300;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dropdown-down {
+  transform-origin: top center;
+  animation: menu-in 0.1s ease-out;
+}
+
+.dropdown-up {
+  transform-origin: bottom center;
+  animation: menu-in-up 0.1s ease-out;
+}
+
 .popover-menu button {
   display: flex;
   align-items: center;
@@ -351,10 +369,6 @@ textarea {
     0 14px 44px color-mix(in srgb, var(--shadow) 76%, transparent),
     inset 0 1px 0 rgb(255 255 255 / 0.04);
 
-  position: fixed;
-  z-index: 300;
-  max-height: 320px;
-  overflow-y: auto;
   padding: var(--space-1);
 }
 
@@ -722,7 +736,6 @@ textarea.mono,
 }
 
 .sidebar-tools-row {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -731,7 +744,6 @@ textarea.mono,
 }
 
 .new-chat-wrap {
-  position: static;
   flex: none;
   padding: 0;
 }
@@ -753,16 +765,6 @@ textarea.mono,
 
 .new-chat-menu {
   --popover-bg: var(--bg-raised);
-
-  position: absolute;
-  left: var(--space-2);
-  right: var(--space-2);
-  top: 100%;
-  z-index: 30;
-  overflow-y: auto;
-  max-height: 50dvh;
-  transform-origin: top center;
-  animation: menu-in 0.1s ease-out;
 }
 
 @keyframes menu-in {
@@ -1014,6 +1016,8 @@ textarea.mono,
 /* ---- Header ---- */
 
 .header {
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -1130,7 +1134,6 @@ textarea.mono,
 }
 
 .header-view-wrap {
-  position: relative;
   flex: none;
 }
 
@@ -1145,23 +1148,10 @@ textarea.mono,
   border-color: transparent;
 }
 
-.header-view-btn:hover:not(:disabled),
-.header-view-active {
+.header-view-btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--bg-hover);
   border-color: transparent;
-}
-
-.header-view-active {
-  color: var(--accent);
-}
-
-.header-view-menu {
-  position: absolute;
-  z-index: 45;
-  top: calc(100% + var(--space-2));
-  right: 0;
-  min-width: 210px;
 }
 
 .header-dropdown-menu {
@@ -1171,7 +1161,6 @@ textarea.mono,
   --popover-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
 
   padding: 0;
-  animation: menu-in 0.1s ease-out;
 }
 
 .header-dropdown-menu button {
@@ -1659,12 +1648,16 @@ textarea.mono,
 }
 
 .spinner {
+  display: inline-block;
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
   border: 1.5px solid transparent;
   border-top-color: currentColor;
   border-right-color: currentColor;
   border-radius: 50%;
+  transform-origin: center;
+  will-change: transform;
   animation: spin 0.7s linear infinite;
 }
 
@@ -2019,33 +2012,22 @@ textarea.mono,
   display: none;
 }
 
-.tools-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 30;
-  min-width: 200px;
-  transform-origin: bottom left;
-  animation: menu-in-up 0.1s ease-out;
+.tools-menu button {
+  white-space: nowrap;
 }
 
 /* ⋯ menu on messages: destructive/rare actions live behind one extra click. */
 .msg-more-wrap {
-  position: relative;
   display: inline-flex;
 }
 
 .msg-more-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 40;
-  min-width: 140px;
-  animation: menu-in 0.1s ease-out;
+  --popover-bg: var(--bg-panel);
 }
 
 .msg-more-menu button {
   font-size: 13.5px;
+  white-space: nowrap;
 }
 
 .msg-more-menu .danger {
@@ -2067,17 +2049,6 @@ textarea.mono,
   box-shadow:
     0 7px 18px color-mix(in srgb, var(--danger) 24%, transparent),
     inset 0 1px 0 rgb(255 255 255 / 0.24);
-}
-
-.resume-btn {
-  background: var(--bg-raised);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-
-.resume-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
 }
 
 /* ---- Command autocomplete ---- */
@@ -3186,5 +3157,12 @@ textarea.mono,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Loading state must remain visibly active even when decorative motion is
+     reduced; this is status feedback rather than an entrance transition. */
+  .spinner {
+    animation-duration: 0.7s !important;
+    animation-iteration-count: infinite !important;
   }
 }

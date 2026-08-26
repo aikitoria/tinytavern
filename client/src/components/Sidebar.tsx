@@ -11,9 +11,10 @@ import {
   toast,
   toggleGroupByCharacter,
 } from '../state/store.ts';
-import { errorMessage, useDismiss } from '../util.ts';
+import { errorMessage } from '../util.ts';
 import { confirmAction } from '../state/confirm.ts';
 import Avatar from './Avatar.tsx';
+import DropdownSurface from './DropdownSurface.tsx';
 import GearIcon from './GearIcon.tsx';
 import GroupIcon from './GroupIcon.tsx';
 
@@ -36,16 +37,13 @@ export default function Sidebar() {
   const [query, setQuery] = createSignal('');
   const [results, setResults] = createSignal<SearchResult[] | null>(null);
   let searchTimer: number | undefined;
-  let newChatWrap: HTMLDivElement | undefined;
+  let sidebarToolsRow: HTMLDivElement | undefined;
+  let newChatButton: HTMLButtonElement | undefined;
 
-  useDismiss(
-    () => newChatWrap,
-    newMenuOpen,
-    () => {
-      setNewMenuOpen(false);
-      setNewChatQuery('');
-    },
-  );
+  const closeNewChatMenu = () => {
+    setNewMenuOpen(false);
+    setNewChatQuery('');
+  };
 
   // Apply only if the query hasn't changed while the request was in flight.
   const runSearch = (q: string) => {
@@ -252,10 +250,14 @@ export default function Sidebar() {
         </span>
       </div>
 
-      <div class="sidebar-tools-row">
-        <div class="new-chat-wrap" ref={newChatWrap}>
+      <div class="sidebar-tools-row" ref={sidebarToolsRow}>
+        <div class="new-chat-wrap">
           <button
+            ref={newChatButton}
+            type="button"
             class="new-chat-btn"
+            aria-haspopup="dialog"
+            aria-expanded={newMenuOpen()}
             onClick={() => {
               const open = !newMenuOpen();
               setNewMenuOpen(open);
@@ -264,74 +266,81 @@ export default function Sidebar() {
           >
             + New chat
           </button>
-          <Show when={newMenuOpen()}>
-            <div class="new-chat-menu popover-surface popover-menu">
-              <div class="new-chat-search">
-                <input
-                  class="search-input"
-                  placeholder="Search characters…"
-                  value={newChatQuery()}
-                  onInput={(event) => setNewChatQuery(event.currentTarget.value)}
-                />
-              </div>
-              {/* Characterless fallback, only when no characters exist (Assistant is normally a seeded character). */}
-              <Show when={state.characters.length === 0}>
-                <button onClick={() => create(null)}>
-                  <span class="avatar avatar-fallback">A</span> Assistant
-                </button>
-              </Show>
-              <For each={state.characterFolders}>
-                {(folder) => (
-                  <Show when={charactersInFolder(folder.id).length > 0}>
-                    <div class="new-chat-folder">
-                      <button
-                        class="new-chat-folder-toggle"
-                        aria-expanded={
-                          newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                        }
-                        onClick={() => {
-                          if (!newChatSearchActive()) toggleCharacterFolder(folder.id);
-                        }}
-                      >
-                        <span class="tree-disclosure">
-                          {newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                            ? '▾'
-                            : '▸'}
-                        </span>
-                        <span>{folder.name}</span>
-                      </button>
-                      <Show
-                        when={newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)}
-                      >
-                        <For each={charactersInFolder(folder.id)}>
-                          {(character) => (
-                            <button
-                              class="new-chat-folder-child"
-                              onClick={() => create(character.id)}
-                            >
-                              <Avatar src={character.avatar} name={character.name} />{' '}
-                              {character.name}
-                            </button>
-                          )}
-                        </For>
-                      </Show>
-                    </div>
-                  </Show>
-                )}
-              </For>
-              <For each={rootCharacters()}>
-                {(character) => (
-                  <button onClick={() => create(character.id)}>
-                    <Avatar src={character.avatar} name={character.name} /> {character.name}
-                  </button>
-                )}
-              </For>
-              <Show when={newChatSearchActive() && matchingNewChatCharacters() === 0}>
-                <p class="hint search-empty">No matches.</p>
-              </Show>
-            </div>
-          </Show>
         </div>
+
+        <DropdownSurface
+          open={newMenuOpen()}
+          anchor={() => sidebarToolsRow}
+          dismissRoot={() => newChatButton}
+          focusTarget={() => newChatButton}
+          onClose={closeNewChatMenu}
+          class="new-chat-menu"
+          role="dialog"
+          ariaLabel="Choose a character for a new chat"
+          placement="bottom"
+          align="start"
+          matchAnchorWidth
+          maxHeight={() => window.innerHeight * 0.5}
+          anchorInset={8}
+        >
+          <div class="new-chat-search">
+            <input
+              class="search-input"
+              placeholder="Search characters…"
+              value={newChatQuery()}
+              onInput={(event) => setNewChatQuery(event.currentTarget.value)}
+            />
+          </div>
+          {/* Characterless fallback, only when no characters exist (Assistant is normally a seeded character). */}
+          <Show when={state.characters.length === 0}>
+            <button onClick={() => create(null)}>
+              <span class="avatar avatar-fallback">A</span> Assistant
+            </button>
+          </Show>
+          <For each={state.characterFolders}>
+            {(folder) => (
+              <Show when={charactersInFolder(folder.id).length > 0}>
+                <div class="new-chat-folder">
+                  <button
+                    class="new-chat-folder-toggle"
+                    aria-expanded={
+                      newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
+                    }
+                    onClick={() => {
+                      if (!newChatSearchActive()) toggleCharacterFolder(folder.id);
+                    }}
+                  >
+                    <span class="tree-disclosure">
+                      {newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
+                        ? '▾'
+                        : '▸'}
+                    </span>
+                    <span>{folder.name}</span>
+                  </button>
+                  <Show when={newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)}>
+                    <For each={charactersInFolder(folder.id)}>
+                      {(character) => (
+                        <button class="new-chat-folder-child" onClick={() => create(character.id)}>
+                          <Avatar src={character.avatar} name={character.name} /> {character.name}
+                        </button>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+              </Show>
+            )}
+          </For>
+          <For each={rootCharacters()}>
+            {(character) => (
+              <button onClick={() => create(character.id)}>
+                <Avatar src={character.avatar} name={character.name} /> {character.name}
+              </button>
+            )}
+          </For>
+          <Show when={newChatSearchActive() && matchingNewChatCharacters() === 0}>
+            <p class="hint search-empty">No matches.</p>
+          </Show>
+        </DropdownSurface>
 
         <div class="search-wrap">
           <input

@@ -19,6 +19,7 @@ import {
 import { messageSupportsSwipe, swipeMessage } from '../messageSwipe.ts';
 import { findMessageView } from '../plugins/index.ts';
 import Avatar from './Avatar.tsx';
+import DropdownSurface from './DropdownSurface.tsx';
 import Markdown from './Markdown.tsx';
 import Modal from './Modal.tsx';
 import TrashIcon from './TrashIcon.tsx';
@@ -44,21 +45,14 @@ const ThinkingIcon = () => (
 // Shared across all messages: on touch layouts, actions show only on the last-tapped message.
 const [touchedId, setTouchedId] = createSignal<number | null>(null);
 
-// At most one ⋯ menu open at a time; module-level listeners dismiss it.
+// At most one ⋯ menu is open at a time across the message list.
 const [moreMenuId, setMoreMenuId] = createSignal<number | null>(null);
-document.addEventListener('click', (event) => {
-  if (moreMenuId() != null && !(event.target as Element).closest?.('.msg-more-wrap')) {
-    setMoreMenuId(null);
-  }
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') setMoreMenuId(null);
-});
 
 export default function MessageNode(props: { message: Message; inMap?: boolean }) {
   const [editing, setEditing] = createSignal(false);
   const [showReasoning, setShowReasoning] = createSignal(false);
   let editArea: HTMLTextAreaElement | undefined;
+  let moreButton: HTMLButtonElement | undefined;
 
   const isUser = () => props.message.role === 'user';
   const isTool = () => props.message.role === 'tool';
@@ -470,6 +464,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               <span class="msg-actions">
                 <span class="msg-more-wrap">
                   <button
+                    ref={moreButton}
+                    type="button"
                     class="icon-btn"
                     classList={{ 'icon-btn-active': menuOpen() }}
                     title="More"
@@ -480,108 +476,121 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                   >
                     ⋯
                   </button>
-                  <Show when={menuOpen()}>
-                    <div
-                      class="msg-more-menu popover-surface popover-menu"
-                      ref={(el) => queueMicrotask(() => el.scrollIntoView({ block: 'nearest' }))}
-                      role="menu"
+                  <DropdownSurface
+                    open={menuOpen()}
+                    anchor={() => moreButton}
+                    onClose={closeMenu}
+                    class="msg-more-menu"
+                    role="menu"
+                    ariaLabel="Message actions"
+                    placement="auto"
+                    align="end"
+                    fitContentWidth
+                    keyboardNavigation
+                    autoFocus
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closeMenu();
+                        copy();
+                      }}
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={props.message.imagePending}
+                      onClick={() => {
+                        closeMenu();
+                        startEdit();
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <Show when={isAssistant() || (isTool() && claimedView() != null)}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeMenu();
+                          openSteer();
+                        }}
+                      >
+                        Regenerate
+                      </button>
+                    </Show>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closeMenu();
+                        duplicate();
+                      }}
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closeMenu();
+                        branchToConversation();
+                      }}
+                    >
+                      Branch chat
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!canMoveUp()}
+                      onClick={() => {
+                        closeMenu();
+                        move('up');
+                      }}
+                    >
+                      Move up
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!canMoveDown()}
+                      onClick={() => {
+                        closeMenu();
+                        move('down');
+                      }}
+                    >
+                      Move down
+                    </button>
+                    <Show
+                      when={claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1}
                     >
                       <button
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          copy();
-                        }}
-                      >
-                        Copy
-                      </button>
-                      <button
-                        role="menuitem"
-                        disabled={props.message.imagePending}
-                        onClick={() => {
-                          closeMenu();
-                          startEdit();
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <Show when={isAssistant() || (isTool() && claimedView() != null)}>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            openSteer();
-                          }}
-                        >
-                          {isTool() ? 'Generate revised image…' : 'Regenerate with instruction…'}
-                        </button>
-                      </Show>
-                      <button
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          duplicate();
-                        }}
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          branchToConversation();
-                        }}
-                      >
-                        Branch to new conversation
-                      </button>
-                      <button
-                        role="menuitem"
-                        disabled={!canMoveUp()}
-                        onClick={() => {
-                          closeMenu();
-                          move('up');
-                        }}
-                      >
-                        Move up
-                      </button>
-                      <button
-                        role="menuitem"
-                        disabled={!canMoveDown()}
-                        onClick={() => {
-                          closeMenu();
-                          move('down');
-                        }}
-                      >
-                        Move down
-                      </button>
-                      <Show
-                        when={
-                          claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1
-                        }
-                      >
-                        <button
-                          class="danger"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            removeSwipe();
-                          }}
-                        >
-                          <TrashIcon /> Delete swipe
-                        </button>
-                      </Show>
-                      <button
+                        type="button"
                         class="danger"
                         role="menuitem"
                         onClick={() => {
                           closeMenu();
-                          remove();
+                          removeSwipe();
                         }}
                       >
-                        <TrashIcon /> Delete
+                        <TrashIcon /> Delete swipe
                       </button>
-                    </div>
-                  </Show>
+                    </Show>
+                    <button
+                      type="button"
+                      class="danger"
+                      role="menuitem"
+                      onClick={() => {
+                        closeMenu();
+                        remove();
+                      }}
+                    >
+                      <TrashIcon /> Delete
+                    </button>
+                  </DropdownSurface>
                 </span>
               </span>
             </Show>

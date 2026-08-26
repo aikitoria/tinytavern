@@ -12,8 +12,9 @@ import {
   toast,
   toggleSidebar,
 } from '../state/store.ts';
-import { errorMessage, useDismiss } from '../util.ts';
+import { errorMessage } from '../util.ts';
 import Avatar from './Avatar.tsx';
+import DropdownSurface from './DropdownSurface.tsx';
 import GearIcon from './GearIcon.tsx';
 import MapIcon from './MapIcon.tsx';
 import Select from './Select.tsx';
@@ -54,13 +55,7 @@ export default function Header() {
     value: number | null;
   } | null>(null);
   let titleInput: HTMLInputElement | undefined;
-  let viewRoot: HTMLSpanElement | undefined;
-
-  useDismiss(
-    () => viewRoot,
-    viewOpen,
-    () => setViewOpen(false),
-  );
+  let viewButton: HTMLButtonElement | undefined;
 
   const contextValue = (field: ContextField) => {
     const pending = pendingContext();
@@ -247,11 +242,12 @@ export default function Header() {
                 />
               </div>
             </div>
-            <span class="header-view-wrap" ref={viewRoot}>
+            <span class="header-view-wrap">
               <button
+                ref={viewButton}
+                type="button"
                 class="header-view-btn"
                 aria-label={`View: ${activeView().label}`}
-                classList={{ 'header-view-active': state.viewMode !== 'chat' }}
                 aria-haspopup="menu"
                 aria-expanded={viewOpen()}
                 onClick={() => setViewOpen(!viewOpen())}
@@ -262,29 +258,37 @@ export default function Header() {
                   ▾
                 </span>
               </button>
-              <Show when={viewOpen()}>
-                <div
-                  class="header-view-menu header-dropdown-menu popover-surface popover-menu"
-                  role="menu"
-                >
-                  <For each={VIEWS}>
-                    {(view) => (
-                      <button
-                        role="menuitemradio"
-                        aria-checked={state.viewMode === view.mode}
-                        classList={{ active: state.viewMode === view.mode }}
-                        onClick={() => setView(view.mode)}
-                      >
-                        <Dynamic component={view.icon} />
-                        <span>{view.label}</span>
-                        <span class="view-check" aria-hidden="true">
-                          {state.viewMode === view.mode ? '✓' : ''}
-                        </span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
+              <DropdownSurface
+                open={viewOpen()}
+                anchor={() => viewButton}
+                onClose={() => setViewOpen(false)}
+                class="header-view-menu header-dropdown-menu"
+                role="menu"
+                ariaLabel="Conversation view"
+                placement="bottom"
+                align="end"
+                minWidth={210}
+                keyboardNavigation
+                autoFocus
+              >
+                <For each={VIEWS}>
+                  {(view) => (
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={state.viewMode === view.mode}
+                      classList={{ active: state.viewMode === view.mode }}
+                      onClick={() => setView(view.mode)}
+                    >
+                      <Dynamic component={view.icon} />
+                      <span>{view.label}</span>
+                      <span class="view-check" aria-hidden="true">
+                        {state.viewMode === view.mode ? '✓' : ''}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </DropdownSurface>
             </span>
             <button
               class="icon-btn"

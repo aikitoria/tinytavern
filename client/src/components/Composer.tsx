@@ -17,7 +17,8 @@ import {
   streamingMessage,
   toast,
 } from '../state/store.ts';
-import { errorMessage, useDismiss } from '../util.ts';
+import { errorMessage } from '../util.ts';
+import DropdownSurface from './DropdownSurface.tsx';
 import MobileSidebarButton from './MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
@@ -135,15 +136,9 @@ export default function Composer() {
   const [selIdx, setSelIdx] = createSignal(0);
   const [toolsOpen, setToolsOpen] = createSignal(false);
   let area: HTMLTextAreaElement | undefined;
-  let toolsWrap: HTMLSpanElement | undefined;
+  let toolsButton: HTMLButtonElement | undefined;
 
   onCleanup(stopDraftCompletion);
-
-  useDismiss(
-    () => toolsWrap,
-    toolsOpen,
-    () => setToolsOpen(false),
-  );
 
   // "/cha" -> completion menu; "/char args" -> parameter hint.
   const cmdQuery = () => {
@@ -367,8 +362,10 @@ export default function Composer() {
           )}
         </Show>
         <MobileSidebarButton />
-        <span class="tools-wrap" ref={toolsWrap}>
+        <span class="tools-wrap">
           <button
+            ref={toolsButton}
+            type="button"
             class="send-btn tools-btn"
             title="Tools"
             aria-label="Composer tools"
@@ -379,23 +376,34 @@ export default function Composer() {
           >
             <WrenchIcon />
           </button>
-          <Show when={toolsOpen()}>
-            <div class="tools-menu popover-surface popover-menu" role="menu">
-              <For each={pluginTools()}>
-                {(tool) => (
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setToolsOpen(false);
-                      tool.run();
-                    }}
-                  >
-                    <tool.icon /> {tool.label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
+          <DropdownSurface
+            open={toolsOpen()}
+            anchor={() => toolsButton}
+            onClose={() => setToolsOpen(false)}
+            class="tools-menu"
+            role="menu"
+            ariaLabel="Composer tools"
+            placement="top"
+            align="start"
+            fitContentWidth
+            keyboardNavigation
+            autoFocus
+          >
+            <For each={pluginTools()}>
+              {(tool) => (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setToolsOpen(false);
+                    tool.run();
+                  }}
+                >
+                  <tool.icon /> {tool.label}
+                </button>
+              )}
+            </For>
+          </DropdownSurface>
         </span>
         <textarea
           ref={area}

@@ -1045,7 +1045,7 @@ const messageView: PluginMessageView = {
     void swipeImage(message, dir);
   },
   canDeleteSwipe: (message) =>
-    message.images.length > 0 && !message.imagePending && imageOnActivePath(message),
+    message.images.length > 1 && !message.imagePending && imageOnActivePath(message),
   deleteSwipe: (message) =>
     api.deleteImage(
       message.id,

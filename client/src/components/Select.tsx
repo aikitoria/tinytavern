@@ -1,9 +1,5 @@
-import { For, Show, createEffect, createSignal, createUniqueId, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
-
-const MENU_GAP = 4;
-const VIEWPORT_GUTTER = 8;
-const MAX_MENU_HEIGHT = 320;
+import { For, Show, createEffect, createSignal, createUniqueId } from 'solid-js';
+import DropdownSurface from './DropdownSurface.tsx';
 
 export interface SelectOption {
   value: string;
@@ -39,13 +35,6 @@ export default function Select(props: {
   const [current, setCurrent] = createSignal(props.value ?? '');
   const [open, setOpen] = createSignal(false);
   const [highlighted, setHighlighted] = createSignal(0);
-  const [pos, setPos] = createSignal({
-    left: 0,
-    top: 0,
-    width: 0,
-    maxHeight: MAX_MENU_HEIGHT,
-    up: false,
-  });
   let button!: HTMLButtonElement;
   let menu: HTMLDivElement | undefined;
 
@@ -66,27 +55,8 @@ export default function Select(props: {
   const label = () =>
     props.buttonLabel ?? props.options.find((o) => o.value === current())?.label ?? current();
 
-  const reposition = () => {
-    const rect = button.getBoundingClientRect();
-    const naturalHeight = Math.min(props.options.length * 34 + 12, MAX_MENU_HEIGHT);
-    const spaceAbove = Math.max(0, rect.top - MENU_GAP - VIEWPORT_GUTTER);
-    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - MENU_GAP - VIEWPORT_GUTTER);
-    const up = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
-    const maxHeight = Math.min(MAX_MENU_HEIGHT, up ? spaceAbove : spaceBelow);
-    const width = Math.min(
-      Math.max(rect.width, props.menuMinWidth ?? 0),
-      window.innerWidth - VIEWPORT_GUTTER * 2,
-    );
-    const left = Math.min(
-      Math.max(rect.left, VIEWPORT_GUTTER),
-      window.innerWidth - VIEWPORT_GUTTER - width,
-    );
-    setPos({ left, top: up ? rect.top : rect.bottom, width, maxHeight, up });
-  };
-
   const openMenu = () => {
     if (props.disabled) return;
-    reposition();
     setHighlighted(
       Math.max(
         0,
@@ -103,23 +73,6 @@ export default function Select(props: {
     props.onChange?.(value);
     button.focus({ preventScroll: true });
   };
-
-  const onDocPointerDown = (event: PointerEvent) => {
-    if (!open()) return;
-    const target = event.target as Node;
-    if (!button.contains(target) && !menu?.contains(target)) setOpen(false);
-  };
-  const onScrollOrResize = () => {
-    if (open()) reposition();
-  };
-  document.addEventListener('pointerdown', onDocPointerDown);
-  window.addEventListener('scroll', onScrollOrResize, true);
-  window.addEventListener('resize', onScrollOrResize);
-  onCleanup(() => {
-    document.removeEventListener('pointerdown', onDocPointerDown);
-    window.removeEventListener('scroll', onScrollOrResize, true);
-    window.removeEventListener('resize', onScrollOrResize);
-  });
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (!open()) {
@@ -165,52 +118,46 @@ export default function Select(props: {
         <span class="select-label">{label()}</span>
         <span class="select-caret">▾</span>
       </button>
-      <Show when={open()}>
-        <Portal>
-          <div
-            class={`select-menu popover-surface popover-menu ${props.menuClass ?? ''}`}
-            ref={menu}
-            id={listboxId}
-            role="listbox"
-            aria-label={props.ariaLabel}
-            style={{
-              left: `${pos().left}px`,
-              width: `${pos().width}px`,
-              'max-height': `${pos().maxHeight}px`,
-              ...(pos().up
-                ? { bottom: `${window.innerHeight - pos().top + MENU_GAP}px` }
-                : { top: `${pos().top + MENU_GAP}px` }),
-            }}
-          >
-            <For each={props.options}>
-              {(option, i) => (
-                <button
-                  type="button"
-                  class="select-option"
-                  id={`select-option-${id}-${i()}`}
-                  role="option"
-                  tabIndex={-1}
-                  aria-selected={option.value === current()}
-                  classList={{
-                    highlighted: i() === highlighted(),
-                    selected: option.value === current(),
-                    active: props.showCheck && option.value === current(),
-                  }}
-                  onPointerEnter={() => setHighlighted(i())}
-                  onClick={() => pick(option.value)}
-                >
-                  <span>{option.label}</span>
-                  <Show when={props.showCheck}>
-                    <span class="menu-check" aria-hidden="true">
-                      {option.value === current() ? '✓' : ''}
-                    </span>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-        </Portal>
-      </Show>
+      <DropdownSurface
+        open={open()}
+        anchor={() => button}
+        onClose={() => setOpen(false)}
+        id={listboxId}
+        class={`select-menu ${props.menuClass ?? ''}`}
+        role="listbox"
+        ariaLabel={props.ariaLabel}
+        matchAnchorWidth
+        minWidth={props.menuMinWidth}
+        maxHeight={320}
+        ref={(element) => (menu = element)}
+      >
+        <For each={props.options}>
+          {(option, i) => (
+            <button
+              type="button"
+              class="select-option"
+              id={`select-option-${id}-${i()}`}
+              role="option"
+              tabIndex={-1}
+              aria-selected={option.value === current()}
+              classList={{
+                highlighted: i() === highlighted(),
+                selected: option.value === current(),
+                active: props.showCheck && option.value === current(),
+              }}
+              onPointerEnter={() => setHighlighted(i())}
+              onClick={() => pick(option.value)}
+            >
+              <span>{option.label}</span>
+              <Show when={props.showCheck}>
+                <span class="menu-check" aria-hidden="true">
+                  {option.value === current() ? '✓' : ''}
+                </span>
+              </Show>
+            </button>
+          )}
+        </For>
+      </DropdownSurface>
     </>
   );
 }
