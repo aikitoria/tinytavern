@@ -28,17 +28,25 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Popover dismiss wiring: close on click outside `root` or on Escape.
+/** Popover dismiss wiring: close on click outside `root`/`additionalRoot` or on Escape.
  * Call from component setup — the document listeners live for the component's
  * lifetime and are cleaned up with it. */
 export function useDismiss(
   root: () => HTMLElement | undefined,
   open: () => boolean,
   close: () => void,
+  additionalRoot?: () => HTMLElement | undefined,
 ): void {
   const onDocClick = (event: MouseEvent) => {
     const el = root();
-    if (open() && el && !el.contains(event.target as Node)) close();
+    const additional = additionalRoot?.();
+    if (
+      open() &&
+      el &&
+      !el.contains(event.target as Node) &&
+      !additional?.contains(event.target as Node)
+    )
+      close();
   };
   const onDocKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') close();

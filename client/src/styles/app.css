@@ -2499,12 +2499,12 @@ textarea.mono,
 }
 
 .help-card {
-  position: absolute;
-  top: calc(100% + var(--space-2));
-  left: calc(-1 * var(--space-2));
-  z-index: 50;
-  width: min(460px, 82vw);
+  position: fixed;
+  /* Portaled above ordinary modals, but below confirmations and media viewers. */
+  z-index: 150;
+  max-width: calc(100vw - 16px);
   padding: var(--space-3);
+  overflow-y: auto;
   /* aligned two-column table: macros left, descriptions share one column */
   display: grid;
   grid-template-columns: max-content 1fr;
