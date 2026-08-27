@@ -75,25 +75,21 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message);
 }
 
-/** Reads the avatar prompt SSE stream ({d} deltas, {error}, {done}), invoking
+/** Reads a text-completion SSE stream ({d} deltas, {error}, {done}), invoking
  * onDelta per token and resolving with the assembled text. */
-async function streamAvatarPrompt(
-  kind: 'character' | 'persona',
-  id: number,
-  prompt: string,
-  context: string,
+async function streamTextCompletion(
+  url: string,
+  body: Record<string, unknown>,
   onDelta: (text: string) => void,
+  streamLabel: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const res = await fetch(
-    `/api/${kind === 'character' ? 'characters' : 'personas'}/${id}/avatar/prompt`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, context }),
-      signal: signal ?? null,
-    },
-  );
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: signal ?? null,
+  });
   if (!res.ok || !res.body) throw await errorFromResponse(res);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -118,9 +114,40 @@ async function streamAvatarPrompt(
       }
     }
   }
-  if (!completed) throw new ApiError(502, 'avatar prompt stream ended before completion');
+  if (!completed) throw new ApiError(502, `${streamLabel} stream ended before completion`);
   return text;
 }
+
+const streamAvatarPrompt = (
+  kind: 'character' | 'persona',
+  id: number,
+  prompt: string,
+  context: string,
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+) =>
+  streamTextCompletion(
+    `/api/${kind === 'character' ? 'characters' : 'personas'}/${id}/avatar/prompt`,
+    { prompt, context },
+    onDelta,
+    'avatar prompt',
+    signal,
+  );
+
+const streamGalleryPromptRevision = (
+  id: number,
+  prompt: string,
+  instruction: string,
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+) =>
+  streamTextCompletion(
+    `/api/gallery/${id}/revise-prompt`,
+    { prompt, instruction },
+    onDelta,
+    'gallery prompt revision',
+    signal,
+  );
 
 /** Stateless avatar render: prompt + workflow in, image bytes out. */
 async function renderAvatar(
@@ -219,6 +246,7 @@ export const api = {
       messageId,
       index,
     }),
+  streamGalleryPromptRevision,
   renderGalleryImage: (
     id: number,
     jobId: string,

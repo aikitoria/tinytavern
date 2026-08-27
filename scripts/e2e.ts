@@ -2839,6 +2839,60 @@ async function main() {
       (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200,
     'deleting the source conversation detaches links but preserves the saved image and prompt',
   );
+  const galleryRevisionInstruction = 'change only the lighting to a warm sunset';
+  await expectStatus(
+    'POST',
+    `/api/gallery/${savedGallery.item.id}/revise-prompt`,
+    { prompt: savedGallery.item.prompt, instruction: '   ' },
+    400,
+  );
+  const galleryRevisionResponse = await fetch(
+    `${BASE}/api/gallery/${savedGallery.item.id}/revise-prompt`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: savedGallery.item.prompt,
+        instruction: galleryRevisionInstruction,
+      }),
+    },
+  );
+  assert(
+    galleryRevisionResponse.ok &&
+      galleryRevisionResponse.headers.get('content-type')?.includes('text/event-stream') === true,
+    'gallery prompt revision responds with SSE',
+  );
+  let galleryRevisedPrompt = '';
+  let galleryRevisionDone = false;
+  let galleryRevisionError = '';
+  for (const line of (await galleryRevisionResponse.text()).split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    const event = JSON.parse(line.slice(5)) as { d?: string; error?: string; done?: boolean };
+    if (event.d) galleryRevisedPrompt += event.d;
+    if (event.error) galleryRevisionError = event.error;
+    if (event.done) galleryRevisionDone = true;
+  }
+  assert(
+    galleryRevisionDone && !galleryRevisionError && galleryRevisedPrompt.trim().length > 0,
+    'gallery prompt revision streams a complete replacement prompt',
+  );
+  const galleryRevisionCompletion = (await (
+    await fetch(`${MOCK_CONTROL}/control/last-completion`)
+  ).json()) as {
+    completion: {
+      messages: { role: string; content: string }[];
+    } | null;
+  };
+  assert(
+    galleryRevisionCompletion.completion?.messages.map((message) => message.role).join(',') ===
+      'user,assistant,user' &&
+      galleryRevisionCompletion.completion.messages[1]?.content ===
+        `<original_image_prompt>\n${savedGallery.item.prompt}\n</original_image_prompt>` &&
+      galleryRevisionCompletion.completion.messages[2]?.content.includes(
+        `<revision_instruction>\n${galleryRevisionInstruction}\n</revision_instruction>`,
+      ) === true,
+    'gallery prompt revision reuses the alternating-safe image edit task without chat context',
+  );
   const galleryJobId = 'e2e-gallery-job';
   const galleryProgressAbort = new AbortController();
   const galleryProgressResponse = await fetch(
@@ -2883,20 +2937,20 @@ async function main() {
   const galleryGenerated = await req<GalleryItem>(
     'POST',
     `/api/gallery/${savedGallery.item.id}/render-image`,
-    { jobId: galleryJobId, prompt: `edited ${savedGallery.item.prompt}` },
+    { jobId: galleryJobId, prompt: galleryRevisedPrompt },
   );
   await galleryProgressSeen;
   galleryProgressAbort.abort();
   const generatedGalleryImageUrl = galleryGenerated.image;
   assert(
     galleryGenerated.id !== savedGallery.item.id &&
-      galleryGenerated.prompt === `edited ${savedGallery.item.prompt}` &&
+      galleryGenerated.prompt === galleryRevisedPrompt.trim() &&
       galleryGenerated.characterName === savedGallery.item.characterName &&
       galleryGenerated.sourceConversationId === null &&
       galleryGenerated.sourceMessageId === null &&
       generatedGalleryImageUrl !== savedGalleryImageUrl &&
       (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200,
-    'gallery generation creates a separate saved image from the edited prompt instead of a swipe',
+    'gallery generation creates a separate saved image from the regenerated prompt instead of a swipe',
   );
   assert(
     (await req<GalleryItem[]>('GET', '/api/gallery')).some(

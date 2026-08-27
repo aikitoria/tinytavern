@@ -4,8 +4,11 @@ import type { GalleryItem } from '@minitavern/shared';
 import { stmt, toGalleryItem, transaction } from '../db.ts';
 import { openProgressSocket, parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { invalidate } from '../events.ts';
+import { streamChatCompletion } from '../generation.ts';
 import { copyImage, deleteImageFiles, saveImage } from '../images.ts';
+import { buildImagePromptRevisionMessages } from '../prompt.ts';
 import { HttpError, route } from '../router.ts';
+import type { Ctx } from '../router.ts';
 import {
   finishRenderProgress,
   publishRenderPreview,
@@ -120,6 +123,8 @@ route.post('/api/gallery', ({ body }) => {
 });
 
 const activeRenders = new Set<number>();
+const activePromptRevisions = new Set<number>();
+const PROMPT_REVISION_MAX_TOKENS = 2048;
 
 route.get('/api/gallery/render-progress/:id', (ctx) => streamRenderProgress(ctx));
 
@@ -151,11 +156,58 @@ route.post('/api/gallery/bulk-delete', ({ body }) => {
     throw new HttpError(400, 'ids must contain positive integers');
   }
   const ids = [...new Set(rawIds as number[])];
-  if (ids.some((id) => activeRenders.has(id))) {
-    throw new HttpError(409, 'an image render is still running for a selected item');
+  if (ids.some((id) => activeRenders.has(id) || activePromptRevisions.has(id))) {
+    throw new HttpError(409, 'generation is still running for a selected item');
   }
   return { deleted: deleteGalleryRows(ids) };
 });
+
+async function reviseGalleryPrompt(ctx: Ctx): Promise<void> {
+  const id = positiveId(ctx.params.id);
+  requireGalleryItem(id);
+  const body = objectBody(ctx.body);
+  const prompt = requiredString(body, 'prompt');
+  const instruction = requiredString(body, 'instruction');
+  if (activePromptRevisions.has(id)) {
+    throw new HttpError(409, 'a prompt revision is already running for this gallery item');
+  }
+  const abort = new AbortController();
+  const onClose = () => {
+    if (!ctx.res.writableEnded) abort.abort();
+  };
+  ctx.res.on('close', onClose);
+  if (ctx.res.destroyed) abort.abort();
+  activePromptRevisions.add(id);
+  try {
+    ctx.res.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    });
+    try {
+      await streamChatCompletion(
+        null,
+        buildImagePromptRevisionMessages(prompt, instruction),
+        PROMPT_REVISION_MAX_TOKENS,
+        (delta) => ctx.res.write(`data: ${JSON.stringify({ d: delta })}\n\n`),
+        abort.signal,
+      );
+      if (!abort.signal.aborted) ctx.res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        ctx.res.write(
+          `data: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`,
+        );
+      }
+    }
+    ctx.res.end();
+  } finally {
+    ctx.res.off('close', onClose);
+    activePromptRevisions.delete(id);
+  }
+}
+
+route.post('/api/gallery/:id/revise-prompt', reviseGalleryPrompt);
 
 /** Generates a new, independent gallery item from this item's snapshotted
  * prompt/character. It never appends a swipe to or mutates the source item. */
@@ -243,6 +295,8 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
 route.del('/api/gallery/:id', ({ params }) => {
   const id = positiveId(params.id);
   requireGalleryItem(id);
-  if (activeRenders.has(id)) throw new HttpError(409, 'an image render is still running');
+  if (activeRenders.has(id) || activePromptRevisions.has(id)) {
+    throw new HttpError(409, 'generation is still running for this gallery item');
+  }
   deleteGalleryRows([id]);
 });

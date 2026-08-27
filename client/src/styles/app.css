@@ -2506,7 +2506,7 @@ textarea.mono,
 .gallery-prompt-modal {
   width: min(680px, 100%);
   height: auto;
-  max-height: min(75dvh, 720px);
+  max-height: min(90dvh, 820px);
 }
 
 .gallery-prompt-dialog {
@@ -2515,9 +2515,32 @@ textarea.mono,
   gap: var(--space-3);
 }
 
-.gallery-prompt-dialog textarea {
+.gallery-prompt-render-form,
+.gallery-prompt-revision-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gallery-prompt-render-form textarea {
   min-height: 220px;
   resize: vertical;
+}
+
+.gallery-prompt-revision-form {
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+
+.gallery-prompt-revision-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.gallery-prompt-revision-form .form-actions {
+  margin-top: 0;
 }
 
 .gallery-prompt-dialog .hint,

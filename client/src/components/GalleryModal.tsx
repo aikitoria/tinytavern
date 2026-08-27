@@ -1,4 +1,4 @@
-import { For, Show, batch, createEffect, createMemo, createSignal } from 'solid-js';
+import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { GalleryItem } from '@minitavern/shared';
 import { api } from '../state/api.ts';
 import { applyGalleryItem, setState, state, toast } from '../state/store.ts';
@@ -84,13 +84,19 @@ function GalleryCard(props: {
   const [mutating, setMutating] = createSignal(false);
   const [promptOpen, setPromptOpen] = createSignal(false);
   const [promptDraft, setPromptDraft] = createSignal(props.item.prompt);
+  const [revisionInstruction, setRevisionInstruction] = createSignal('');
+  const [revisionError, setRevisionError] = createSignal('');
+  const [revisingPrompt, setRevisingPrompt] = createSignal(false);
   const [viewerOpen, setViewerOpen] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
   let moreButton: HTMLButtonElement | undefined;
+  let revisionAbort: AbortController | undefined;
+  const renderFormId = `gallery-render-form-${props.item.id}`;
+  const revisionFormId = `gallery-revision-form-${props.item.id}`;
   const canGenerate = () => props.item.hasImageRender || activeImageRenderConfig() != null;
   const rendering = () =>
     state.galleryRenders.some((render) => render.sourceItemId === props.item.id);
-  const busy = () => mutating() || rendering();
+  const busy = () => mutating() || rendering() || revisingPrompt();
 
   createEffect(() => {
     if (props.selectionMode) setMenuOpen(false);
@@ -98,14 +104,65 @@ function GalleryCard(props: {
 
   const openPromptForm = () => {
     if (busy()) return;
+    revisionAbort?.abort();
     setPromptDraft(props.item.prompt);
+    setRevisionInstruction('');
+    setRevisionError('');
+    setRevisingPrompt(false);
     setPromptOpen(true);
+  };
+
+  const closePromptForm = () => {
+    revisionAbort?.abort();
+    revisionAbort = undefined;
+    setRevisingPrompt(false);
+    setPromptOpen(false);
+  };
+
+  onCleanup(() => revisionAbort?.abort());
+
+  const revisePrompt = async () => {
+    const original = promptDraft().trim();
+    const instruction = revisionInstruction().trim();
+    if (!original || !instruction || busy()) return;
+    const abort = new AbortController();
+    revisionAbort = abort;
+    let streamed = '';
+    setRevisionError('');
+    setRevisingPrompt(true);
+    setPromptDraft('');
+    try {
+      const revised = await api.streamGalleryPromptRevision(
+        props.item.id,
+        original,
+        instruction,
+        (delta) => {
+          if (revisionAbort !== abort) return;
+          streamed += delta;
+          setPromptDraft(streamed);
+        },
+        abort.signal,
+      );
+      if (revisionAbort !== abort) return;
+      setPromptDraft(revised.trim());
+      setRevisionInstruction('');
+    } catch (err) {
+      if (!abort.signal.aborted && revisionAbort === abort) {
+        setPromptDraft(original);
+        setRevisionError(errorMessage(err));
+      }
+    } finally {
+      if (revisionAbort === abort) {
+        revisionAbort = undefined;
+        setRevisingPrompt(false);
+      }
+    }
   };
 
   const generate = () => {
     const prompt = promptDraft().trim();
     if (!prompt || !canGenerate() || busy()) return;
-    setPromptOpen(false);
+    closePromptForm();
     props.onGenerate(props.item, prompt);
   };
 
@@ -254,23 +311,73 @@ function GalleryCard(props: {
         <Modal
           title="Generate gallery image"
           class="gallery-prompt-modal"
-          onClose={() => setPromptOpen(false)}
+          onClose={closePromptForm}
         >
-          <form
-            class="gallery-prompt-dialog form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              generate();
-            }}
-          >
-            <label for={`gallery-prompt-${props.item.id}`}>Prompt</label>
-            <textarea
-              id={`gallery-prompt-${props.item.id}`}
-              data-modal-initial-focus
-              rows={8}
-              value={promptDraft()}
-              onInput={(event) => setPromptDraft(event.currentTarget.value)}
-            />
+          <div class="gallery-prompt-dialog form">
+            <form
+              id={renderFormId}
+              class="gallery-prompt-render-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                generate();
+              }}
+            >
+              <label for={`gallery-prompt-${props.item.id}`}>Prompt</label>
+              <textarea
+                id={`gallery-prompt-${props.item.id}`}
+                data-modal-initial-focus
+                rows={8}
+                value={promptDraft()}
+                readOnly={revisingPrompt()}
+                onInput={(event) => setPromptDraft(event.currentTarget.value)}
+              />
+            </form>
+            <form
+              id={revisionFormId}
+              class="gallery-prompt-revision-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void revisePrompt();
+              }}
+            >
+              <label for={`gallery-revision-${props.item.id}`}>
+                Regenerate prompt with an edit instruction
+              </label>
+              <textarea
+                id={`gallery-revision-${props.item.id}`}
+                rows={3}
+                value={revisionInstruction()}
+                readOnly={revisingPrompt()}
+                placeholder="e.g. change the lighting to sunset; preserve everything else"
+                onInput={(event) => setRevisionInstruction(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (
+                    !event.isComposing &&
+                    event.key === 'Enter' &&
+                    (event.ctrlKey || event.metaKey)
+                  ) {
+                    event.preventDefault();
+                    void revisePrompt();
+                  }
+                }}
+              />
+              <div class="form-actions">
+                <button
+                  type="submit"
+                  disabled={!promptDraft().trim() || !revisionInstruction().trim() || busy()}
+                >
+                  <Show when={revisingPrompt()}>
+                    <span class="spinner" />
+                  </Show>
+                  {revisingPrompt() ? 'Revising…' : 'Regenerate prompt'}
+                </button>
+              </div>
+              <Show when={revisionError()}>
+                <p class="notice notice-error" role="alert">
+                  {revisionError()}
+                </p>
+              </Show>
+            </form>
             <p class="hint">
               Uses the active image workflow, or this image's saved workflow when none is active.
             </p>
@@ -282,19 +389,24 @@ function GalleryCard(props: {
             <div class="form-actions">
               <button
                 type="submit"
+                form={renderFormId}
                 class="primary-btn"
                 disabled={!promptDraft().trim() || !canGenerate() || busy()}
               >
                 Generate image
               </button>
-              <button type="button" onClick={() => void copyPrompt(promptDraft())}>
+              <button
+                type="button"
+                disabled={revisingPrompt()}
+                onClick={() => void copyPrompt(promptDraft())}
+              >
                 Copy prompt
               </button>
-              <button type="button" onClick={() => setPromptOpen(false)}>
+              <button type="button" onClick={closePromptForm}>
                 Cancel
               </button>
             </div>
-          </form>
+          </div>
         </Modal>
       </Show>
     </article>

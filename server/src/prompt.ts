@@ -330,6 +330,54 @@ export function buildSteeredPrompt(
   return built;
 }
 
+/** Appends the shared image-prompt revision exchange. Starting from an empty
+ * array produces a standalone revision request; starting from roleplay context
+ * preserves that context for the chat message regeneration flow. */
+export function appendImagePromptRevisionTask(
+  messages: ChatMessage[],
+  original: string,
+  originalReasoning: string | null,
+  instruction: string,
+): void {
+  const originalBlock = `<original_image_prompt>\n${original.trim()}\n</original_image_prompt>`;
+  // Always represent the model-produced prompt as an assistant turn so its
+  // reasoning_content can be replayed too. Add a bridge when needed to retain
+  // strict user/assistant alternation.
+  if (messages.at(-1)?.role !== 'user') {
+    appendChatMessage(messages, {
+      role: 'user',
+      content:
+        '[IMAGE PROMPT REVISION CONTEXT]\nThe next assistant message is the original image-generation prompt to revise.',
+    });
+  }
+  appendChatMessage(messages, {
+    role: 'assistant',
+    content: originalBlock,
+    ...(originalReasoning?.trim() ? { reasoning_content: originalReasoning } : {}),
+  });
+  appendChatMessage(messages, {
+    role: 'user',
+    content:
+      `[IMAGE PROMPT REVISION TASK]\n` +
+      `The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ` +
+      `Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ` +
+      `Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n` +
+      `The immediately preceding assistant message contains the original image prompt.\n\n` +
+      `<revision_instruction>\n${instruction.trim()}\n</revision_instruction>`,
+  });
+}
+
+/** Standalone form of the same revision request, used by durable gallery
+ * items even after their source conversation has been deleted. */
+export function buildImagePromptRevisionMessages(
+  original: string,
+  instruction: string,
+): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  appendImagePromptRevisionTask(messages, original, null, instruction);
+  return messages;
+}
+
 /** Revision of an image-tool output. The unchanged roleplay history stays as
  * the request prefix for cache reuse and contextual references. A strongly
  * delimited final user task tells the model that history is reference-only and
@@ -342,32 +390,7 @@ export function buildSteeredToolPrompt(
   instruction: string,
 ): BuiltPrompt {
   const built = buildChatMessages(conversation, history);
-  const originalBlock = `<original_image_prompt>\n${original.trim()}\n</original_image_prompt>`;
-  // Always represent the model-produced tool output as an assistant turn so
-  // its reasoning_content can be replayed too. Add a clear bridge only when
-  // needed to preserve strict user/assistant alternation.
-  if (built.messages.at(-1)?.role !== 'user') {
-    appendChatMessage(built.messages, {
-      role: 'user',
-      content:
-        '[IMAGE PROMPT REVISION CONTEXT]\nThe next assistant message is the original image-generation prompt to revise.',
-    });
-  }
-  appendChatMessage(built.messages, {
-    role: 'assistant',
-    content: originalBlock,
-    ...(originalReasoning?.trim() ? { reasoning_content: originalReasoning } : {}),
-  });
-  appendChatMessage(built.messages, {
-    role: 'user',
-    content:
-      `[IMAGE PROMPT REVISION TASK]\n` +
-      `The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ` +
-      `Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ` +
-      `Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n` +
-      `The immediately preceding assistant message contains the original image prompt.\n\n` +
-      `<revision_instruction>\n${instruction.trim()}\n</revision_instruction>`,
-  });
+  appendImagePromptRevisionTask(built.messages, original, originalReasoning, instruction);
   return {
     ...built,
     reasoningPrefill: null,
