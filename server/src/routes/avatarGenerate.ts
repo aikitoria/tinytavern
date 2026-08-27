@@ -6,6 +6,13 @@ import { getSettings } from '../settingsStore.ts';
 import { route, HttpError } from '../router.ts';
 import type { Ctx } from '../router.ts';
 import { objectBody, positiveId } from '../validation.ts';
+import {
+  finishRenderProgress,
+  publishRenderPreview,
+  publishRenderProgress,
+  renderJobId,
+  streamRenderProgress,
+} from '../renderProgress.ts';
 import { rowById } from './entityUtils.ts';
 import type { AvatarKind } from './avatarStore.ts';
 
@@ -23,70 +30,6 @@ const AVATAR_PROMPT_MAX_TOKENS = 2048;
 
 /** One in-flight prompt stream per entity — a double open 409s. */
 const streaming = new Set<string>();
-
-/** Job-scoped SSE listeners. The random job id is capability-like: unlike a
- * global WS broadcast, sampler progress reaches only the modal that opened the
- * corresponding stream, and the entry disappears as soon as it closes. */
-const renderProgressListeners = new Map<string, Set<Ctx['res']>>();
-
-function avatarJobId(raw: string): string {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(raw)) throw new HttpError(400, 'invalid avatar render job id');
-  return raw;
-}
-
-function publishRenderProgress(jobId: string, value: number, max: number): void {
-  const payload = `data: ${JSON.stringify({ value, max })}\n\n`;
-  for (const res of renderProgressListeners.get(jobId) ?? []) {
-    if (!res.destroyed && !res.writableEnded) res.write(payload);
-  }
-}
-
-function publishRenderPreview(jobId: string, preview: string): void {
-  const payload = `data: ${JSON.stringify({ preview })}\n\n`;
-  for (const res of renderProgressListeners.get(jobId) ?? []) {
-    if (!res.destroyed && !res.writableEnded) res.write(payload);
-  }
-}
-
-function finishRenderProgress(jobId: string): void {
-  const listeners = renderProgressListeners.get(jobId);
-  if (!listeners) return;
-  renderProgressListeners.delete(jobId);
-  for (const res of listeners) {
-    if (!res.destroyed && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    }
-  }
-}
-
-async function streamRenderProgress(ctx: Ctx): Promise<void> {
-  const jobId = avatarJobId(ctx.params.id ?? '');
-  let listeners = renderProgressListeners.get(jobId);
-  if (!listeners) {
-    listeners = new Set();
-    renderProgressListeners.set(jobId, listeners);
-  }
-  listeners.add(ctx.res);
-  ctx.res.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
-  });
-  // Force response headers through so the client knows registration completed
-  // before it starts the render request.
-  ctx.res.write(': ready\n\n');
-  await new Promise<void>((resolve) => {
-    ctx.res.once('close', resolve);
-  });
-  listeners.delete(ctx.res);
-  if (listeners.size === 0 && renderProgressListeners.get(jobId) === listeners) {
-    renderProgressListeners.delete(jobId);
-  }
-  // On an aborted connection Node may not mark writableEnded by itself; make
-  // the router's post-handler response path a no-op.
-  if (!ctx.res.writableEnded) ctx.res.end();
-}
 
 /** Case-insensitive replaceAll of the macros this entity kind supports;
  * unsupported or unknown macros are left untouched. */
@@ -210,7 +153,7 @@ async function renderAvatar(ctx: Ctx) {
   const b = objectBody(ctx.body);
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt) throw new HttpError(400, 'prompt is required');
-  const jobId = typeof b.jobId === 'string' && b.jobId.trim() ? avatarJobId(b.jobId.trim()) : '';
+  const jobId = typeof b.jobId === 'string' && b.jobId.trim() ? renderJobId(b.jobId.trim()) : '';
   let image: { workflow: string; comfyUrl: string };
   try {
     image = parseImageConfig(b.image);

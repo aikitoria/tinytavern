@@ -17,6 +17,7 @@ import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import GearIcon from './GearIcon.tsx';
 import GroupIcon from './GroupIcon.tsx';
+import GalleryIcon from './GalleryIcon.tsx';
 
 interface SearchResult {
   conversation: Conversation;
@@ -229,6 +230,14 @@ export default function Sidebar() {
           />
         </span>
         <span class="sidebar-head-actions">
+          <button
+            class="icon-btn"
+            title="Gallery"
+            aria-label="Open saved image gallery"
+            onClick={() => openModal('gallery')}
+          >
+            <GalleryIcon />
+          </button>
           <button
             class="icon-btn"
             classList={{ 'icon-btn-active': state.groupByCharacter }}

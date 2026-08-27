@@ -52,6 +52,25 @@ export interface Message {
   createdAt: number;
 }
 
+/** A durable, gallery-owned copy of one saved image swipe. The source links
+ * are optional metadata only: deleting the source never removes this item. */
+export interface GalleryItem {
+  id: number;
+  characterId: number | null;
+  /** Snapshotted when saved so grouping survives character deletion. */
+  characterName: string;
+  sourceConversationId: number | null;
+  sourceMessageId: number | null;
+  /** Original message image path, used only to recognize an already-saved swipe. */
+  sourceImage: string | null;
+  prompt: string;
+  /** Independent gallery-owned image file. */
+  image: string;
+  hasImageRender: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Conversation {
   id: number;
   title: string;
@@ -300,6 +319,7 @@ export interface TreeSnapshot {
 
 export type InvalidateEntity =
   | 'conversations'
+  | 'gallery'
   | 'characters'
   | 'characterFolders'
   | 'presets'

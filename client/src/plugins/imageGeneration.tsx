@@ -5,9 +5,11 @@ import { pluginSettings } from './api.ts';
 import { api, ApiError } from '../state/api.ts';
 import {
   activePath,
+  applyGalleryItem,
   applySettings,
   imageProgress,
   navigateTree,
+  openModal,
   state,
   toast,
 } from '../state/store.ts';
@@ -19,6 +21,7 @@ import Markdown from '../components/Markdown.tsx';
 import Select from '../components/Select.tsx';
 import { useSettingsGuard } from '../components/SettingsGuard.tsx';
 import type { SelectHandle } from '../components/Select.tsx';
+import GalleryIcon from '../components/GalleryIcon.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import './imageGeneration.css';
 
@@ -226,7 +229,7 @@ function composePrompt(
 }
 
 /** The active workflow as a render config; undefined when none is configured. */
-function activeRenderConfig(): { workflow: string; comfyUrl: string } | undefined {
+export function activeImageRenderConfig(): { workflow: string; comfyUrl: string } | undefined {
   const cfg = settings();
   const active = cfg.workflows.find((workflow) => workflow.name === cfg.activeWorkflow);
   return active?.json.trim() ? { workflow: active.json, comfyUrl: cfg.comfyUrl } : undefined;
@@ -239,7 +242,7 @@ export function avatarRenderConfig(): { workflow: string; comfyUrl: string } | u
   const avatar = cfg.workflows.find((workflow) => workflow.name === cfg.avatarWorkflow);
   return avatar?.json.trim()
     ? { workflow: avatar.json, comfyUrl: cfg.comfyUrl }
-    : activeRenderConfig();
+    : activeImageRenderConfig();
 }
 
 /** Avatar generation is available once a workflow resolves (dedicated avatar
@@ -277,7 +280,7 @@ async function generate(
       'Image prompt',
       state.tree.activeLeafId,
       state.tree.mutationRevision,
-      activeRenderConfig(),
+      activeImageRenderConfig(),
     ),
   );
 }
@@ -977,7 +980,7 @@ const canRenderImage = (message: Message) =>
   !state.treeNavigationPending &&
   imageOnActivePath(message) &&
   !message.imagePending &&
-  (message.hasImageRender || activeRenderConfig() != null);
+  (message.hasImageRender || activeImageRenderConfig() != null);
 
 /** Shared by header buttons and ChatView's Left/Right shortcut. */
 async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
@@ -1017,7 +1020,7 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
           // A manual rerender follows the workflow currently selected in
           // settings. The server falls back to the stored snapshot only when
           // no workflow is selected now.
-          activeRenderConfig(),
+          activeImageRenderConfig(),
         ),
       );
     } else {
@@ -1040,7 +1043,7 @@ const messageView: PluginMessageView = {
     message.imagePending ||
     message.hasImageRender ||
     message.name === 'Image prompt',
-  currentImageConfig: activeRenderConfig,
+  currentImageConfig: activeImageRenderConfig,
   swipe: (message, dir) => {
     void swipeImage(message, dir);
   },
@@ -1056,6 +1059,7 @@ const messageView: PluginMessageView = {
   create: (message, ctx) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
+    const [savingToGallery, setSavingToGallery] = createSignal(false);
     const images = () => message().images;
     const activeImage = () => Math.min(message().activeImage, images().length - 1);
     const currentImage = () => images()[activeImage()];
@@ -1072,6 +1076,32 @@ const messageView: PluginMessageView = {
     const promptCollapsed = () => images().length > 0 || livePreview() != null;
     const onActivePath = () => activePath().some((active) => active.id === message().id);
     const canRender = () => canRenderImage(message());
+    const savedItem = () => {
+      const image = currentImage();
+      return image
+        ? state.gallery.find(
+            (item) => item.sourceMessageId === message().id && item.sourceImage === image,
+          )
+        : undefined;
+    };
+    const saveToGallery = async () => {
+      if (savedItem()) {
+        openModal('gallery');
+        return;
+      }
+      if (!currentImage() || savingToGallery()) return;
+      setSavingToGallery(true);
+      try {
+        const result = await api.saveGalleryImage(message().id, activeImage());
+        applyGalleryItem(result.item);
+        if (result.created) toast('Saved image to gallery.', 'success');
+        else openModal('gallery');
+      } catch (err) {
+        toast(errorMessage(err));
+      } finally {
+        setSavingToGallery(false);
+      }
+    };
 
     const Header = () => (
       <Show when={promptCollapsed()}>
@@ -1115,6 +1145,16 @@ const messageView: PluginMessageView = {
           </span>
         </Show>
         <Show when={images().length > 0}>
+          <button
+            class="icon-btn gallery-save-btn"
+            classList={{ 'icon-btn-active': savedItem() != null }}
+            title={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+            aria-label={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+            disabled={savingToGallery()}
+            onClick={() => void saveToGallery()}
+          >
+            <GalleryIcon filled={savedItem() != null} />
+          </button>
           <span class="branch-nav">
             <button
               class="icon-btn"

@@ -38,7 +38,10 @@ can be open on several devices without separate client-side copies.
   exported as self-contained JSON, including their branches and generated images.
 - Generate chat images and character or persona avatars through ComfyUI. The
   bundled image plugin supports reusable prompt presets, multiple workflows, live
-  previews, and image alternatives.
+  previews, and image alternatives. Individual image swipes can be saved to a
+  global character-grouped gallery with their prompts, then edit, regenerate,
+  multi-select, or bulk-delete them even after the source message or conversation
+  is deleted.
 - Use the responsive web client on desktop or mobile. Changes and active streams
   appear on every connected client.
 

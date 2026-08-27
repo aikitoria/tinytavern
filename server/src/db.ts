@@ -8,6 +8,7 @@ import type {
   Conversation,
   CustomTemplate,
   Endpoint,
+  GalleryItem,
   Message,
   Persona,
   Preset,
@@ -411,6 +412,56 @@ if (version < 22) {
   `);
 }
 
+// Saved image swipes own independent file copies and prompt/render snapshots.
+// Source foreign keys are navigation metadata only and become NULL on delete;
+// gallery content itself never cascades with a message or conversation.
+if (version < 23) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE gallery_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      character_name TEXT NOT NULL,
+      source_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+      source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+      source_image TEXT UNIQUE,
+      prompt TEXT NOT NULL,
+      images_json TEXT NOT NULL DEFAULT '[]',
+      active_image INTEGER NOT NULL DEFAULT 0,
+      image_render_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_gallery_character ON gallery_items(character_id, updated_at DESC);
+    PRAGMA user_version = 23;
+    COMMIT;
+  `);
+}
+
+// Gallery generation creates separate cards, not within-card swipes. Preserve
+// any alternatives created by early development builds by splitting them into
+// independent rows before collapsing storage to one image path per item.
+if (version < 24) {
+  db.exec(`
+    BEGIN;
+    ALTER TABLE gallery_items ADD COLUMN image TEXT;
+    UPDATE gallery_items SET image = json_extract(images_json, '$[0]');
+    INSERT INTO gallery_items
+      (character_id, character_name, source_conversation_id, source_message_id,
+       source_image, prompt, images_json, active_image, image_render_json,
+       created_at, updated_at, image)
+    SELECT g.character_id, g.character_name, NULL, NULL,
+           NULL, g.prompt, json_array(j.value), 0, g.image_render_json,
+           g.created_at, g.updated_at + CAST(j.key AS INTEGER), j.value
+    FROM gallery_items g, json_each(g.images_json) j
+    WHERE CAST(j.key AS INTEGER) > 0;
+    ALTER TABLE gallery_items DROP COLUMN images_json;
+    ALTER TABLE gallery_items DROP COLUMN active_image;
+    PRAGMA user_version = 24;
+    COMMIT;
+  `);
+}
+
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 db.prepare(
@@ -504,6 +555,22 @@ export function toMessage(r: Row): Message {
     imagePending: (r.image_pending as number) === 1,
     hasImageRender: r.image_render_json != null,
     createdAt: r.created_at as number,
+  };
+}
+
+export function toGalleryItem(r: Row): GalleryItem {
+  return {
+    id: r.id as number,
+    characterId: (r.character_id as number | null) ?? null,
+    characterName: (r.current_character_name as string | null) ?? (r.character_name as string),
+    sourceConversationId: (r.source_conversation_id as number | null) ?? null,
+    sourceMessageId: (r.source_message_id as number | null) ?? null,
+    sourceImage: (r.source_image as string | null) ?? null,
+    prompt: r.prompt as string,
+    image: r.image as string,
+    hasImageRender: r.image_render_json != null,
+    createdAt: r.created_at as number,
+    updatedAt: r.updated_at as number,
   };
 }
 

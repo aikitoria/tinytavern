@@ -145,11 +145,10 @@
   display: flex;
   gap: var(--space-1);
   padding: var(--space-1);
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  background: var(--bg-panel);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   border-radius: var(--radius-control-group);
   box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 45%, transparent);
-  backdrop-filter: blur(14px);
 }
 
 .treemap-empty {

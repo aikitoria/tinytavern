@@ -3,6 +3,7 @@ import type {
   CharacterFolder,
   Conversation,
   Endpoint,
+  GalleryItem,
   Message,
   Persona,
   Preset,
@@ -140,16 +141,17 @@ async function renderAvatar(
   return res.blob();
 }
 
-/** Opens the job-scoped avatar-render progress stream. Resolving means the
- * server registered this listener, so the render can start without racing its
- * first sampler events. */
-async function openAvatarRenderProgress(
+/** Opens a job-scoped render progress stream. Resolving means the server
+ * registered this listener, so rendering can start without racing its first
+ * sampler event. */
+async function openRenderProgress(
+  url: string,
   jobId: string,
   onProgress: (value: number, max: number) => void,
   onPreview: (dataUrl: string) => void,
   signal?: AbortSignal,
 ): Promise<{ done: Promise<void> }> {
-  const res = await fetch(`/api/avatar/render-progress/${encodeURIComponent(jobId)}`, {
+  const res = await fetch(`${url}/${encodeURIComponent(jobId)}`, {
     signal: signal ?? null,
   });
   if (!res.ok || !res.body) throw await errorFromResponse(res);
@@ -189,6 +191,20 @@ async function openAvatarRenderProgress(
   return { done };
 }
 
+const openAvatarRenderProgress = (
+  jobId: string,
+  onProgress: (value: number, max: number) => void,
+  onPreview: (dataUrl: string) => void,
+  signal?: AbortSignal,
+) => openRenderProgress('/api/avatar/render-progress', jobId, onProgress, onPreview, signal);
+
+const openGalleryRenderProgress = (
+  jobId: string,
+  onProgress: (value: number, max: number) => void,
+  onPreview: (dataUrl: string) => void,
+  signal?: AbortSignal,
+) => openRenderProgress('/api/gallery/render-progress', jobId, onProgress, onPreview, signal);
+
 export const api = {
   authStatus: () =>
     request<{ required: boolean; authenticated: boolean }>('GET', '/api/auth/status'),
@@ -197,6 +213,27 @@ export const api = {
   logout: () => request<{ authenticated: boolean }>('POST', '/api/auth/logout'),
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
+  gallery: () => request<GalleryItem[]>('GET', '/api/gallery'),
+  saveGalleryImage: (messageId: number, index: number) =>
+    request<{ item: GalleryItem; created: boolean }>('POST', '/api/gallery', {
+      messageId,
+      index,
+    }),
+  renderGalleryImage: (
+    id: number,
+    jobId: string,
+    prompt: string,
+    currentConfig?: { workflow: string; comfyUrl: string },
+  ) =>
+    request<GalleryItem>('POST', `/api/gallery/${id}/render-image`, {
+      ...currentConfig,
+      jobId,
+      prompt,
+    }),
+  openGalleryRenderProgress,
+  deleteGalleryItem: (id: number) => request<void>('DELETE', `/api/gallery/${id}`),
+  deleteGalleryItems: (ids: number[]) =>
+    request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),

@@ -242,13 +242,16 @@ export function collectConversationImages(conversationId: number): string[] {
   return rows.map((row) => row.image);
 }
 
-/** Startup backstop: delete files no message references (crash windows, late renders). */
+/** Startup backstop: delete files no message or gallery item references
+ * (crash windows, late renders). */
 export function sweepOrphanedImages(): void {
   const referenced = new Set(
     (
-      stmt('SELECT j.value AS image FROM messages m, json_each(m.images_json) j').all() as {
-        image: string;
-      }[]
+      stmt(
+        `SELECT j.value AS image FROM messages m, json_each(m.images_json) j
+         UNION ALL
+         SELECT image FROM gallery_items WHERE image IS NOT NULL`,
+      ).all() as { image: string }[]
     )
       .map((row) => basename(row.image.slice('/images/'.length)))
       .filter(Boolean),

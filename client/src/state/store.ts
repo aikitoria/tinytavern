@@ -5,6 +5,7 @@ import type {
   CharacterFolder,
   Conversation,
   Endpoint,
+  GalleryItem,
   InvalidateEntity,
   Message,
   Persona,
@@ -24,7 +25,18 @@ import {
 import { isCurrentSettingsRevision, SuccessfulFetchSequence, upsertById } from './sync.ts';
 import { afterOperationEnd, afterTreeFrame } from './swipeSync.ts';
 
-export type ModalKind = 'settings' | 'conversation' | null;
+export type ModalKind = 'settings' | 'conversation' | 'gallery' | null;
+
+export interface GalleryRenderState {
+  jobId: string;
+  sourceItemId: number;
+  characterId: number | null;
+  characterName: string;
+  prompt: string;
+  preview?: string;
+  value?: number;
+  max?: number;
+}
 
 const GROUP_BY_CHARACTER_KEY = 'minitavern.groupByCharacter';
 
@@ -52,6 +64,9 @@ interface AppState {
   templates: Template[];
   personas: Persona[];
   endpoints: Endpoint[];
+  gallery: GalleryItem[];
+  /** Client-local live cards for gallery renders; final items are server-owned. */
+  galleryRenders: GalleryRenderState[];
   settings: Settings;
   connected: boolean;
   booted: boolean;
@@ -76,6 +91,8 @@ export const [state, setState] = createStore<AppState>({
   templates: [],
   personas: [],
   endpoints: [],
+  gallery: [],
+  galleryRenders: [],
   settings: { ...DEFAULT_SETTINGS },
   connected: false,
   booted: false,
@@ -235,6 +252,9 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
       }
     }
   }),
+  gallery: loader('gallery', api.gallery, (data) =>
+    setState('gallery', reconcile(data, { key: 'id' })),
+  ),
   characters: loader('characters', api.characters, (data) =>
     setState('characters', reconcile(data, { key: 'id' })),
   ),
@@ -593,6 +613,14 @@ export function applySettings(next: Settings): boolean {
   if (!isCurrentSettingsRevision(state.settings.revision, next.revision)) return false;
   setState('settings', next);
   return true;
+}
+
+/** Upserts a write response because its invalidate-triggered GET may resolve
+ * before or after the initiating request. */
+export function applyGalleryItem(item: GalleryItem): void {
+  setState('gallery', (items) =>
+    upsertById(items, item).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id),
+  );
 }
 
 export async function deleteConversation(id: number): Promise<void> {

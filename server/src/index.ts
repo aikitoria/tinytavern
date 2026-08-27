@@ -20,6 +20,7 @@ import { isRequestAuthenticated } from './auth.ts';
 import { setSpeculativeRefillHandler } from './speculation.ts';
 import { sweepOrphanedImages } from './images.ts';
 import './routes/messages.ts';
+import './routes/gallery.ts';
 import './routes/presets.ts';
 import './routes/templates.ts';
 import './routes/personas.ts';

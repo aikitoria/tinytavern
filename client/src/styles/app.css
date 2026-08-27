@@ -1030,10 +1030,9 @@ textarea.mono,
   padding: var(--space-1) var(--space-4);
   min-height: var(--bar-h);
   border-bottom: 1px solid color-mix(in srgb, var(--accent-hot) 16%, var(--border));
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  background: var(--bg-panel);
   padding-top: calc(var(--space-1) + env(safe-area-inset-top));
   box-shadow: 0 8px 30px color-mix(in srgb, var(--shadow) 22%, transparent);
-  backdrop-filter: blur(18px) saturate(1.18);
 }
 
 .header .avatar,
@@ -1383,7 +1382,8 @@ textarea.mono,
   padding: 0 var(--space-3) var(--space-3);
 }
 
-.msg-tool.msg-full-bleed .msg-overlay-toolbar {
+.msg-tool.msg-full-bleed .msg-overlay-toolbar,
+.gallery-card-toolbar {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
@@ -1399,7 +1399,8 @@ textarea.mono,
 
 /* One glass surface for both image-overlay toolbars. Its opacity is the only
    state that changes, so hover, focus, pending, and touch cannot drift apart. */
-.msg-tool.msg-full-bleed .msg-overlay-toolbar::before {
+.msg-tool.msg-full-bleed .msg-overlay-toolbar::before,
+.gallery-card-toolbar::before {
   content: '';
   position: absolute;
   inset: -1px;
@@ -1441,7 +1442,9 @@ textarea.mono,
 .msg-tool.msg-full-bleed:hover .msg-overlay-toolbar::before,
 .msg-tool.msg-full-bleed:focus-within .msg-overlay-toolbar::before,
 .msg-tool.msg-full-bleed .msg-tools-top:has(.msg-image-pending)::before,
-.msg-tool.msg-hide-name.msg-full-bleed.msg-streaming .msg-tools-left::before {
+.msg-tool.msg-hide-name.msg-full-bleed.msg-streaming .msg-tools-left::before,
+.gallery-card:hover .gallery-card-toolbar::before,
+.gallery-card-toolbar:focus-within::before {
   opacity: 1;
 }
 
@@ -1451,6 +1454,12 @@ textarea.mono,
   }
 
   .msg-tool.msg-hide-name.msg-full-bleed.touched .msg-tools-left {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .gallery-card-toolbar,
+  .gallery-card-toolbar::before {
     opacity: 1;
     pointer-events: auto;
   }
@@ -1471,7 +1480,7 @@ textarea.mono,
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: rgb(0 0 0 / 0.92);
+  background: #000;
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -1924,12 +1933,11 @@ textarea.mono,
   max-width: var(--composer-max-width);
   margin: var(--space-3) auto;
   padding: 4px;
-  background: color-mix(in srgb, var(--bg-panel) 86%, transparent);
+  background: var(--bg-panel);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   /* 19px control radius + 4px padding + 1px border = concentric 24px corners. */
   border-radius: 24px;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 45%, transparent);
-  backdrop-filter: blur(18px) saturate(1.12);
   transition:
     border-color 0.15s,
     box-shadow 0.15s,
@@ -2151,7 +2159,7 @@ textarea.mono,
 }
 
 .modal {
-  background: color-mix(in srgb, var(--bg-panel) 95%, transparent);
+  background: var(--bg-panel);
   border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
   border-radius: var(--radius-modal);
   width: min(860px, 100%);
@@ -2161,7 +2169,6 @@ textarea.mono,
   flex-direction: column;
   transform-origin: top center;
   animation: modal-in 0.1s ease-out;
-  backdrop-filter: blur(20px) saturate(1.08);
   box-shadow:
     0 28px 90px color-mix(in srgb, var(--shadow) 80%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
@@ -2262,6 +2269,282 @@ textarea.mono,
 .modal-body {
   padding: var(--space-4);
   overflow-y: auto;
+}
+
+/* ---- Saved image gallery ---- */
+
+.gallery-backdrop {
+  padding: 0;
+  background: var(--bg-panel);
+  backdrop-filter: none;
+}
+
+.gallery-modal {
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.gallery-modal .modal-title {
+  flex: none;
+}
+
+.gallery-modal .modal-body {
+  min-height: 0;
+  padding: 0;
+  background: var(--bg-panel);
+}
+
+.gallery-modal-head-actions {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.gallery-delete-selected {
+  color: var(--danger);
+}
+
+.gallery-count,
+.gallery-group-count {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.gallery-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4);
+}
+
+.gallery-group {
+  min-width: 0;
+}
+
+.gallery-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.gallery-group-head .avatar,
+.gallery-group-head .avatar-fallback {
+  width: 28px;
+  height: 28px;
+}
+
+.gallery-group-count {
+  margin-left: var(--space-1);
+  font-weight: 400;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.gallery-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+}
+
+.gallery-card-selecting .gallery-image-button {
+  cursor: pointer;
+}
+
+.gallery-card-selecting .gallery-image-button:disabled {
+  cursor: not-allowed;
+}
+
+.gallery-card-selected {
+  border-color: var(--accent);
+}
+
+.gallery-card-selected .gallery-image-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  pointer-events: none;
+}
+
+.gallery-image-button {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.gallery-image-button:hover:not(:disabled) {
+  background: transparent;
+}
+
+.gallery-image-button img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gallery-selection-check {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: grid;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  background: rgb(10 12 15 / 0.82);
+  border: 1px solid rgb(255 255 255 / 0.5);
+  border-radius: var(--radius-control);
+  place-items: center;
+  pointer-events: none;
+}
+
+.gallery-selection-check.selected {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (max-width: 480px) {
+  .gallery-selection-mode .modal-title {
+    display: none;
+  }
+}
+
+.gallery-pending-card {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.gallery-pending-card > img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gallery-pending-placeholder {
+  display: grid;
+  min-height: 180px;
+  aspect-ratio: 1;
+  place-items: center;
+  color: var(--text-dim);
+  background: var(--bg-raised);
+}
+
+.gallery-pending-status {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  left: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  color: #fff;
+  background: rgb(10 12 15 / 0.82);
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: var(--radius-control);
+  backdrop-filter: blur(6px);
+}
+
+.gallery-pending-status .img-progress {
+  flex: 1;
+  min-width: 36px;
+}
+
+.gallery-card-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-2);
+  right: var(--space-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+.gallery-card:hover .gallery-card-toolbar,
+.gallery-card-toolbar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (pointer: coarse) {
+  .gallery-card-toolbar,
+  .gallery-card-toolbar::before {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.gallery-prompt-modal {
+  width: min(680px, 100%);
+  height: auto;
+  max-height: min(75dvh, 720px);
+}
+
+.gallery-prompt-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gallery-prompt-dialog textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.gallery-prompt-dialog .hint,
+.gallery-prompt-dialog .notice {
+  margin: 0;
+}
+
+.gallery-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 320px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.gallery-empty > svg {
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+}
+
+.gallery-empty strong {
+  color: var(--text);
 }
 
 /* Master-detail tabs: the body stops scrolling as a whole; the entity list
@@ -2415,7 +2698,7 @@ textarea.mono,
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-4);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: color-mix(in srgb, var(--bg) 72%, var(--bg-panel));
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
 }

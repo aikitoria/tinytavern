@@ -20,6 +20,7 @@ import type {
   CharacterFolder,
   Conversation,
   GenParams,
+  GalleryItem,
   Message,
   ServerEvent,
   Settings,
@@ -2788,6 +2789,37 @@ async function main() {
       (await fetch(`${BASE}${branchedImageMessage.images[0]}`)).status === 200,
     'branch to new conversation copies generated image files instead of sharing paths',
   );
+  console.log('== durable saved-image gallery ==');
+  const savedGallery = await req<{ item: GalleryItem; created: boolean }>('POST', '/api/gallery', {
+    messageId: branchedImageMessage.id,
+    index: branchedImageMessage.activeImage,
+  });
+  const savedGalleryImageUrl = savedGallery.item.image;
+  assert(
+    savedGallery.created &&
+      savedGallery.item.prompt === branchedImageMessage.content &&
+      savedGallery.item.sourceConversationId === imageBranch.id &&
+      savedGallery.item.sourceMessageId === branchedImageMessage.id &&
+      savedGallery.item.sourceImage ===
+        branchedImageMessage.images[branchedImageMessage.activeImage] &&
+      savedGalleryImageUrl !== branchedImageMessage.images[branchedImageMessage.activeImage] &&
+      (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200,
+    'saving an image swipe copies its file and snapshots its prompt and source metadata',
+  );
+  const savedAgain = await req<{ item: GalleryItem; created: boolean }>('POST', '/api/gallery', {
+    messageId: branchedImageMessage.id,
+    index: branchedImageMessage.activeImage,
+  });
+  assert(
+    !savedAgain.created && savedAgain.item.id === savedGallery.item.id,
+    'saving the same source swipe is idempotent',
+  );
+  await expectStatus(
+    'POST',
+    '/api/gallery',
+    { messageId: branchedImageMessage.id, index: 999 },
+    400,
+  );
   await req(
     'DELETE',
     `/api/conversations/${imageBranch.id}?expectedActiveLeafId=${imageBranch.activeLeafId}&expectedMutationRevision=${imageBranch.mutationRevision}`,
@@ -2796,6 +2828,81 @@ async function main() {
     (await fetch(`${BASE}${branchedImageMessage.images[0]}`)).status === 404 &&
       (await fetch(`${BASE}${regenMsg.images[0]}`)).status === 200,
     'deleting a branched conversation removes only its copied image files',
+  );
+  const detachedGallery = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
+    (item) => item.id === savedGallery.item.id,
+  )!;
+  assert(
+    detachedGallery.sourceConversationId === null &&
+      detachedGallery.sourceMessageId === null &&
+      detachedGallery.prompt === branchedImageMessage.content &&
+      (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200,
+    'deleting the source conversation detaches links but preserves the saved image and prompt',
+  );
+  const galleryJobId = 'e2e-gallery-job';
+  const galleryProgressAbort = new AbortController();
+  const galleryProgressResponse = await fetch(
+    `${BASE}/api/gallery/render-progress/${galleryJobId}`,
+    { signal: galleryProgressAbort.signal },
+  );
+  assert(
+    galleryProgressResponse.ok && galleryProgressResponse.body != null,
+    'gallery render progress SSE opens',
+  );
+  await expectStatus(
+    'POST',
+    `/api/gallery/${savedGallery.item.id}/render-image`,
+    { prompt: '   ' },
+    400,
+  );
+  const galleryProgressSeen = (async () => {
+    const reader = galleryProgressResponse.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sawProgress = false;
+    let sawPreview = false;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error('gallery progress SSE ended before progress and preview');
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const event = JSON.parse(line.slice(5)) as {
+          value?: number;
+          max?: number;
+          preview?: string;
+        };
+        if (event.max && typeof event.value === 'number') sawProgress = true;
+        if (event.preview?.startsWith('data:image/jpeg;base64,')) sawPreview = true;
+        if (sawProgress && sawPreview) return;
+      }
+    }
+  })();
+  const galleryGenerated = await req<GalleryItem>(
+    'POST',
+    `/api/gallery/${savedGallery.item.id}/render-image`,
+    { jobId: galleryJobId, prompt: `edited ${savedGallery.item.prompt}` },
+  );
+  await galleryProgressSeen;
+  galleryProgressAbort.abort();
+  const generatedGalleryImageUrl = galleryGenerated.image;
+  assert(
+    galleryGenerated.id !== savedGallery.item.id &&
+      galleryGenerated.prompt === `edited ${savedGallery.item.prompt}` &&
+      galleryGenerated.characterName === savedGallery.item.characterName &&
+      galleryGenerated.sourceConversationId === null &&
+      galleryGenerated.sourceMessageId === null &&
+      generatedGalleryImageUrl !== savedGalleryImageUrl &&
+      (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200,
+    'gallery generation creates a separate saved image from the edited prompt instead of a swipe',
+  );
+  assert(
+    (await req<GalleryItem[]>('GET', '/api/gallery')).some(
+      (item) => item.id === savedGallery.item.id && item.image === savedGalleryImageUrl,
+    ),
+    'creating the new gallery image leaves its source gallery item unchanged',
   );
 
   // A duplicate is inserted immediately after its source with independent
@@ -3148,6 +3255,18 @@ async function main() {
       (await fetch(`${BASE}${removedImageUrl}`)).status === 404 &&
       (await fetch(`${BASE}${survivingImageUrl}`)).status === 200,
     'Delete swipe removes only the selected image file and selects the nearest survivor',
+  );
+  const individuallyDeletedGallery = await req<{ item: GalleryItem; created: boolean }>(
+    'POST',
+    '/api/gallery',
+    { messageId: imgRes.toolMessageId, index: 0 },
+  );
+  const individuallyDeletedGalleryUrl = individuallyDeletedGallery.item.image;
+  assert(
+    individuallyDeletedGallery.created &&
+      individuallyDeletedGalleryUrl !== survivingImageUrl &&
+      (await fetch(`${BASE}${individuallyDeletedGalleryUrl}`)).status === 200,
+    'a second source image can be saved as another independent gallery item',
   );
 
   const imgParent = chainSnap.messages.find((m) => m.id === imgRes.toolMessageId)!.parentId;
@@ -3859,6 +3978,34 @@ async function main() {
   assert(
     (await fetch(`${BASE}${imageUrl}`)).status === 404,
     'bulk delete removes generated images',
+  );
+  const galleryAfterBulkDelete = await req<GalleryItem[]>('GET', '/api/gallery');
+  assert(
+    galleryAfterBulkDelete.some(
+      (item) => item.id === savedGallery.item.id && item.sourceConversationId === null,
+    ) &&
+      galleryAfterBulkDelete.some((item) => item.id === galleryGenerated.id) &&
+      galleryAfterBulkDelete.some((item) => item.id === individuallyDeletedGallery.item.id) &&
+      (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200 &&
+      (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200 &&
+      (await fetch(`${BASE}${individuallyDeletedGalleryUrl}`)).status === 200,
+    'bulk conversation deletion leaves independently saved gallery images intact',
+  );
+  await req('DELETE', `/api/gallery/${individuallyDeletedGallery.item.id}`);
+  assert(
+    (await fetch(`${BASE}${individuallyDeletedGalleryUrl}`)).status === 404,
+    'deleting one gallery item removes its independent image file',
+  );
+  await expectStatus('POST', '/api/gallery/bulk-delete', { ids: [] }, 400);
+  const galleryBulkDelete = await req<{ deleted: number }>('POST', '/api/gallery/bulk-delete', {
+    ids: [savedGallery.item.id, galleryGenerated.id],
+  });
+  assert(
+    galleryBulkDelete.deleted === 2 &&
+      (await req<GalleryItem[]>('GET', '/api/gallery')).length === 0 &&
+      (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 404 &&
+      (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 404,
+    'bulk deleting selected gallery items removes every row and owned image file',
   );
 
   ws.close();

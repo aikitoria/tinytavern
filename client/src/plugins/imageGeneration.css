@@ -99,9 +99,8 @@
   padding: var(--space-2) var(--space-4);
   overflow-x: auto;
   overflow-y: hidden;
-  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(12px);
   scrollbar-width: none;
 }
 

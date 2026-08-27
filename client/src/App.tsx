@@ -17,6 +17,7 @@ import {
   selectedMessageRange,
 } from './state/messageSelection.ts';
 import MessageSelectionBar from './components/MessageSelectionBar.tsx';
+import GalleryModal from './components/GalleryModal.tsx';
 
 export default function App() {
   // Boot is one-way: once booting() clears, fade the cover out and unmount it
@@ -65,6 +66,9 @@ export default function App() {
         </Show>
         <Show when={state.modal === 'conversation'}>
           <ConversationSettings />
+        </Show>
+        <Show when={state.modal === 'gallery'}>
+          <GalleryModal />
         </Show>
         <ConfirmDialogHost />
         <div class="toasts" aria-live="polite" aria-atomic="false">
