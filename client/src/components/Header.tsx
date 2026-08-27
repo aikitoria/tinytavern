@@ -10,7 +10,6 @@ import {
   setState,
   state,
   toast,
-  toggleSidebar,
 } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import Avatar from './Avatar.tsx';
@@ -152,14 +151,6 @@ export default function Header() {
 
   return (
     <header class="header">
-      <button
-        class="icon-btn menu-btn"
-        title="Conversations"
-        aria-label="Open conversations"
-        onClick={toggleSidebar}
-      >
-        ☰
-      </button>
       <Show when={selectedConversation()} fallback={<span class="header-title">MiniTavern</span>}>
         {(conv) => (
           <>

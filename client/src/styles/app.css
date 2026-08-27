@@ -1042,11 +1042,6 @@ textarea.mono,
   height: 32px;
 }
 
-.menu-btn {
-  display: none;
-  font-size: 19px;
-}
-
 .header-info {
   flex: 1;
   min-width: 0;
@@ -2978,7 +2973,7 @@ textarea.mono,
 
   .sidebar.open {
     transform: translateX(0);
-    box-shadow: 0 0 40px rgb(0 0 0 / 0.5);
+    box-shadow: none;
   }
 
   .backdrop {
@@ -3010,26 +3005,16 @@ textarea.mono,
     display: none;
   }
 
-  .menu-btn {
-    display: inline-flex;
-  }
-
-  /* Dense vertical layout: screen space is precious. One quiet line —
-     avatar and info chips are desktop luxuries; only warnings stay.
-     Header and modal title bar share the same height.
-
-     The bar belongs to the sidebar, not the chat: it slides in with the panel
-     and is gone otherwise, so the chat scroller owns the full height. It
-     overlays rather than displaces the chat (no relayout on every toggle) and
-     sits above the backdrop, which would otherwise dim and swallow it. */
+  /* Opening the drawer restores the same single top row as desktop: sidebar
+     header in the left corner, chat header directly beside it. */
   .header {
     position: absolute;
-    inset: 0 0 auto 0;
+    inset: 0 0 auto min(85vw, var(--sidebar-w));
     z-index: 55;
     gap: var(--space-2);
-    padding: var(--space-1) var(--space-3);
-    padding-top: calc(var(--space-1) + env(safe-area-inset-top));
-    min-height: calc(46px + env(safe-area-inset-top));
+    min-height: calc(var(--bar-h) + env(safe-area-inset-top));
+    padding: calc(var(--space-1) + env(safe-area-inset-top)) var(--space-3) var(--space-1);
+    overflow: hidden;
     transform: translateY(-100%);
     visibility: hidden;
     transition:
@@ -3053,14 +3038,8 @@ textarea.mono,
   }
 
   .header > .avatar,
-  .header > .avatar-fallback {
-    display: none;
-  }
-
-  .header-context {
-    display: none;
-  }
-
+  .header > .avatar-fallback,
+  .header-context,
   .header-rename-btn {
     display: none;
   }
@@ -3106,7 +3085,8 @@ textarea.mono,
     font-size: 15px;
   }
 
-  /* No top overlay remains; only clear the device's safe area. */
+  /* The temporary header only appears with the drawer and backdrop; while
+     chatting, content still owns the top of the screen. */
   .chat-inner {
     --chat-inline-padding: var(--space-2);
 
@@ -3220,6 +3200,20 @@ textarea.mono,
     border: 1px solid var(--border);
     border-radius: var(--radius-modal);
     padding-top: 0;
+  }
+}
+
+/* Very narrow phones cannot fit the title and fixed header actions beside the
+   open drawer, so the conversation title takes priority in the remaining
+   portion of the shared top row. */
+@media (max-width: 480px) {
+  .sidebar-open .header-view-wrap,
+  .sidebar-open .header > .icon-btn {
+    display: none;
+  }
+
+  .sidebar-open .header {
+    padding-inline: var(--space-2);
   }
 }
 
