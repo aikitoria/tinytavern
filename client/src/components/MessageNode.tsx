@@ -3,6 +3,12 @@ import type { Message } from '@minitavern/shared';
 import type { PendingSwipe } from '../state/store.ts';
 import { api } from '../state/api.ts';
 import {
+  extendMessageSelection,
+  messageIsSelected,
+  messageSelectionActive,
+  startMessageSelection,
+} from '../state/messageSelection.ts';
+import {
   branchConversation,
   childrenByParent,
   editRequestId,
@@ -136,6 +142,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
 
   const swipeable = () =>
     messageSupportsSwipe(props.message) &&
+    !messageSelectionActive() &&
     !editing() &&
     !state.treeNavigationPending &&
     (state.tree.activeLeafId === props.message.id ||
@@ -280,6 +287,10 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   // ---- ⋯ menu actions ----
   const menuOpen = () => moreMenuId() === props.message.id;
   const closeMenu = () => setMoreMenuId(null);
+  const selectRange = () => {
+    closeMenu();
+    startMessageSelection(props.message.id);
+  };
   const canMoveUp = () => props.message.parentId != null;
   const canMoveDown = () => (childrenByParent().get(props.message.id)?.length ?? 0) > 0;
   const duplicate = () =>
@@ -347,6 +358,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         'msg-streaming': streaming(),
         'msg-hide-name': pluginView()?.hideName === true,
         'msg-full-bleed': pluginView()?.fullBleed?.() === true,
+        'msg-range-selected': messageIsSelected(props.message.id),
         touched: touchedId() === props.message.id,
       }}
       // In the tree map the card handles clicks (branch activation) and pans on
@@ -360,14 +372,30 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       onPointerCancel={props.inMap ? undefined : onPointerCancel}
     >
       <Show
-        when={!isTool()}
+        when={!props.inMap && messageSelectionActive()}
         fallback={
-          <span class="avatar avatar-fallback tool-avatar">
-            {pluginView()?.RailIcon?.() ?? '⚙'}
-          </span>
+          <Show
+            when={!isTool()}
+            fallback={
+              <span class="avatar avatar-fallback tool-avatar">
+                {pluginView()?.RailIcon?.() ?? '⚙'}
+              </span>
+            }
+          >
+            <Avatar src={avatarSrc()} name={name()} />
+          </Show>
         }
       >
-        <Avatar src={avatarSrc()} name={name()} />
+        <button
+          type="button"
+          class="msg-range-toggle icon-btn"
+          classList={{ active: messageIsSelected(props.message.id) }}
+          aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
+          aria-pressed={messageIsSelected(props.message.id)}
+          onClick={() => extendMessageSelection(props.message.id)}
+        >
+          {messageIsSelected(props.message.id) ? '✓' : ''}
+        </button>
       </Show>
       <div
         class="msg-body"
@@ -412,187 +440,199 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             {pluginView()?.Header?.()}
           </span>
           <span class="msg-tools-top msg-overlay-toolbar">
-            {pluginView()?.HeaderTools?.()}
-            <Show when={siblings().length > 1 || (isAssistant() && !editing())}>
-              <span class="branch-nav">
-                <button
-                  class="icon-btn"
-                  title="Previous swipe"
-                  aria-label="Previous swipe"
-                  disabled={
-                    state.treeNavigationPending ||
-                    ancestorNavigationBlocked() ||
-                    streaming() ||
-                    editing() ||
-                    siblingIndex() <= 0
-                  }
-                  onClick={() => swipeMessage(props.message, -1)}
-                >
-                  ‹
-                </button>
-                <span
-                  class="branch-count"
-                  aria-label={`Swipe ${siblingIndex() + 1} of ${siblings().length}`}
-                >
-                  {siblingIndex() + 1}/{siblings().length}
-                </span>
-                <button
-                  class="icon-btn"
-                  disabled={
-                    state.treeNavigationPending ||
-                    ancestorNavigationBlocked() ||
-                    editing() ||
-                    (!isAssistant() && siblingIndex() >= siblings().length - 1)
-                  }
-                  title={
-                    isAssistant() && siblingIndex() >= siblings().length - 1
-                      ? 'Regenerate'
-                      : 'Next swipe'
-                  }
-                  aria-label={
-                    isAssistant() && siblingIndex() >= siblings().length - 1
-                      ? 'Regenerate'
-                      : 'Next swipe'
-                  }
-                  onClick={() => swipeMessage(props.message, 1)}
-                >
-                  ›
-                </button>
-              </span>
-            </Show>
-            <Show when={!streaming() && !editing()}>
-              <span class="msg-actions">
-                <span class="msg-more-wrap">
+            <Show when={!messageSelectionActive()}>
+              {pluginView()?.HeaderTools?.()}
+              <Show when={siblings().length > 1 || (isAssistant() && !editing())}>
+                <span class="branch-nav">
                   <button
-                    ref={moreButton}
-                    type="button"
                     class="icon-btn"
-                    classList={{ 'icon-btn-active': menuOpen() }}
-                    title="More"
-                    aria-label="More message actions"
-                    aria-haspopup="menu"
-                    aria-expanded={menuOpen()}
-                    onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
+                    title="Previous swipe"
+                    aria-label="Previous swipe"
+                    disabled={
+                      state.treeNavigationPending ||
+                      ancestorNavigationBlocked() ||
+                      streaming() ||
+                      editing() ||
+                      siblingIndex() <= 0
+                    }
+                    onClick={() => swipeMessage(props.message, -1)}
                   >
-                    ⋯
+                    ‹
                   </button>
-                  <DropdownSurface
-                    open={menuOpen()}
-                    anchor={() => moreButton}
-                    onClose={closeMenu}
-                    class="msg-more-menu"
-                    role="menu"
-                    ariaLabel="Message actions"
-                    placement="auto"
-                    align="end"
-                    fitContentWidth
-                    keyboardNavigation
-                    autoFocus
+                  <span
+                    class="branch-count"
+                    aria-label={`Swipe ${siblingIndex() + 1} of ${siblings().length}`}
                   >
+                    {siblingIndex() + 1}/{siblings().length}
+                  </span>
+                  <button
+                    class="icon-btn"
+                    disabled={
+                      state.treeNavigationPending ||
+                      ancestorNavigationBlocked() ||
+                      editing() ||
+                      (!isAssistant() && siblingIndex() >= siblings().length - 1)
+                    }
+                    title={
+                      isAssistant() && siblingIndex() >= siblings().length - 1
+                        ? 'Regenerate'
+                        : 'Next swipe'
+                    }
+                    aria-label={
+                      isAssistant() && siblingIndex() >= siblings().length - 1
+                        ? 'Regenerate'
+                        : 'Next swipe'
+                    }
+                    onClick={() => swipeMessage(props.message, 1)}
+                  >
+                    ›
+                  </button>
+                </span>
+              </Show>
+              <Show when={!streaming() && !editing()}>
+                <span class="msg-actions">
+                  <span class="msg-more-wrap">
                     <button
+                      ref={moreButton}
                       type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        closeMenu();
-                        copy();
-                      }}
+                      class="icon-btn"
+                      classList={{ 'icon-btn-active': menuOpen() }}
+                      title="More"
+                      aria-label="More message actions"
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen()}
+                      onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
                     >
-                      Copy
+                      ⋯
                     </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={props.message.imagePending}
-                      onClick={() => {
-                        closeMenu();
-                        startEdit();
-                      }}
+                    <DropdownSurface
+                      open={menuOpen()}
+                      anchor={() => moreButton}
+                      onClose={closeMenu}
+                      class="msg-more-menu"
+                      role="menu"
+                      ariaLabel="Message actions"
+                      placement="auto"
+                      align="end"
+                      fitContentWidth
+                      keyboardNavigation
+                      autoFocus
                     >
-                      Edit
-                    </button>
-                    <Show when={isAssistant() || (isTool() && claimedView() != null)}>
                       <button
                         type="button"
                         role="menuitem"
                         onClick={() => {
                           closeMenu();
-                          openSteer();
+                          copy();
                         }}
                       >
-                        Regenerate
+                        Copy
                       </button>
-                    </Show>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        closeMenu();
-                        duplicate();
-                      }}
-                    >
-                      Duplicate
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        closeMenu();
-                        branchToConversation();
-                      }}
-                    >
-                      Branch chat
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={!canMoveUp()}
-                      onClick={() => {
-                        closeMenu();
-                        move('up');
-                      }}
-                    >
-                      Move up
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={!canMoveDown()}
-                      onClick={() => {
-                        closeMenu();
-                        move('down');
-                      }}
-                    >
-                      Move down
-                    </button>
-                    <Show
-                      when={claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1}
-                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={props.message.imagePending}
+                        onClick={() => {
+                          closeMenu();
+                          startEdit();
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <div class="menu-separator" role="separator" />
+                      <Show when={isAssistant() || (isTool() && claimedView() != null)}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            closeMenu();
+                            openSteer();
+                          }}
+                        >
+                          Regenerate
+                        </button>
+                      </Show>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeMenu();
+                          duplicate();
+                        }}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeMenu();
+                          branchToConversation();
+                        }}
+                      >
+                        Branch chat
+                      </button>
+                      <div class="menu-separator" role="separator" />
+                      <button type="button" role="menuitem" onClick={selectRange}>
+                        Select range
+                      </button>
+                      <Show when={canMoveUp()}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            closeMenu();
+                            move('up');
+                          }}
+                        >
+                          Move up
+                        </button>
+                      </Show>
+                      <Show when={canMoveDown()}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            closeMenu();
+                            move('down');
+                          }}
+                        >
+                          Move down
+                        </button>
+                      </Show>
+                      <div class="menu-separator" role="separator" />
+                      <Show
+                        when={
+                          claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1
+                        }
+                      >
+                        <button
+                          type="button"
+                          class="danger"
+                          role="menuitem"
+                          onClick={() => {
+                            closeMenu();
+                            removeSwipe();
+                          }}
+                        >
+                          <TrashIcon /> Delete swipe
+                        </button>
+                      </Show>
                       <button
                         type="button"
                         class="danger"
                         role="menuitem"
                         onClick={() => {
                           closeMenu();
-                          removeSwipe();
+                          remove();
                         }}
                       >
-                        <TrashIcon /> Delete swipe
+                        <TrashIcon /> Delete
                       </button>
-                    </Show>
-                    <button
-                      type="button"
-                      class="danger"
-                      role="menuitem"
-                      onClick={() => {
-                        closeMenu();
-                        remove();
-                      }}
-                    >
-                      <TrashIcon /> Delete
-                    </button>
-                  </DropdownSurface>
+                    </DropdownSurface>
+                  </span>
                 </span>
-              </span>
+              </Show>
             </Show>
           </span>
         </div>

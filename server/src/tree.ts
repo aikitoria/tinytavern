@@ -253,15 +253,10 @@ function newestChildId(conversationId: number, parentId: number | null): number 
   return row?.id ?? null;
 }
 
-/**
- * "Remove this block from the screen" — the delete button's semantics. The
- * message AND its sibling swipes are deleted (an alternative's subtree dies
- * with it), while the message's own children — the blocks visible below it —
- * reattach to its parent. Whole-tail removal is what delete-tail (/del) does.
- */
-export function spliceMessage(messageId: number): void {
+/** Splices one visible block while already inside the caller's transaction. */
+function spliceMessageInTransaction(messageId: number): string[] {
   const row = getRow(messageId);
-  if (!row) return;
+  if (!row) return [];
   const {
     conversation_id: conversationId,
     parent_id: parentId,
@@ -280,29 +275,48 @@ export function spliceMessage(messageId: number): void {
     ...collectMessageImages(messageId),
     ...siblingIds.flatMap((id) => collectSubtreeImages(id)),
   ];
+  const leaf = getActiveLeafId(conversationId);
+  // Order matters: drop the sibling group first (their subtrees cascade),
+  // THEN reparent this message's children — reparenting first would put
+  // them into the very group being deleted.
+  for (const id of siblingIds) stmt('DELETE FROM messages WHERE id = ?').run(id);
+  stmt('UPDATE messages SET parent_id = ? WHERE parent_id = ?').run(parentId, messageId);
+  stmt('DELETE FROM messages WHERE id = ?').run(messageId);
+  // Re-derive the leaf: descend through the removed node's remembered child
+  // when it was the leaf itself; keep it if it survived (the visible chain);
+  // otherwise it died inside a sibling subtree — fall back near the parent.
+  let newLeaf: number | null;
+  if (leaf === messageId) {
+    newLeaf = activeChildId != null ? descendToLeaf(activeChildId) : parentId;
+  } else if (leaf != null && getRow(leaf)) {
+    newLeaf = leaf;
+  } else {
+    const fallback = parentId ?? newestChildId(conversationId, null);
+    newLeaf = fallback != null ? descendToLeaf(fallback) : null;
+  }
+  setActiveLeaf(conversationId, newLeaf);
+  return doomedImages;
+}
+
+/**
+ * "Remove this block from the screen" — the delete button's semantics. Each
+ * selected message AND its sibling swipes are deleted (an alternative's
+ * subtree dies with it), while the visible continuation below the range
+ * reattaches above it. A contiguous range is committed atomically, and image
+ * files are unlinked only after that commit succeeds.
+ */
+export function spliceMessages(messageIds: readonly number[]): void {
+  const doomedImages: string[] = [];
   transaction(() => {
-    const leaf = getActiveLeafId(conversationId);
-    // Order matters: drop the sibling group first (their subtrees cascade),
-    // THEN reparent this message's children — reparenting first would put
-    // them into the very group being deleted.
-    for (const id of siblingIds) stmt('DELETE FROM messages WHERE id = ?').run(id);
-    stmt('UPDATE messages SET parent_id = ? WHERE parent_id = ?').run(parentId, messageId);
-    stmt('DELETE FROM messages WHERE id = ?').run(messageId);
-    // Re-derive the leaf: descend through the removed node's remembered child
-    // when it was the leaf itself; keep it if it survived (the visible chain);
-    // otherwise it died inside a sibling subtree — fall back near the parent.
-    let newLeaf: number | null;
-    if (leaf === messageId) {
-      newLeaf = activeChildId != null ? descendToLeaf(activeChildId) : parentId;
-    } else if (leaf != null && getRow(leaf)) {
-      newLeaf = leaf;
-    } else {
-      const fallback = parentId ?? newestChildId(conversationId, null);
-      newLeaf = fallback != null ? descendToLeaf(fallback) : null;
+    for (const messageId of messageIds) {
+      doomedImages.push(...spliceMessageInTransaction(messageId));
     }
-    setActiveLeaf(conversationId, newLeaf);
   });
   deleteImageFiles(doomedImages);
+}
+
+export function spliceMessage(messageId: number): void {
+  spliceMessages([messageId]);
 }
 
 /**

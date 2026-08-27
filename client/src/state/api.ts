@@ -289,6 +289,34 @@ export const api = {
       expectedActiveLeafId,
       expectedMutationRevision,
     }),
+  moveMessageRange: (
+    messageIds: number[],
+    direction: 'up' | 'down',
+    steps: number,
+    expectedActiveLeafId: number | null,
+    expectedMutationRevision: number,
+  ) =>
+    request<{ activeLeafId: number | null; movedSteps: number }>(
+      'POST',
+      '/api/message-ranges/move',
+      {
+        messageIds,
+        direction,
+        steps,
+        expectedActiveLeafId,
+        expectedMutationRevision,
+      },
+    ),
+  deleteMessageRange: (
+    messageIds: number[],
+    expectedActiveLeafId: number | null,
+    expectedMutationRevision: number,
+  ) =>
+    request<{ activeLeafId: number | null }>('POST', '/api/message-ranges/delete', {
+      messageIds,
+      expectedActiveLeafId,
+      expectedMutationRevision,
+    }),
   duplicateMessage: (
     messageId: number,
     expectedActiveLeafId: number | null,

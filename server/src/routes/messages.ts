@@ -19,6 +19,7 @@ import {
   markMessageDirty,
   rotateDown,
   spliceMessage,
+  spliceMessages,
 } from '../tree.ts';
 import {
   activeGenerationMessageIds,
@@ -104,6 +105,41 @@ function requireExpectedLeaf(message: ReturnType<typeof requireMessage>, body: u
     optionalNullableId(b, 'expectedActiveLeafId'),
     optionalNumber(b, 'expectedMutationRevision'),
   );
+}
+
+function messageIdsFromBody(body: Record<string, unknown>): number[] {
+  const value = body.messageIds;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 1000 ||
+    value.some((id) => !Number.isSafeInteger(id) || (id as number) <= 0)
+  ) {
+    throw new HttpError(400, 'messageIds must be 1–1000 positive integers');
+  }
+  const ids = value as number[];
+  if (new Set(ids).size !== ids.length) {
+    throw new HttpError(400, 'messageIds must not contain duplicates');
+  }
+  return ids;
+}
+
+function requireActiveMessageRange(messageIds: readonly number[]): {
+  conversationId: number;
+  pathLength: number;
+  start: number;
+} {
+  const messages = messageIds.map((id) => requireMessage(id));
+  const conversationId = messages[0]!.conversationId;
+  if (messages.some((message) => message.conversationId !== conversationId)) {
+    throw new HttpError(400, 'all selected messages must belong to one conversation');
+  }
+  const path = getActivePath(conversationId);
+  const start = path.findIndex((message) => message.id === messageIds[0]);
+  if (start < 0 || messageIds.some((id, index) => path[start + index]?.id !== id)) {
+    throw new HttpError(400, 'selected messages must be contiguous on the active branch');
+  }
+  return { conversationId, pathLength: path.length, start };
 }
 
 /** Resume: continue the last assistant reply in place via prefill-style trailing assistant message. */
@@ -417,6 +453,80 @@ route.del('/api/messages/:id/swipe', ({ params, req }) => {
   broadcastTree(msg.conversationId);
   invalidate('conversations');
   return { activeLeafId: getActiveLeafId(msg.conversationId) };
+});
+
+/** Moves a contiguous active-path range as one block. Every selected message's
+ * sibling swipes travel with it, preserving the tree rather than flattening
+ * the visible path. `steps` is the number of unselected slots to cross. */
+route.post('/api/message-ranges/move', ({ body }) => {
+  const b = objectBody(body);
+  const messageIds = messageIdsFromBody(b);
+  const first = requireMessage(messageIds[0]!);
+  const direction = b.direction;
+  if (direction !== 'up' && direction !== 'down') {
+    throw new HttpError(400, "direction must be 'up' or 'down'");
+  }
+  const steps = b.steps;
+  if (!Number.isSafeInteger(steps) || (steps as number) <= 0) {
+    throw new HttpError(400, 'steps must be a positive integer');
+  }
+  requireExpectedLeaf(first, body);
+  const initialRange = requireActiveMessageRange(messageIds);
+  const initialAvailableSteps =
+    direction === 'up'
+      ? initialRange.start
+      : initialRange.pathLength - initialRange.start - messageIds.length;
+  if ((steps as number) > initialAvailableSteps) {
+    throw new HttpError(400, `selected range can only move ${initialAvailableSteps} more slots`);
+  }
+  requireIdle(first.conversationId);
+  const range = requireActiveMessageRange(messageIds);
+  const availableSteps =
+    direction === 'up' ? range.start : range.pathLength - range.start - messageIds.length;
+  if ((steps as number) > availableSteps) {
+    throw new HttpError(400, `selected range can only move ${availableSteps} more slots`);
+  }
+
+  // Reordering changes the context every prepared swipe was generated for.
+  discardSpeculativeSwipes(range.conversationId);
+  transaction(() => {
+    for (let step = 0; step < (steps as number); step++) {
+      const ordered = direction === 'up' ? messageIds : [...messageIds].reverse();
+      for (const messageId of ordered) {
+        const target = direction === 'up' ? requireMessage(messageId).parentId : messageId;
+        if (target == null || !rotateDown(target)) {
+          throw new HttpError(400, `selected range cannot move ${direction}`);
+        }
+      }
+    }
+  });
+  broadcastTree(range.conversationId);
+  return {
+    activeLeafId: getActiveLeafId(range.conversationId),
+    movedSteps: steps,
+  };
+});
+
+/** Deletes a contiguous visible range atomically. Each selected block's swipe
+ * alternatives are deleted with it; the continuation after the range is
+ * spliced back onto the block before the range. */
+route.post('/api/message-ranges/delete', ({ body }) => {
+  const b = objectBody(body);
+  const messageIds = messageIdsFromBody(b);
+  const first = requireMessage(messageIds[0]!);
+  requireExpectedLeaf(first, body);
+  requireActiveMessageRange(messageIds);
+  requireDeleteCompatible(first.conversationId);
+  const range = requireActiveMessageRange(messageIds);
+  for (const messageId of messageIds) {
+    stopGenerationsDeletedBySplice(requireMessage(messageId));
+  }
+  discardSpeculativeSwipes(range.conversationId);
+  spliceMessages(messageIds);
+  touchConversation(range.conversationId);
+  broadcastTree(range.conversationId);
+  invalidate('conversations');
+  return { activeLeafId: getActiveLeafId(range.conversationId) };
 });
 
 /** Moves a message's block one step up or down the visible chain. Down rotates

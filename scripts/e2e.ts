@@ -1337,6 +1337,167 @@ async function main() {
     400,
   );
 
+  console.log('== contiguous message-range move and delete ==');
+  const rangeConv = await req<{ id: number }>('POST', '/api/conversations', {});
+  ws.sub(rangeConv.id);
+  await ws.waitFor(
+    (e) => e.t === 'tree' && e.conversationId === rangeConv.id,
+    'message-range conversation tree',
+  );
+  const rangeFirst = await sendMessage(rangeConv.id, 'range first');
+  await ws.waitFor(
+    (e) => e.t === 'final' && e.message.id === rangeFirst.assistantMessageId,
+    'message-range first reply',
+  );
+  const rangeSecond = await sendMessage(rangeConv.id, 'range second');
+  await ws.waitFor(
+    (e) => e.t === 'final' && e.message.id === rangeSecond.assistantMessageId,
+    'message-range second reply',
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [
+        rangeFirst.assistantMessageId,
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+      ],
+      direction: 'up',
+      steps: 1,
+    }),
+  );
+  let rangeSnap = await tree(rangeConv.id);
+  assert(
+    pathOf(rangeSnap)
+      .map((message) => message.id)
+      .join(',') ===
+      [
+        rangeFirst.assistantMessageId,
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+        rangeFirst.userMessageId,
+      ].join(','),
+    'moving a three-message selected range up keeps the full range together',
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [
+        rangeFirst.assistantMessageId,
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+      ],
+      direction: 'down',
+      steps: 1,
+    }),
+  );
+  rangeSnap = await tree(rangeConv.id);
+  assert(
+    pathOf(rangeSnap)
+      .map((message) => message.id)
+      .join(',') ===
+      [
+        rangeFirst.userMessageId,
+        rangeFirst.assistantMessageId,
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+      ].join(','),
+    'moving that selected range down restores the original order',
+  );
+  await expectStatus(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeFirst.userMessageId, rangeSecond.userMessageId],
+      direction: 'up',
+      steps: 1,
+    }),
+    400,
+  );
+  await expectStatus(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeSecond.userMessageId, rangeSecond.assistantMessageId],
+      direction: 'up',
+      steps: 3,
+    }),
+    400,
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeSecond.userMessageId, rangeSecond.assistantMessageId],
+      direction: 'up',
+      steps: 2,
+    }),
+  );
+  rangeSnap = await tree(rangeConv.id);
+  assert(
+    pathOf(rangeSnap)
+      .map((message) => message.id)
+      .join(',') ===
+      [
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+        rangeFirst.userMessageId,
+        rangeFirst.assistantMessageId,
+      ].join(','),
+    'a contiguous message range moves several slots as one block',
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeSecond.userMessageId, rangeSecond.assistantMessageId],
+      direction: 'down',
+      steps: 2,
+    }),
+  );
+  rangeSnap = await tree(rangeConv.id);
+  assert(
+    pathOf(rangeSnap)
+      .map((message) => message.id)
+      .join(',') ===
+      [
+        rangeFirst.userMessageId,
+        rangeFirst.assistantMessageId,
+        rangeSecond.userMessageId,
+        rangeSecond.assistantMessageId,
+      ].join(','),
+    'a contiguous message range also moves several slots downward as one block',
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/move',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeSecond.userMessageId, rangeSecond.assistantMessageId],
+      direction: 'up',
+      steps: 2,
+    }),
+  );
+  await req(
+    'POST',
+    '/api/message-ranges/delete',
+    await branchBody(rangeConv.id, {
+      messageIds: [rangeSecond.userMessageId, rangeSecond.assistantMessageId],
+    }),
+  );
+  rangeSnap = await tree(rangeConv.id);
+  assert(
+    pathOf(rangeSnap)
+      .map((message) => message.id)
+      .join(',') === [rangeFirst.userMessageId, rangeFirst.assistantMessageId].join(',') &&
+      !rangeSnap.messages.some(
+        (message) =>
+          message.id === rangeSecond.userMessageId || message.id === rangeSecond.assistantMessageId,
+      ),
+    'deleting a contiguous range preserves and reconnects its continuation',
+  );
+
   console.log('== delete-tail removes sibling swipes and descendant trees ==');
   const tailConv = await req<{ id: number }>('POST', '/api/conversations', {});
   ws.sub(tailConv.id);

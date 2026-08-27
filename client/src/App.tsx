@@ -10,6 +10,13 @@ import ConversationSettings from './components/ConversationSettings.tsx';
 import PasswordGate from './components/PasswordGate.tsx';
 import ConfirmDialogHost from './components/ConfirmDialogHost.tsx';
 import { authPhase } from './state/auth.ts';
+import {
+  clearMessageSelection,
+  messageSelection,
+  messageSelectionActive,
+  selectedMessageRange,
+} from './state/messageSelection.ts';
+import MessageSelectionBar from './components/MessageSelectionBar.tsx';
 
 export default function App() {
   // Boot is one-way: once booting() clears, fade the cover out and unmount it
@@ -17,6 +24,9 @@ export default function App() {
   const [bootGone, setBootGone] = createSignal(false);
   createEffect(() => {
     if (!booting()) setTimeout(() => setBootGone(true), 350);
+  });
+  createEffect(() => {
+    if (messageSelection() && !selectedMessageRange()) clearMessageSelection();
   });
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
@@ -39,7 +49,14 @@ export default function App() {
         <main class="main">
           <Header />
           <ChatView />
-          <Show when={state.viewMode === 'tree'} fallback={<Composer />}>
+          <Show
+            when={state.viewMode === 'tree'}
+            fallback={
+              <Show when={messageSelectionActive()} fallback={<Composer />}>
+                <MessageSelectionBar />
+              </Show>
+            }
+          >
             <TreeSearch />
           </Show>
         </main>

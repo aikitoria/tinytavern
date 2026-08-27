@@ -361,6 +361,12 @@ textarea {
   background: var(--bg-hover);
 }
 
+.menu-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+}
+
 .select-menu {
   --popover-bg: color-mix(in srgb, var(--bg-panel) 94%, var(--accent-hot));
   --popover-border: color-mix(in srgb, var(--accent) 22%, var(--border));
@@ -1238,6 +1244,27 @@ textarea.mono,
   align-items: flex-start;
 }
 
+.msg-range-toggle {
+  width: var(--chat-rail-size);
+  min-width: var(--chat-rail-size);
+  height: var(--chat-rail-size);
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+
+.msg-range-toggle.active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.msg-range-selected > .msg-body {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-panel);
+}
+
 .msg-body {
   flex: 1;
   min-width: 0;
@@ -1404,7 +1431,8 @@ textarea.mono,
   transition: opacity 0.12s;
 }
 
-.msg-tool.msg-hide-name .msg-tools-left:empty {
+.msg-tool.msg-hide-name .msg-tools-left:empty,
+.msg-tool.msg-full-bleed .msg-tools-top:empty {
   display: none;
 }
 
@@ -1921,6 +1949,28 @@ textarea.mono,
   border-radius: var(--radius-panel);
 }
 
+.message-selection-bar {
+  align-items: center;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--radius-panel);
+}
+
+.message-selection-summary {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-3);
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-selection-bar > button:not(.icon-btn) {
+  min-height: var(--chat-rail-size);
+}
+
 .composer textarea {
   flex: 1;
   width: auto;
@@ -2249,6 +2299,30 @@ textarea.mono,
 
 .confirm-actions {
   margin-top: var(--space-5);
+}
+
+.message-move-modal {
+  width: min(460px, 100%);
+  height: auto;
+  max-height: min(80dvh, 520px);
+}
+
+.message-position-row {
+  display: grid;
+  grid-template-columns: auto minmax(70px, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.message-position-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.message-position-row > span {
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .folder-dialog-form > label {
