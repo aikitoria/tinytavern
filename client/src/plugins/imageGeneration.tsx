@@ -1145,16 +1145,18 @@ const messageView: PluginMessageView = {
           </span>
         </Show>
         <Show when={images().length > 0}>
-          <button
-            class="icon-btn gallery-save-btn"
-            classList={{ 'icon-btn-active': savedItem() != null }}
-            title={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
-            aria-label={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
-            disabled={savingToGallery()}
-            onClick={() => void saveToGallery()}
-          >
-            <GalleryIcon filled={savedItem() != null} />
-          </button>
+          <span class="msg-actions">
+            <button
+              class="icon-btn gallery-save-btn"
+              classList={{ 'icon-btn-active': savedItem() != null }}
+              title={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+              aria-label={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+              disabled={savingToGallery()}
+              onClick={() => void saveToGallery()}
+            >
+              <GalleryIcon filled={savedItem() != null} />
+            </button>
+          </span>
           <span class="branch-nav">
             <button
               class="icon-btn"
