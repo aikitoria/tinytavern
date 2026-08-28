@@ -290,8 +290,9 @@ export function withDisabledPrefillSpeakerNote(built: BuiltPrompt): ChatMessage[
 
 /**
  * Upstream request for a plugin tool generation: the normal chat context plus
- * the tool's prompt (macros expanded) as a trailing user turn. No name
- * prefill — tool output is not a character reply.
+ * the tool's prompt (macros expanded) as a trailing user turn. The resolved
+ * template's reasoning prefill still seeds the generation, but visible-message
+ * and name prefills do not — tool output is not a character reply.
  */
 export function buildToolPrompt(
   conversation: Conversation,
@@ -305,7 +306,7 @@ export function buildToolPrompt(
   });
   return {
     ...built,
-    reasoningPrefill: null,
+    reasoningPrefill: built.reasoningPrefill,
     messagePrefill: null,
     namePrefill: null,
     disabledPrefillSpeakerNote: null,
@@ -393,7 +394,7 @@ export function buildSteeredToolPrompt(
   appendImagePromptRevisionTask(built.messages, original, originalReasoning, instruction);
   return {
     ...built,
-    reasoningPrefill: null,
+    reasoningPrefill: built.reasoningPrefill,
     messagePrefill: null,
     namePrefill: null,
     disabledPrefillSpeakerNote: null,

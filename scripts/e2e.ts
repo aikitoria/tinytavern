@@ -2118,6 +2118,86 @@ async function main() {
     }),
     'fresh generation sends reasoning_content and visible content in one final assistant prefill',
   );
+
+  console.log('== template reasoning prefill for image prompts ==');
+  const imagePrefillConv = await req<{ id: number }>('POST', '/api/conversations', {});
+  const imagePrefillWs = new WsClient();
+  await imagePrefillWs.open();
+  imagePrefillWs.sub(imagePrefillConv.id);
+  await imagePrefillWs.waitFor(
+    (event) => event.t === 'tree' && event.conversationId === imagePrefillConv.id,
+    'image-prefill conversation subscribed',
+  );
+  await fetch(`${MOCK_CONTROL}/control/clear-completions`, { method: 'POST' });
+  const imagePrompt = await req<{ toolMessageId: number }>(
+    'POST',
+    `/api/conversations/${imagePrefillConv.id}/tool`,
+    await branchBody(imagePrefillConv.id, {
+      prompt: 'Describe {{char}} for {{user}}.',
+      label: 'Image prompt',
+    }),
+  );
+  const imagePromptFinal = await imagePrefillWs.waitFor(
+    (event) => event.t === 'final' && event.message.id === imagePrompt.toolMessageId,
+    'image prompt with reasoning prefill finished',
+  );
+  assert(
+    imagePromptFinal.t === 'final' &&
+      imagePromptFinal.message.role === 'tool' &&
+      imagePromptFinal.message.reasoning?.startsWith('Reason first as Assistant for Aiki.') ===
+        true &&
+      !imagePromptFinal.message.content.startsWith('Seeded reply to Aiki:'),
+    'image prompt saves the active template reasoning prefill but not its message prefill',
+  );
+  const imagePromptCompletion = (await (
+    await fetch(`${MOCK_CONTROL}/control/last-completion`)
+  ).json()) as {
+    completion: {
+      messages: { role: string; content: string; reasoning_content?: string }[];
+    } | null;
+  };
+  assert(
+    imagePromptCompletion.completion?.messages.at(-1)?.role === 'assistant' &&
+      imagePromptCompletion.completion.messages.at(-1)?.content === '' &&
+      imagePromptCompletion.completion.messages.at(-1)?.reasoning_content ===
+        'Reason first as Assistant for Aiki.',
+    'image prompt sends only the template reasoning prefill in its final assistant turn',
+  );
+
+  const revisedImagePrompt = await req<{ assistantMessageId: number }>(
+    'POST',
+    `/api/messages/${imagePrompt.toolMessageId}/regenerate`,
+    await branchBody(imagePrefillConv.id, { instruction: 'Make it moonlit.' }),
+  );
+  const revisedImagePromptFinal = await imagePrefillWs.waitFor(
+    (event) => event.t === 'final' && event.message.id === revisedImagePrompt.assistantMessageId,
+    'revised image prompt with reasoning prefill finished',
+  );
+  const revisedImagePromptCompletion = (await (
+    await fetch(`${MOCK_CONTROL}/control/last-completion`)
+  ).json()) as {
+    completion: {
+      messages: { role: string; content: string; reasoning_content?: string }[];
+    } | null;
+  };
+  assert(
+    revisedImagePromptFinal.t === 'final' &&
+      revisedImagePromptFinal.message.reasoning?.startsWith(
+        'Reason first as Assistant for Aiki.',
+      ) === true &&
+      revisedImagePromptCompletion.completion?.messages.at(-1)?.role === 'assistant' &&
+      revisedImagePromptCompletion.completion.messages.at(-1)?.content === '' &&
+      revisedImagePromptCompletion.completion.messages.at(-1)?.reasoning_content ===
+        'Reason first as Assistant for Aiki.',
+    'revised image prompt also applies only the active template reasoning prefill',
+  );
+  imagePrefillWs.close();
+  const imagePrefillSnapshot = await tree(imagePrefillConv.id);
+  await req(
+    'DELETE',
+    `/api/conversations/${imagePrefillConv.id}?${branchQuery(imagePrefillSnapshot)}`,
+  );
+
   assert(
     reply.content.includes('Aiki: prefix check'),
     'history prefixed with persona name upstream',
