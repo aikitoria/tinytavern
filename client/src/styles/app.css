@@ -1780,6 +1780,7 @@ textarea.mono,
 }
 
 .md pre code {
+  display: block;
   white-space: inherit;
 }
 
