@@ -1650,6 +1650,12 @@ textarea.mono,
   font-size: 13px;
 }
 
+/* Header controls should not determine the message row height. Keep their
+   horizontal hit area, but align their vertical box with the compact name row. */
+.msg-head .icon-btn {
+  height: 20px;
+}
+
 .branch-count {
   min-width: 0;
   padding-inline: 2px;
@@ -3093,6 +3099,10 @@ textarea.mono,
     width: 20px;
     min-width: 20px;
     height: 28px;
+  }
+
+  .msg-head .icon-btn {
+    height: 20px;
   }
 
   .help-btn {
