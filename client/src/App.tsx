@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createSignal } from 'solid-js';
-import { booting, state, setState } from './state/store.ts';
+import { booting, state, setState, streamingMessage } from './state/store.ts';
 import Sidebar from './components/Sidebar.tsx';
 import Header from './components/Header.tsx';
 import ChatView from './components/ChatView.tsx';
@@ -28,6 +28,9 @@ export default function App() {
   });
   createEffect(() => {
     if (messageSelection() && !selectedMessageRange()) clearMessageSelection();
+  });
+  createEffect(() => {
+    document.title = streamingMessage() ? '● MiniTavern' : 'MiniTavern';
   });
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
