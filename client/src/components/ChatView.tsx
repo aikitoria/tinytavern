@@ -1,31 +1,21 @@
 import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
 import { activePath, newConversation, selectedConversation, state } from '../state/store.ts';
 import { swipeMessage } from '../messageSwipe.ts';
+import { createChatScroll } from '../chatScroll.ts';
 import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from './TreeMap.tsx';
 
 export default function ChatView() {
   let scroller!: HTMLDivElement;
-  let stickToBottom = true;
-  let lastScrollTop = 0;
+  let scroll!: ReturnType<typeof createChatScroll>;
   let lastTouchX = 0;
   let lastTouchY = 0;
-
-  const onScroll = () => {
-    const top = scroller.scrollTop;
-    const movingUp = top < lastScrollTop - 1;
-    const atBottom = scroller.scrollHeight - top - scroller.clientHeight < 2;
-    // Upward intent overrides the at-bottom tolerance.
-    if (movingUp) stickToBottom = false;
-    else if (atBottom) stickToBottom = true;
-    lastScrollTop = top;
-  };
 
   // Wheel intent arrives before the resulting scroll event. Disengage here so
   // a streaming resize cannot snap back to the bottom between the two.
   const onWheel = (event: WheelEvent) => {
-    if (event.deltaY < 0) stickToBottom = false;
+    if (event.deltaY < 0 && !event.ctrlKey) scroll.pause();
   };
 
   const onTouchStart = (event: TouchEvent) => {
@@ -41,12 +31,35 @@ export default function ChatView() {
     const dx = touch.clientX - lastTouchX;
     const dy = touch.clientY - lastTouchY;
     // Disengage before scrolling toward older content; ignore horizontal swipes.
-    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) stickToBottom = false;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) scroll.pause();
     lastTouchX = touch.clientX;
     lastTouchY = touch.clientY;
   };
 
+  const onMouseDown = (event: MouseEvent) => {
+    // Middle-button autoscroll, or a native scrollbar press (including RTL gutters).
+    if (event.button === 1) scroll.pause();
+    if (event.button !== 0 || event.target !== scroller) return;
+    const x = event.clientX - scroller.getBoundingClientRect().left - scroller.clientLeft;
+    if (x < 0 || x >= scroller.clientWidth) scroll.pause();
+  };
+
   const onKey = (event: KeyboardEvent) => {
+    if (
+      !event.defaultPrevented &&
+      !event.metaKey &&
+      !event.altKey &&
+      state.modal === null &&
+      state.viewMode === 'chat' &&
+      event.target instanceof HTMLElement &&
+      (event.target === document.body || scroller.contains(event.target)) &&
+      !event.target.closest('input, textarea, select, [contenteditable]') &&
+      (event.key === 'ArrowUp' ||
+        event.key === 'PageUp' ||
+        event.key === 'Home' ||
+        (event.key === ' ' && event.shiftKey && !event.target.closest('button, [role="button"]')))
+    )
+      scroll.pause();
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.repeat) return;
     if (
@@ -82,16 +95,15 @@ export default function ChatView() {
 
   createEffect(() => {
     if (state.tree.conversationId == null) return;
-    stickToBottom = true;
+    scroll.reset();
     requestAnimationFrame(() => {
-      scroller.scrollTop = scroller.scrollHeight;
-      lastScrollTop = scroller.scrollTop;
+      scroll.follow();
     });
   });
 
   // Catch layout changes beyond token updates, including markdown and font settling.
   const resizeObserver = new ResizeObserver(() => {
-    if (stickToBottom) scroller.scrollTop = scroller.scrollHeight;
+    scroll.follow();
   });
   onCleanup(() => resizeObserver.disconnect());
 
@@ -100,15 +112,19 @@ export default function ChatView() {
     const last = path[path.length - 1];
     void last?.content.length;
     void last?.reasoning?.length;
-    if (stickToBottom) scroller.scrollTop = scroller.scrollHeight;
+    scroll.follow();
   });
 
   return (
     <div
       class="chat"
       classList={{ 'chat-map': state.viewMode === 'map' }}
-      ref={scroller}
-      onScroll={onScroll}
+      ref={(el) => {
+        scroller = el;
+        scroll = createChatScroll(el);
+      }}
+      onScroll={() => scroll.onScroll()}
+      onMouseDown={onMouseDown}
       onWheel={onWheel}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
