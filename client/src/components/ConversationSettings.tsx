@@ -4,7 +4,7 @@ import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import type { Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
-import { openModal, selectedConversation, state } from '../state/store.ts';
+import { openCharacterSettings, openModal, selectedConversation, state } from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';
 import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import Avatar from './Avatar.tsx';
@@ -39,6 +39,7 @@ function snapshot(conv: Conversation): Draft {
 function Editor(props: {
   conv: Conversation;
   register: (actions: SettingsSectionActions) => () => void;
+  navigate: (action: () => void) => void;
 }) {
   let scenarioEl: HTMLTextAreaElement | undefined;
   let base = snapshot(props.conv);
@@ -127,7 +128,21 @@ function Editor(props: {
       <label>Character</label>
       <div class="conversation-character-value">
         <Avatar src={character()?.avatar} name={character()?.name ?? 'Assistant'} />
-        <span>{character()?.name ?? 'Assistant'}</span>
+        <span class="conversation-character-name">{character()?.name ?? 'Assistant'}</span>
+        <Show when={character()}>
+          {(current) => (
+            <button
+              type="button"
+              class="conversation-character-edit"
+              onClick={() => {
+                const id = current().id;
+                props.navigate(() => openCharacterSettings(id));
+              }}
+            >
+              Edit character
+            </button>
+          )}
+        </Show>
       </div>
 
       <label>Speaker name (assistant replies; empty = character's name, also set via /char)</label>
@@ -218,7 +233,7 @@ export default function ConversationSettings() {
             title="Conversation settings"
             onClose={() => navigation.navigate(() => openModal(null))}
           >
-            <Editor conv={conv()} register={navigation.register} />
+            <Editor conv={conv()} register={navigation.register} navigate={navigation.navigate} />
           </Modal>
         )}
       </Show>

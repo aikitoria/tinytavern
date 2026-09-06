@@ -2,12 +2,12 @@ import {
   faChevronDown,
   faChevronRight,
   faEllipsis,
-  faGear,
   faLayerGroup,
+  faSliders,
   faPlus,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
-import { faCopy, faImages } from '@fortawesome/free-regular-svg-icons';
+import { faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
 import type { Character, Conversation } from '@tinytavern/shared';
@@ -15,7 +15,6 @@ import { api } from '../state/api.ts';
 import { createCharacterGroups } from '../state/characterGroups.ts';
 import {
   deleteConversation,
-  duplicateConversation,
   newConversation,
   openModal,
   selectConversation,
@@ -126,21 +125,12 @@ export default function Sidebar() {
     }
   };
 
-  const duplicate = async (id: number, event: MouseEvent) => {
-    event.stopPropagation();
-    try {
-      await duplicateConversation(id);
-    } catch (err) {
-      toast(errorMessage(err));
-    }
-  };
-
-  const runConversationMenuAction = (action: 'duplicate' | 'delete', event: MouseEvent) => {
+  const runConversationMenuAction = (event: MouseEvent) => {
     const conversation = conversationMenu();
     if (!conversation) return;
     setConversationMenu(null);
     conversationMenuButton?.focus({ preventScroll: true });
-    void (action === 'duplicate' ? duplicate : remove)(conversation.id, event);
+    void remove(conversation.id, event);
   };
 
   const characterOf = (characterId: number | null) =>
@@ -198,14 +188,6 @@ export default function Sidebar() {
         </button>
         <span class="conv-actions" aria-label={`Actions for ${props.conv.title}`}>
           <button
-            class="icon-btn conv-duplicate"
-            title="Duplicate"
-            aria-label={`Duplicate ${props.conv.title}`}
-            onClick={(e) => void duplicate(props.conv.id, e)}
-          >
-            <FontAwesomeIcon icon={faCopy} size={15} />
-          </button>
-          <button
             class="icon-btn conv-delete"
             title="Delete"
             aria-label={`Delete ${props.conv.title}`}
@@ -250,52 +232,49 @@ export default function Sidebar() {
         </span>
         <span class="sidebar-head-actions">
           <button
+            type="button"
             class="icon-btn"
             title="Gallery"
             aria-label="Open saved image gallery"
-            onClick={() => openModal('gallery')}
+            onClick={() => {
+              closeNewChatMenu();
+              openModal('gallery');
+            }}
           >
             <FontAwesomeIcon icon={faImages} />
           </button>
           <button
-            class="icon-btn"
-            classList={{ 'icon-btn-active': state.groupByCharacter }}
-            title="Group by character"
-            aria-label="Group conversations by character"
-            aria-pressed={state.groupByCharacter}
-            onClick={toggleGroupByCharacter}
-          >
-            <FontAwesomeIcon icon={faLayerGroup} />
-          </button>
-          <button
+            type="button"
             class="icon-btn"
             title="Settings"
             aria-label="Open settings"
-            onClick={() => openModal('settings')}
+            onClick={() => {
+              closeNewChatMenu();
+              openModal('settings');
+            }}
           >
-            <FontAwesomeIcon icon={faGear} />
+            <FontAwesomeIcon icon={faSliders} size={16} />
           </button>
         </span>
       </div>
 
       <div class="sidebar-tools-row" ref={sidebarToolsRow}>
-        <div class="new-chat-wrap">
-          <button
-            ref={newChatButton}
-            type="button"
-            class="new-chat-btn"
-            aria-haspopup="dialog"
-            aria-expanded={newMenuOpen()}
-            onClick={() => {
-              const open = !newMenuOpen();
-              setNewMenuOpen(open);
-              if (!open) setNewChatQuery('');
-            }}
-          >
-            <FontAwesomeIcon icon={faPlus} size={12} /> New chat
-          </button>
-        </div>
-
+        <button
+          ref={newChatButton}
+          type="button"
+          class="icon-btn"
+          title="New chat"
+          aria-label="New chat"
+          aria-haspopup="dialog"
+          aria-expanded={newMenuOpen()}
+          onClick={() => {
+            const open = !newMenuOpen();
+            setNewMenuOpen(open);
+            if (!open) setNewChatQuery('');
+          }}
+        >
+          <FontAwesomeIcon icon={faPlus} size={16} />
+        </button>
         <DropdownSurface
           open={newMenuOpen()}
           anchor={() => sidebarToolsRow}
@@ -374,6 +353,7 @@ export default function Sidebar() {
           <input
             class="search-input"
             placeholder="Search…"
+            aria-label="Search conversations"
             value={query()}
             onInput={(e) => onSearchInput(e.currentTarget.value)}
           />
@@ -419,6 +399,17 @@ export default function Sidebar() {
           )}
         </Show>
       </nav>
+      <button
+        type="button"
+        class="icon-btn sidebar-group-toggle"
+        classList={{ 'icon-btn-active': state.groupByCharacter }}
+        title="Group by character"
+        aria-label="Group by character"
+        aria-pressed={state.groupByCharacter}
+        onClick={toggleGroupByCharacter}
+      >
+        <FontAwesomeIcon icon={faLayerGroup} size={16} />
+      </button>
       <DropdownSurface
         open={conversationMenu() != null}
         anchor={() => conversationMenuButton}
@@ -432,19 +423,7 @@ export default function Sidebar() {
         keyboardNavigation
         autoFocus
       >
-        <button
-          type="button"
-          role="menuitem"
-          onClick={(event) => runConversationMenuAction('duplicate', event)}
-        >
-          Duplicate
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          class="danger"
-          onClick={(event) => runConversationMenuAction('delete', event)}
-        >
+        <button type="button" role="menuitem" class="danger" onClick={runConversationMenuAction}>
           Delete
         </button>
       </DropdownSurface>

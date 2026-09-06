@@ -74,6 +74,7 @@ interface AppState {
   sidebarOpen: boolean;
   groupByCharacter: boolean;
   modal: ModalKind;
+  settingsCharacterId: number | null;
   /** 'trace' replaces the timeline with the assembled upstream request;
    * 'tree'/'map' show the conversation tree as an outline / zoomable 2D map. */
   viewMode: 'chat' | 'trace' | 'tree' | 'map';
@@ -99,6 +100,7 @@ export const [state, setState] = createStore<AppState>({
   sidebarOpen: false,
   groupByCharacter: loadGroupByCharacter(),
   modal: null,
+  settingsCharacterId: null,
   viewMode: 'chat',
   treeNavigationPending: false,
   toasts: [],
@@ -619,7 +621,17 @@ export function restoreConversationSelection(): void {
 }
 
 export function openModal(modal: ModalKind): void {
-  setState('modal', modal);
+  batch(() => {
+    setState('settingsCharacterId', null);
+    setState('modal', modal);
+  });
+}
+
+export function openCharacterSettings(characterId: number): void {
+  batch(() => {
+    setState('settingsCharacterId', characterId);
+    setState('modal', 'settings');
+  });
 }
 
 export function toggleSidebar(): void {

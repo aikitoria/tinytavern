@@ -23,6 +23,7 @@ import {
   childrenByParent,
   editRequestId,
   navigateTree,
+  openCharacterSettings,
   pendingSwipe,
   selectedCharacter,
   personasEnabled,
@@ -322,33 +323,35 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       onPointerUp={props.inMap ? undefined : onPointerUp}
       onPointerCancel={props.inMap ? undefined : onPointerCancel}
     >
-      <Show
-        when={!props.inMap && messageSelectionActive()}
-        fallback={
-          <Show
-            when={!isTool()}
-            fallback={
-              <span class="avatar avatar-fallback tool-avatar">
-                {pluginView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
-              </span>
-            }
-          >
-            <Avatar src={avatarSrc()} name={name()} />
-          </Show>
-        }
-      >
-        <button
-          type="button"
-          class="msg-range-toggle icon-btn"
-          classList={{ active: messageIsSelected(props.message.id) }}
-          aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
-          aria-pressed={messageIsSelected(props.message.id)}
-          onClick={() => extendMessageSelection(props.message.id)}
+      <Show when={!props.inMap}>
+        <Show
+          when={messageSelectionActive()}
+          fallback={
+            <Show
+              when={!isTool()}
+              fallback={
+                <span class="avatar avatar-fallback tool-avatar">
+                  {pluginView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
+                </span>
+              }
+            >
+              <Avatar src={avatarSrc()} name={name()} />
+            </Show>
+          }
         >
-          {messageIsSelected(props.message.id) ? (
-            <FontAwesomeIcon icon={faCheck} size={12} />
-          ) : null}
-        </button>
+          <button
+            type="button"
+            class="msg-range-toggle icon-btn"
+            classList={{ active: messageIsSelected(props.message.id) }}
+            aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
+            aria-pressed={messageIsSelected(props.message.id)}
+            onClick={() => extendMessageSelection(props.message.id)}
+          >
+            {messageIsSelected(props.message.id) ? (
+              <FontAwesomeIcon icon={faCheck} size={12} />
+            ) : null}
+          </button>
+        </Show>
       </Show>
       <div
         class="msg-body"
@@ -367,7 +370,25 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         }
       >
         <div class="msg-head">
-          <span class="msg-name">{name()}</span>
+          <Show
+            when={!props.inMap && isAssistant() && selectedCharacter()}
+            fallback={<span class="msg-name">{name()}</span>}
+          >
+            {(character) => (
+              <button
+                type="button"
+                class="msg-name msg-character-link"
+                title={`Character settings: ${character().name}`}
+                aria-label={`Open character settings for ${character().name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openCharacterSettings(character().id);
+                }}
+              >
+                {name()}
+              </button>
+            )}
+          </Show>
           <Show when={props.message.status === 'stopped'}>
             <span class="msg-chip">stopped</span>
           </Show>

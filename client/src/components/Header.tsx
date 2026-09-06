@@ -1,13 +1,4 @@
-import {
-  faCheck,
-  faChevronDown,
-  faCode,
-  faCodeBranch,
-  faDiagramProject,
-  faGear,
-  faPen,
-} from '@fortawesome/free-solid-svg-icons';
-import { faComment } from '@fortawesome/free-regular-svg-icons';
+import { faCheck, faChevronDown, faGear, faPen } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createSignal } from 'solid-js';
 import { api } from '../state/api.ts';
@@ -27,10 +18,10 @@ import DropdownSurface from './DropdownSurface.tsx';
 import Select from './Select.tsx';
 
 const VIEWS = [
-  { mode: 'chat', label: 'Chat', icon: faComment },
-  { mode: 'trace', label: 'Prompt trace', icon: faCode },
-  { mode: 'tree', label: 'Conversation tree', icon: faCodeBranch },
-  { mode: 'map', label: 'Tree map', icon: faDiagramProject },
+  { mode: 'chat', label: 'Chat' },
+  { mode: 'trace', label: 'Prompt trace' },
+  { mode: 'tree', label: 'Conversation tree' },
+  { mode: 'map', label: 'Tree map' },
 ] as const;
 
 type ContextField = 'endpointId' | 'personaId';
@@ -243,7 +234,6 @@ export default function Header() {
                 aria-expanded={viewOpen()}
                 onClick={() => setViewOpen(!viewOpen())}
               >
-                <FontAwesomeIcon icon={activeView().icon} />
                 <span>{activeView().label}</span>
                 <span class="select-caret" aria-hidden="true">
                   <FontAwesomeIcon icon={faChevronDown} size={10} />
@@ -271,7 +261,6 @@ export default function Header() {
                       classList={{ active: state.viewMode === view.mode }}
                       onClick={() => setView(view.mode)}
                     >
-                      <FontAwesomeIcon icon={view.icon} />
                       <span>{view.label}</span>
                       <span class="view-check" aria-hidden="true">
                         {state.viewMode === view.mode ? (
@@ -289,7 +278,7 @@ export default function Header() {
               aria-label="Conversation settings"
               onClick={() => show('conversation')}
             >
-              <FontAwesomeIcon icon={faGear} />
+              <FontAwesomeIcon icon={faGear} size={16} />
             </button>
           </>
         )}

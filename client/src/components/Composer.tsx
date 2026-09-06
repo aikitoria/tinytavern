@@ -357,7 +357,7 @@ export default function Composer() {
                   title="Start another image generation"
                   onClick={() => void send()}
                 >
-                  <FontAwesomeIcon icon={faPaperPlane} />
+                  <FontAwesomeIcon icon={faPaperPlane} class="send-icon" />
                 </button>
               </Show>
               <button class="send-btn stop-btn" title="Stop generating" onClick={stop}>
@@ -385,7 +385,7 @@ export default function Composer() {
             disabled={!text().trim()}
             onClick={() => void send()}
           >
-            <FontAwesomeIcon icon={faPaperPlane} />
+            <FontAwesomeIcon icon={faPaperPlane} class="send-icon" />
           </button>
         </Show>
       </div>

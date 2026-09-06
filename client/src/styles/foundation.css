@@ -13,9 +13,9 @@
   --accent-hot: #5aa2ff;
   --accent-text: #ffffff;
   --secondary: #85bdf5;
-  --role-user: #74acf0;
+  --role-user: #8babd2;
   --role-assistant: #aab2bc;
-  --role-assistant-line: #df9447;
+  --role-assistant-line: #c6a078;
   --warning: #df9447;
   --font-mono: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   --border-emphasis: color-mix(in srgb, var(--accent) 22%, var(--border));
@@ -55,7 +55,7 @@
   --composer-max-width: calc(
     var(--chat-content-width) + var(--composer-shell-inset) + var(--composer-shell-inset)
   );
-  --sidebar-w: 288px;
+  --sidebar-w: 240px;
   --bar-h: 46px;
 }
 

@@ -1,7 +1,7 @@
 import { For, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
-import { openModal } from '../state/store.ts';
+import { openModal, state } from '../state/store.ts';
 import Modal from './Modal.tsx';
 import {
   createSettingsNavigation,
@@ -51,7 +51,7 @@ function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
 }
 
 export default function SettingsModal() {
-  const [tab, setTab] = createSignal('general');
+  const [tab, setTab] = createSignal(state.settingsCharacterId != null ? 'characters' : 'general');
   const navigation = createSettingsNavigation();
   const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS[0]!;
 

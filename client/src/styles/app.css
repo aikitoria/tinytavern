@@ -230,6 +230,7 @@
 /* ---- Sidebar ---- */
 
 .sidebar {
+  position: relative;
   width: var(--sidebar-w);
   flex-shrink: 0;
   background: var(--bg-panel);
@@ -244,8 +245,6 @@
   justify-content: space-between;
   padding: var(--space-1) var(--space-2);
   min-height: var(--bar-h);
-  margin-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
 }
 
 .brand {
@@ -253,7 +252,6 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  padding-left: var(--space-2);
 }
 
 .brand-name {
@@ -294,24 +292,21 @@
   box-shadow: none;
 }
 
-.new-chat-wrap {
-  flex: none;
-  padding: 0;
+.sidebar-group-toggle {
+  position: absolute;
+  right: var(--space-2);
+  bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
+  width: 32px;
+  height: 32px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border-color: var(--border);
 }
 
-.new-chat-btn {
-  width: auto;
-  text-align: left;
-  font-weight: 600;
+.sidebar-group-toggle:hover {
+  color: var(--text);
   background: var(--bg-raised);
   border-color: var(--border);
-  box-shadow: none;
-}
-
-.new-chat-btn:hover:where(:not(:disabled)) {
-  background: var(--bg-hover);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  box-shadow: none;
 }
 
 .new-chat-menu {
@@ -373,6 +368,7 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2);
+  padding-bottom: calc(32px + var(--space-4) + env(safe-area-inset-bottom));
 }
 
 .conv-item {
@@ -600,6 +596,7 @@
 
 .header-title-group {
   display: flex;
+  flex: 1;
   align-items: center;
   min-width: 0;
 }
@@ -638,6 +635,7 @@
 
 .header-context {
   display: inline-flex;
+  margin-left: auto;
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
@@ -1133,6 +1131,21 @@
   white-space: nowrap;
 }
 
+.msg-character-link {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  line-height: inherit;
+  text-align: left;
+}
+
+.msg-character-link:hover {
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .msg-chip {
   flex: none;
   font-size: 12px;
@@ -1568,17 +1581,23 @@
   transform: none;
 }
 
+/* The diagonal plane's visual weight sits above and right of its SVG center. */
+.send-icon {
+  transform: translate(-1px, 1px);
+}
+
 .tools-btn {
-  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
+  background: transparent;
   color: var(--text-dim);
-  border: 1px solid color-mix(in srgb, var(--text-dim) 20%, var(--border));
+  border: 1px solid transparent;
   box-shadow: none;
 }
 
-.tools-btn:hover:where(:not(:disabled)) {
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg-raised));
+.tools-btn:hover:where(:not(:disabled)),
+.tools-btn:focus-visible {
+  background: var(--bg-raised);
   color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-color: var(--border);
   box-shadow: none;
   transform: none;
 }
@@ -2235,6 +2254,30 @@
   border-radius: var(--radius-control);
 }
 
+.conversation-character-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-character-edit {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.conversation-character-edit:hover {
+  background: transparent;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .danger-zone {
   display: flex;
   align-items: center;
@@ -2662,6 +2705,10 @@
 
 /* Include large phones and foldables that exceed the 767px cutoff. */
 @media (max-width: 767px), (pointer: coarse) and (max-width: 1024px) {
+  :root {
+    --sidebar-w: 288px;
+  }
+
   /* Prevent mobile input zoom below 16px; keep MacroTextarea overlay metrics matched. */
   input:not([type='checkbox'], [type='radio'], [type='file']),
   select,
@@ -2737,8 +2784,7 @@
     visibility: visible;
   }
 
-  .modal-head,
-  .sidebar-head {
+  .modal-head {
     padding: var(--space-1) var(--space-3);
     min-height: 46px;
   }
