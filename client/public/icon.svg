@@ -17,8 +17,6 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="108" fill="url(#charcoal)"/>
-  <rect x="27" y="27" width="458" height="458" rx="83" fill="none" stroke="#d7aa65" stroke-opacity="0.45" stroke-width="3"/>
-  <path d="m256 58 7 12-7 12-7-12Zm0 372 7 12-7 12-7-12Z" fill="#d7aa65"/>
   <path d="M97 112h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H155v-15c24-2 32-7 32-26V140h-24c-34 0-44 8-52 37H93Z" fill="url(#gold)"/>
   <path d="M193 184h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H251v-15c24-2 32-7 32-26V212h-24c-34 0-44 8-52 37h-14Z" fill="url(#light-gold)" stroke="#1b1b1e" stroke-width="10" stroke-linejoin="round" paint-order="stroke"/>
   <path d="M108 120h195M204 192h195" fill="none" stroke="#fff5da" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>
