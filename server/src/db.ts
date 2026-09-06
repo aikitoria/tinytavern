@@ -462,6 +462,16 @@ if (version < 24) {
   `);
 }
 
+// Characters inherit the global speculation setting unless explicitly disabled.
+if (version < 25) {
+  db.exec(`
+    BEGIN;
+    ALTER TABLE characters ADD COLUMN disable_background_swipe_generation INTEGER NOT NULL DEFAULT 0;
+    PRAGMA user_version = 25;
+    COMMIT;
+  `);
+}
+
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 db.prepare(
@@ -604,6 +614,7 @@ export function toCharacter(r: Row): Character {
     customPrompt: r.custom_prompt as string | null,
     templateId: r.template_id as number | null,
     customTemplate: parseCustomTemplate(r.custom_template as string | null),
+    disableBackgroundSwipeGeneration: !!r.disable_background_swipe_generation,
     createdAt: r.created_at as number,
   };
 }

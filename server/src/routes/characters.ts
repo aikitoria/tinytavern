@@ -36,6 +36,15 @@ defineEntityRoutes<Character>({
     nullableTextField('customPrompt', 'custom_prompt', (cur) => cur.customPrompt),
     refIdField('templateId', 'template_id', 'templates', (cur) => cur.templateId),
     {
+      column: 'disable_background_swipe_generation',
+      value: (b, cur) =>
+        Number(
+          optionalBoolean(b, 'disableBackgroundSwipeGeneration') ??
+            cur?.disableBackgroundSwipeGeneration ??
+            false,
+        ),
+    },
+    {
       column: 'custom_template',
       value: (b, cur) => {
         const raw = b.customTemplate;

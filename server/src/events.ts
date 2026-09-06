@@ -6,10 +6,36 @@ import { isRequestAuthenticated } from './auth.ts';
 
 const clients = new Map<WebSocket, { sub: number | null; alive: boolean }>();
 let onSubscribe: ((ws: WebSocket, conversationId: number) => void) | null = null;
+let onUnsubscribe: ((conversationId: number) => void) | null = null;
 
 /** Called whenever a client subscribes to a conversation (used to push the initial tree). */
 export function setSubscribeHandler(fn: (ws: WebSocket, conversationId: number) => void): void {
   onSubscribe = fn;
+}
+
+/** Called when a conversation loses its last connected viewer. */
+export function setUnsubscribeHandler(fn: (conversationId: number) => void): void {
+  onUnsubscribe = fn;
+}
+
+export function hasConversationSubscribers(conversationId: number): boolean {
+  for (const [ws, state] of clients) {
+    if (state.sub === conversationId && ws.readyState === WebSocket.OPEN) return true;
+  }
+  return false;
+}
+
+function notifyUnsubscribed(conversationId: number | null): void {
+  if (conversationId != null && !hasConversationSubscribers(conversationId)) {
+    onUnsubscribe?.(conversationId);
+  }
+}
+
+function removeClient(ws: WebSocket): void {
+  const state = clients.get(ws);
+  if (!state) return;
+  clients.delete(ws);
+  notifyUnsubscribed(state.sub);
 }
 
 export function initWebSocket(server: Server): void {
@@ -37,7 +63,11 @@ export function initWebSocket(server: Server): void {
       if (parsed == null || typeof parsed !== 'object' || !('sub' in parsed)) return;
       const cmd = parsed as ClientCommand;
       if (cmd.sub === null || (Number.isSafeInteger(cmd.sub) && cmd.sub > 0)) {
-        clients.get(ws)!.sub = cmd.sub;
+        const state = clients.get(ws);
+        if (!state) return;
+        const previous = state.sub;
+        state.sub = cmd.sub;
+        if (previous !== cmd.sub) notifyUnsubscribed(previous);
         if (cmd.sub != null) onSubscribe?.(ws, cmd.sub);
       }
     });
@@ -45,14 +75,14 @@ export function initWebSocket(server: Server): void {
       const state = clients.get(ws);
       if (state) state.alive = true;
     });
-    ws.on('close', () => clients.delete(ws));
-    ws.on('error', () => clients.delete(ws));
+    ws.on('close', () => removeClient(ws));
+    ws.on('error', () => removeClient(ws));
   });
   const heartbeat = setInterval(() => {
     for (const [ws, state] of clients) {
       if (!state.alive) {
         ws.terminate();
-        clients.delete(ws);
+        removeClient(ws);
         continue;
       }
       state.alive = false;

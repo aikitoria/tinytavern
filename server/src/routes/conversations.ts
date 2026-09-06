@@ -40,7 +40,7 @@ import {
   stopConversationGenerations,
 } from '../generation.ts';
 import { broadcastTree, treeSnapshot } from '../sync.ts';
-import { invalidate, subscribedConversationIds } from '../events.ts';
+import { invalidate, hasConversationSubscribers } from '../events.ts';
 import {
   cancelSpeculativeRetries,
   discardSpeculativeSwipes,
@@ -79,6 +79,7 @@ export function touchConversation(id: number): void {
 
 /** Removes an in-flight speculative sibling before a foreground action takes over. */
 export function cancelBackgroundSwipe(conversationId: number): boolean {
+  cancelSpeculativeRetries(conversationId);
   const mid = stopBackgroundGenerations(conversationId);
   if (mid == null) return false;
   deleteMessage(mid);
@@ -89,27 +90,26 @@ export function cancelBackgroundSwipe(conversationId: number): boolean {
   return true;
 }
 
-/**
- * Speculative swipe work is only worthwhile while at least one client is
- * subscribed to the conversation. Every asynchronous continuation of the
- * speculative chain (spawn after a foreground reply, refill after a
- * speculative reply, retry after a failure) is gated on this, so closing all
- * clients stops the chain instead of burning upstream quota on replies nobody
- * will read. Synchronous entry points (routes, the subscribe/refill handlers)
- * stay ungated: an explicit user action or a new subscription always restarts
- * speculation.
- */
+/** Speculation is useful only while a connected client is viewing the conversation. */
 export function isConversationWatched(conversationId: number): boolean {
-  return subscribedConversationIds().includes(conversationId);
+  return hasConversationSubscribers(conversationId);
 }
 
 /** Ensures the active assistant reply has one unread sibling ready or in progress. */
 export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   const message = getMessage(messageId);
   if (!message || message.role !== 'assistant' || message.status !== 'done') return;
+  if (!isConversationWatched(message.conversationId)) return;
   const conversation = getConversation(message.conversationId);
   if (conversation.activeLeafId !== message.id) return;
   if (!getSettings().backgroundSwipeGeneration || hasActiveGeneration(conversation.id)) return;
+  if (
+    conversation.characterId != null &&
+    stmt('SELECT 1 FROM characters WHERE id = ? AND disable_background_swipe_generation = 1').get(
+      conversation.characterId,
+    )
+  )
+    return;
 
   if (nextUnreadSibling(message) != null) return;
 

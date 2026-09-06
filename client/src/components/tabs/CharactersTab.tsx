@@ -34,6 +34,7 @@ export default function CharactersTab() {
   let presetEl!: SelectHandle;
   let customEl!: HTMLTextAreaElement;
   let templateEl!: SelectHandle;
+  let disableBackgroundSwipeEl!: HTMLInputElement;
   let customTemplateEl!: HTMLTextAreaElement;
   let customPrologueEl!: HTMLTextAreaElement;
   let customReasoningPrefillEl!: HTMLTextAreaElement;
@@ -55,6 +56,7 @@ export default function CharactersTab() {
       presetEl.value =
         character?.customPrompt != null ? 'custom' : String(character?.presetId ?? '');
       customEl.value = character?.customPrompt ?? '';
+      disableBackgroundSwipeEl.checked = character?.disableBackgroundSwipeGeneration ?? false;
       templateEl.value =
         character?.customTemplate != null ? 'custom' : String(character?.templateId ?? '');
       customTemplateEl.value = character?.customTemplate?.content ?? '';
@@ -80,6 +82,7 @@ export default function CharactersTab() {
         presetId: promptChoice && promptChoice !== 'custom' ? Number(promptChoice) : null,
         customPrompt: promptChoice === 'custom' ? customEl.value : null,
         templateId: templateChoice && templateChoice !== 'custom' ? Number(templateChoice) : null,
+        disableBackgroundSwipeGeneration: disableBackgroundSwipeEl.checked,
         customTemplate:
           templateChoice === 'custom'
             ? {
@@ -439,6 +442,15 @@ export default function CharactersTab() {
               { value: 'custom', label: 'Custom template…' },
             ]}
           />
+        </section>
+
+        <section class="settings-section">
+          <h3>Generation</h3>
+          <label class="check-row">
+            <input type="checkbox" ref={disableBackgroundSwipeEl} />
+            Disable background swipe generation
+          </label>
+          <p class="hint">Overrides the global setting for all chats with this character.</p>
         </section>
 
         <section

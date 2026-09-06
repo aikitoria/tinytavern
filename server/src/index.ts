@@ -7,9 +7,14 @@ import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AVATAR_DIR, IMAGES_DIR } from './db.ts';
 import { dispatch } from './router.ts';
-import { initWebSocket, setSubscribeHandler, subscribedConversationIds } from './events.ts';
+import {
+  initWebSocket,
+  setSubscribeHandler,
+  setUnsubscribeHandler,
+  subscribedConversationIds,
+} from './events.ts';
 import { sendTreeTo } from './sync.ts';
-import { prepareActiveSwipe } from './routes/conversations.ts';
+import { cancelBackgroundSwipe, prepareActiveSwipe } from './routes/conversations.ts';
 import {
   configuredIpAllowlist,
   isRequestIpAllowed,
@@ -243,6 +248,13 @@ if (certPath && keyPath) {
   listener = server;
 }
 
+setUnsubscribeHandler((conversationId) => {
+  try {
+    cancelBackgroundSwipe(conversationId);
+  } catch (err) {
+    console.error(`[ws] unsubscribe handler failed for conversation ${conversationId}:`, err);
+  }
+});
 setSubscribeHandler((ws, conversationId) => {
   // Runs inside the ws 'message' listener with no upstream containment (the
   // HTTP side has one in router.ts) — an escaping throw would crash the process.

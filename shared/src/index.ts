@@ -106,6 +106,8 @@ export interface Character {
   templateId: number | null;
   /** Inline template override; replaces templateId with the same settings. */
   customTemplate: CustomTemplate | null;
+  /** Opt out of background swipes even when the global setting is enabled. */
+  disableBackgroundSwipeGeneration: boolean;
   createdAt: number;
 }
 
