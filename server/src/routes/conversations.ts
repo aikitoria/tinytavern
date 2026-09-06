@@ -30,10 +30,12 @@ import {
 import type { BuiltPrompt } from '../prompt.ts';
 import { clearSettingReference, getSettings } from '../settingsStore.ts';
 import {
+  activeGenerationToken,
   chatCompletionOnce,
   hasActiveGeneration,
   hasActiveNonToolGeneration,
   hasForegroundGeneration,
+  isBackgroundGeneration,
   mergeLiveBuffers,
   startGeneration,
   stopBackgroundGenerations,
@@ -98,11 +100,21 @@ export function isConversationWatched(conversationId: number): boolean {
 /** Ensures the active assistant reply has one unread sibling ready or in progress. */
 export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   const message = getMessage(messageId);
-  if (!message || message.role !== 'assistant' || message.status !== 'done') return;
+  if (!message || message.role !== 'assistant') return;
   if (!isConversationWatched(message.conversationId)) return;
   const conversation = getConversation(message.conversationId);
   if (conversation.activeLeafId !== message.id) return;
-  if (!getSettings().backgroundSwipeGeneration || hasActiveGeneration(conversation.id)) return;
+  const settings = getSettings();
+  if (!settings.backgroundSwipeGeneration) return;
+  const parallel =
+    settings.parallelBackgroundSwipeGeneration &&
+    message.status === 'streaming' &&
+    activeGenerationToken(message.id) != null &&
+    !isBackgroundGeneration(message.id);
+  if (message.status !== 'done' && !parallel) return;
+  // Only the visible reply may overlap its speculative sibling; another
+  // assistant, tool or speculative stream still occupies the second slot.
+  if (hasActiveGeneration(conversation.id, parallel ? message.id : undefined)) return;
   if (
     conversation.characterId != null &&
     stmt('SELECT 1 FROM characters WHERE id = ? AND disable_background_swipe_generation = 1').get(
@@ -133,7 +145,11 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
     },
     onError: () => {
       const row = getMessage(speculative.id);
-      if (row?.generationKind !== 'speculative') return;
+      if (row?.generationKind !== 'speculative') {
+        if (getActiveLeafId(conversation.id) === speculative.id)
+          cancelBackgroundSwipe(conversation.id);
+        return;
+      }
       deleteMessage(speculative.id);
       broadcastTree(conversation.id);
       if (!isConversationWatched(conversation.id)) return;
@@ -179,7 +195,11 @@ export function spawnAssistantReply(
       if (isConversationWatched(conversation.id)) prepareNextSwipe(msg.id);
       maybeAutoTitle(conversation.id, msg.id);
     },
+    onError: () => {
+      if (getActiveLeafId(conversation.id) === msg.id) cancelBackgroundSwipe(conversation.id);
+    },
   });
+  prepareNextSwipe(msg.id);
   broadcastTree(conversation.id);
   return msg.id;
 }

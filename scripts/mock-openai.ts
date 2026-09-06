@@ -50,6 +50,8 @@ const COMFY_OUTPUTS: Record<ComfyOutputKind, { filename: string; type: string; d
 let failuresRemaining = 0;
 let terminalWithoutNewline = false;
 let reasoningOnly = false;
+/** Slow one streaming response so e2e can exercise out-of-order completion. */
+let nextTokenMs: number | null = null;
 /** Next request streams this partial output, then dies mid-stream. */
 let dieAfterContent: string | null = null;
 let lastComfyWorkflow: unknown = null;
@@ -105,6 +107,17 @@ const server = http.createServer((req, res) => {
     reasoningOnly = true;
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ reasoningOnly }));
+    return;
+  }
+  if (req.method === 'POST' && req.url?.startsWith('/control/token-delay-next')) {
+    const ms = Number(new URL(req.url, 'http://mock').searchParams.get('ms'));
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > 1000) {
+      res.writeHead(400).end();
+      return;
+    }
+    nextTokenMs = ms;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ nextTokenMs }));
     return;
   }
   if (req.method === 'POST' && req.url?.startsWith('/control/die-after-content')) {
@@ -391,6 +404,8 @@ const server = http.createServer((req, res) => {
         return;
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      const tokenMs = nextTokenMs ?? TOKEN_MS;
+      nextTokenMs = null;
       const send = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
       // Mid-stream connection death: emit the armed partial output, then cut
@@ -448,7 +463,7 @@ const server = http.createServer((req, res) => {
           res.end();
           clearInterval(timer);
         }
-      }, TOKEN_MS);
+      }, tokenMs);
       // 'close' on req fires once the body is consumed; the response signals disconnects.
       res.on('close', () => clearInterval(timer));
     });

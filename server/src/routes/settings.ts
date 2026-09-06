@@ -39,6 +39,7 @@ route.put('/api/settings', ({ req, res, body }) => {
   }
   const autoExpandThinking = optionalBoolean(b, 'autoExpandThinking');
   const backgroundSwipeGeneration = optionalBoolean(b, 'backgroundSwipeGeneration');
+  const parallelBackgroundSwipeGeneration = optionalBoolean(b, 'parallelBackgroundSwipeGeneration');
   const accessPassword = b.accessPassword;
   if (accessPassword !== undefined) {
     try {
@@ -60,6 +61,9 @@ route.put('/api/settings', ({ req, res, body }) => {
     ...Object.fromEntries(Object.entries(ids).filter(([, value]) => value !== undefined)),
     ...(autoExpandThinking === undefined ? {} : { autoExpandThinking }),
     ...(backgroundSwipeGeneration === undefined ? {} : { backgroundSwipeGeneration }),
+    ...(parallelBackgroundSwipeGeneration === undefined
+      ? {}
+      : { parallelBackgroundSwipeGeneration }),
     ...(accessPassword === undefined ? {} : { hasPassword: accessPassword !== null }),
     ...(pluginSettings === undefined ? {} : { pluginSettings }),
     revision: current.revision + 1,
@@ -76,7 +80,8 @@ route.put('/api/settings', ({ req, res, body }) => {
     current.defaultTemplateId !== next.defaultTemplateId;
   if (
     generationContextChanged ||
-    (current.backgroundSwipeGeneration && !next.backgroundSwipeGeneration)
+    (current.backgroundSwipeGeneration && !next.backgroundSwipeGeneration) ||
+    (current.parallelBackgroundSwipeGeneration && !next.parallelBackgroundSwipeGeneration)
   ) {
     discardSpeculativeSwipes();
   }
@@ -84,7 +89,11 @@ route.put('/api/settings', ({ req, res, body }) => {
     bumpAllConversationRevisions();
     for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
   }
-  if (!current.backgroundSwipeGeneration && next.backgroundSwipeGeneration) {
+  if (
+    next.backgroundSwipeGeneration &&
+    (!current.backgroundSwipeGeneration ||
+      (!current.parallelBackgroundSwipeGeneration && next.parallelBackgroundSwipeGeneration))
+  ) {
     for (const conversationId of subscribedConversationIds()) prepareActiveSwipe(conversationId);
   }
   if (accessPassword === undefined) invalidate('settings');

@@ -12,7 +12,11 @@ function snapshot(): Settings {
 }
 
 type SettingKey = Exclude<keyof Settings, 'revision' | 'hasPassword' | 'pluginSettings'>;
-const SETTING_KEYS: SettingKey[] = ['autoExpandThinking', 'backgroundSwipeGeneration'];
+const SETTING_KEYS: SettingKey[] = [
+  'autoExpandThinking',
+  'backgroundSwipeGeneration',
+  'parallelBackgroundSwipeGeneration',
+];
 
 export default function GeneralTab() {
   const [draft, setDraft] = createStore<Settings>(snapshot());
@@ -164,6 +168,20 @@ export default function GeneralTab() {
         />
         Background Swipe Generation (keep one unread assistant swipe prepared ahead)
       </label>
+
+      <label class="check-row">
+        <input
+          type="checkbox"
+          checked={draft.parallelBackgroundSwipeGeneration}
+          disabled={!draft.backgroundSwipeGeneration}
+          onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
+        />
+        Generate the background swipe alongside the primary reply
+      </label>
+      <p class="hint">
+        Allows two responses to generate at once. When off, the background swipe waits for the
+        primary reply to finish.
+      </p>
 
       <Show when={error()}>
         <p class="notice notice-error" role="alert">

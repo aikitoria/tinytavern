@@ -34,8 +34,11 @@ interface ActiveGen {
 
 const active = new Map<number, ActiveGen>();
 
-export function hasActiveGeneration(conversationId: number): boolean {
-  for (const gen of active.values()) if (gen.conversationId === conversationId) return true;
+/** Optionally exclude the active reply when checking capacity for its parallel swipe. */
+export function hasActiveGeneration(conversationId: number, exceptMessageId?: number): boolean {
+  for (const gen of active.values()) {
+    if (gen.conversationId === conversationId && gen.mid !== exceptMessageId) return true;
+  }
   return false;
 }
 

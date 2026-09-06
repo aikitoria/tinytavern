@@ -197,6 +197,8 @@ export interface Settings {
   autoExpandThinking: boolean;
   /** Keep one unread assistant sibling prepared ahead of the active reply. */
   backgroundSwipeGeneration: boolean;
+  /** Allow the one unread swipe to generate concurrently with the active reply. */
+  parallelBackgroundSwipeGeneration: boolean;
   /** Whether the server has an access password. The password itself is never returned. */
   hasPassword: boolean;
   /** Per-plugin settings blobs, keyed by plugin id (shapes are plugin-defined). */
@@ -239,6 +241,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTemplateId: null,
   autoExpandThinking: false,
   backgroundSwipeGeneration: false,
+  parallelBackgroundSwipeGeneration: false,
   hasPassword: false,
   pluginSettings: {},
 };

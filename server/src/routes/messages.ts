@@ -170,8 +170,13 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
       onDone: () => {
         if (isConversationWatched(msg.conversationId)) prepareNextSwipe(msg.id);
       },
+      onError: () => {
+        if (getActiveLeafId(msg.conversationId) === msg.id)
+          cancelBackgroundSwipe(msg.conversationId);
+      },
     },
   );
+  prepareNextSwipe(msg.id);
   broadcastTree(msg.conversationId);
   invalidate('conversations');
   return { assistantMessageId: msg.id };
@@ -190,11 +195,18 @@ route.post('/api/messages/:id/advance', ({ params, body }) => {
     // sidebar, exactly like generating it in the foreground would have been.
     const wasUnread = getMessage(nextId)?.generationKind === 'speculative';
     if (hasActiveGeneration(msg.conversationId)) {
-      if (isBackgroundGeneration(nextId)) promoteBackgroundGeneration(nextId);
-      // A speculative stream in another sibling group loses its context on
-      // this branch switch anyway — cancel it rather than refusing the swipe.
-      else if (!stopGeneration(msg.id) && !cancelBackgroundSwipe(msg.conversationId)) {
-        throw new HttpError(409, 'a different generation is already running');
+      stopGeneration(msg.id);
+      if (isBackgroundGeneration(nextId)) {
+        if (hasForegroundGeneration(msg.conversationId)) {
+          throw new HttpError(409, 'a different generation is already running');
+        }
+        promoteBackgroundGeneration(nextId);
+      } else {
+        // Cancel a parallel sibling as well as the outgoing foreground reply.
+        cancelBackgroundSwipe(msg.conversationId);
+        if (hasActiveGeneration(msg.conversationId)) {
+          throw new HttpError(409, 'a different generation is already running');
+        }
       }
     }
     markSwipeRead(nextId);
@@ -206,11 +218,9 @@ route.post('/api/messages/:id/advance', ({ params, body }) => {
     return { activeLeafId: leaf, assistantMessageId: null };
   }
 
-  if (
-    hasActiveGeneration(msg.conversationId) &&
-    !stopGeneration(msg.id) &&
-    !cancelBackgroundSwipe(msg.conversationId)
-  ) {
+  stopGeneration(msg.id);
+  cancelBackgroundSwipe(msg.conversationId);
+  if (hasActiveGeneration(msg.conversationId)) {
     throw new HttpError(409, 'a different generation is already running');
   }
   const mid = spawnAssistantReply(getConversation(msg.conversationId), msg.parentId, msg.name);
@@ -382,8 +392,19 @@ route.post('/api/messages/:id/activate', ({ params, body }) => {
   requireExpectedLeaf(msg, body);
   const wasUnread = msg.generationKind === 'speculative';
   if (hasActiveGeneration(msg.conversationId)) {
-    if (isBackgroundGeneration(msg.id)) promoteBackgroundGeneration(msg.id);
-    else requireIdle(msg.conversationId);
+    // A prepared swipe can be selected before its primary reply has finished,
+    // including when the prepared swipe itself finished first.
+    if (wasUnread) {
+      const leafId = getActiveLeafId(msg.conversationId);
+      const leaf = leafId == null ? null : getMessage(leafId);
+      if (leaf?.parentId === msg.parentId) stopGeneration(leaf.id);
+    }
+    if (isBackgroundGeneration(msg.id)) {
+      if (hasForegroundGeneration(msg.conversationId)) {
+        throw new HttpError(409, 'a different generation is already running');
+      }
+      promoteBackgroundGeneration(msg.id);
+    } else requireIdle(msg.conversationId);
   }
   markSwipeRead(msg.id);
   if (wasUnread) touchConversation(msg.conversationId);
@@ -744,5 +765,9 @@ route.post('/api/generations/:id/stop', ({ params, body }) => {
   }
   const stopped = stopGeneration(mid);
   if (!stopped) throw new HttpError(404, 'no active generation for this message');
+  const message = getMessage(mid);
+  if (message?.role === 'assistant' && getActiveLeafId(message.conversationId) === mid) {
+    cancelBackgroundSwipe(message.conversationId);
+  }
   return { stopped: true };
 });
