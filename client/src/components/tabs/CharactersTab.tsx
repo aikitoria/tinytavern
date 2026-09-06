@@ -5,13 +5,7 @@ import type { Character } from '@tinytavern/shared';
 import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { createCharacterGroups } from '../../state/characterGroups.ts';
-import {
-  duplicateConversation,
-  openModal,
-  selectedConversation,
-  state,
-  toast,
-} from '../../state/store.ts';
+import { state } from '../../state/store.ts';
 import { avatarGenerationAvailable } from '../../plugins/imageGeneration.tsx';
 import AvatarGenerateModal from '../../plugins/AvatarGenerateModal.tsx';
 import { createEntityEditor, download, errorMessage } from '../../util.ts';
@@ -25,10 +19,8 @@ import MacroTextarea from '../MacroTextarea.tsx';
 import Modal from '../Modal.tsx';
 import Select from '../Select.tsx';
 import type { SelectHandle } from '../Select.tsx';
-import { useSettingsNavigation } from '../SettingsGuard.tsx';
 
 export default function CharactersTab() {
-  const navigate = useSettingsNavigation();
   const [customPrompt, setCustomPrompt] = createSignal(false);
   const [customTemplate, setCustomTemplate] = createSignal(false);
   const [avatarGen, setAvatarGen] = createSignal(false);
@@ -95,14 +87,6 @@ export default function CharactersTab() {
   });
 
   const [collapsedFolders, setCollapsedFolders] = createSignal<ReadonlySet<number>>(new Set());
-  const duplicateChat = () => {
-    const conversation = selectedConversation();
-    if (!conversation || conversation.characterId !== editor.selectedId()) return;
-    navigate(() => {
-      openModal(null);
-      void duplicateConversation(conversation.id).catch((err) => toast(errorMessage(err)));
-    });
-  };
   onMount(() => {
     if (editor.selectedId() === state.settingsCharacterId) editor.nav.openDetail();
   });
@@ -311,14 +295,9 @@ export default function CharactersTab() {
           </>
         }
         extraActions={
-          <>
-            <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
-              Export PNG
-            </button>
-            <Show when={selectedConversation()?.characterId === editor.selectedId()}>
-              <button onClick={duplicateChat}>Duplicate chat</button>
-            </Show>
-          </>
+          <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
+            Export PNG
+          </button>
         }
       >
         <section class="settings-section">

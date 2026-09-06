@@ -4,7 +4,14 @@ import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import type { Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
-import { openCharacterSettings, openModal, selectedConversation, state } from '../state/store.ts';
+import {
+  duplicateConversation,
+  openCharacterSettings,
+  openModal,
+  selectedConversation,
+  state,
+  toast,
+} from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';
 import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import Avatar from './Avatar.tsx';
@@ -120,6 +127,14 @@ function Editor(props: {
   const unregister = props.register({ isDirty, save, discard });
   onCleanup(unregister);
 
+  const duplicateChat = () => {
+    const id = props.conv.id;
+    props.navigate(() => {
+      openModal(null);
+      void duplicateConversation(id).catch((err) => toast(errorMessage(err)));
+    });
+  };
+
   return (
     <div class="form">
       <label>Title</label>
@@ -209,6 +224,7 @@ function Editor(props: {
           Save
         </button>
         <button onClick={discard}>Discard</button>
+        <button onClick={duplicateChat}>Duplicate chat</button>
         <button onClick={() => download(`/api/conversations/${props.conv.id}/export`)}>
           Export JSON
         </button>
