@@ -1,4 +1,4 @@
-import type { Conversation } from '@minitavern/shared';
+import type { Conversation } from '@tinytavern/shared';
 import {
   MOCK_URL,
   MOCK_CONTROL,

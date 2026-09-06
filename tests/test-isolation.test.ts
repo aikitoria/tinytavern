@@ -4,10 +4,10 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = mkdtempSync(join(tmpdir(), 'minitavern-isolation-check-'));
+const root = mkdtempSync(join(tmpdir(), 'tinytavern-isolation-check-'));
 try {
   const inheritedData = join(root, 'inherited-data');
-  const inheritedDb = join(root, 'inherited-db', 'minitavern.db');
+  const inheritedDb = join(root, 'inherited-db', 'tinytavern.db');
   const tests = [
     'chat-prompt',
     'draft-completion',
@@ -23,7 +23,7 @@ try {
           ...process.env,
           DATA_DIR: inheritedData,
           DB_PATH: inheritedDb,
-          MINITAVERN_TEST_DATA_DIR: marker,
+          TINYTAVERN_TEST_DATA_DIR: marker,
         },
       });
       assert.equal(result.status, 1, `${test} rejects a missing marker or external DB_PATH`);

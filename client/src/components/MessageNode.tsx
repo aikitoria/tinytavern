@@ -1,5 +1,5 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import type { PendingSwipe } from '../state/store.ts';
 import { api } from '../state/api.ts';
 import {

@@ -1,4 +1,4 @@
-import type { Preset } from '@minitavern/shared';
+import type { Preset } from '@tinytavern/shared';
 import { toPreset } from '../db.ts';
 import { defineEntityRoutes, nameField, textField } from './entityRoutes.ts';
 

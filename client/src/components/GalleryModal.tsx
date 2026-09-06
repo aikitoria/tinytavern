@@ -1,5 +1,5 @@
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import type { GalleryItem } from '@minitavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { applyGalleryItem, setState, state, toast } from '../state/store.ts';
 import type { GalleryRenderState } from '../state/store.ts';
@@ -16,7 +16,7 @@ import ImageViewer from './ImageViewer.tsx';
 import Modal from './Modal.tsx';
 import TrashIcon from './TrashIcon.tsx';
 
-const GROUP_KEY = 'minitavern.galleryGroupByCharacter';
+const GROUP_KEY = 'tinytavern.galleryGroupByCharacter';
 
 function initialGrouping(): boolean {
   try {

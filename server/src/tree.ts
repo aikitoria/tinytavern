@@ -1,4 +1,4 @@
-import type { GenerationKind, Message, MessageStatus, Role, TreeNode } from '@minitavern/shared';
+import type { GenerationKind, Message, MessageStatus, Role, TreeNode } from '@tinytavern/shared';
 import { stmt, toMessage, transaction } from './db.ts';
 import { collectMessageImages, collectSubtreeImages, deleteImageFiles } from './images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';

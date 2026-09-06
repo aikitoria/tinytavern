@@ -145,7 +145,7 @@ export default function Header() {
 
   return (
     <header class="header">
-      <Show when={selectedConversation()} fallback={<span class="header-title">MiniTavern</span>}>
+      <Show when={selectedConversation()} fallback={<span class="header-title">TinyTavern</span>}>
         {(conv) => (
           <>
             <Avatar

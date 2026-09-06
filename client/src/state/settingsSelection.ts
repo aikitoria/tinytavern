@@ -1,4 +1,4 @@
-import type { Settings } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
 import { api, ApiError } from './api.ts';
 import { applySettings, state } from './store.ts';
 

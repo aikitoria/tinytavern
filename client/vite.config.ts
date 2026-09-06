@@ -7,11 +7,11 @@ import { createIpAllowlist } from '../server/src/ipAccess.ts';
 
 const behindCaddy = process.env.CADDY_FRONTEND === '1';
 const target = process.env.VITE_PROXY_TARGET ?? 'http://localhost:5487';
-const allowlist = createIpAllowlist(process.env.MINITAVERN_IP_ALLOWLIST);
+const allowlist = createIpAllowlist(process.env.TINYTAVERN_IP_ALLOWLIST);
 const ipAllowed = (address?: string) => allowlist.isAllowed(address);
 
 const ipAllowlistPlugin: Plugin = {
-  name: 'minitavern-ip-allowlist',
+  name: 'tinytavern-ip-allowlist',
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
       if (ipAllowed(req.socket.remoteAddress)) next();

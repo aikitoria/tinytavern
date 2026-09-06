@@ -1,6 +1,6 @@
 {
-  "name": "MiniTavern",
-  "short_name": "MiniTavern",
+  "name": "TinyTavern",
+  "short_name": "TinyTavern",
   "description": "Small but mighty LLM chat frontend",
   "start_url": "/",
   "display": "standalone",

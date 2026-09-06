@@ -13,13 +13,13 @@ import type {
   Persona,
   Preset,
   Template,
-} from '@minitavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS } from '@minitavern/shared';
+} from '@tinytavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS } from '@tinytavern/shared';
 
 export const DATA_DIR = process.env.DATA_DIR ?? '/data';
 export const AVATAR_DIR = join(DATA_DIR, 'avatars');
 export const IMAGES_DIR = join(DATA_DIR, 'images');
-const DB_PATH = process.env.DB_PATH ?? join(DATA_DIR, 'minitavern.db');
+const DB_PATH = process.env.DB_PATH ?? join(DATA_DIR, 'tinytavern.db');
 
 // SQLite holds plaintext chats and credentials; keep future WAL/SHM sidecars private too.
 process.umask(0o077);

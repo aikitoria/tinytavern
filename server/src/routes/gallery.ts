@@ -1,7 +1,7 @@
 import { publicGalleryItem } from '../mediaUrls.ts';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import type { GalleryItem } from '@minitavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import { stmt, toGalleryItem as canonicalGalleryItem, transaction } from '../db.ts';
 import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { invalidate } from '../events.ts';

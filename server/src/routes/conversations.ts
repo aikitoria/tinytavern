@@ -2,7 +2,7 @@
 // handlers or generation callbacks invalidate generation and active-leaf guards.
 import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
 import type { MessageRow } from './conversationCopies.ts';
-import type { Conversation } from '@minitavern/shared';
+import type { Conversation } from '@tinytavern/shared';
 import { stmt, toConversation, toMessage, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {

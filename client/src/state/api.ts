@@ -9,8 +9,8 @@ import type {
   Preset,
   Settings,
   Template,
-} from '@minitavern/shared';
-import { readSseData } from '@minitavern/shared';
+} from '@tinytavern/shared';
+import { readSseData } from '@tinytavern/shared';
 import { prepareEndpointPatch } from './endpointSync.ts';
 
 interface RequestOptions {

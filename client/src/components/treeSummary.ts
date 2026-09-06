@@ -1,4 +1,4 @@
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { personasEnabled, selectedCharacter, selectedPersona } from '../state/store.ts';
 
 export function speakerName(message: Message): string {

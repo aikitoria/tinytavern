@@ -6,8 +6,8 @@ import type {
   Persona,
   Role,
   Template,
-} from '@minitavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@minitavern/shared';
+} from '@tinytavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@tinytavern/shared';
 import { stmt, toCharacter, toPersona, toPreset, toTemplate } from './db.ts';
 import { getSettings } from './settingsStore.ts';
 

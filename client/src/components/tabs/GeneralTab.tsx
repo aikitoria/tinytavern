@@ -1,5 +1,5 @@
 import { Show, createEffect, createSignal, untrack } from 'solid-js';
-import type { Settings } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
 import { api, ApiError } from '../../state/api.ts';
 import { applySettings, deleteAllConversations, setState, state } from '../../state/store.ts';
 import { createSavedFlash, errorMessage } from '../../util.ts';

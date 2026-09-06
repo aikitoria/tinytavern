@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
-import type { Conversation } from '@minitavern/shared';
+import type { Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { openModal, selectedConversation, state } from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';

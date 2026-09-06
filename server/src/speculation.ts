@@ -1,4 +1,4 @@
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { stmt } from './db.ts';
 import { stopBackgroundGenerations } from './generation.ts';
 import { broadcastTree } from './sync.ts';

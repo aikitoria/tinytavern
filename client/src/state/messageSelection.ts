@@ -1,5 +1,5 @@
 import { createMemo, createRoot, createSignal } from 'solid-js';
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { activePath, state } from './store.ts';
 
 interface MessageSelection {

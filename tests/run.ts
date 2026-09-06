@@ -14,7 +14,7 @@ const tests = readdirSync(import.meta.dirname)
   )
   .sort();
 if (tests.length === 0) throw new Error(`No standalone tests match: ${filters.join(', ')}`);
-const root = mkdtempSync(join(tmpdir(), 'minitavern-tests-'));
+const root = mkdtempSync(join(tmpdir(), 'tinytavern-tests-'));
 try {
   for (const test of tests) {
     console.log(`\n== ${test} ==`);
@@ -26,10 +26,10 @@ try {
         ...process.env,
         MEDIA_SIGNING_KEY_FILE: '',
         CADDY_PROXY_KEY_FILE: '',
-        SESSION_COOKIE_NAME: 'minitavern_session',
+        SESSION_COOKIE_NAME: 'tinytavern_session',
         DATA_DIR: dataDir,
-        DB_PATH: join(dataDir, 'minitavern.db'),
-        MINITAVERN_TEST_DATA_DIR: dataDir,
+        DB_PATH: join(dataDir, 'tinytavern.db'),
+        TINYTAVERN_TEST_DATA_DIR: dataDir,
       },
     });
     if (result.error) throw result.error;

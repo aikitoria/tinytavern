@@ -29,7 +29,7 @@ export default function App() {
     if (messageSelection() && !selectedMessageRange()) clearMessageSelection();
   });
   createEffect(() => {
-    document.title = streamingMessage() ? '● MiniTavern' : 'MiniTavern';
+    document.title = streamingMessage() ? '● TinyTavern' : 'TinyTavern';
   });
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
@@ -37,7 +37,7 @@ export default function App() {
         <Show when={!bootGone()}>
           <div class="boot-screen" classList={{ 'boot-done': !booting() }}>
             <img src="/icon.svg" alt="" width="72" height="72" />
-            <span class="boot-name">MiniTavern</span>
+            <span class="boot-name">TinyTavern</span>
             <span class="boot-dots">
               <i />
               <i />

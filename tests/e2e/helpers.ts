@@ -2,7 +2,7 @@ import { deflateSync } from 'node:zlib';
 import { join } from 'node:path';
 import { WebSocket as HeaderWebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
-import type { Message, ServerEvent, Settings, TreeSnapshot } from '@minitavern/shared';
+import type { Message, ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
 import { chunk } from '../../server/src/pngChunk.ts';
 
 if (!process.env.E2E_BASE || !process.env.E2E_MOCK) {

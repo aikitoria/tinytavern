@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const root = mkdtempSync(join(tmpdir(), 'minitavern-migration-test-'));
+const root = mkdtempSync(join(tmpdir(), 'tinytavern-migration-test-'));
 const moduleUrl = new URL('../server/src/db.ts', import.meta.url).href;
 function migrate(path: string, code = '') {
   return spawnSync(

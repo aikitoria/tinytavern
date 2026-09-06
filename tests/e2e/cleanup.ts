@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@minitavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import { BASE, assert, req, expectStatus } from './helpers.ts';
 import type { ImagesFixture } from './images.ts';
 import type { GalleryFixture } from './gallery.ts';

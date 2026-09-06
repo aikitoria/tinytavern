@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { activePath, childrenByParent, navigateTree, setState, state } from '../state/store.ts';
 import MessageNode from './MessageNode.tsx';

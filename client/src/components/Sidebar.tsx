@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on } from 'solid-js';
-import type { Character, Conversation } from '@minitavern/shared';
+import type { Character, Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { createCharacterGroups } from '../state/characterGroups.ts';
 import {
@@ -197,7 +197,7 @@ export default function Sidebar() {
     <aside class="sidebar" classList={{ open: state.sidebarOpen }}>
       <div class="sidebar-head">
         <span class="brand">
-          MiniTavern
+          TinyTavern
           <span
             class="conn-dot"
             classList={{ ok: state.connected }}

@@ -1,4 +1,4 @@
-import type { Template } from '@minitavern/shared';
+import type { Template } from '@tinytavern/shared';
 import { toTemplate } from '../db.ts';
 import { optionalBoolean } from '../validation.ts';
 import { defineEntityRoutes, nameField, textField } from './entityRoutes.ts';

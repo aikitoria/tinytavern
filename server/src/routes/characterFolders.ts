@@ -1,4 +1,4 @@
-import type { CharacterFolder } from '@minitavern/shared';
+import type { CharacterFolder } from '@tinytavern/shared';
 import { stmt, toCharacterFolder } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { route, HttpError } from '../router.ts';

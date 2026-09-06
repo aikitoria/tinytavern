@@ -1,5 +1,5 @@
-import type { Settings } from '@minitavern/shared';
-import { DEFAULT_SETTINGS } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import { stmt } from './db.ts';
 import { isPasswordConfigured } from './auth.ts';
 

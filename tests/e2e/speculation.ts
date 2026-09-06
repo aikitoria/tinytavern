@@ -1,4 +1,4 @@
-import type { Message, Settings } from '@minitavern/shared';
+import type { Message, Settings } from '@tinytavern/shared';
 import {
   assert,
   req,

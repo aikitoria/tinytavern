@@ -1,7 +1,9 @@
+name: tinytavern
+
 services:
-  minitavern:
+  tinytavern:
     build: .
-    container_name: minitavern
+    container_name: tinytavern
     user: "1000:1000"
     volumes:
       - ./data:/data
@@ -9,8 +11,8 @@ services:
     environment:
       MEDIA_SIGNING_KEY_FILE: /secrets/media.key
       CADDY_PROXY_KEY_FILE: /secrets/proxy.key
-      SESSION_COOKIE_NAME: minitavern_prod_session
-      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+      SESSION_COOKIE_NAME: tinytavern_prod_session
+      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
     restart: unless-stopped
     # Also joined to ComfyUI's network so the server can reach http://comfy:8588.
     networks:
@@ -28,8 +30,8 @@ services:
       - "5487:5487/udp"
     environment:
       PUBLIC_PORT: "5487"
-      BACKEND: minitavern:5487
-      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+      BACKEND: tinytavern:5487
+      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
     volumes:
       - ./certs:/certs:ro
       - ./.secrets/prod:/secrets:ro
@@ -40,7 +42,7 @@ services:
       - /config:uid=1000,gid=1000,mode=0700
     restart: unless-stopped
     depends_on:
-      - minitavern
+      - tinytavern
 
 networks:
   comfy:

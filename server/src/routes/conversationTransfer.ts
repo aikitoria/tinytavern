@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { GenerationKind, MessageStatus, Role } from '@minitavern/shared';
+import type { GenerationKind, MessageStatus, Role } from '@tinytavern/shared';
 import { IMAGES_DIR, stmt, toConversation, toMessage, transaction } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { mergeLiveBuffers } from '../generation.ts';
@@ -11,7 +11,7 @@ import { getPathToMessage } from '../tree.ts';
 import { positiveId } from '../validation.ts';
 import { parseImageConfig } from '../comfy.ts';
 
-const FORMAT = 'minitavern-conversation';
+const FORMAT = 'tinytavern-conversation';
 const VERSION = 1;
 const MAX_MESSAGES = 10_000;
 const MAX_ASSETS = 1_000;
@@ -552,7 +552,7 @@ route.get('/api/conversations/:id/export', ({ params, res }) => {
   res
     .writeHead(200, {
       'content-type': 'application/json',
-      'content-disposition': `attachment; filename="${filename}.minitavern.json"`,
+      'content-disposition': `attachment; filename="${filename}.tinytavern.json"`,
     })
     .end(json);
 });

@@ -1,10 +1,10 @@
 {
-  "name": "@minitavern/client",
+  "name": "@tinytavern/client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@minitavern/shared": "*",
+    "@tinytavern/shared": "*",
     "dompurify": "^3.2.4",
     "highlight.js": "^11.11.1",
     "marked": "^16.0.0",

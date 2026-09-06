@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import WebSocket from 'ws';
-import { expandWorkflowTemplate, workflowValidationError } from '@minitavern/shared';
+import { expandWorkflowTemplate, workflowValidationError } from '@tinytavern/shared';
 import { stmt } from './db.ts';
 import { getMessage, markMessageDirty } from './tree.ts';
 import { broadcastTree } from './sync.ts';

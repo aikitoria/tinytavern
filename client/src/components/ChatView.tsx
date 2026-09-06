@@ -119,7 +119,7 @@ export default function ChatView() {
         fallback={
           // Hide until booted to prevent a welcome-screen flash on reload.
           <div class="chat-empty" classList={{ hidden: !state.booted }}>
-            <h1>MiniTavern</h1>
+            <h1>TinyTavern</h1>
             <p>Small but mighty.</p>
             <button class="primary-btn" onClick={() => void newConversation(null)}>
               Start a new chat

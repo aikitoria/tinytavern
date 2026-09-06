@@ -1,4 +1,4 @@
-import type { Character } from '@minitavern/shared';
+import type { Character } from '@tinytavern/shared';
 import {
   assert,
   req,

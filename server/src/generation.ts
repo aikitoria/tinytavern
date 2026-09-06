@@ -1,6 +1,6 @@
-import { readSseData } from '@minitavern/shared';
+import { readSseData } from '@tinytavern/shared';
 import { publicMessage } from './mediaUrls.ts';
-import type { Conversation, Endpoint, GenMeta, Message } from '@minitavern/shared';
+import type { Conversation, Endpoint, GenMeta, Message } from '@tinytavern/shared';
 import { stmt, toEndpoint } from './db.ts';
 import { getMessage, getPathToMessage } from './tree.ts';
 import { appendChatMessage, buildChatMessages, withDisabledPrefillSpeakerNote } from './prompt.ts';

@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Character, CharacterFolder, Settings } from '@minitavern/shared';
+import type { Character, CharacterFolder, Settings } from '@tinytavern/shared';
 import {
   BASE,
   assert,

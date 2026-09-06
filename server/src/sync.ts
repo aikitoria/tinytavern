@@ -1,6 +1,6 @@
 import { publicMessage } from './mediaUrls.ts';
 import type { WebSocket } from 'ws';
-import type { Message, TreeSnapshot } from '@minitavern/shared';
+import type { Message, TreeSnapshot } from '@tinytavern/shared';
 import {
   getActiveLeafId,
   getMessage,

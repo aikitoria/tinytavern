@@ -1,4 +1,4 @@
-import type { InvalidateEntity } from '@minitavern/shared';
+import type { InvalidateEntity } from '@tinytavern/shared';
 import { stmt } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { route } from '../router.ts';

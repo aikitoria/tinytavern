@@ -1,4 +1,4 @@
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { findMessageView } from './plugins/index.ts';
 import { streamingMessage, swipeToSibling } from './state/store.ts';
 

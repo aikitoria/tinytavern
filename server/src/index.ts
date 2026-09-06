@@ -281,7 +281,7 @@ initWebSocket(server as http.Server);
 
 listener.listen(PORT, () => {
   console.log(
-    `minitavern server listening on ${certPath && keyPath ? 'https' : 'http'}://0.0.0.0:${PORT}`,
+    `tinytavern server listening on ${certPath && keyPath ? 'https' : 'http'}://0.0.0.0:${PORT}`,
   );
   console.log(`IP allowlist: ${configuredIpAllowlist()}`);
 });

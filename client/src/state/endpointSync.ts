@@ -1,4 +1,4 @@
-import type { Endpoint } from '@minitavern/shared';
+import type { Endpoint } from '@tinytavern/shared';
 
 export type EndpointPatchPayload = Partial<Endpoint> & { replaceGenParams?: true };
 

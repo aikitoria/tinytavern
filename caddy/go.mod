@@ -1,4 +1,4 @@
-module minitavern/caddy
+module tinytavern/caddy
 
 go 1.26.0
 

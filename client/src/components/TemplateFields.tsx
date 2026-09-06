@@ -1,5 +1,5 @@
-import type { CustomTemplate } from '@minitavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@minitavern/shared';
+import type { CustomTemplate } from '@tinytavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@tinytavern/shared';
 import MacroHelp from './MacroHelp.tsx';
 import MacroTextarea from './MacroTextarea.tsx';
 

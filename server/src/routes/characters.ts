@@ -1,6 +1,6 @@
 import { publicAvatar } from '../mediaUrls.ts';
 import { defineAvatarRoutes } from './avatarRoutes.ts';
-import type { Character, CustomTemplate } from '@minitavern/shared';
+import type { Character, CustomTemplate } from '@tinytavern/shared';
 import { stmt, toCharacter } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { buildCharacterCard, isPng, makePlaceholderPng, parseCharacterCard } from '../pngCard.ts';

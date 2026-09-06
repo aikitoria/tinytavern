@@ -1,5 +1,5 @@
 import type { Component, JSX } from 'solid-js';
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import { state } from '../state/store.ts';
 
 /** A button in the composer's tools menu. */

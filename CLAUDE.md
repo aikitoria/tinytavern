@@ -4,14 +4,14 @@ Repository instructions for coding agents. `AGENTS.md` links to this file.
 
 ## Project
 
-MiniTavern: self-hosted chat frontend for OpenAI-compatible LLM APIs with tree-structured conversation history (branch on edit, swipe AI replies as siblings). Everything runs in Docker — no node process is expected to run on the host, so run commands through `docker compose`.
+TinyTavern: self-hosted chat frontend for OpenAI-compatible LLM APIs with tree-structured conversation history (branch on edit, swipe AI replies as siblings). Everything runs in Docker — no node process is expected to run on the host, so run commands through `docker compose`.
 
 ## Live environments — do not disturb
 
 The user keeps stacks running while working. Treat them as someone else's live session:
 
 - **Dev stack** (`docker-compose.dev.yml`: `server`, `client`, `caddy-dev`, HTTPS host port 5173, state in `./data-dev`) is the user's live hot-reload environment. Never `up`, `stop`, `restart`, or attach `--profile mock` to it. Application source edits hot-reload on their own. Caddy image/configuration or Compose changes require deployment; do not deploy unless the user requests it.
-- **Prod stack** (`docker-compose.yml`: Node container `minitavern` plus `caddy-prod`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
+- **Prod stack** (`docker-compose.yml`: Node container `tinytavern` plus `caddy-prod`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
 - Never run tests or ad-hoc scripts against either live server — the e2e suite mutates global settings, creates endpoints/conversations, and would repoint the active endpoint at the mock mid-session.
 - One-off throwaway containers are always safe: `docker compose -f docker-compose.dev.yml run --rm --no-deps server <cmd>` (used for typecheck/format below). It does not start or affect stack services.
 
@@ -27,7 +27,7 @@ internal HTTP; Vite serves the dev client and HMR over internal HTTP.
 
 | Stack       | Compose file             | Public URL            | Services                        | Data         |
 | ----------- | ------------------------ | --------------------- | ------------------------------- | ------------ |
-| Production  | `docker-compose.yml`     | `https://<host>:5487` | `minitavern`, `caddy-prod`      | `./data`     |
+| Production  | `docker-compose.yml`     | `https://<host>:5487` | `tinytavern`, `caddy-prod`      | `./data`     |
 | Development | `docker-compose.dev.yml` | `https://<host>:5173` | `server`, `client`, `caddy-dev` | `./data-dev` |
 
 Both require `certs/cert.pem`, `certs/key.pem`, and the external Docker network
@@ -43,7 +43,7 @@ For a new installation or an explicitly requested deployment:
 
 # Production: Node image plus Caddy image containing the compiled client.
 docker compose -f docker-compose.yml build
-docker compose -f docker-compose.yml up -d --no-build minitavern caddy-prod
+docker compose -f docker-compose.yml up -d --no-build tinytavern caddy-prod
 
 # Development: bind-mounted application sources and Caddy in front of Vite.
 docker compose -f docker-compose.dev.yml run --rm --no-deps server npm install
@@ -62,11 +62,11 @@ Reload certificate files through the wrapper, which reads the proxy key before
 Caddy adapts its configuration:
 
 ```sh
-docker compose -f docker-compose.yml exec caddy-prod minitavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
-docker compose -f docker-compose.dev.yml exec caddy-dev minitavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose -f docker-compose.yml exec caddy-prod tinytavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose -f docker-compose.dev.yml exec caddy-dev tinytavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-Production database backup: `docker compose exec minitavern node server/src/backup.ts /data/backups/<unique-name>.db`.
+Production database backup: `docker compose exec tinytavern node server/src/backup.ts /data/backups/<unique-name>.db`.
 The helper uses SQLite's online backup API and refuses to overwrite files. Never
 copy an active database file directly; the WAL may contain committed changes.
 A full backup also needs the media directories. Preserve `.secrets/` across
@@ -90,13 +90,13 @@ docker compose -f docker-compose.dev.yml run --rm --no-deps server npm test
 # HTTP E2E tests — run fully ISOLATED, never against the live stacks:
 # separate compose project, server+mock inside one throwaway container,
 # container-local DATA_DIR, non-default ports.
-docker compose -p minitavern-e2e -f docker-compose.dev.yml run --rm --no-deps \
-  -e MEDIA_SIGNING_KEY_FILE= -e CADDY_PROXY_KEY_FILE= -e SESSION_COOKIE_NAME=minitavern_session \
+docker compose -p tinytavern-e2e -f docker-compose.dev.yml run --rm --no-deps \
+  -e MEDIA_SIGNING_KEY_FILE= -e CADDY_PROXY_KEY_FILE= -e SESSION_COOKIE_NAME=tinytavern_session \
   -e DATA_DIR=/tmp/e2e-data -e E2E_BASE=http://127.0.0.1:15487 -e E2E_MOCK=http://127.0.0.1:19800/v1 \
   server sh -c 'PORT=15487 node server/src/index.ts >/tmp/server.log 2>&1 & \
     PORT=19800 node tests/mocks/server.ts >/tmp/mock.log 2>&1 & \
     sleep 2; npm run test:e2e; ec=$?; tail -5 /tmp/server.log; exit $ec'
-# Afterwards: docker network rm minitavern-e2e_default
+# Afterwards: docker network rm tinytavern-e2e_default
 ```
 
 `npm test` discovers all `tests/*.test.ts` files and runs each in a separate
@@ -108,7 +108,7 @@ HTTP E2E runs isolated as shown above. Both suites are part of normal validation
 
 The presence of `E2E_BASE`/`E2E_MOCK` automatically switches the server and mock to fast timing (mock token cadence 3 ms, comfy poll 100 ms, speculation backoff 50 ms — production defaults are 15/1500/500), so a full run takes ~20 s instead of >1 min. `MOCK_TOKEN_MS`/`COMFY_POLL_MS`/`SPECULATION_BACKOFF_MS` override; keep tokens >= ~3 ms — several tests act mid-stream and need the generation to still be in flight.
 
-**Caddy edge**: `caddy/Caddyfile` selects `/images/*` and `/avatars/*` for the local `minitavern_signed_url` matcher, which only validates the exact signed URI and expiry. Node signs outgoing DTOs in `mediaUrls.ts` (24-hour URLs, reused to avoid repeated signing; no client renewal), never DB/export/copy paths. Caddy serves media directly from read-only directory mounts with `Cache-Control: private, no-store`; signed URLs remain valid until expiry regardless of session revocation. APIs/WS stay session-authenticated in Node. `proxy.ts` requires a private header that Caddy overwrites before accepting original-client-IP/protocol headers. Only Caddy publishes application TCP/UDP ports; dev proxies Vite/HMR, prod serves its compiled client. `.secrets/{dev,prod}` keys are initialized by `scripts/init-caddy.sh`; changes apply on container recreation, never restart/recreate the live stacks during implementation. The isolated HTTP regression command above disables Caddy credentials for its container-local server and mock.
+**Caddy edge**: `caddy/Caddyfile` selects `/images/*` and `/avatars/*` for the local `tinytavern_signed_url` matcher, which only validates the exact signed URI and expiry. Node signs outgoing DTOs in `mediaUrls.ts` (24-hour URLs, reused to avoid repeated signing; no client renewal), never DB/export/copy paths. Caddy serves media directly from read-only directory mounts with `Cache-Control: private, no-store`; signed URLs remain valid until expiry regardless of session revocation. APIs/WS stay session-authenticated in Node. `proxy.ts` requires a private header that Caddy overwrites before accepting original-client-IP/protocol headers. Only Caddy publishes application TCP/UDP ports; dev proxies Vite/HMR, prod serves its compiled client. `.secrets/{dev,prod}` keys are initialized by `scripts/init-caddy.sh`; changes apply on container recreation, never restart/recreate the live stacks during implementation. The isolated HTTP regression command above disables Caddy credentials for its container-local server and mock.
 
 There is no server build step: Node 26 runs the TypeScript sources directly (`node server/src/index.ts`). Only the client is bundled (Vite), and only for production.
 
@@ -167,6 +167,6 @@ Each WebSocket client subscribes to at most one conversation (`events.ts`). The 
 
 **Speculative swipes** (`server/src/speculation.ts`): when `backgroundSwipeGeneration` is on, the server keeps one unread assistant sibling ahead of the active leaf (`generationKind: 'speculative'`), only while the conversation has a connected viewer and its character has not opted out via `disableBackgroundSwipeGeneration`. By default preparation waits for the primary reply to finish; `parallelBackgroundSwipeGeneration` allows the active streaming reply and its one speculative sibling to overlap (at most two streams, still only one unread alternative). Swiping to the prepared reply stops the outgoing primary, promotes the prepared reply, and refills under the same limit. Stopping/failing the primary, leaving the last subscription, or changing branches cancels in-flight background work and retries. Context changes discard prepared swipes; refill retries use backoff capped at 8 attempts, with explicit user actions resetting the budget.
 
-**Access control**: Caddy applies the configured source-IP allowlist to the entire application; every Node HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`, using the client IP forwarded by the trusted Caddy service). Configured via `MINITAVERN_IP_ALLOWLIST` in a gitignored `.env`; the Compose files default to an empty value, which allows all addresses. Docker-internal traffic (e.g. the mock, e2e runs) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes and WebSocket upgrades require an opaque HTTP-only session cookie. Caddy media routes use expiring signed URLs issued through authenticated DTOs. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
+**Access control**: Caddy applies the configured source-IP allowlist to the entire application; every Node HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`, using the client IP forwarded by the trusted Caddy service). Configured via `TINYTAVERN_IP_ALLOWLIST` in a gitignored `.env`; the Compose files default to an empty value, which allows all addresses. Docker-internal traffic (e.g. the mock, e2e runs) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes and WebSocket upgrades require an opaque HTTP-only session cookie. Caddy media routes use expiring signed URLs issued through authenticated DTOs. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
 
 **Mock LLM** (`tests/mocks/server.ts`): OpenAI-compatible streaming endpoint at `http://mock:9800/v1` (from inside the compose network) with `/control/*` endpoints to inject failures; the e2e suite drives it.

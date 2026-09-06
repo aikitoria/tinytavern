@@ -1,6 +1,6 @@
-# MiniTavern
+# TinyTavern
 
-MiniTavern is a self-hosted chat interface for OpenAI-compatible language model
+TinyTavern is a self-hosted chat interface for OpenAI-compatible language model
 APIs, with characters, personas, prompt templates, and branching conversations.
 Use it on desktop or mobile, with chats synchronized across devices.
 
@@ -44,7 +44,7 @@ or adjust the user and file ownership for your installation.
    docker network create my-bridge-network
    ```
 
-3. Prepare the directories and start MiniTavern:
+3. Prepare the directories and start TinyTavern:
 
    ```sh
    ./scripts/init-caddy.sh --media-dirs
@@ -70,10 +70,10 @@ Set a password under **Settings > General** to require sign-in. No password is
 configured by default. Sessions last 30 days; changing or removing the password
 signs out all devices.
 
-To restrict access by IP address, set `MINITAVERN_IP_ALLOWLIST` in `.env`:
+To restrict access by IP address, set `TINYTAVERN_IP_ALLOWLIST` in `.env`:
 
 ```dotenv
-MINITAVERN_IP_ALLOWLIST=127.0.0.1/32,::1/128,192.168.1.20/32,192.168.1.0/24
+TINYTAVERN_IP_ALLOWLIST=127.0.0.1/32,::1/128,192.168.1.20/32,192.168.1.0/24
 ```
 
 Separate addresses or CIDR ranges with commas, and include the devices that need
@@ -97,15 +97,25 @@ deleting their source conversations.
 
 ## Backups
 
-Create a database backup while MiniTavern is running:
+When upgrading an installation from before the TinyTavern rename, back up both
+databases and stop the old containers before changing files. Rename the database
+in each data directory to `tinytavern.db`, keeping any `-wal` and `-shm` sidecars
+with it under the same new basename. Preserve the media directories, `.secrets`,
+and certificates, and rename the allowlist variable in `.env` to
+`TINYTAVERN_IP_ALLOWLIST` before recreating the stacks. Browser sessions and local
+view preferences use new keys, so sign in again after upgrading. To import a
+conversation JSON exported before the rename, change its top-level `format`
+field to `tinytavern-conversation`.
+
+Create a database backup while TinyTavern is running:
 
 ```sh
-docker compose exec minitavern node server/src/backup.ts /data/backups/minitavern-$(date +%F).db
+docker compose exec tinytavern node server/src/backup.ts /data/backups/tinytavern-$(date +%F).db
 ```
 
 The command refuses to overwrite an existing backup. Do not copy the live
-`minitavern.db` file directly: that can miss changes still in its write-ahead log.
-For a complete backup including avatars and images, stop MiniTavern and copy
+`tinytavern.db` file directly: that can miss changes still in its write-ahead log.
+For a complete backup including avatars and images, stop TinyTavern and copy
 `./data`.
 
 ## Certificate renewal
@@ -113,7 +123,7 @@ For a complete backup including avatars and images, stop MiniTavern and copy
 After replacing `certs/cert.pem` and `certs/key.pem`, reload the certificate:
 
 ```sh
-docker compose exec caddy-prod minitavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose exec caddy-prod tinytavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
 ## Shortcuts and commands

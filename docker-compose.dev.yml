@@ -1,3 +1,5 @@
+name: tinytavern
+
 # Read-only overlays protect repository metadata and deployment files during hot reload.
 x-dev-volumes: &dev-volumes
   volumes:
@@ -16,10 +18,10 @@ services:
     command: node --watch-path=server/src --watch-path=shared/src server/src/index.ts
     environment:
       DATA_DIR: /app/data-dev
-      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
       MEDIA_SIGNING_KEY_FILE: /app/.secrets/dev/media.key
       CADDY_PROXY_KEY_FILE: /app/.secrets/dev/proxy.key
-      SESSION_COOKIE_NAME: minitavern_dev_session
+      SESSION_COOKIE_NAME: tinytavern_dev_session
     <<: *dev-volumes
     # Reach ComfyUI at http://comfy:8588 on its existing network.
     networks:
@@ -33,7 +35,7 @@ services:
     command: npm run dev -w client
     environment:
       CADDY_FRONTEND: "1"
-      MINITAVERN_IP_ALLOWLIST: ""
+      TINYTAVERN_IP_ALLOWLIST: ""
     volumes:
       - .:/app
       - ./.git:/app/.git:ro
@@ -54,7 +56,7 @@ services:
       - "5173:5173/udp"
     environment:
       PUBLIC_PORT: "5173"
-      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
     volumes:
       - ./certs:/certs:ro
       - ./.secrets/dev:/secrets:ro

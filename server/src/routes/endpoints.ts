@@ -1,4 +1,4 @@
-import type { Endpoint, GenParams, ReasoningEffort } from '@minitavern/shared';
+import type { Endpoint, GenParams, ReasoningEffort } from '@tinytavern/shared';
 import { stmt, toEndpoint } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { route, HttpError } from '../router.ts';

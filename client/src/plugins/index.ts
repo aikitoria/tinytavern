@@ -1,4 +1,4 @@
-import type { Message } from '@minitavern/shared';
+import type { Message } from '@tinytavern/shared';
 import type { Plugin, PluginCommand, PluginMessageView, PluginTool } from './api.ts';
 import { imageGenerationPlugin } from './imageGeneration.tsx';
 

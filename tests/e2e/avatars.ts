@@ -1,4 +1,4 @@
-import type { Settings } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,

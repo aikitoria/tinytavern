@@ -54,7 +54,7 @@ class FakeWebSocket {
 Object.defineProperty(globalThis, 'document', { value: fakeDocument, configurable: true });
 Object.defineProperty(globalThis, 'window', { value: fakeWindow, configurable: true });
 Object.defineProperty(globalThis, 'location', {
-  value: { protocol: 'https:', host: 'minitavern.test' },
+  value: { protocol: 'https:', host: 'tinytavern.test' },
   configurable: true,
 });
 Object.defineProperty(globalThis, 'WebSocket', { value: FakeWebSocket, configurable: true });
@@ -90,7 +90,7 @@ configureWs({
 startWs();
 assert.equal(FakeWebSocket.instances.length, 1);
 const first = FakeWebSocket.instances[0]!;
-assert.equal(first.url, 'wss://minitavern.test/ws');
+assert.equal(first.url, 'wss://tinytavern.test/ws');
 first.open();
 subscribe(42);
 assert.deepEqual(

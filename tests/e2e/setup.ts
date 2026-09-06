@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { expandWorkflowTemplate, workflowValidationError } from '@minitavern/shared';
-import type { GenParams, Settings } from '@minitavern/shared';
+import { expandWorkflowTemplate, workflowValidationError } from '@tinytavern/shared';
+import type { GenParams, Settings } from '@tinytavern/shared';
 import { createIpAllowlist } from '../../server/src/ipAccess.ts';
 import {
   BASE,
@@ -188,13 +188,13 @@ export async function testSetup() {
   const dataDir = process.env.DATA_DIR!;
   for (const path of [
     dataDir,
-    join(dataDir, 'minitavern.db'),
-    join(dataDir, 'minitavern.db-wal'),
-    join(dataDir, 'minitavern.db-shm'),
+    join(dataDir, 'tinytavern.db'),
+    join(dataDir, 'tinytavern.db-wal'),
+    join(dataDir, 'tinytavern.db-shm'),
   ]) {
     assert((statSync(path).mode & 0o077) === 0, `${path} is private to the server user`);
   }
-  const backupPath = join('/tmp', `minitavern-e2e-backup-${randomUUID()}.db`);
+  const backupPath = join('/tmp', `tinytavern-e2e-backup-${randomUUID()}.db`);
   execFileSync('node', ['server/src/backup.ts', backupPath], {
     cwd: process.cwd(),
     env: process.env,
@@ -202,7 +202,7 @@ export async function testSetup() {
   });
   try {
     assert((statSync(backupPath).mode & 0o077) === 0, 'online backup file is mode 0600');
-    const live = new DatabaseSync(join(dataDir, 'minitavern.db'), { readOnly: true });
+    const live = new DatabaseSync(join(dataDir, 'tinytavern.db'), { readOnly: true });
     const snapshot = new DatabaseSync(backupPath, { readOnly: true });
     try {
       const liveEndpoints = (

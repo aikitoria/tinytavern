@@ -4,7 +4,7 @@ import { isTrustedProxy } from './proxy.ts';
 import { stmt } from './db.ts';
 
 const PASSWORD_KEY = 'access_password_hash';
-const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'minitavern_session';
+const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'tinytavern_session';
 if (!/^[a-zA-Z0-9_]+$/.test(SESSION_COOKIE)) throw new Error('Invalid SESSION_COOKIE_NAME');
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PASSWORD_LENGTH = 1024;

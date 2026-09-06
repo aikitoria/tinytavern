@@ -13,8 +13,8 @@ import type {
   ServerEvent,
   Settings,
   Template,
-} from '@minitavern/shared';
-import { DEFAULT_SETTINGS } from '@minitavern/shared';
+} from '@tinytavern/shared';
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import { api, ApiError } from './api.ts';
 import { refreshWs, subscribe } from './ws.ts';
 import {
@@ -38,7 +38,7 @@ export interface GalleryRenderState {
   max?: number;
 }
 
-const GROUP_BY_CHARACTER_KEY = 'minitavern.groupByCharacter';
+const GROUP_BY_CHARACTER_KEY = 'tinytavern.groupByCharacter';
 
 function loadGroupByCharacter(): boolean {
   try {
@@ -182,7 +182,7 @@ export const streamingMessage = globalMemo<Message | null>(() => {
   return null;
 });
 
-const LAST_CONVERSATION_KEY = 'minitavern.lastConversationId';
+const LAST_CONVERSATION_KEY = 'tinytavern.lastConversationId';
 let conversationsLoaded = false;
 let selectionRestored = false;
 /** The boot cover waits only for the initial restored tree. */

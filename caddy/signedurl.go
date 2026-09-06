@@ -29,7 +29,7 @@ type SignedURL struct {
 
 func (SignedURL) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
-		ID:  "http.matchers.minitavern_signed_url",
+		ID:  "http.matchers.tinytavern_signed_url",
 		New: func() caddy.Module { return new(SignedURL) },
 	}
 }

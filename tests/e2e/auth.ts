@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { Settings } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
 import { BASE, assert, req, websocketHandshake } from './helpers.ts';
 import type { SetupFixture } from './setup.ts';
 import type { ImagesFixture } from './images.ts';
@@ -30,11 +30,11 @@ export async function testAuth(
   assert(
     enabledSettings.hasPassword &&
       !JSON.stringify(enabledSettings).includes('correct horse battery staple') &&
-      enablingCookie.startsWith('minitavern_session='),
+      enablingCookie.startsWith('tinytavern_session='),
     'enabling a password returns only password status and an HTTP-only session',
   );
 
-  const passwordRow = new DatabaseSync(join(dataDir, 'minitavern.db'));
+  const passwordRow = new DatabaseSync(join(dataDir, 'tinytavern.db'));
   try {
     const stored = passwordRow
       .prepare("SELECT value FROM settings WHERE key = 'access_password_hash'")
@@ -69,7 +69,7 @@ export async function testAuth(
   });
   const cookie = login.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
   assert(
-    login.status === 200 && cookie.startsWith('minitavern_session='),
+    login.status === 200 && cookie.startsWith('tinytavern_session='),
     'the correct access password creates a session',
   );
   const authModule = new URL('../../server/src/auth.ts', import.meta.url).href;
@@ -92,7 +92,7 @@ export async function testAuth(
     'a login cookie remains valid in a fresh server process using the same database',
   );
   const sessionToken = cookie.slice(cookie.indexOf('=') + 1);
-  const sessionDb = new DatabaseSync(join(dataDir, 'minitavern.db'), { readOnly: true });
+  const sessionDb = new DatabaseSync(join(dataDir, 'tinytavern.db'), { readOnly: true });
   try {
     const persisted = sessionDb
       .prepare('SELECT token_hash, expires_at FROM auth_sessions')
@@ -140,7 +140,7 @@ export async function testAuth(
     }),
   });
   assert(disableAuth.status === 200, 'the access password can be removed in settings');
-  const sessionsAfterDisable = new DatabaseSync(join(dataDir, 'minitavern.db'), {
+  const sessionsAfterDisable = new DatabaseSync(join(dataDir, 'tinytavern.db'), {
     readOnly: true,
   });
   try {

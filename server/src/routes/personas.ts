@@ -1,6 +1,6 @@
 import { publicAvatar } from '../mediaUrls.ts';
 import { defineAvatarRoutes } from './avatarRoutes.ts';
-import type { Persona } from '@minitavern/shared';
+import type { Persona } from '@tinytavern/shared';
 import { stmt, toPersona } from '../db.ts';
 import { copyAvatarFiles, deleteAvatarFiles } from './avatarStore.ts';
 import { defineEntityRoutes, nameField, textField } from './entityRoutes.ts';

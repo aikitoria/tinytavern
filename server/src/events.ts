@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
-import type { ClientCommand, InvalidateEntity, ServerEvent } from '@minitavern/shared';
+import type { ClientCommand, InvalidateEntity, ServerEvent } from '@tinytavern/shared';
 import { isRequestIpAllowed, isRequestOriginAllowed } from './ipAccess.ts';
 import { isRequestAuthenticated } from './auth.ts';
 

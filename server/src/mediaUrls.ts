@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { GalleryItem, Message } from '@minitavern/shared';
+import type { GalleryItem, Message } from '@tinytavern/shared';
 
 const keyFile = process.env.MEDIA_SIGNING_KEY_FILE;
 const keyText = keyFile ? readFileSync(keyFile, 'utf8').trim() : null;

@@ -1,4 +1,4 @@
-import type { ClientCommand, ServerEvent } from '@minitavern/shared';
+import type { ClientCommand, ServerEvent } from '@tinytavern/shared';
 
 let sock: WebSocket | null = null;
 let currentSub: number | null = null;

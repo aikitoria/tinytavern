@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 
 process.umask(0o077);
 const DATA_DIR = process.env.DATA_DIR ?? '/data';
-const sourcePath = process.env.DB_PATH ?? join(DATA_DIR, 'minitavern.db');
+const sourcePath = process.env.DB_PATH ?? join(DATA_DIR, 'tinytavern.db');
 const requested = process.argv[2];
 
 if (!requested) {

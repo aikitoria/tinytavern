@@ -124,7 +124,7 @@ stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(
 
 const portable = exportPortableConversation(sourceConversationId);
 assert(
-  portable.format === 'minitavern-conversation' && portable.version === 1,
+  portable.format === 'tinytavern-conversation' && portable.version === 1,
   'schema is versioned',
 );
 assert(

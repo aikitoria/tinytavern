@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@minitavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,

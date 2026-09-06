@@ -1,5 +1,5 @@
-import type { Settings } from '@minitavern/shared';
-import { DEFAULT_SETTINGS } from '@minitavern/shared';
+import type { Settings } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import { route, HttpError } from '../router.ts';
 import { getSettings, putSettings } from '../settingsStore.ts';
 import { disconnectAllForAuthChange, invalidate } from '../events.ts';

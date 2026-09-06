@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { GalleryItem } from '@minitavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,

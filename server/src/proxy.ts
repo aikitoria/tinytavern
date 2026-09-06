@@ -13,7 +13,7 @@ export const behindCaddy = expected !== null;
 // Caddy overwrites this header. Backends publish no ports, and the private
 // token also prevents other containers on ComfyUI's shared network spoofing it.
 export function isTrustedProxy(req: IncomingMessage): boolean {
-  const supplied = req.headers['x-minitavern-proxy'];
+  const supplied = req.headers['x-tinytavern-proxy'];
   return (
     expected !== null &&
     typeof supplied === 'string' &&

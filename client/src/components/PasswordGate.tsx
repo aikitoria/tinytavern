@@ -26,7 +26,7 @@ export default function PasswordGate() {
     <main class="password-gate">
       <form class="password-card" onSubmit={(event) => void submit(event)}>
         <img src="/icon.svg" alt="" width="64" height="64" />
-        <h1>MiniTavern</h1>
+        <h1>TinyTavern</h1>
         <p>Enter the access password to continue.</p>
         <label for="access-password">Password</label>
         <input

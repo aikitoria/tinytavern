@@ -1,5 +1,5 @@
 import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
-import { workflowValidationError, type Message } from '@minitavern/shared';
+import { workflowValidationError, type Message } from '@tinytavern/shared';
 import type { Plugin, PluginMessageView, PluginTool } from './api.ts';
 import { pluginSettings } from './api.ts';
 import { api, ApiError } from '../state/api.ts';

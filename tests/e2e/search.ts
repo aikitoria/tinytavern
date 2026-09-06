@@ -40,7 +40,7 @@ export async function testSearch(
     'title search treats LIKE wildcards as literals',
   );
 
-  const searchSeed = new DatabaseSync(join(dataDir, 'minitavern.db'));
+  const searchSeed = new DatabaseSync(join(dataDir, 'tinytavern.db'));
   searchSeed.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; BEGIN');
   let crowdedSearchId: number;
   let otherSearchId: number;

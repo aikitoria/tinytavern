@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Conversation, Message } from '@minitavern/shared';
+import type { Conversation, Message } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,

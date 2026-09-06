@@ -1,6 +1,6 @@
 import { For, Show, createSignal } from 'solid-js';
-import type { Character } from '@minitavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE } from '@minitavern/shared';
+import type { Character } from '@tinytavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { createCharacterGroups } from '../../state/characterGroups.ts';
 import { state } from '../../state/store.ts';

@@ -1,5 +1,5 @@
 import { Show, createSignal } from 'solid-js';
-import type { Endpoint, GenParams } from '@minitavern/shared';
+import type { Endpoint, GenParams } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';

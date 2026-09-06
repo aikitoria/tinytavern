@@ -5,7 +5,7 @@ import type {
   Message,
   MessageStatus,
   Role,
-} from '@minitavern/shared';
+} from '@tinytavern/shared';
 import { stmt, transaction } from '../db.ts';
 import { copyImage, deleteImageFiles } from '../images.ts';
 

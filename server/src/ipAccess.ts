@@ -31,16 +31,16 @@ export function createIpAllowlist(env: string | undefined): IpAllowlist {
     const slash = entry.lastIndexOf('/');
     const address = normalizeAddress(slash === -1 ? entry : entry.slice(0, slash));
     const family = isIP(address);
-    if (!family) throw new Error(`Invalid address in MINITAVERN_IP_ALLOWLIST: ${entry}`);
+    if (!family) throw new Error(`Invalid address in TINYTAVERN_IP_ALLOWLIST: ${entry}`);
     const maxPrefix = family === 4 ? 32 : 128;
     // Strict digit check: Number('') is 0, so a trailing "/" would silently become /0.
     const rawPrefix = slash === -1 ? null : entry.slice(slash + 1);
     if (rawPrefix !== null && !/^\d+$/.test(rawPrefix)) {
-      throw new Error(`Invalid prefix in MINITAVERN_IP_ALLOWLIST: ${entry}`);
+      throw new Error(`Invalid prefix in TINYTAVERN_IP_ALLOWLIST: ${entry}`);
     }
     const prefix = rawPrefix === null ? maxPrefix : Number(rawPrefix);
     if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
-      throw new Error(`Invalid prefix in MINITAVERN_IP_ALLOWLIST: ${entry}`);
+      throw new Error(`Invalid prefix in TINYTAVERN_IP_ALLOWLIST: ${entry}`);
     }
     list.addSubnet(address, prefix, family === 4 ? 'ipv4' : 'ipv6');
   }
@@ -54,11 +54,11 @@ export function createIpAllowlist(env: string | undefined): IpAllowlist {
   };
 }
 
-const allowlist = createIpAllowlist(process.env.MINITAVERN_IP_ALLOWLIST);
+const allowlist = createIpAllowlist(process.env.TINYTAVERN_IP_ALLOWLIST);
 
 export function requestIp(req: IncomingMessage): string | null {
   const address = isTrustedProxy(req)
-    ? (req.headers['x-minitavern-client-ip'] as string | undefined)
+    ? (req.headers['x-tinytavern-client-ip'] as string | undefined)
     : req.socket.remoteAddress;
   return address ? normalizeAddress(address) : null;
 }

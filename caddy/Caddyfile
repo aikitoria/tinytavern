@@ -15,7 +15,7 @@ https://:{$PUBLIC_PORT:5487} {
 			route {
 				@signed {
 					method GET HEAD
-					minitavern_signed_url /secrets/media.key
+					tinytavern_signed_url /secrets/media.key
 				}
 				handle @signed {
 					header Cache-Control "private, no-store"
@@ -32,8 +32,8 @@ https://:{$PUBLIC_PORT:5487} {
 		@backend path /api/* /ws
 		handle @backend {
 			reverse_proxy {$BACKEND:server:5487} {
-				header_up X-Minitavern-Proxy {$MINITAVERN_PROXY_TOKEN}
-				header_up X-Minitavern-Client-IP {remote_host}
+				header_up X-Tinytavern-Proxy {$TINYTAVERN_PROXY_TOKEN}
+				header_up X-Tinytavern-Client-IP {remote_host}
 			}
 		}
 		handle {

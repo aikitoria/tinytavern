@@ -1,5 +1,5 @@
 import { createMemo, type Accessor } from 'solid-js';
-import type { Character } from '@minitavern/shared';
+import type { Character } from '@tinytavern/shared';
 import { state } from './store.ts';
 
 const EMPTY: Character[] = [];
