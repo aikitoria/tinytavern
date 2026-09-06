@@ -1,5 +1,15 @@
+import {
+  faCheck,
+  faChevronDown,
+  faCode,
+  faCodeBranch,
+  faDiagramProject,
+  faGear,
+  faPen,
+} from '@fortawesome/free-solid-svg-icons';
+import { faComment } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createSignal } from 'solid-js';
-import { Dynamic } from 'solid-js/web';
 import { api } from '../state/api.ts';
 import {
   closeSidebar,
@@ -14,33 +24,13 @@ import {
 import { errorMessage } from '../util.ts';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
-import GearIcon from './GearIcon.tsx';
-import MapIcon from './MapIcon.tsx';
 import Select from './Select.tsx';
-import TraceIcon from './TraceIcon.tsx';
-import { TreeIcon } from './TreeView.tsx';
-
-const ChatIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="16"
-    height="16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M4 5h16v11H9l-5 4z" />
-  </svg>
-);
 
 const VIEWS = [
-  { mode: 'chat', label: 'Chat', icon: ChatIcon },
-  { mode: 'trace', label: 'Prompt trace', icon: TraceIcon },
-  { mode: 'tree', label: 'Conversation tree', icon: TreeIcon },
-  { mode: 'map', label: 'Tree map', icon: MapIcon },
+  { mode: 'chat', label: 'Chat', icon: faComment },
+  { mode: 'trace', label: 'Prompt trace', icon: faCode },
+  { mode: 'tree', label: 'Conversation tree', icon: faCodeBranch },
+  { mode: 'map', label: 'Tree map', icon: faDiagramProject },
 ] as const;
 
 type ContextField = 'endpointId' | 'personaId';
@@ -177,7 +167,7 @@ export default function Header() {
                     aria-label="Rename conversation"
                     onClick={startRename}
                   >
-                    ✎
+                    <FontAwesomeIcon icon={faPen} size={14} />
                   </button>
                 </Show>
               </div>
@@ -253,10 +243,10 @@ export default function Header() {
                 aria-expanded={viewOpen()}
                 onClick={() => setViewOpen(!viewOpen())}
               >
-                <Dynamic component={activeView().icon} />
+                <FontAwesomeIcon icon={activeView().icon} />
                 <span>{activeView().label}</span>
                 <span class="select-caret" aria-hidden="true">
-                  ▾
+                  <FontAwesomeIcon icon={faChevronDown} size={10} />
                 </span>
               </button>
               <DropdownSurface
@@ -281,10 +271,12 @@ export default function Header() {
                       classList={{ active: state.viewMode === view.mode }}
                       onClick={() => setView(view.mode)}
                     >
-                      <Dynamic component={view.icon} />
+                      <FontAwesomeIcon icon={view.icon} />
                       <span>{view.label}</span>
                       <span class="view-check" aria-hidden="true">
-                        {state.viewMode === view.mode ? '✓' : ''}
+                        {state.viewMode === view.mode ? (
+                          <FontAwesomeIcon icon={faCheck} size={12} />
+                        ) : null}
                       </span>
                     </button>
                   )}
@@ -297,7 +289,7 @@ export default function Header() {
               aria-label="Conversation settings"
               onClick={() => show('conversation')}
             >
-              <GearIcon />
+              <FontAwesomeIcon icon={faGear} />
             </button>
           </>
         )}

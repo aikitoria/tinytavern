@@ -1,3 +1,5 @@
+import { faCheck } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import type { Conversation } from '@tinytavern/shared';
@@ -196,7 +198,9 @@ function Editor(props: {
           Export JSON
         </button>
         <Show when={saved()}>
-          <span class="saved-flash">✓ Saved</span>
+          <span class="saved-flash">
+            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
+          </span>
         </Show>
       </div>
     </div>

@@ -30,7 +30,7 @@ export default function PresetsTab() {
       editor={editor}
       items={state.presets}
       itemLabel={(preset) => preset.name}
-      newLabel="+ New preset"
+      newLabel="New preset"
       activeId={state.settings.defaultPresetId}
       defaultOption={{
         label: 'No default prompt',

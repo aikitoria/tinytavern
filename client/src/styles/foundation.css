@@ -5,6 +5,7 @@
   --bg-raised: #303135;
   --bg-hover: #3d3f44;
   --border: #404248;
+  --border-subtle: color-mix(in srgb, var(--border) 40%, transparent);
   --text: #f2f3f5;
   --text-dim: #a9abb2;
   --text-muted: #747780;

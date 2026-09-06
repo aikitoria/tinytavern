@@ -125,11 +125,8 @@
   border-color: var(--accent);
 }
 
-.treeview-active-leaf::after {
-  content: '●';
-  flex: none;
+.treeview-active-marker {
   align-self: center;
-  font-size: 10px;
   color: var(--accent);
 }
 

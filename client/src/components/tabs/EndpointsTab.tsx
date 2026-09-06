@@ -103,7 +103,7 @@ export default function EndpointsTab() {
       editor={editor}
       items={state.endpoints}
       itemLabel={(ep) => ep.name}
-      newLabel="+ New endpoint"
+      newLabel="New endpoint"
       activeId={state.settings.activeEndpointId}
       defaultOption={{
         label: 'No active endpoint',

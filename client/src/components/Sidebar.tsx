@@ -1,3 +1,14 @@
+import {
+  faChevronDown,
+  faChevronRight,
+  faEllipsis,
+  faGear,
+  faLayerGroup,
+  faPlus,
+  faXmark,
+} from '@fortawesome/free-solid-svg-icons';
+import { faCopy, faImages } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
 import type { Character, Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
@@ -16,9 +27,6 @@ import { errorMessage } from '../util.ts';
 import { confirmAction } from '../state/confirm.ts';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
-import GearIcon from './GearIcon.tsx';
-import GroupIcon from './GroupIcon.tsx';
-import GalleryIcon from './GalleryIcon.tsx';
 
 interface SearchResult {
   conversation: Conversation;
@@ -195,7 +203,7 @@ export default function Sidebar() {
             aria-label={`Duplicate ${props.conv.title}`}
             onClick={(e) => void duplicate(props.conv.id, e)}
           >
-            ⧉
+            <FontAwesomeIcon icon={faCopy} size={15} />
           </button>
           <button
             class="icon-btn conv-delete"
@@ -203,7 +211,7 @@ export default function Sidebar() {
             aria-label={`Delete ${props.conv.title}`}
             onClick={(e) => void remove(props.conv.id, e)}
           >
-            ✕
+            <FontAwesomeIcon icon={faXmark} size={14} />
           </button>
         </span>
         <button
@@ -221,7 +229,7 @@ export default function Sidebar() {
             setConversationMenu(open ? null : props.conv);
           }}
         >
-          ⋯
+          <FontAwesomeIcon icon={faEllipsis} size={16} />
         </button>
       </div>
     );
@@ -247,7 +255,7 @@ export default function Sidebar() {
             aria-label="Open saved image gallery"
             onClick={() => openModal('gallery')}
           >
-            <GalleryIcon />
+            <FontAwesomeIcon icon={faImages} />
           </button>
           <button
             class="icon-btn"
@@ -257,7 +265,7 @@ export default function Sidebar() {
             aria-pressed={state.groupByCharacter}
             onClick={toggleGroupByCharacter}
           >
-            <GroupIcon />
+            <FontAwesomeIcon icon={faLayerGroup} />
           </button>
           <button
             class="icon-btn"
@@ -265,7 +273,7 @@ export default function Sidebar() {
             aria-label="Open settings"
             onClick={() => openModal('settings')}
           >
-            <GearIcon />
+            <FontAwesomeIcon icon={faGear} />
           </button>
         </span>
       </div>
@@ -284,7 +292,7 @@ export default function Sidebar() {
               if (!open) setNewChatQuery('');
             }}
           >
-            + New chat
+            <FontAwesomeIcon icon={faPlus} size={12} /> New chat
           </button>
         </div>
 
@@ -329,7 +337,11 @@ export default function Sidebar() {
                     }}
                   >
                     <span class="tree-disclosure">
-                      {searchActive() || !collapsedCharacterFolders().has(folder.id) ? '▾' : '▸'}
+                      {searchActive() || !collapsedCharacterFolders().has(folder.id) ? (
+                        <FontAwesomeIcon icon={faChevronDown} size={10} />
+                      ) : (
+                        <FontAwesomeIcon icon={faChevronRight} size={12} />
+                      )}
                     </span>
                     <span>{folder.name}</span>
                   </button>

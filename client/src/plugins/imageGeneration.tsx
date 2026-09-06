@@ -1,3 +1,15 @@
+import {
+  faCheck,
+  faChevronLeft,
+  faChevronRight,
+  faImages as faImagesSolid,
+  faPlus,
+  faSpinner,
+  faXmark,
+  faTriangleExclamation,
+} from '@fortawesome/free-solid-svg-icons';
+import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
 import { workflowValidationError, type Message } from '@tinytavern/shared';
 import type { Plugin, PluginMessageView, PluginTool } from './api.ts';
@@ -21,28 +33,9 @@ import Markdown from '../components/Markdown.tsx';
 import Select from '../components/Select.tsx';
 import { useSettingsGuard } from '../components/SettingsGuard.tsx';
 import type { SelectHandle } from '../components/Select.tsx';
-import GalleryIcon from '../components/GalleryIcon.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 import './imageGeneration.css';
-
-const PromptIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="15"
-    height="15"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M6 2h9l4 4v16H6z" />
-    <path d="M14 2v5h5" />
-    <path d="M9 12h6M9 16h6" />
-  </svg>
-);
 
 const ID = 'imageGeneration';
 
@@ -337,14 +330,20 @@ function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face'): 
   const presets = settings().promptPresets[kind].presets;
   const baseLabel = `Generate ${subject} Image`;
   if (presets.length === 0) {
-    return [{ label: baseLabel, icon: ImageIcon, run: () => void generate(kind) }];
+    return [
+      {
+        label: baseLabel,
+        icon: () => <FontAwesomeIcon icon={faImage} size={16} />,
+        run: () => void generate(kind),
+      },
+    ];
   }
   return [
     { name: 'Default', presetName: null },
     ...presets.map((preset) => ({ name: preset.name, presetName: preset.name })),
   ].map(({ name, presetName }) => ({
     label: `${baseLabel} — ${name}`,
-    icon: ImageIcon,
+    icon: () => <FontAwesomeIcon icon={faImage} size={16} />,
     run: () => void generate(kind, '', presetName),
   }));
 }
@@ -352,24 +351,6 @@ function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face'): 
 function imageGenerationTools(): PluginTool[] {
   return [...promptTools('describe', 'Character'), ...promptTools('face', 'Face')];
 }
-
-const ImageIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="16"
-    height="16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <circle cx="9" cy="10" r="1.6" />
-    <path d="M21 16l-5-5-9 9" />
-  </svg>
-);
 
 /** Names identify active selections, so copies must have unique names. */
 function copyName(base: string, taken: (name: string) => boolean): string {
@@ -515,7 +496,9 @@ function PromptPresetEditor(props: {
             })),
           ]}
         />
-        <button onClick={add}>+ New</button>
+        <button onClick={add}>
+          <FontAwesomeIcon icon={faPlus} size={12} /> New
+        </button>
         <Show when={selected() !== -1}>
           <button onClick={duplicate}>Duplicate</button>
           <button onClick={rename}>Rename</button>
@@ -869,7 +852,9 @@ function SettingsPage() {
               })),
             ]}
           />
-          <button onClick={addWorkflow}>+ Add</button>
+          <button onClick={addWorkflow}>
+            <FontAwesomeIcon icon={faPlus} size={12} /> Add
+          </button>
           <Show when={selected() !== -1}>
             <button onClick={duplicateWorkflow}>Duplicate</button>
             <button class="danger-btn" onClick={deleteWorkflow}>
@@ -900,14 +885,16 @@ function SettingsPage() {
           <Show when={workflowText().trim()}>
             <div class="macro-checks">
               <span classList={{ warn: !hasPrompt() }}>
+                <FontAwesomeIcon icon={hasPrompt() ? faCheck : faXmark} size={12} />{' '}
                 {hasPrompt()
-                  ? '✓ {{prompt}} found'
-                  : '✗ {{prompt}} missing — the generated description would not be used'}
+                  ? '{{prompt}} found'
+                  : '{{prompt}} missing — the generated description would not be used'}
               </span>
               <span classList={{ soft: !hasSeed() }}>
+                <FontAwesomeIcon icon={hasSeed() ? faCheck : faTriangleExclamation} size={12} />{' '}
                 {hasSeed()
-                  ? '✓ {{seed}} found'
-                  : "△ {{seed}} missing — every render will reuse the workflow's fixed seed"}
+                  ? '{{seed}} found'
+                  : "{{seed}} missing — every render will reuse the workflow's fixed seed"}
               </span>
             </div>
           </Show>
@@ -920,7 +907,9 @@ function SettingsPage() {
         </button>
         <button onClick={discard}>Discard</button>
         <Show when={saved()}>
-          <span class="saved-flash">✓ Saved</span>
+          <span class="saved-flash">
+            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
+          </span>
         </Show>
       </div>
     </>
@@ -1052,7 +1041,7 @@ const messageView: PluginMessageView = {
           aria-expanded={showPrompt()}
           onClick={() => setShowPrompt(!showPrompt())}
         >
-          <PromptIcon />
+          <FontAwesomeIcon icon={faFileLines} size={15} />
         </button>
       </Show>
     );
@@ -1061,7 +1050,7 @@ const messageView: PluginMessageView = {
       <>
         <Show when={message().imagePending && !ctx.streaming()}>
           <span class="msg-image-pending">
-            <span class="spinner" />
+            <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
             <SamplerProgress progress={renderProgress()} fallback={<span>Rendering…</span>} />
           </span>
         </Show>
@@ -1075,7 +1064,7 @@ const messageView: PluginMessageView = {
               disabled={savingToGallery()}
               onClick={() => void saveToGallery()}
             >
-              <GalleryIcon filled={savedItem() != null} />
+              <FontAwesomeIcon icon={savedItem() != null ? faImagesSolid : faImages} />
             </button>
           </span>
           <span class="branch-nav">
@@ -1086,7 +1075,7 @@ const messageView: PluginMessageView = {
               disabled={state.treeNavigationPending || !onActivePath() || activeImage() <= 0}
               onClick={() => void swipeImage(message(), -1)}
             >
-              ‹
+              <FontAwesomeIcon icon={faChevronLeft} size={12} />
             </button>
             <span
               class="branch-count"
@@ -1113,7 +1102,7 @@ const messageView: PluginMessageView = {
               }
               onClick={() => void swipeImage(message(), 1)}
             >
-              ›
+              <FontAwesomeIcon icon={faChevronRight} size={12} />
             </button>
           </span>
         </Show>
@@ -1154,7 +1143,7 @@ const messageView: PluginMessageView = {
     );
 
     return {
-      RailIcon: ImageIcon,
+      RailIcon: () => <FontAwesomeIcon icon={faImage} size={16} />,
       Header,
       HeaderTools,
       Body,

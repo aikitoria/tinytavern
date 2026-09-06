@@ -19,6 +19,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@fontsource-variable/ibm-plex-sans": "^5.2.8"
+    "@fontsource-variable/ibm-plex-sans": "^5.2.8",
+    "@fortawesome/free-regular-svg-icons": "7.3.0",
+    "@fortawesome/free-solid-svg-icons": "7.3.0"
   }
 }

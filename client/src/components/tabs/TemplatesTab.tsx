@@ -33,7 +33,7 @@ export default function TemplatesTab() {
       editor={editor}
       items={state.templates}
       itemLabel={(template) => template.name}
-      newLabel="+ New template"
+      newLabel="New template"
       activeId={state.settings.defaultTemplateId}
       defaultOption={{
         label: 'Built-in template',

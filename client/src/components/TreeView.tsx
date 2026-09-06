@@ -1,31 +1,12 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
+import { faCircle } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import type { Message } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { activePath, childrenByParent, navigateTree, setState, state } from '../state/store.ts';
 import '../styles/treeview.css';
 import MobileSidebarButton from './MobileSidebarButton.tsx';
 import { speakerName, snippet } from './treeSummary.ts';
-
-export function TreeIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2.25"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 3v12" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
-}
 
 /** Activation restores the descendant chain through the authoritative treePatch. */
 async function activate(message: Message): Promise<void> {
@@ -75,6 +56,9 @@ function TreeNode(props: { message: Message; activeIds: Set<number>; filter: Tre
           >
             {props.message.status}
           </span>
+        </Show>
+        <Show when={props.message.id === state.tree.activeLeafId}>
+          <FontAwesomeIcon icon={faCircle} size={8} class="treeview-active-marker" />
         </Show>
       </button>
       <Show when={children().length > 0}>

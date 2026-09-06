@@ -1,3 +1,5 @@
+import { faCheck } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { Show, createEffect, createSignal, untrack } from 'solid-js';
 import type { Settings } from '@tinytavern/shared';
 import { api, ApiError } from '../../state/api.ts';
@@ -187,7 +189,9 @@ export default function GeneralTab() {
         </button>
         <button onClick={discard}>Discard</button>
         <Show when={saved()}>
-          <span class="saved-flash">✓ Saved</span>
+          <span class="saved-flash">
+            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
+          </span>
         </Show>
       </div>
     </div>

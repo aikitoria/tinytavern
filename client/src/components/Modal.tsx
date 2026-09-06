@@ -1,3 +1,5 @@
+import { faXmark } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { createUniqueId, onCleanup, onMount, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { openModal } from '../state/store.ts';
@@ -93,7 +95,7 @@ export default function Modal(props: {
             </span>
             {props.headerExtra}
             <button class="icon-btn" title="Close" aria-label="Close" onClick={close}>
-              ✕
+              <FontAwesomeIcon icon={faXmark} size={14} />
             </button>
           </div>
           <div class="modal-body">{props.children}</div>

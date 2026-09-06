@@ -1,3 +1,5 @@
+import { faAnglesRight, faPaperPlane, faStop, faWrench } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { api } from '../state/api.ts';
 import {
@@ -22,51 +24,6 @@ import DropdownSurface from './DropdownSurface.tsx';
 import MobileSidebarButton from './MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
-
-const SendIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-    <path d="M3.4 20.4 20.85 12.92c.8-.35.8-1.49 0-1.84L3.4 3.6c-.66-.29-1.39.2-1.39.91L2 9.12c0 .5.37.93.87.99L16 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z" />
-  </svg>
-);
-
-const ResumeIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="18"
-    height="18"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2.4"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M5 5l7 7-7 7" />
-    <path d="M13 5l7 7-7 7" />
-  </svg>
-);
-
-const StopIcon = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-    <rect x="5" y="5" width="14" height="14" rx="2" />
-  </svg>
-);
-
-const WrenchIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="17"
-    height="17"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-  </svg>
-);
 
 const BUILTIN_COMMANDS: PluginCommand[] = [
   {
@@ -346,7 +303,7 @@ export default function Composer() {
             classList={{ 'tools-btn-open': toolsOpen() }}
             onClick={() => setToolsOpen(!toolsOpen())}
           >
-            <WrenchIcon />
+            <FontAwesomeIcon icon={faWrench} size={17} />
           </button>
           <DropdownSurface
             open={toolsOpen()}
@@ -400,11 +357,11 @@ export default function Composer() {
                   title="Start another image generation"
                   onClick={() => void send()}
                 >
-                  <SendIcon />
+                  <FontAwesomeIcon icon={faPaperPlane} />
                 </button>
               </Show>
               <button class="send-btn stop-btn" title="Stop generating" onClick={stop}>
-                <StopIcon />
+                <FontAwesomeIcon icon={faStop} size={14} />
               </button>
             </>
           }
@@ -419,7 +376,7 @@ export default function Composer() {
               }
               onClick={continueTextOrReply}
             >
-              <ResumeIcon />
+              <FontAwesomeIcon icon={faAnglesRight} />
             </button>
           </Show>
           <button
@@ -428,7 +385,7 @@ export default function Composer() {
             disabled={!text().trim()}
             onClick={() => void send()}
           >
-            <SendIcon />
+            <FontAwesomeIcon icon={faPaperPlane} />
           </button>
         </Show>
       </div>

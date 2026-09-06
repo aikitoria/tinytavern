@@ -1,3 +1,12 @@
+import {
+  faCheck,
+  faEllipsis,
+  faLayerGroup,
+  faListCheck,
+  faSpinner,
+} from '@fortawesome/free-solid-svg-icons';
+import { faImages, faSquare, faSquareCheck, faTrashCan } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { GalleryItem } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
@@ -9,12 +18,8 @@ import { activeImageRenderConfig } from '../plugins/imageGeneration.tsx';
 import SamplerProgress from '../plugins/SamplerProgress.tsx';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
-import GalleryIcon from './GalleryIcon.tsx';
-import GallerySelectIcon, { GallerySelectAllIcon } from './GallerySelectIcon.tsx';
-import GroupIcon from './GroupIcon.tsx';
 import ImageViewer from './ImageViewer.tsx';
 import Modal from './Modal.tsx';
-import TrashIcon from './TrashIcon.tsx';
 
 const GROUP_KEY = 'tinytavern.galleryGroupByCharacter';
 
@@ -41,14 +46,14 @@ function GalleryPendingCard(props: { render: GalleryRenderState }) {
         when={props.render.preview}
         fallback={
           <div class="gallery-pending-placeholder">
-            <span class="spinner" />
+            <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
           </div>
         }
       >
         {(preview) => <img src={preview()} alt="Gallery image rendering preview" />}
       </Show>
       <span class="gallery-pending-status">
-        <span class="spinner" />
+        <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
         <SamplerProgress progress={props.render} fallback={<span>Rendering…</span>} />
       </span>
     </article>
@@ -209,7 +214,7 @@ function GalleryCard(props: {
             classList={{ selected: props.selected }}
             aria-hidden="true"
           >
-            {props.selected ? '✓' : ''}
+            {props.selected ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
           </span>
         </Show>
       </button>
@@ -228,7 +233,7 @@ function GalleryCard(props: {
               aria-expanded={menuOpen()}
               onClick={() => setMenuOpen(!menuOpen())}
             >
-              ⋯
+              <FontAwesomeIcon icon={faEllipsis} size={16} />
             </button>
             <DropdownSurface
               open={menuOpen()}
@@ -279,7 +284,7 @@ function GalleryCard(props: {
                   void deleteItem();
                 }}
               >
-                <TrashIcon /> Delete saved image
+                <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete saved image
               </button>
             </DropdownSurface>
           </span>
@@ -349,7 +354,7 @@ function GalleryCard(props: {
                   disabled={!promptDraft().trim() || !revisionInstruction().trim() || busy()}
                 >
                   <Show when={revisingPrompt()}>
-                    <span class="spinner" />
+                    <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
                   </Show>
                   {revisingPrompt() ? 'Revising…' : 'Regenerate prompt'}
                 </button>
@@ -590,7 +595,7 @@ export default function GalleryModal() {
                   disabled={state.gallery.length === 0}
                   onClick={() => setSelectionMode(true)}
                 >
-                  <GallerySelectIcon />
+                  <FontAwesomeIcon icon={faListCheck} />
                 </button>
                 <button
                   class="icon-btn"
@@ -600,7 +605,7 @@ export default function GalleryModal() {
                   aria-pressed={grouped()}
                   onClick={toggleGrouping}
                 >
-                  <GroupIcon />
+                  <FontAwesomeIcon icon={faLayerGroup} />
                 </button>
               </>
             }
@@ -616,7 +621,7 @@ export default function GalleryModal() {
               disabled={bulkDeleting() || selectableItems().length === 0}
               onClick={toggleSelectAll}
             >
-              <GallerySelectAllIcon checked={allSelected()} />
+              <FontAwesomeIcon icon={allSelected() ? faSquareCheck : faSquare} />
             </button>
             <button
               type="button"
@@ -626,7 +631,7 @@ export default function GalleryModal() {
               disabled={bulkDeleting() || selectedItems().length === 0}
               onClick={() => void deleteSelected()}
             >
-              <TrashIcon />
+              <FontAwesomeIcon icon={faTrashCan} size={15} />
             </button>
             <button
               type="button"
@@ -636,7 +641,7 @@ export default function GalleryModal() {
               disabled={bulkDeleting()}
               onClick={leaveSelectionMode}
             >
-              <GallerySelectIcon />
+              <FontAwesomeIcon icon={faListCheck} />
             </button>
           </Show>
         </div>
@@ -646,7 +651,7 @@ export default function GalleryModal() {
         when={state.gallery.length > 0}
         fallback={
           <div class="gallery-empty">
-            <GalleryIcon />
+            <FontAwesomeIcon icon={faImages} />
             <strong>No saved images yet</strong>
             <span>Save an image swipe from its message controls to keep it here.</span>
           </div>

@@ -41,7 +41,7 @@ export default function PersonasTab() {
           <Avatar src={persona.avatar} name={persona.name} /> {persona.name}
         </>
       )}
-      newLabel="+ New persona"
+      newLabel="New persona"
       activeId={state.settings.defaultPersonaId}
       defaultOption={{
         label: 'No default persona',

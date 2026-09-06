@@ -1,3 +1,5 @@
+import { faArrowDown, faArrowUp, faXmark } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { Show, createSignal } from 'solid-js';
 import { api } from '../state/api.ts';
 import { confirmAction } from '../state/confirm.ts';
@@ -91,7 +93,7 @@ export default function MessageSelectionBar() {
           disabled={(range()?.start ?? 0) <= 0 || state.treeNavigationPending}
           onClick={() => void moveRangeOneStep('up')}
         >
-          ↑
+          <FontAwesomeIcon icon={faArrowUp} size={14} />
         </button>
         <button
           type="button"
@@ -103,7 +105,7 @@ export default function MessageSelectionBar() {
           }
           onClick={() => void moveRangeOneStep('down')}
         >
-          ↓
+          <FontAwesomeIcon icon={faArrowDown} size={14} />
         </button>
         <button
           type="button"
@@ -127,7 +129,7 @@ export default function MessageSelectionBar() {
           aria-label="Cancel message selection"
           onClick={clearMessageSelection}
         >
-          ✕
+          <FontAwesomeIcon icon={faXmark} size={14} />
         </button>
       </div>
 

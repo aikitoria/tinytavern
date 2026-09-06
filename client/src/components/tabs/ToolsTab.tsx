@@ -1,3 +1,5 @@
+import { faChevronLeft } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { For, Show, createSignal } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { PLUGINS } from '../../plugins/index.ts';
@@ -28,7 +30,7 @@ export default function ToolsTab() {
       </div>
       <div class="form">
         <button class="detail-back" onClick={nav.closeDetail}>
-          ‹ Back to list
+          <FontAwesomeIcon icon={faChevronLeft} size={12} /> Back to list
         </button>
         <Show when={active()}>{(plugin) => <Dynamic component={plugin().settingsPage!} />}</Show>
       </div>

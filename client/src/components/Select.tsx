@@ -1,3 +1,5 @@
+import { faCheck, faChevronDown } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createSignal, createUniqueId, type JSX } from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
 
@@ -112,7 +114,9 @@ export default function Select(props: {
         onKeyDown={onKeyDown}
       >
         <span class="select-label">{label()}</span>
-        <span class="select-caret">▾</span>
+        <span class="select-caret">
+          <FontAwesomeIcon icon={faChevronDown} size={10} />
+        </span>
       </button>
       <DropdownSurface
         open={open()}
@@ -147,7 +151,7 @@ export default function Select(props: {
               <span>{option.label}</span>
               <Show when={props.showCheck}>
                 <span class="menu-check" aria-hidden="true">
-                  {option.value === current() ? '✓' : ''}
+                  {option.value === current() ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
                 </span>
               </Show>
             </button>

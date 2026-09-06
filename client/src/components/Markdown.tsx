@@ -1,6 +1,12 @@
 import { createEffect, createSignal, onCleanup } from 'solid-js';
 import { marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
+import {
+  faCheck,
+  faTriangleExclamation,
+  type IconDefinition,
+} from '@fortawesome/free-solid-svg-icons';
+import { faCopy } from '@fortawesome/free-regular-svg-icons';
 
 let hljsPromise: Promise<typeof import('highlight.js')> | null = null;
 
@@ -40,16 +46,44 @@ function escapeHtml(text: string): string {
 }
 
 const COPY_CODE_BUTTON =
-  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code">⧉</button>';
+  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button>';
+const copyIconTemplates = new Map<IconDefinition, SVGSVGElement>();
+
+// Only trusted package data becomes SVG, after sanitizing the message HTML.
+function setCopyIcon(button: HTMLButtonElement, icon: IconDefinition): void {
+  let template = copyIconTemplates.get(icon);
+  if (!template) {
+    const ns = 'http://www.w3.org/2000/svg';
+    template = document.createElementNS(ns, 'svg');
+    template.setAttribute('class', 'fa-icon');
+    template.setAttribute('viewBox', `0 0 ${icon.icon[0]} ${icon.icon[1]}`);
+    template.setAttribute('width', '15');
+    template.setAttribute('height', '15');
+    template.setAttribute('fill', 'currentColor');
+    template.setAttribute('aria-hidden', 'true');
+    template.setAttribute('focusable', 'false');
+    const paths = icon.icon[4];
+    for (const d of typeof paths === 'string' ? [paths] : paths) {
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', d);
+      template.append(path);
+    }
+    copyIconTemplates.set(icon, template);
+  }
+  button.replaceChildren(template.cloneNode(true));
+}
+
 const markdownRenderer = new Renderer();
-let hasRawCodeBlocks = false;
+let hasCodeBlocks = false;
 // Preserve marked's escaping, language classes and newline; wrap before sanitization
 // to avoid reparenting DOM each frame.
-markdownRenderer.code = (token) =>
-  `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${COPY_CODE_BUTTON}</div>\n`;
+markdownRenderer.code = (token) => {
+  hasCodeBlocks = true;
+  return `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${COPY_CODE_BUTTON}</div>\n`;
+};
 markdownRenderer.html = (token) => {
   // Multiline HTML survives instruction filtering; decorate after sanitizing its nesting.
-  if (/<pre[\s/>]/i.test(token.text)) hasRawCodeBlocks = true;
+  if (/<pre[\s/>]/i.test(token.text)) hasCodeBlocks = true;
   return Renderer.prototype.html.call(markdownRenderer, token);
 };
 markdownRenderer.image = ({ text }) =>
@@ -149,24 +183,28 @@ export default function Markdown(props: { content: string; streaming: boolean })
   let container: HTMLDivElement | undefined;
   let raf = 0;
 
-  const decorateRawCodeBlocks = () => {
+  const decorateCodeBlocks = () => {
     container?.querySelectorAll('pre').forEach((pre) => {
-      if (pre.parentElement?.classList.contains('code-block-wrap') || !pre.querySelector('code'))
-        return;
-      const wrap = document.createElement('div');
-      wrap.className = 'code-block-wrap';
-      pre.replaceWith(wrap);
-      wrap.append(pre);
-      wrap.insertAdjacentHTML('beforeend', COPY_CODE_BUTTON);
+      if (!pre.querySelector('code')) return;
+      let wrap = pre.parentElement;
+      if (!wrap?.classList.contains('code-block-wrap')) {
+        wrap = document.createElement('div');
+        wrap.className = 'code-block-wrap';
+        pre.replaceWith(wrap);
+        wrap.append(pre);
+        wrap.insertAdjacentHTML('beforeend', COPY_CODE_BUTTON);
+      }
+      const button = wrap.querySelector<HTMLButtonElement>(':scope > .code-copy-btn:empty');
+      if (button) setCopyIcon(button, faCopy);
     });
   };
 
   const render = () => {
     const src = hideAngleInstructions(props.streaming ? autoclose(props.content) : props.content);
-    hasRawCodeBlocks = false;
+    hasCodeBlocks = false;
     const parsed = marked.parse(markQuotes(src), { async: false, renderer: markdownRenderer });
     setHtml(DOMPurify.sanitize(parsed, { FORBID_TAGS: FORBIDDEN_MEDIA_TAGS }));
-    if (hasRawCodeBlocks) queueMicrotask(decorateRawCodeBlocks);
+    if (hasCodeBlocks) queueMicrotask(decorateCodeBlocks);
   };
 
   const highlight = async () => {
@@ -197,18 +235,18 @@ export default function Markdown(props: { content: string; streaming: boolean })
     try {
       // Remove only marked's appended newline, preserving source blank lines.
       await navigator.clipboard.writeText((code.textContent ?? '').replace(/\n$/, ''));
-      button.textContent = '✓';
+      setCopyIcon(button, faCheck);
       button.title = 'Copied';
       button.setAttribute('aria-label', 'Code copied');
       button.classList.add('copied');
     } catch {
-      button.textContent = '!';
+      setCopyIcon(button, faTriangleExclamation);
       button.title = 'Copy failed';
       button.setAttribute('aria-label', 'Copy failed');
     }
     window.setTimeout(() => {
       if (!button.isConnected) return;
-      button.textContent = '⧉';
+      setCopyIcon(button, faCopy);
       button.title = 'Copy code';
       button.setAttribute('aria-label', 'Copy code');
       button.classList.remove('copied');

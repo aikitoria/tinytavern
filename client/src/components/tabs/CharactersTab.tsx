@@ -1,3 +1,5 @@
+import { faChevronDown, faChevronRight, faPen, faXmark } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { For, Show, createSignal } from 'solid-js';
 import type { Character } from '@tinytavern/shared';
 import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
@@ -243,7 +245,11 @@ export default function CharactersTab() {
                         }}
                       >
                         <span class="tree-disclosure">
-                          {searchActive() || !collapsedFolders().has(folder.id) ? '▾' : '▸'}
+                          {searchActive() || !collapsedFolders().has(folder.id) ? (
+                            <FontAwesomeIcon icon={faChevronDown} size={10} />
+                          ) : (
+                            <FontAwesomeIcon icon={faChevronRight} size={12} />
+                          )}
                         </span>
                         <span class="character-folder-name">{folder.name}</span>
                       </button>
@@ -253,7 +259,7 @@ export default function CharactersTab() {
                         aria-label={`Rename ${folder.name}`}
                         onClick={() => editFolder(folder.id, folder.name)}
                       >
-                        ✎
+                        <FontAwesomeIcon icon={faPen} size={14} />
                       </button>
                       <button
                         class="character-folder-action"
@@ -261,7 +267,7 @@ export default function CharactersTab() {
                         aria-label={`Delete ${folder.name}`}
                         onClick={() => void deleteFolder(folder.id, folder.name)}
                       >
-                        ×
+                        <FontAwesomeIcon icon={faXmark} size={14} />
                       </button>
                     </div>
                     <Show when={searchActive() || !collapsedFolders().has(folder.id)}>

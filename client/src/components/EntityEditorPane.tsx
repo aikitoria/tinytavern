@@ -1,3 +1,5 @@
+import { faCheck, faChevronLeft, faPlus } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show } from 'solid-js';
 import type { JSX } from 'solid-js';
 import type { EditorId, NoticeKind } from '../util.ts';
@@ -21,7 +23,7 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
   items: readonly T[];
   itemLabel: (item: T) => JSX.Element;
   newLabel: string;
-  /** Content beside "+ New". */
+  /** Content beside the new-entity button. */
   listActions?: JSX.Element;
   /** Filter between list actions and contents. */
   listSearch?: JSX.Element;
@@ -42,7 +44,7 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
       classList={{ active: editor.selectedId() === 'new' }}
       onClick={() => editor.select('new')}
     >
-      {props.newLabel}
+      <FontAwesomeIcon icon={faPlus} size={12} /> {props.newLabel}
     </button>
   );
   return (
@@ -98,7 +100,7 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
       </div>
       <div class="form">
         <button class="detail-back" onClick={editor.nav.closeDetail}>
-          ‹ Back to list
+          <FontAwesomeIcon icon={faChevronLeft} size={12} /> Back to list
         </button>
         <Show
           when={editor.selectedId() === 'default' && props.defaultOption}
@@ -118,7 +120,9 @@ export default function EntityEditorPane<T extends { id: number }>(props: {
                   </button>
                 </Show>
                 <Show when={editor.saved()}>
-                  <span class="saved-flash">✓ Saved</span>
+                  <span class="saved-flash">
+                    <FontAwesomeIcon icon={faCheck} size={12} /> Saved
+                  </span>
                 </Show>
               </div>
             </>

@@ -1,3 +1,5 @@
+import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Message } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
@@ -510,7 +512,7 @@ export default function TreeMap() {
       </Show>
       <div class="treemap-toolbar">
         <button class="icon-btn" title="Zoom in" aria-label="Zoom in" onClick={() => zoomStep(1.3)}>
-          +
+          <FontAwesomeIcon icon={faPlus} size={12} />
         </button>
         <button
           class="icon-btn"
@@ -518,7 +520,7 @@ export default function TreeMap() {
           aria-label="Zoom out"
           onClick={() => zoomStep(1 / 1.3)}
         >
-          −
+          <FontAwesomeIcon icon={faMinus} size={12} />
         </button>
         <button
           class="icon-btn"
@@ -526,7 +528,7 @@ export default function TreeMap() {
           aria-label="Fit whole tree"
           onClick={fit}
         >
-          ⛶
+          <FontAwesomeIcon icon={faExpand} size={16} />
         </button>
         <button
           class="icon-btn"
@@ -534,7 +536,7 @@ export default function TreeMap() {
           aria-label="Center active message"
           onClick={centerActive}
         >
-          ◎
+          <FontAwesomeIcon icon={faCrosshairs} size={16} />
         </button>
       </div>
     </div>

@@ -1,3 +1,5 @@
+import { faCircleQuestion } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, createSignal } from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
 
@@ -50,7 +52,7 @@ export default function MacroHelp(props: {
         aria-expanded={open()}
         onClick={() => setOpen(!open())}
       >
-        ?
+        <FontAwesomeIcon icon={faCircleQuestion} size={14} />
       </button>
       <DropdownSurface
         open={open()}

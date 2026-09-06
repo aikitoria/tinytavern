@@ -1,3 +1,5 @@
+import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { api } from '../state/api.ts';
 import { errorMessage } from '../util.ts';
@@ -141,7 +143,7 @@ export default function AvatarGenerateModal(props: {
         <label>
           Portrait prompt{' '}
           <Show when={streaming()}>
-            <span class="spinner spinner-wait" />
+            <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
           </Show>
         </label>
         <textarea
@@ -160,7 +162,9 @@ export default function AvatarGenerateModal(props: {
                   <SamplerProgress
                     progress={progress()}
                     stepsClass="avatar-gen-steps"
-                    fallback={<span class="spinner spinner-wait" />}
+                    fallback={
+                      <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
+                    }
                   />
                 </Show>
               </div>
@@ -179,7 +183,7 @@ export default function AvatarGenerateModal(props: {
             <SamplerProgress
               progress={progress()}
               stepsClass="avatar-gen-steps"
-              fallback={<span class="spinner spinner-wait" />}
+              fallback={<FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />}
             />
           </Show>
         </div>

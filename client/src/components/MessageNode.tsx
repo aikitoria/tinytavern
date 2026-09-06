@@ -1,3 +1,13 @@
+import {
+  faCheck,
+  faChevronLeft,
+  faChevronRight,
+  faEllipsis,
+  faGear,
+  faSpinner,
+} from '@fortawesome/free-solid-svg-icons';
+import { faLightbulb, faTrashCan } from '@fortawesome/free-regular-svg-icons';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
 import type { Message } from '@tinytavern/shared';
 import type { PendingSwipe } from '../state/store.ts';
@@ -28,25 +38,6 @@ import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import Markdown from './Markdown.tsx';
 import Modal from './Modal.tsx';
-import TrashIcon from './TrashIcon.tsx';
-
-const ThinkingIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    width="15"
-    height="15"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M9 18h6" />
-    <path d="M10 22h4" />
-    <path d="M8.3 14.5A7 7 0 1 1 15.7 14.5C14.8 15.2 14.5 16 14.5 17h-5c0-1-.3-1.8-1.2-2.5Z" />
-  </svg>
-);
 
 // On touch layouts, only the last-tapped message shows actions.
 const [touchedId, setTouchedId] = createSignal<number | null>(null);
@@ -338,7 +329,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             when={!isTool()}
             fallback={
               <span class="avatar avatar-fallback tool-avatar">
-                {pluginView()?.RailIcon?.() ?? '⚙'}
+                {pluginView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
               </span>
             }
           >
@@ -354,7 +345,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
           aria-pressed={messageIsSelected(props.message.id)}
           onClick={() => extendMessageSelection(props.message.id)}
         >
-          {messageIsSelected(props.message.id) ? '✓' : ''}
+          {messageIsSelected(props.message.id) ? (
+            <FontAwesomeIcon icon={faCheck} size={12} />
+          ) : null}
         </button>
       </Show>
       <div
@@ -379,7 +372,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             <span class="msg-chip">stopped</span>
           </Show>
           <Show when={streaming() && !props.message.content && !props.message.reasoning}>
-            <span class="spinner spinner-wait" />
+            <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
           </Show>
           <span class="msg-tools-left msg-overlay-toolbar">
             <Show when={props.message.reasoning}>
@@ -391,9 +384,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 aria-expanded={reasoningOpen()}
                 onClick={() => setShowReasoning(!showReasoning())}
               >
-                <ThinkingIcon />
+                <FontAwesomeIcon icon={faLightbulb} size={15} />
                 <Show when={streaming() && !props.message.content}>
-                  <span class="spinner" />
+                  <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
                 </Show>
               </button>
             </Show>
@@ -417,7 +410,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     }
                     onClick={() => swipeMessage(props.message, -1)}
                   >
-                    ‹
+                    <FontAwesomeIcon icon={faChevronLeft} size={12} />
                   </button>
                   <span
                     class="branch-count"
@@ -445,7 +438,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     }
                     onClick={() => swipeMessage(props.message, 1)}
                   >
-                    ›
+                    <FontAwesomeIcon icon={faChevronRight} size={12} />
                   </button>
                 </span>
               </Show>
@@ -463,7 +456,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       aria-expanded={menuOpen()}
                       onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
                     >
-                      ⋯
+                      <FontAwesomeIcon icon={faEllipsis} size={16} />
                     </button>
                     <DropdownSurface
                       open={menuOpen()}
@@ -505,11 +498,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         }
                       >
                         <MenuItem danger action={removeSwipe}>
-                          <TrashIcon /> Delete swipe
+                          <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete swipe
                         </MenuItem>
                       </Show>
                       <MenuItem danger action={remove}>
-                        <TrashIcon /> Delete
+                        <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete
                       </MenuItem>
                     </DropdownSurface>
                   </span>
