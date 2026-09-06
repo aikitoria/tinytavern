@@ -1413,6 +1413,8 @@
 /* ---- Composer ---- */
 
 .composer {
+  --composer-button-size: var(--chat-rail-size);
+
   position: relative;
   display: flex;
   gap: var(--chat-column-gap);
@@ -1423,7 +1425,8 @@
   padding: 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border-emphasis);
-  border-radius: var(--radius-control-group);
+  /* Concentric with the circular buttons: button radius + padding + border. */
+  border-radius: calc(var(--composer-button-size) / 2 + var(--composer-shell-inset));
   box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 45%, transparent);
   transition:
     border-color 0.15s,
@@ -1466,7 +1469,7 @@
   background: none;
   border: none;
   box-shadow: none;
-  border-radius: var(--radius-control);
+  border-radius: calc(var(--composer-button-size) / 2);
   line-height: 24px;
 }
 
@@ -1478,8 +1481,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--chat-rail-size);
-  height: var(--chat-rail-size);
+  width: var(--composer-button-size);
+  height: var(--composer-button-size);
   padding: 0;
   border-radius: 50%;
   background: var(--accent);
@@ -2712,6 +2715,8 @@
   /* Flex stretching avoids viewport-width rounding; an inset divider prevents
      Mobile Safari from clipping the final device pixels. */
   .composer {
+    --composer-button-size: 36px;
+
     width: auto;
     max-width: none;
     flex-shrink: 0;
@@ -2730,8 +2735,6 @@
   }
 
   .send-btn {
-    width: 36px;
-    height: 36px;
     font-size: 15px;
   }
 
