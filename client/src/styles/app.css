@@ -48,25 +48,39 @@
 
 /* ---- Prompt trace view ---- */
 
-.trace,
-.treeview {
+.trace {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
 
 .trace-msg {
-  border: 1px solid var(--border);
+  position: relative;
+  background: var(--message-surface);
   border-radius: var(--radius-panel);
   overflow: hidden;
 }
 
+.trace-head {
+  min-height: 20px;
+  padding-right: 28px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.trace-copy.icon-btn {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+}
+
 .trace-role {
-  display: block;
-  padding: var(--space-1) var(--space-3);
+  flex: 1;
   color: var(--role-color, var(--text-dim));
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border);
 }
 
 .role-color-user {
@@ -85,15 +99,13 @@
   --role-color: var(--text-dim);
 }
 
-.role-indicator {
-  background: var(--role-color);
-}
-
 .trace-content {
-  margin: 0;
-  padding: var(--space-3);
+  color: var(--md-body);
+  margin: var(--space-1) 0 0;
+  padding: 0;
   font-family: var(--font-mono);
   font-size: 12.5px;
+  font-weight: 400;
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -233,7 +245,7 @@
   position: relative;
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: var(--bg-panel);
+  background: var(--bg-chrome);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -245,6 +257,8 @@
   justify-content: space-between;
   padding: var(--space-1) var(--space-2);
   min-height: var(--bar-h);
+  flex: none;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .brand {
@@ -278,35 +292,35 @@
   background: var(--success);
 }
 
-.sidebar-tools-row {
+.sidebar-footer {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-subtle);
 }
 
-.sidebar-tools-row .search-input {
+.sidebar-footer .search-input {
+  height: 32px;
+  padding: var(--space-1) var(--space-2);
   background: var(--bg);
   border-color: var(--border-subtle);
   box-shadow: none;
 }
 
 .sidebar-group-toggle {
-  position: absolute;
-  right: var(--space-2);
-  bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
   width: 32px;
   height: 32px;
-  color: var(--text-dim);
-  background: var(--bg-panel);
-  border-color: var(--border);
+  color: var(--text-control);
+  background: transparent;
+  border-color: transparent;
 }
 
 .sidebar-group-toggle:hover {
   color: var(--text);
   background: var(--bg-raised);
-  border-color: var(--border);
+  border-color: transparent;
 }
 
 .new-chat-menu {
@@ -366,9 +380,9 @@
 
 .conv-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-2);
-  padding-bottom: calc(32px + var(--space-4) + env(safe-area-inset-bottom));
 }
 
 .conv-item {
@@ -464,13 +478,11 @@
 }
 
 .conv-item:hover {
-  background: color-mix(in srgb, var(--bg-raised) 65%, var(--bg-panel));
-  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-raised) 65%, var(--bg-chrome));
 }
 
 .conv-item.active {
-  background: color-mix(in srgb, var(--bg-raised) 50%, var(--bg-panel));
-  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-raised) 50%, var(--bg-chrome));
 }
 
 .conv-body {
@@ -576,14 +588,8 @@
   padding: var(--space-1) var(--space-4);
   min-height: var(--bar-h);
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
+  background: var(--bg-chrome);
   padding-top: calc(var(--space-1) + env(safe-area-inset-top));
-}
-
-.header .avatar,
-.header .avatar-fallback {
-  width: 32px;
-  height: 32px;
 }
 
 .header-info {
@@ -648,25 +654,30 @@
   scrollbar-width: none;
 }
 
+.header-context-select,
+.header-view-btn {
+  min-height: 32px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
 .header-context-select {
   flex: 0 1 auto;
   width: auto;
   min-width: 0;
   max-width: 180px;
-  min-height: 28px;
   padding: 2px var(--space-1);
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-control);
   background: none;
   border: none;
   border-radius: var(--radius-control);
-  font-size: 13.5px;
-  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-context-select:hover:not(:disabled) {
+.header-context-select:hover:not(:disabled),
+.header-context-select:focus-visible {
   color: var(--text);
   background: var(--bg-hover);
   border-color: transparent;
@@ -691,8 +702,12 @@
 .header-context-value {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-control);
   text-overflow: ellipsis;
+}
+
+.header-context-select:is(:hover, :focus-visible):not(:disabled) .header-context-value {
+  color: var(--text);
 }
 
 .header-context-select:disabled {
@@ -711,14 +726,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
   padding: var(--space-1) var(--space-2);
-  color: var(--text-dim);
+  color: var(--text-control);
   background: transparent;
   border-color: transparent;
 }
 
-.header-view-btn:hover:not(:disabled) {
+.header-view-btn:hover:not(:disabled),
+.header-view-btn:focus-visible {
   color: var(--text);
   background: var(--bg-hover);
   border-color: transparent;
@@ -834,12 +849,11 @@
   min-width: 0;
 }
 
+.trace-msg,
 .msg-user > .msg-body,
 .msg-assistant > .msg-body {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-panel);
-  /* A faint inset outline keeps the existing message height. */
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .msg-user > .msg-body {
@@ -883,7 +897,11 @@
 }
 
 .msg-assistant .msg-name {
-  color: var(--role-assistant-line);
+  color: var(--role-assistant);
+}
+
+.msg-system .msg-name {
+  color: var(--accent);
 }
 
 /* Keep vertical scrolling native; horizontal swipes navigate messages. */
@@ -894,10 +912,9 @@
 
 .msg-tool .msg-body {
   background: var(--bg-panel);
-  border: 1px dashed color-mix(in srgb, var(--secondary) 34%, var(--border));
+  border: 1px solid transparent;
   border-radius: var(--radius-panel);
   padding: var(--space-3);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
 }
 
 .msg-tool .msg-name {
@@ -1297,6 +1314,11 @@
   margin: 0.6em 0;
 }
 
+.chat:not(.chat-map) .msg-user .md > :is(p, ul, ol, blockquote),
+.chat:not(.chat-map) .msg-assistant .md > :is(p, ul, ol, blockquote) {
+  max-width: 80ch;
+}
+
 .md pre {
   background: var(--code-bg);
   border: 1px solid color-mix(in srgb, var(--text-muted) 20%, var(--border));
@@ -1495,13 +1517,10 @@
   margin: var(--space-3) auto;
   padding: 4px;
   background: var(--bg-panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-subtle);
   /* Concentric with the circular buttons: button radius + padding + border. */
   border-radius: calc(var(--composer-button-size) / 2 + var(--composer-shell-inset));
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 45%, transparent);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+  transition: border-color 0.15s;
 }
 
 .composer:focus-within {
@@ -1530,7 +1549,8 @@
   min-height: var(--chat-rail-size);
 }
 
-.composer textarea {
+.composer textarea,
+.composer input[type='search'] {
   flex: 1;
   width: auto;
   min-width: 0;
@@ -1544,7 +1564,8 @@
   line-height: 24px;
 }
 
-.composer textarea:focus {
+.composer textarea:focus,
+.composer input[type='search']:focus {
   outline: none;
 }
 
@@ -1588,7 +1609,7 @@
 
 .tools-btn {
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-control);
   border: 1px solid transparent;
   box-shadow: none;
 }
@@ -2793,8 +2814,6 @@
     min-height: 54px;
   }
 
-  .header > .avatar,
-  .header > .avatar-fallback,
   .header-context,
   .header-rename-btn {
     display: none;
@@ -2824,7 +2843,8 @@
     backdrop-filter: none;
   }
 
-  .composer textarea {
+  .composer textarea,
+  .composer input[type='search'] {
     background: var(--bg-raised);
   }
 

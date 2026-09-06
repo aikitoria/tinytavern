@@ -1,11 +1,28 @@
 import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+} from 'solid-js';
 import type { Message } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { activePath, childrenByParent, navigateTree, setState, state } from '../state/store.ts';
 import MessageNode from './MessageNode.tsx';
-import { speakerName, snippet } from './treeSummary.ts';
+import { highlightMapSearch } from './mapSearchHighlight.ts';
+import {
+  snippet,
+  mapSearchQuery,
+  matchesMapSearch,
+  setMapSearchResults,
+  mapSearchTarget,
+  setMapSearchTarget,
+} from './mapSearch.ts';
 import '../styles/treemap.css';
 
 // Fixed card slots keep layout independent of content and zoom.
@@ -86,6 +103,44 @@ export default function TreeMap() {
   });
   const positions = () => layout().positions;
   const ordered = () => layout().ordered;
+
+  const searchMatches = createMemo<Set<number> | null>((previous) => {
+    const query = mapSearchQuery().trim().toLowerCase();
+    if (!query) return null;
+    const matches = new Set(
+      ordered()
+        .filter((message) => matchesMapSearch(message, query))
+        .map((message) => message.id),
+    );
+    // Token updates within an existing match must not reset the user's camera.
+    return previous &&
+      previous.size === matches.size &&
+      [...matches].every((id) => previous.has(id))
+      ? previous
+      : matches;
+  });
+
+  const searchParent = createMemo(() => {
+    const matches = searchMatches();
+    if (!matches?.size) return null;
+    let parent: number | null | undefined;
+    for (const id of matches) {
+      const current = state.tree.messages[id]?.parentId ?? null;
+      if (current === null || (parent !== undefined && parent !== current)) return null;
+      parent = current;
+    }
+    return parent ?? null;
+  });
+
+  createEffect(
+    on([mapSearchQuery, searchMatches], ([query, matches], previous) => {
+      setMapSearchResults(matches ? [...matches] : []);
+      const target = mapSearchTarget();
+      if (query !== previous?.[0] || (target && !matches?.has(target.messageId))) {
+        setMapSearchTarget(null);
+      }
+    }),
+  );
 
   const activeIds = createMemo(() => new Set(activePath().map((message) => message.id)));
 
@@ -237,18 +292,27 @@ export default function TreeMap() {
     zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, scale * factor);
   };
 
-  const fit = () => {
+  const fitBounds = (left: number, top: number, w: number, h: number, maxScale = MAX_SCALE) => {
     const vp = viewport();
-    const b = layout().bounds;
-    if (!vp.w || !vp.h || !b.w || !b.h) return;
+    if (!vp.w || !vp.h || !w || !h) return;
     const pad = 40;
     scale = Math.min(
-      MAX_SCALE,
-      Math.max(FIT_MIN_SCALE, Math.min((vp.w - 2 * pad) / b.w, (vp.h - 2 * pad) / b.h)),
+      maxScale,
+      Math.max(FIT_MIN_SCALE, Math.min((vp.w - 2 * pad) / w, (vp.h - 2 * pad) / h)),
     );
-    x = (vp.w - b.w * scale) / 2;
-    y = (vp.h - b.h * scale) / 2;
+    x = (vp.w - w * scale) / 2 - left * scale;
+    y = (vp.h - h * scale) / 2 - top * scale;
     apply();
+  };
+
+  const fit = () => {
+    const b = layout().bounds;
+    fitBounds(0, 0, b.w, b.h);
+  };
+
+  const resetZoom = () => {
+    const rect = root.getBoundingClientRect();
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, 1);
   };
 
   const centerActive = () => {
@@ -294,9 +358,11 @@ export default function TreeMap() {
   let pinchStartScale = 1;
   let lastMidX = 0;
   let lastMidY = 0;
-  /** One-finger touch on a scrollable card may become a native card scroll. */
+  /** Vertical drags scroll cards within the map's touch-action:none surface. */
   let cardScroll: Element | null = null;
   let touchDecided = false;
+  let cardScrolling = false;
+  let lastScrollY = 0;
 
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
@@ -360,12 +426,15 @@ export default function TreeMap() {
       panning = true;
       panMoved = false;
       touchDecided = false;
+      cardScrolling = false;
       downX = e.touches[0]!.clientX;
       downY = e.touches[0]!.clientY;
       dragStartX = downX - x;
       dragStartY = downY - y;
-      const card = (e.target as Element).closest('.treemap-card');
-      cardScroll = card && card.scrollHeight > card.clientHeight + 1 ? card : null;
+      lastScrollY = downY;
+      const card = (e.target as Element).closest('.treemap-card:not(.treemap-card-mini)');
+      const body = card?.querySelector('.msg-swipe');
+      cardScroll = body && body.scrollHeight > body.clientHeight + 1 ? body : null;
     }
   };
   const onTouchMove = (e: TouchEvent) => {
@@ -388,14 +457,15 @@ export default function TreeMap() {
       if (!touchDecided) {
         if (Math.hypot(dx, dy) <= 8) return;
         touchDecided = true;
-        // Leave vertical card scrolling to the browser.
-        if (cardScroll && Math.abs(dy) > Math.abs(dx) * 1.2) {
-          panning = false;
-          return;
-        }
+        cardScrolling = cardScroll !== null && Math.abs(dy) > Math.abs(dx) * 1.2;
         panMoved = true;
       }
       e.preventDefault();
+      if (cardScrolling && cardScroll) {
+        cardScroll.scrollTop -= (touch.clientY - lastScrollY) / scale;
+        lastScrollY = touch.clientY;
+        return;
+      }
       x = touch.clientX - dragStartX;
       y = touch.clientY - dragStartY;
       apply();
@@ -420,22 +490,82 @@ export default function TreeMap() {
   };
 
   const onWheel = (e: WheelEvent) => {
-    // Cards scroll via scrollbar or touch; the wheel always zooms the map.
+    // Keep ordinary wheel gestures inside full cards; background/modifier gestures zoom.
+    if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      (e.target as Element).closest('.treemap-card:not(.treemap-card-mini)')
+    )
+      return;
     e.preventDefault();
     zoomAt(e.clientX, e.clientY, scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
   };
 
-  // Open at full scale on the active leaf for readability.
+  // Frame small trees in full; large trees open around the active branch.
   let initialCameraDone = false;
   createEffect(() => {
-    if (initialCameraDone || !viewport().w || positions().size === 0) return;
+    if (initialCameraDone || !viewport().w || !viewport().h || positions().size === 0) return;
     initialCameraDone = true;
-    if (state.tree.activeLeafId != null && positions().has(state.tree.activeLeafId)) {
-      centerActive();
-    } else {
-      fit();
+    const b = layout().bounds;
+    const vp = viewport();
+    const active =
+      state.tree.activeLeafId != null ? state.tree.messages[state.tree.activeLeafId] : undefined;
+    if (
+      !active ||
+      ordered().length <= 8 ||
+      Math.min((vp.w - 80) / b.w, (vp.h - 80) / b.h) >= MINI_SCALE
+    ) {
+      fitBounds(0, 0, b.w, b.h, 1);
+      return;
     }
+    const neighbors = childrenByParent().get(active.parentId ?? -1) ?? [active];
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    const include = (id: number) => {
+      const p = positions().get(id);
+      if (!p) return;
+      left = Math.min(left, p.x);
+      top = Math.min(top, p.y);
+      right = Math.max(right, p.x + CARD_W);
+      bottom = Math.max(bottom, p.y + CARD_H);
+    };
+    for (const message of neighbors) include(message.id);
+    if (active.parentId != null) include(active.parentId);
+    fitBounds(left, top, right - left, bottom - top, 1);
   });
+
+  createEffect(
+    on([mapSearchQuery, searchMatches, searchParent, viewport], ([, matches, parent, vp]) => {
+      if (!matches?.size || !vp.w || !vp.h) return;
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+      const include = (id: number) => {
+        const p = positions().get(id);
+        if (!p) return;
+        left = Math.min(left, p.x);
+        top = Math.min(top, p.y);
+        right = Math.max(right, p.x + CARD_W);
+        bottom = Math.max(bottom, p.y + CARD_H);
+      };
+      for (const id of matches) include(id);
+      if (parent !== null) include(parent);
+      if (Number.isFinite(left)) fitBounds(left, top, right - left, bottom - top, 1);
+    }),
+  );
+
+  createEffect(
+    on(mapSearchTarget, (target) => {
+      if (!target) return;
+      const p = positions().get(target.messageId);
+      if (p) fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
+    }),
+  );
+
+  highlightMapSearch(() => content, mapSearchQuery);
 
   let resizeObserver: ResizeObserver | undefined;
   onMount(() => {
@@ -449,6 +579,8 @@ export default function TreeMap() {
   });
   onCleanup(() => {
     resizeObserver?.disconnect();
+    setMapSearchResults([]);
+    setMapSearchTarget(null);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     clearTimeout(panClickResetTimer);
@@ -473,8 +605,14 @@ export default function TreeMap() {
           {(message) => (
             <div
               class="treemap-card"
+              data-message-id={message.id}
               classList={{
                 'treemap-card-mini': view().scale < MINI_SCALE,
+                'treemap-search-match': searchMatches()?.has(message.id) ?? false,
+                'treemap-search-dimmed':
+                  searchMatches() !== null &&
+                  !searchMatches()!.has(message.id) &&
+                  message.id !== searchParent(),
                 'treemap-on-path': activeIds().has(message.id),
                 'treemap-active-leaf': message.id === state.tree.activeLeafId,
               }}
@@ -493,11 +631,7 @@ export default function TreeMap() {
                     class="treemap-mini"
                     style={{ 'font-size': `${Math.min(12 / view().scale, 240)}px` }}
                   >
-                    <div class="treemap-mini-head">
-                      <span class={`treemap-role role-indicator role-color-${message.role}`} />
-                      <span class="treemap-mini-name">{speakerName(message)}</span>
-                    </div>
-                    <span class="treemap-mini-snippet">{snippet(message)}</span>
+                    <span class="treemap-mini-snippet">{snippet(message, mapSearchQuery())}</span>
                   </div>
                 }
               >
@@ -521,6 +655,14 @@ export default function TreeMap() {
           onClick={() => zoomStep(1 / 1.3)}
         >
           <FontAwesomeIcon icon={faMinus} size={12} />
+        </button>
+        <button
+          class="icon-btn treemap-zoom"
+          title="Reset zoom to 100%"
+          aria-label="Reset zoom to 100%"
+          onClick={resetZoom}
+        >
+          {Math.round(view().scale * 100)}%
         </button>
         <button
           class="icon-btn"

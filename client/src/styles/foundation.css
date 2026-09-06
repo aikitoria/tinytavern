@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #111113;
+  --bg-chrome: #161719;
   --bg-panel: #1a1b1d;
   --bg-raised: #303135;
   --bg-hover: #3d3f44;
@@ -8,14 +9,14 @@
   --border-subtle: color-mix(in srgb, var(--border) 40%, transparent);
   --text: #f2f3f5;
   --text-dim: #a9abb2;
+  --text-control: #969da7;
   --text-muted: #747780;
   --accent: #3488f6;
   --accent-hot: #5aa2ff;
   --accent-text: #ffffff;
   --secondary: #85bdf5;
   --role-user: #8babd2;
-  --role-assistant: #aab2bc;
-  --role-assistant-line: #c6a078;
+  --role-assistant: #c6a078;
   --warning: #df9447;
   --font-mono: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   --border-emphasis: color-mix(in srgb, var(--accent) 22%, var(--border));

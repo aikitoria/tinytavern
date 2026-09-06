@@ -4,7 +4,7 @@ import Sidebar from './components/Sidebar.tsx';
 import Header from './components/Header.tsx';
 import ChatView from './components/ChatView.tsx';
 import Composer from './components/Composer.tsx';
-import { TreeSearch } from './components/TreeView.tsx';
+import MapSearch from './components/MapSearch.tsx';
 import SettingsModal from './components/SettingsModal.tsx';
 import ConversationSettings from './components/ConversationSettings.tsx';
 import PasswordGate from './components/PasswordGate.tsx';
@@ -53,14 +53,14 @@ export default function App() {
           <Header />
           <ChatView />
           <Show
-            when={state.viewMode === 'tree'}
+            when={state.viewMode === 'map'}
             fallback={
               <Show when={messageSelectionActive()} fallback={<Composer />}>
                 <MessageSelectionBar />
               </Show>
             }
           >
-            <TreeSearch />
+            <MapSearch />
           </Show>
         </main>
         <Show when={state.modal === 'settings'}>

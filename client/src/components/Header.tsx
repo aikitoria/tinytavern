@@ -5,7 +5,6 @@ import { api } from '../state/api.ts';
 import {
   closeSidebar,
   openModal,
-  selectedCharacter,
   selectedConversation,
   personasEnabled,
   setState,
@@ -13,14 +12,12 @@ import {
   toast,
 } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
-import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import Select from './Select.tsx';
 
 const VIEWS = [
   { mode: 'chat', label: 'Chat' },
   { mode: 'trace', label: 'Prompt trace' },
-  { mode: 'tree', label: 'Conversation tree' },
   { mode: 'map', label: 'Tree map' },
 ] as const;
 
@@ -91,7 +88,7 @@ export default function Header() {
     openModal(modal);
   };
 
-  const setView = (mode: 'chat' | 'trace' | 'tree' | 'map') => {
+  const setView = (mode: 'chat' | 'trace' | 'map') => {
     setViewOpen(false);
     closeSidebar();
     setState('viewMode', mode);
@@ -129,10 +126,6 @@ export default function Header() {
       <Show when={selectedConversation()} fallback={<span class="header-title">TinyTavern</span>}>
         {(conv) => (
           <>
-            <Avatar
-              src={selectedCharacter()?.avatar}
-              name={selectedCharacter()?.name ?? 'Assistant'}
-            />
             <div class="header-info">
               <div class="header-title-group">
                 <Show

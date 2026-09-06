@@ -43,12 +43,11 @@
   position: absolute;
   width: 640px;
   height: 240px;
-  overflow-y: auto;
+  overflow: hidden;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   cursor: pointer;
-  box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 38%, transparent);
 }
 
 /* Low-zoom tiles clip instead of scrolling — wheel over them must zoom. */
@@ -57,17 +56,48 @@
 }
 
 .treemap-card.treemap-on-path {
-  border-color: color-mix(in srgb, var(--secondary) 45%, var(--border));
+  border-color: var(--border);
 }
 
 .treemap-card.treemap-active-leaf {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .treemap-card .msg {
+  height: 100%;
   gap: var(--space-2);
   padding: var(--space-2);
+}
+
+.treemap-card .msg > .msg-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.treemap-card .msg > .msg-body > .msg-head {
+  position: static;
+  flex-shrink: 0;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.treemap-card .msg > .msg-body > .msg-swipe {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--text-muted) transparent;
+}
+
+.treemap-card .msg.msg-full-bleed > .msg-body > .msg-swipe {
+  padding-top: 0;
 }
 
 /* Card clicks activate branches; per-message tools would fight map panning. */
@@ -80,38 +110,10 @@
 /* Inverse-zoom font sizing keeps em-based tiles constant on screen;
    fixed slots clip overflow without relayout. */
 .treemap-mini {
-  display: flex;
-  flex-direction: column;
-  gap: 0.17em;
   height: 100%;
   padding: 0.66em;
   overflow: hidden;
   line-height: 1.35;
-}
-
-.treemap-mini-head {
-  display: flex;
-  align-items: center;
-  gap: 0.66em;
-  min-width: 0;
-}
-
-.treemap-role {
-  flex: none;
-  width: 0.66em;
-  height: 0.66em;
-  border-radius: 50%;
-}
-
-.treemap-mini-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 1.1em;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
 }
 
 .treemap-mini-snippet {
@@ -137,7 +139,6 @@
   background: var(--bg-panel);
   border: 1px solid var(--border-emphasis);
   border-radius: var(--radius-control-group);
-  box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 45%, transparent);
 }
 
 .treemap-empty {
@@ -146,4 +147,45 @@
   left: 50%;
   margin: 0;
   transform: translate(-50%, -50%);
+}
+
+.treemap-zoom.icon-btn {
+  min-width: 5ch;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.treemap-card.treemap-search-dimmed {
+  opacity: 0.65;
+}
+
+::highlight(map-search-text) {
+  background-color: #efc75e;
+  color: #17191c;
+  text-shadow: none;
+}
+
+.map-search-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--composer-button-size);
+  padding-right: var(--space-1);
+}
+
+.map-search-controls .icon-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+}
+
+.map-search-status {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.map-search input::-webkit-search-cancel-button {
+  display: none;
 }

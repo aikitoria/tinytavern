@@ -47,7 +47,7 @@ export default function Sidebar() {
   const [results, setResults] = createSignal<SearchResult[] | null>(null);
   const [conversationMenu, setConversationMenu] = createSignal<Conversation | null>(null);
   let searchTimer: number | undefined;
-  let sidebarToolsRow: HTMLDivElement | undefined;
+  let sidebarHead: HTMLDivElement | undefined;
   let newChatButton: HTMLButtonElement | undefined;
   let conversationMenuButton: HTMLButtonElement | undefined;
 
@@ -154,7 +154,12 @@ export default function Sidebar() {
     return groups;
   });
 
-  const ConvItem = (props: { conv: Conversation; snippet?: string | null; expanded?: boolean }) => {
+  const ConvItem = (props: {
+    conv: Conversation;
+    snippet?: string | null;
+    expanded?: boolean;
+    grouped?: boolean;
+  }) => {
     let menuButton: HTMLButtonElement | undefined;
     onCleanup(() => {
       if (conversationMenuButton === menuButton) setConversationMenu(null);
@@ -173,11 +178,13 @@ export default function Sidebar() {
           class="conv-select"
           aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
         >
-          <Show
-            when={characterOf(props.conv.characterId)}
-            fallback={<span class="avatar avatar-fallback">A</span>}
-          >
-            {(character) => <Avatar src={character().avatar} name={character().name} />}
+          <Show when={!props.grouped}>
+            <Show
+              when={characterOf(props.conv.characterId)}
+              fallback={<span class="avatar avatar-fallback">A</span>}
+            >
+              {(character) => <Avatar src={character().avatar} name={character().name} />}
+            </Show>
           </Show>
           <span class="conv-body">
             <span class="conv-title">{props.conv.title}</span>
@@ -219,7 +226,7 @@ export default function Sidebar() {
 
   return (
     <aside class="sidebar" classList={{ open: state.sidebarOpen }}>
-      <div class="sidebar-head">
+      <div class="sidebar-head" ref={sidebarHead}>
         <span class="brand">
           <span class="brand-name">TinyTavern</span>
           <span
@@ -231,6 +238,22 @@ export default function Sidebar() {
           />
         </span>
         <span class="sidebar-head-actions">
+          <button
+            ref={newChatButton}
+            type="button"
+            class="icon-btn"
+            title="New chat"
+            aria-label="New chat"
+            aria-haspopup="dialog"
+            aria-expanded={newMenuOpen()}
+            onClick={() => {
+              const open = !newMenuOpen();
+              setNewMenuOpen(open);
+              if (!open) setNewChatQuery('');
+            }}
+          >
+            <FontAwesomeIcon icon={faPlus} size={16} />
+          </button>
           <button
             type="button"
             class="icon-btn"
@@ -258,107 +281,79 @@ export default function Sidebar() {
         </span>
       </div>
 
-      <div class="sidebar-tools-row" ref={sidebarToolsRow}>
-        <button
-          ref={newChatButton}
-          type="button"
-          class="icon-btn"
-          title="New chat"
-          aria-label="New chat"
-          aria-haspopup="dialog"
-          aria-expanded={newMenuOpen()}
-          onClick={() => {
-            const open = !newMenuOpen();
-            setNewMenuOpen(open);
-            if (!open) setNewChatQuery('');
-          }}
-        >
-          <FontAwesomeIcon icon={faPlus} size={16} />
-        </button>
-        <DropdownSurface
-          open={newMenuOpen()}
-          anchor={() => sidebarToolsRow}
-          dismissRoot={() => newChatButton}
-          focusTarget={() => newChatButton}
-          onClose={closeNewChatMenu}
-          class="new-chat-menu"
-          role="dialog"
-          ariaLabel="Choose a character for a new chat"
-          placement="bottom"
-          align="start"
-          matchAnchorWidth
-          maxHeight={() => window.innerHeight * 0.5}
-          anchorInset={8}
-        >
-          <div class="new-chat-search">
-            <input
-              class="search-input"
-              placeholder="Search characters…"
-              value={newChatQuery()}
-              onInput={(event) => setNewChatQuery(event.currentTarget.value)}
-            />
-          </div>
-          {/* Assistant is normally a seeded character. */}
-          <Show when={state.characters.length === 0}>
-            <button onClick={() => create(null)}>
-              <span class="avatar avatar-fallback">A</span> Assistant
-            </button>
-          </Show>
-          <For each={state.characterFolders}>
-            {(folder) => (
-              <Show when={charactersInFolder(folder.id).length > 0}>
-                <div class="new-chat-folder">
-                  <button
-                    class="new-chat-folder-toggle"
-                    aria-expanded={searchActive() || !collapsedCharacterFolders().has(folder.id)}
-                    onClick={() => {
-                      if (!searchActive()) toggleCharacterFolder(folder.id);
-                    }}
-                  >
-                    <span class="tree-disclosure">
-                      {searchActive() || !collapsedCharacterFolders().has(folder.id) ? (
-                        <FontAwesomeIcon icon={faChevronDown} size={10} />
-                      ) : (
-                        <FontAwesomeIcon icon={faChevronRight} size={12} />
-                      )}
-                    </span>
-                    <span>{folder.name}</span>
-                  </button>
-                  <Show when={searchActive() || !collapsedCharacterFolders().has(folder.id)}>
-                    <For each={charactersInFolder(folder.id)}>
-                      {(character) => (
-                        <button class="new-chat-folder-child" onClick={() => create(character.id)}>
-                          <Avatar src={character.avatar} name={character.name} /> {character.name}
-                        </button>
-                      )}
-                    </For>
-                  </Show>
-                </div>
-              </Show>
-            )}
-          </For>
-          <For each={rootCharacters()}>
-            {(character) => (
-              <button onClick={() => create(character.id)}>
-                <Avatar src={character.avatar} name={character.name} /> {character.name}
-              </button>
-            )}
-          </For>
-          <Show when={searchActive() && matchingCharacterCount() === 0}>
-            <p class="hint search-empty">No matches.</p>
-          </Show>
-        </DropdownSurface>
-
-        <div class="search-wrap">
+      <DropdownSurface
+        open={newMenuOpen()}
+        anchor={() => sidebarHead}
+        dismissRoot={() => newChatButton}
+        focusTarget={() => newChatButton}
+        onClose={closeNewChatMenu}
+        class="new-chat-menu"
+        role="dialog"
+        ariaLabel="Choose a character for a new chat"
+        placement="bottom"
+        align="start"
+        matchAnchorWidth
+        maxHeight={() => window.innerHeight * 0.5}
+        anchorInset={8}
+      >
+        <div class="new-chat-search">
           <input
             class="search-input"
-            placeholder="Search…"
-            aria-label="Search conversations"
-            value={query()}
-            onInput={(e) => onSearchInput(e.currentTarget.value)}
+            placeholder="Search characters…"
+            value={newChatQuery()}
+            onInput={(event) => setNewChatQuery(event.currentTarget.value)}
           />
         </div>
-      </div>
+        {/* Assistant is normally a seeded character. */}
+        <Show when={state.characters.length === 0}>
+          <button onClick={() => create(null)}>
+            <span class="avatar avatar-fallback">A</span> Assistant
+          </button>
+        </Show>
+        <For each={state.characterFolders}>
+          {(folder) => (
+            <Show when={charactersInFolder(folder.id).length > 0}>
+              <div class="new-chat-folder">
+                <button
+                  class="new-chat-folder-toggle"
+                  aria-expanded={searchActive() || !collapsedCharacterFolders().has(folder.id)}
+                  onClick={() => {
+                    if (!searchActive()) toggleCharacterFolder(folder.id);
+                  }}
+                >
+                  <span class="tree-disclosure">
+                    {searchActive() || !collapsedCharacterFolders().has(folder.id) ? (
+                      <FontAwesomeIcon icon={faChevronDown} size={10} />
+                    ) : (
+                      <FontAwesomeIcon icon={faChevronRight} size={12} />
+                    )}
+                  </span>
+                  <span>{folder.name}</span>
+                </button>
+                <Show when={searchActive() || !collapsedCharacterFolders().has(folder.id)}>
+                  <For each={charactersInFolder(folder.id)}>
+                    {(character) => (
+                      <button class="new-chat-folder-child" onClick={() => create(character.id)}>
+                        <Avatar src={character.avatar} name={character.name} /> {character.name}
+                      </button>
+                    )}
+                  </For>
+                </Show>
+              </div>
+            </Show>
+          )}
+        </For>
+        <For each={rootCharacters()}>
+          {(character) => (
+            <button onClick={() => create(character.id)}>
+              <Avatar src={character.avatar} name={character.name} /> {character.name}
+            </button>
+          )}
+        </For>
+        <Show when={searchActive() && matchingCharacterCount() === 0}>
+          <p class="hint search-empty">No matches.</p>
+        </Show>
+      </DropdownSurface>
 
       <nav class="conv-list">
         <Show
@@ -380,7 +375,9 @@ export default function Sidebar() {
                       </Show>
                       <span class="conv-group-name">{group.character?.name ?? 'No character'}</span>
                     </div>
-                    <For each={group.conversations}>{(conv) => <ConvItem conv={conv} />}</For>
+                    <For each={group.conversations}>
+                      {(conv) => <ConvItem conv={conv} grouped />}
+                    </For>
                   </section>
                 )}
               </For>
@@ -399,17 +396,28 @@ export default function Sidebar() {
           )}
         </Show>
       </nav>
-      <button
-        type="button"
-        class="icon-btn sidebar-group-toggle"
-        classList={{ 'icon-btn-active': state.groupByCharacter }}
-        title="Group by character"
-        aria-label="Group by character"
-        aria-pressed={state.groupByCharacter}
-        onClick={toggleGroupByCharacter}
-      >
-        <FontAwesomeIcon icon={faLayerGroup} size={16} />
-      </button>
+      <footer class="sidebar-footer">
+        <div class="search-wrap">
+          <input
+            class="search-input"
+            placeholder="Search…"
+            aria-label="Search conversations"
+            value={query()}
+            onInput={(e) => onSearchInput(e.currentTarget.value)}
+          />
+        </div>
+        <button
+          type="button"
+          class="icon-btn sidebar-group-toggle"
+          classList={{ 'icon-btn-active': state.groupByCharacter }}
+          title="Group by character"
+          aria-label="Group by character"
+          aria-pressed={state.groupByCharacter}
+          onClick={toggleGroupByCharacter}
+        >
+          <FontAwesomeIcon icon={faLayerGroup} size={16} />
+        </button>
+      </footer>
       <DropdownSurface
         open={conversationMenu() != null}
         anchor={() => conversationMenuButton}

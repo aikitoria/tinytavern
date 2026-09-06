@@ -4,7 +4,6 @@ import { swipeMessage } from '../messageSwipe.ts';
 import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from './TreeMap.tsx';
-import TreeView from './TreeView.tsx';
 
 export default function ChatView() {
   let scroller!: HTMLDivElement;
@@ -107,7 +106,7 @@ export default function ChatView() {
   return (
     <div
       class="chat"
-      classList={{ 'chat-tree': state.viewMode === 'tree', 'chat-map': state.viewMode === 'map' }}
+      classList={{ 'chat-map': state.viewMode === 'map' }}
       ref={scroller}
       onScroll={onScroll}
       onWheel={onWheel}
@@ -134,14 +133,7 @@ export default function ChatView() {
           <Show
             when={state.viewMode === 'chat'}
             fallback={
-              <Show
-                when={state.viewMode === 'trace'}
-                fallback={
-                  <Show when={state.viewMode === 'map'} fallback={<TreeView />}>
-                    <TreeMap />
-                  </Show>
-                }
-              >
+              <Show when={state.viewMode === 'trace'} fallback={<TreeMap />}>
                 <TraceView />
               </Show>
             }

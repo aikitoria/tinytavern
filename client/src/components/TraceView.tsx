@@ -1,6 +1,49 @@
-import { For, Show, createResource } from 'solid-js';
+import { faCheck } from '@fortawesome/free-solid-svg-icons';
+import { faCopy } from '@fortawesome/free-regular-svg-icons';
+import { For, Show, createResource, createSignal, onCleanup } from 'solid-js';
 import { api } from '../state/api.ts';
-import { state } from '../state/store.ts';
+import { state, toast } from '../state/store.ts';
+import { errorMessage } from '../util.ts';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
+
+function TraceMessage(props: { role: string; label?: string; content: string }) {
+  const [copied, setCopied] = createSignal(false);
+  let resetTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+    clearTimeout(resetTimer);
+  });
+  const label = () => props.label ?? props.role;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.content);
+      if (disposed) return;
+      setCopied(true);
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      toast(`Could not copy message: ${errorMessage(err)}`);
+    }
+  };
+  return (
+    <section class="trace-msg">
+      <div class="trace-head">
+        <span class={`trace-role role-color-${props.role}`}>{label()}</span>
+        <button
+          type="button"
+          class="icon-btn trace-copy"
+          title={copied() ? 'Copied' : 'Copy message'}
+          aria-label={copied() ? 'Copied' : `Copy ${label()}`}
+          onClick={() => void copy()}
+        >
+          <FontAwesomeIcon icon={copied() ? faCheck : faCopy} size={13} />
+        </button>
+      </div>
+      <pre class="trace-content">{props.content}</pre>
+    </section>
+  );
+}
 
 export default function TraceView() {
   const [trace] = createResource(
@@ -15,40 +58,39 @@ export default function TraceView() {
 
   return (
     <div class="trace">
-      <p class="hint">
-        The messages the next generation on this branch will send upstream (system prompt, template,
-        macros and name prefixes applied).
-      </p>
       <Show when={trace()} fallback={<p class="hint">Loading…</p>}>
         {(t) => (
           <>
+            <p
+              class="hint"
+              title="The next generation on this branch, with system prompt, template, macros and name prefixes applied."
+            >
+              Next request · {t().messages.length}{' '}
+              {t().messages.length === 1 ? 'message' : 'messages'}
+            </p>
             <For each={t().messages}>
-              {(msg) => (
-                <div class="trace-msg">
-                  <span class="trace-role" classList={{ [`role-color-${msg.role}`]: true }}>
-                    {msg.role}
-                  </span>
-                  <pre class="trace-content">{msg.content}</pre>
-                </div>
-              )}
+              {(msg) => <TraceMessage role={msg.role} content={msg.content} />}
             </For>
             <Show when={t().namePrefill}>
-              <div class="trace-msg">
-                <span class="trace-role role-color-assistant">assistant name (prefill)</span>
-                <pre class="trace-content">{t().namePrefill}</pre>
-              </div>
+              <TraceMessage
+                role="assistant"
+                label="assistant name (prefill)"
+                content={t().namePrefill!}
+              />
             </Show>
             <Show when={t().reasoningPrefill}>
-              <div class="trace-msg">
-                <span class="trace-role role-color-assistant">assistant reasoning (prefill)</span>
-                <pre class="trace-content">{t().reasoningPrefill}</pre>
-              </div>
+              <TraceMessage
+                role="assistant"
+                label="assistant reasoning (prefill)"
+                content={t().reasoningPrefill!}
+              />
             </Show>
             <Show when={t().messagePrefill}>
-              <div class="trace-msg">
-                <span class="trace-role role-color-assistant">assistant message (prefill)</span>
-                <pre class="trace-content">{t().messagePrefill}</pre>
-              </div>
+              <TraceMessage
+                role="assistant"
+                label="assistant message (prefill)"
+                content={t().messagePrefill!}
+              />
             </Show>
           </>
         )}

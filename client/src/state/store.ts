@@ -76,8 +76,8 @@ interface AppState {
   modal: ModalKind;
   settingsCharacterId: number | null;
   /** 'trace' replaces the timeline with the assembled upstream request;
-   * 'tree'/'map' show the conversation tree as an outline / zoomable 2D map. */
-  viewMode: 'chat' | 'trace' | 'tree' | 'map';
+   * 'map' shows the conversation tree as a zoomable 2D map. */
+  viewMode: 'chat' | 'trace' | 'map';
   treeNavigationPending: boolean;
   toasts: { id: number; text: string; kind: ToastKind }[];
   tree: TreeState;
