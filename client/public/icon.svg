@@ -1,7 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#171717"/>
-  <path d="M256 96c-97 0-176 62-176 138 0 44 26 83 67 108l-15 62c-2 9 8 16 16 11l70-44c12 2 25 3 38 3 97 0 176-62 176-138S353 96 256 96z" fill="#e18a24"/>
-  <circle cx="186" cy="234" r="22" fill="#171717"/>
-  <circle cx="256" cy="234" r="22" fill="#171717"/>
-  <circle cx="326" cy="234" r="22" fill="#171717"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">TinyTavern — interlocking TT monogram</title>
+  <defs>
+    <linearGradient id="charcoal" x2="1" y2="1">
+      <stop stop-color="#303035"/>
+      <stop offset="1" stop-color="#111113"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#fff0c2"/>
+      <stop offset="0.45" stop-color="#e9bd70"/>
+      <stop offset="1" stop-color="#b77737"/>
+    </linearGradient>
+    <linearGradient id="light-gold" x1="0" y1="0" x2="0.7" y2="1">
+      <stop stop-color="#fff3ce"/>
+      <stop offset="0.55" stop-color="#e8bc72"/>
+      <stop offset="1" stop-color="#c48b49"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#charcoal)"/>
+  <rect x="27" y="27" width="458" height="458" rx="83" fill="none" stroke="#d7aa65" stroke-opacity="0.45" stroke-width="3"/>
+  <path d="m256 58 7 12-7 12-7-12Zm0 372 7 12-7 12-7-12Z" fill="#d7aa65"/>
+  <path d="M97 112h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H155v-15c24-2 32-7 32-26V140h-24c-34 0-44 8-52 37H93Z" fill="url(#gold)"/>
+  <path d="M193 184h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H251v-15c24-2 32-7 32-26V212h-24c-34 0-44 8-52 37h-14Z" fill="url(#light-gold)" stroke="#1b1b1e" stroke-width="10" stroke-linejoin="round" paint-order="stroke"/>
+  <path d="M108 120h195M204 192h195" fill="none" stroke="#fff5da" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>
 </svg>

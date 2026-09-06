@@ -1,14 +1,14 @@
 {
   "name": "TinyTavern",
   "short_name": "TinyTavern",
-  "description": "Small but mighty LLM chat frontend",
+  "description": "Tiny but mighty LLM chat frontend",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#111113",
   "theme_color": "#111113",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon.svg?v=tt", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png?v=tt", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png?v=tt", "sizes": "512x512", "type": "image/png" }
   ]
 }
