@@ -10,6 +10,7 @@ import type {
   Settings,
   Template,
 } from '@minitavern/shared';
+import { readSseData } from '@minitavern/shared';
 import { prepareEndpointPatch } from './endpointSync.ts';
 
 interface RequestOptions {
@@ -18,11 +19,10 @@ interface RequestOptions {
 }
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -49,38 +49,51 @@ async function request<T>(
     body: hasRawBody ? options.rawBody : hasJsonBody ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    let message = `${res.status}`;
-    try {
-      const json = (await res.json()) as { error?: string };
-      if (json.error) message = json.error;
-    } catch {
-      /* keep status */
-    }
+    const error = await errorFromResponse(res);
     if (res.status === 401 && !url.startsWith('/api/auth/')) onAuthenticationRequired?.();
-    throw new ApiError(res.status, message);
+    throw error;
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
-/** Error-message extraction shared by the non-JSON (SSE / binary) endpoints. */
+/** Read at dispatch time from the authoritative tree or conversation snapshot. */
+type MutationState = Pick<Conversation, 'activeLeafId' | 'mutationRevision'>;
+
+function mutationRequest<T>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  url: string,
+  expected: MutationState,
+  body?: Record<string, unknown>,
+): Promise<T> {
+  if (method === 'DELETE') {
+    return request<T>(
+      method,
+      `${url}?expectedActiveLeafId=${expected.activeLeafId ?? 'null'}&expectedMutationRevision=${expected.mutationRevision}`,
+    );
+  }
+  body ??= {};
+  body.expectedActiveLeafId = expected.activeLeafId;
+  body.expectedMutationRevision = expected.mutationRevision;
+  return request<T>(method, url, body);
+}
+
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let message = `${res.status}`;
   try {
-    const json = (await res.json()) as { error?: string };
-    if (json.error) message = json.error;
+    const json = (await res.json()) as { error?: unknown };
+    if (typeof json.error === 'string' && json.error) message = json.error;
   } catch {
     /* keep status */
   }
   return new ApiError(res.status, message);
 }
 
-/** Reads a text-completion SSE stream ({d} deltas, {error}, {done}), invoking
- * onDelta per token and resolving with the assembled text. */
-async function streamTextCompletion(
+/** Streams {d}/{error}/{done} SSE events and returns the assembled text. */
+export async function streamTextCompletion(
   url: string,
   body: Record<string, unknown>,
-  onDelta: (text: string) => void,
+  onDelta: (delta: string, text: string) => void,
   streamLabel: string,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -91,29 +104,17 @@ async function streamTextCompletion(
     signal: signal ?? null,
   });
   if (!res.ok || !res.body) throw await errorFromResponse(res);
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let text = '';
   let completed = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const payload = JSON.parse(line.slice(5)) as { d?: string; error?: string; done?: boolean };
-      if (payload.error) throw new ApiError(502, payload.error);
-      if (payload.done) completed = true;
-      if (payload.d) {
-        text += payload.d;
-        onDelta(payload.d);
-      }
+  await readSseData(res.body, (data) => {
+    const payload = JSON.parse(data) as { d?: unknown; error?: unknown; done?: unknown };
+    if (typeof payload.error === 'string' && payload.error) throw new ApiError(502, payload.error);
+    if (payload.done === true) completed = true;
+    if (typeof payload.d === 'string' && payload.d) {
+      text += payload.d;
+      onDelta(payload.d, text);
     }
-  }
+  });
   if (!completed) throw new ApiError(502, `${streamLabel} stream ended before completion`);
   return text;
 }
@@ -149,7 +150,6 @@ const streamGalleryPromptRevision = (
     signal,
   );
 
-/** Stateless avatar render: prompt + workflow in, image bytes out. */
 async function renderAvatar(
   body: {
     prompt: string;
@@ -168,9 +168,7 @@ async function renderAvatar(
   return res.blob();
 }
 
-/** Opens a job-scoped render progress stream. Resolving means the server
- * registered this listener, so rendering can start without racing its first
- * sampler event. */
+/** Resolves after listener registration so rendering cannot race its first event. */
 async function openRenderProgress(
   url: string,
   jobId: string,
@@ -182,39 +180,21 @@ async function openRenderProgress(
     signal: signal ?? null,
   });
   if (!res.ok || !res.body) throw await errorFromResponse(res);
-  const done = (async () => {
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line.startsWith('data:')) continue;
-        const payload = JSON.parse(line.slice(5)) as {
-          value?: unknown;
-          max?: unknown;
-          preview?: unknown;
-          done?: boolean;
-        };
-        if (
-          typeof payload.value === 'number' &&
-          typeof payload.max === 'number' &&
-          payload.max > 0
-        ) {
-          onProgress(payload.value, payload.max);
-        }
-        if (typeof payload.preview === 'string' && payload.preview.startsWith('data:image/')) {
-          onPreview(payload.preview);
-        }
-        if (payload.done) return;
-      }
+  const done = readSseData(res.body, (data) => {
+    const payload = JSON.parse(data) as {
+      value?: unknown;
+      max?: unknown;
+      preview?: unknown;
+      done?: unknown;
+    };
+    if (typeof payload.value === 'number' && typeof payload.max === 'number' && payload.max > 0) {
+      onProgress(payload.value, payload.max);
     }
-  })();
+    if (typeof payload.preview === 'string' && payload.preview.startsWith('data:image/')) {
+      onPreview(payload.preview);
+    }
+    if (payload.done === true) return false;
+  });
   return { done };
 }
 
@@ -265,26 +245,12 @@ export const api = {
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),
-  patchConversation: (
-    id: number,
-    patch: Partial<Conversation>,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<Conversation>('PATCH', `/api/conversations/${id}`, {
+  patchConversation: (id: number, patch: Partial<Conversation>, expected: MutationState) =>
+    mutationRequest<Conversation>('PATCH', `/api/conversations/${id}`, expected, {
       ...patch,
-      expectedActiveLeafId,
-      expectedMutationRevision,
     }),
-  deleteConversation: (
-    id: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<void>(
-      'DELETE',
-      `/api/conversations/${id}?expectedActiveLeafId=${expectedActiveLeafId ?? 'null'}&expectedMutationRevision=${expectedMutationRevision}`,
-    ),
+  deleteConversation: (id: number, expected: MutationState) =>
+    mutationRequest<void>('DELETE', `/api/conversations/${id}`, expected),
   duplicateConversation: (id: number) =>
     request<Conversation>('POST', `/api/conversations/${id}/duplicate`),
   branchConversation: (messageId: number) =>
@@ -301,211 +267,151 @@ export const api = {
       messagePrefill: string | null;
       namePrefill: string | null;
     }>('GET', `/api/conversations/${id}/trace`),
-  send: (
-    conversationId: number,
-    content: string,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ userMessageId: number; assistantMessageId: number }>(
+  send: (conversationId: number, content: string, expected: MutationState) =>
+    mutationRequest<{ userMessageId: number; assistantMessageId: number }>(
       'POST',
       `/api/conversations/${conversationId}/messages`,
-      { content, expectedActiveLeafId, expectedMutationRevision },
+      expected,
+      { content },
     ),
-  deleteTail: (
-    conversationId: number,
-    count: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number | null; deletedSiblingRoots: number }>(
+  deleteTail: (conversationId: number, count: number, expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number | null; deletedSiblingRoots: number }>(
       'POST',
       `/api/conversations/${conversationId}/delete-tail`,
-      { count, expectedActiveLeafId, expectedMutationRevision },
+      expected,
+      { count },
     ),
   toolGenerate: (
     conversationId: number,
     prompt: string,
     label: string,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
+    expected: MutationState,
     image?: { workflow: string; comfyUrl: string },
   ) =>
-    request<{ toolMessageId: number; activeLeafId: number }>(
+    mutationRequest<{ toolMessageId: number; activeLeafId: number }>(
       'POST',
       `/api/conversations/${conversationId}/tool`,
+      expected,
       {
         prompt,
         label,
-        expectedActiveLeafId,
-        expectedMutationRevision,
         ...(image ? { image } : {}),
       },
     ),
 
-  moveMessage: (
-    messageId: number,
-    direction: 'up' | 'down',
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number | null }>('POST', `/api/messages/${messageId}/move`, {
-      direction,
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
+  moveMessage: (messageId: number, direction: 'up' | 'down', expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number | null }>(
+      'POST',
+      `/api/messages/${messageId}/move`,
+      expected,
+      {
+        direction,
+      },
+    ),
   moveMessageRange: (
     messageIds: number[],
     direction: 'up' | 'down',
     steps: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
+    expected: MutationState,
   ) =>
-    request<{ activeLeafId: number | null; movedSteps: number }>(
+    mutationRequest<{ activeLeafId: number | null; movedSteps: number }>(
       'POST',
       '/api/message-ranges/move',
+      expected,
       {
         messageIds,
         direction,
         steps,
-        expectedActiveLeafId,
-        expectedMutationRevision,
       },
     ),
-  deleteMessageRange: (
-    messageIds: number[],
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number | null }>('POST', '/api/message-ranges/delete', {
-      messageIds,
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
-  duplicateMessage: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ messageId: number; activeLeafId: number }>(
+  deleteMessageRange: (messageIds: number[], expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number | null }>(
+      'POST',
+      '/api/message-ranges/delete',
+      expected,
+      {
+        messageIds,
+      },
+    ),
+  duplicateMessage: (messageId: number, expected: MutationState) =>
+    mutationRequest<{ messageId: number; activeLeafId: number }>(
       'POST',
       `/api/messages/${messageId}/duplicate`,
-      { expectedActiveLeafId, expectedMutationRevision },
+      expected,
     ),
   renderImage: (
     messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
+    expected: MutationState,
     currentConfig?: { workflow: string; comfyUrl: string },
   ) =>
-    request<{ rendering: boolean }>('POST', `/api/messages/${messageId}/render-image`, {
-      ...currentConfig,
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
-  setActiveImage: (
-    messageId: number,
-    index: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<void>('POST', `/api/messages/${messageId}/active-image`, {
+    mutationRequest<{ rendering: boolean }>(
+      'POST',
+      `/api/messages/${messageId}/render-image`,
+      expected,
+      {
+        ...currentConfig,
+      },
+    ),
+  setActiveImage: (messageId: number, index: number, expected: MutationState) =>
+    mutationRequest<void>('POST', `/api/messages/${messageId}/active-image`, expected, {
       index,
-      expectedActiveLeafId,
-      expectedMutationRevision,
     }),
-  deleteImage: (
-    messageId: number,
-    index: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<Message>('POST', `/api/messages/${messageId}/delete-image`, {
+  deleteImage: (messageId: number, index: number, expected: MutationState) =>
+    mutationRequest<Message>('POST', `/api/messages/${messageId}/delete-image`, expected, {
       index,
-      expectedActiveLeafId,
-      expectedMutationRevision,
     }),
 
-  editMessage: (
-    messageId: number,
-    content: string,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<unknown>('PATCH', `/api/messages/${messageId}`, {
+  editMessage: (messageId: number, content: string, expected: MutationState) =>
+    mutationRequest<unknown>('PATCH', `/api/messages/${messageId}`, expected, {
       content,
-      expectedActiveLeafId,
-      expectedMutationRevision,
     }),
-  editBranch: (
-    messageId: number,
-    content: string,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ messageId: number }>('POST', `/api/messages/${messageId}/edit-branch`, {
-      content,
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
-  activate: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number }>('POST', `/api/messages/${messageId}/activate`, {
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
-  advance: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number; assistantMessageId: number | null }>(
+  editBranch: (messageId: number, content: string, expected: MutationState) =>
+    mutationRequest<{ messageId: number }>(
+      'POST',
+      `/api/messages/${messageId}/edit-branch`,
+      expected,
+      {
+        content,
+      },
+    ),
+  activate: (messageId: number, expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number }>(
+      'POST',
+      `/api/messages/${messageId}/activate`,
+      expected,
+    ),
+  advance: (messageId: number, expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number; assistantMessageId: number | null }>(
       'POST',
       `/api/messages/${messageId}/advance`,
-      { expectedActiveLeafId, expectedMutationRevision },
+      expected,
     ),
   regenerate: (
     messageId: number,
     instruction: string,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
+    expected: MutationState,
     image?: { workflow: string; comfyUrl: string },
   ) =>
-    request<{ activeLeafId: number; assistantMessageId: number }>(
+    mutationRequest<{ activeLeafId: number; assistantMessageId: number }>(
       'POST',
       `/api/messages/${messageId}/regenerate`,
-      { instruction, expectedActiveLeafId, expectedMutationRevision, image },
+      expected,
+      { instruction, image },
     ),
-  deleteMessage: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<void>(
+  deleteMessage: (messageId: number, expected: MutationState) =>
+    mutationRequest<void>('DELETE', `/api/messages/${messageId}`, expected),
+  deleteSwipe: (messageId: number, expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number | null }>(
       'DELETE',
-      `/api/messages/${messageId}?expectedActiveLeafId=${expectedActiveLeafId ?? 'null'}&expectedMutationRevision=${expectedMutationRevision}`,
+      `/api/messages/${messageId}/swipe`,
+      expected,
     ),
-  deleteSwipe: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ activeLeafId: number | null }>(
-      'DELETE',
-      `/api/messages/${messageId}/swipe?expectedActiveLeafId=${expectedActiveLeafId ?? 'null'}&expectedMutationRevision=${expectedMutationRevision}`,
+  resume: (messageId: number, expected: MutationState) =>
+    mutationRequest<{ assistantMessageId: number }>(
+      'POST',
+      `/api/messages/${messageId}/continue`,
+      expected,
     ),
-  resume: (
-    messageId: number,
-    expectedActiveLeafId: number | null,
-    expectedMutationRevision: number,
-  ) =>
-    request<{ assistantMessageId: number }>('POST', `/api/messages/${messageId}/continue`, {
-      expectedActiveLeafId,
-      expectedMutationRevision,
-    }),
   stopGeneration: (messageId: number, expectedGenerationToken: number) =>
     request<{ stopped: boolean }>('POST', `/api/generations/${messageId}/stop`, {
       expectedGenerationToken,
@@ -575,9 +481,7 @@ export const api = {
     request<Endpoint>(
       'PATCH',
       `/api/endpoints/${id}`,
-      // The endpoint editor submits the complete visible sampling form. Mark
-      // genParams as a replacement here, after generic dirty-field reduction,
-      // so clearing the last parameter persists instead of merging with it.
+      // Replace genParams after dirty-field reduction so clearing its last entry persists.
       prepareEndpointPatch(data),
     ),
   deleteEndpoint: (id: number) => request<void>('DELETE', `/api/endpoints/${id}`),

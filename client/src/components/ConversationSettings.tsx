@@ -10,7 +10,11 @@ import Modal from './Modal.tsx';
 import MacroHelp from './MacroHelp.tsx';
 import MacroTextarea from './MacroTextarea.tsx';
 import Select from './Select.tsx';
-import type { SettingsSectionActions } from './SettingsGuard.tsx';
+import {
+  createSettingsNavigation,
+  SettingsNavigationPrompt,
+  type SettingsSectionActions,
+} from './SettingsGuard.tsx';
 
 interface Draft {
   title: string;
@@ -76,8 +80,7 @@ function Editor(props: {
       setError(`Resolve or discard the conflicting fields: ${conflicts().join(', ')}.`);
       return false;
     }
-    // Only send fields the user changed here — a full-draft PATCH would
-    // clobber concurrent updates (auto-titling, /char on another device).
+    // Patch only changed fields to preserve concurrent auto-titles and remote edits.
     const dirty = Object.fromEntries(
       (Object.keys(base) as (keyof Draft)[])
         .filter((key) => draft[key] !== base[key])
@@ -87,12 +90,7 @@ function Editor(props: {
       const updated = await api.patchConversation(
         props.conv.id,
         dirty,
-        state.tree.conversationId === props.conv.id
-          ? state.tree.activeLeafId
-          : props.conv.activeLeafId,
-        state.tree.conversationId === props.conv.id
-          ? state.tree.mutationRevision
-          : props.conv.mutationRevision,
+        state.tree.conversationId === props.conv.id ? state.tree : props.conv,
       );
       base = snapshot(updated);
       setDraft(reconcile({ ...base }));
@@ -206,68 +204,23 @@ function Editor(props: {
 }
 
 export default function ConversationSettings() {
-  const [promptOpen, setPromptOpen] = createSignal(false);
-  const [saving, setSaving] = createSignal(false);
-  let actions: SettingsSectionActions | undefined;
-
-  const register = (next: SettingsSectionActions) => {
-    actions = next;
-    return () => {
-      if (actions === next) actions = undefined;
-    };
-  };
-  const close = () => openModal(null);
-  const requestClose = () => {
-    if (!actions?.isDirty()) close();
-    else setPromptOpen(true);
-  };
-  const saveAndClose = async () => {
-    if (!actions || saving()) return;
-    setSaving(true);
-    const ok = await actions.save();
-    setSaving(false);
-    if (ok) close();
-    else setPromptOpen(false);
-  };
-  const discardAndClose = () => {
-    actions?.discard();
-    close();
-  };
+  const navigation = createSettingsNavigation();
 
   return (
     <>
       <Show when={selectedConversation()}>
         {(conv) => (
-          <Modal title="Conversation settings" onClose={requestClose}>
-            <Editor conv={conv()} register={register} />
+          <Modal
+            title="Conversation settings"
+            onClose={() => navigation.navigate(() => openModal(null))}
+          >
+            <Editor conv={conv()} register={navigation.register} />
           </Modal>
         )}
       </Show>
-      <Show when={promptOpen()}>
-        <Modal
-          title="Save changes?"
-          class="confirm-modal"
-          backdropClass="confirm-backdrop"
-          onClose={() => setPromptOpen(false)}
-        >
-          <p class="confirm-message">You have unsaved conversation settings.</p>
-          <div class="form-actions confirm-actions">
-            <button class="primary-btn" disabled={saving()} onClick={() => void saveAndClose()}>
-              {saving() ? 'Saving…' : 'Save'}
-            </button>
-            <button disabled={saving()} onClick={discardAndClose}>
-              Discard
-            </button>
-            <button
-              data-modal-initial-focus
-              disabled={saving()}
-              onClick={() => setPromptOpen(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </Modal>
-      </Show>
+      <SettingsNavigationPrompt navigation={navigation}>
+        You have unsaved conversation settings.
+      </SettingsNavigationPrompt>
     </>
   );
 }

@@ -11,16 +11,14 @@ const swipe = (token: number, sourceLeafId = 10) => ({
   dir: 1 as const,
 });
 
-// Structural frames that do not move the active leaf (for example a newly
-// prepared speculative sibling) must not consume the outgoing animation.
+// Preparing a speculative sibling must not consume the outgoing animation.
 const first = swipe(1);
 assert.equal(afterTreeFrame(first, 1, 10)?.token, 1);
 
 // The authoritative branch-changing frame consumes it immediately.
 assert.equal(afterTreeFrame(first, 1, 11), null);
 
-// A delayed fail-safe from an older A -> B operation cannot clear a newer
-// A -> B operation merely because both have the same outgoing message id.
+// An old fail-safe must not clear a newer swipe sharing the same outgoing id.
 const second = swipe(2);
 assert.equal(afterOperationEnd(second, 1)?.token, 2);
 assert.equal(afterOperationEnd(second, 2), null);
@@ -39,7 +37,7 @@ assert.match(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPoint
 assert.doesNotMatch(messageNode, /onPointerCancel=\{props\.inMap \? undefined : onPointerUp\}/);
 assert.match(messageNode, /setPointerCapture\(e\.pointerId\)/);
 assert.match(messageNode, /ancestorNavigationBlocked\(\)/);
-assert.match(messageNode, /siblings\(\)\.length > 1/); // TREE-02 guard survives
+assert.match(messageNode, /siblings\(\)\.length > 1/);
 assert.match(
   messageNode,
   /isUser\(\) && siblings\(\)\.length > 1 && !ancestorNavigationBlocked\(\)/,

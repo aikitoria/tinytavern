@@ -1,9 +1,10 @@
+export { readSseData } from './sse.ts';
+
 /** 'tool' messages are plugin output shown in the chat but excluded from prompt history. */
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 export type MessageStatus = 'done' | 'streaming' | 'error' | 'stopped';
 export type GenerationKind = 'normal' | 'speculative';
 
-/** Union of OpenAI-style efforts and extended backends (e.g. mina's 'max'). */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max';
 
 export interface GenParams {
@@ -30,30 +31,26 @@ export interface Message {
   role: Role;
   content: string;
   reasoning: string | null;
-  /** Speaker name the message was sent with (assistant messages) or the
-   * plugin's tool label (tool messages); null = character default. */
+  /** Assistant speaker name or plugin tool label; null = character default. */
   name: string | null;
   status: MessageStatus;
   activeChildId: number | null;
   model: string | null;
   genMeta: GenMeta | null;
   generationKind: GenerationKind;
-  /** Identity of the current/most-recent generation attempt group for this message.
-   * Changes when a stopped message is continued in place. */
+  /** Generation attempt-group identity; changes on in-place continuation. */
   generationToken: number | null;
-  /** Generated image alternatives (served /images/ paths); swipeable within the message. */
+  /** /images/ paths, swipeable within the message. */
   images: string[];
-  /** Selected index into images (server-persisted so it syncs across devices). */
+  /** Server-persisted index into images. */
   activeImage: number;
-  /** A render is currently producing a new image for this message. */
   imagePending: boolean;
-  /** Whether a render config is stored, i.e. more images can be generated. */
+  /** A stored render config permits generating more images. */
   hasImageRender: boolean;
   createdAt: number;
 }
 
-/** A durable, gallery-owned copy of one saved image swipe. The source links
- * are optional metadata only: deleting the source never removes this item. */
+/** Gallery-owned image copy; source links are metadata, so source deletion preserves it. */
 export interface GalleryItem {
   id: number;
   characterId: number | null;
@@ -64,7 +61,6 @@ export interface GalleryItem {
   /** Original message image path, used only to recognize an already-saved swipe. */
   sourceImage: string | null;
   prompt: string;
-  /** Independent gallery-owned image file. */
   image: string;
   hasImageRender: boolean;
   createdAt: number;
@@ -97,8 +93,7 @@ export interface Character {
   avatar: string | null;
   personality: string;
   scenario: string;
-  /** Example conversation partials (SillyTavern mes_example; users manage
-   * their own separators like <START>). Substituted via the {{examples}} slot. */
+  /** SillyTavern mes_example -> {{examples}}; users supply separators such as <START>. */
   examples: string;
   firstMessage: string;
   presetId: number | null;
@@ -117,16 +112,20 @@ export interface CharacterFolder {
   createdAt: number;
 }
 
-/** The settings a template entity has, inlined on a character. */
 export interface CustomTemplate {
+  /** Template for the system message. */
   content: string;
+  /** Fake first user message; empty = omitted. */
   userPrologue: string;
-  /** Hidden reasoning used to seed the final assistant turn. */
+  /** Seeds the final assistant turn's reasoning; empty = no prefill. */
   reasoningPrefill: string;
-  /** Visible content used to seed the final assistant turn. */
+  /** Seeds the final assistant turn's visible content; empty = no prefill. */
   messagePrefill: string;
+  /** Prefix speaker names into message contents ("User: …", "Char: …") and prefill "Char:" for the reply. */
   prefixNames: boolean;
+  /** When false, chats using this template ignore personas entirely ({{user}} = "User"). */
   usesPersonas: boolean;
+  /** Expands {{instruction}} for this regeneration only; empty = DEFAULT_STEER_TEMPLATE. */
   steerTemplate: string;
 }
 
@@ -137,25 +136,9 @@ export interface Preset {
   createdAt: number;
 }
 
-export interface Template {
+export interface Template extends CustomTemplate {
   id: number;
   name: string;
-  /** Template for the system message. */
-  content: string;
-  /** Optional fake first user message (e.g. introducing the character); empty = not emitted. */
-  userPrologue: string;
-  /** Hidden reasoning used to seed the final assistant turn; empty = start reasoning normally. */
-  reasoningPrefill: string;
-  /** Visible content used to seed the final assistant turn; empty = generate from the start. */
-  messagePrefill: string;
-  /** Prefix speaker names into message contents ("User: …", "Char: …") and prefill "Char:" for the reply. */
-  prefixNames: boolean;
-  /** When false, chats using this template ignore personas entirely ({{user}} = "User"). */
-  usesPersonas: boolean;
-  /** Steer text for "regenerate with instruction"; {{instruction}} is replaced
-   * and the result is injected into that regeneration's prompt only.
-   * Empty = built-in DEFAULT_STEER_TEMPLATE. */
-  steerTemplate: string;
   createdAt: number;
 }
 
@@ -175,12 +158,10 @@ export interface Endpoint {
   /** Whether a secret is stored; the secret itself is never returned by the API. */
   hasApiKey: boolean;
   models: string[];
-  /** The model used for generations; null omits the field and lets the endpoint choose. */
+  /** Null omits the model field, letting the endpoint choose. */
   model: string | null;
-  /** Sampling settings sent with every generation through this endpoint. */
   genParams: GenParams;
-  /** How assistant-prefill continuation is requested: disabled, generic trailing
-   * message, vLLM's continue_final_message, or DeepSeek's beta prefix flag. */
+  /** 'none' uses a trailing message; 'vllm' uses continue_final_message; 'deepseek' uses prefix. */
   prefillMode: 'disabled' | 'none' | 'vllm' | 'deepseek';
   createdAt: number;
 }
@@ -189,7 +170,6 @@ export interface Settings {
   /** Monotonic server revision used to reject stale cross-device writes. */
   revision: number;
   defaultPresetId: number | null;
-  /** The single endpoint all generations go through. */
   activeEndpointId: number | null;
   defaultPersonaId: number | null;
   defaultTemplateId: number | null;
@@ -201,16 +181,11 @@ export interface Settings {
   parallelBackgroundSwipeGeneration: boolean;
   /** Whether the server has an access password. The password itself is never returned. */
   hasPassword: boolean;
-  /** Per-plugin settings blobs, keyed by plugin id (shapes are plugin-defined). */
+  /** Keyed by plugin id; each plugin defines its settings shape. */
   pluginSettings: Record<string, Record<string, unknown>>;
 }
 
-/**
- * Controls how the system message is assembled. Slots: {{system}} (preset or
- * custom prompt), {{personality}}, {{persona}}, {{scenario}}, {{examples}},
- * plus {{char}} / {{user}} names. {{#if x}}...{{/if}} blocks are dropped when
- * x is empty.
- */
+/** {{system}} resolves the preset/custom prompt; empty slots omit their {{#if}} blocks. */
 export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 
 {{#if personality}}{{char}}'s personality:
@@ -225,11 +200,6 @@ export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 {{#if examples}}Example conversations:
 {{examples}}{{/if}}`;
 
-/**
- * Built-in fallback for a template's steerTemplate (used when the resolved
- * template leaves it empty). {{instruction}} is replaced with the steer
- * instruction and the result injected into that regeneration's prompt only.
- */
 export const DEFAULT_STEER_TEMPLATE =
   '[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]';
 
@@ -282,7 +252,6 @@ function workflowMacroPlacementError(workflow: string): string | null {
   return null;
 }
 
-/** Expands a validated ComfyUI workflow with the exact runtime escaping rules. */
 export function expandWorkflowTemplate(workflow: string, prompt: string, seed: number): string {
   const placementError = workflowMacroPlacementError(workflow);
   if (placementError) throw new Error(placementError);
@@ -292,15 +261,11 @@ export function expandWorkflowTemplate(workflow: string, prompt: string, seed: n
   );
 }
 
-/**
- * Validates a ComfyUI workflow template ({{prompt}}/{{seed}} slots) with the
- * same placement and expansion rules used by the server at render time.
- */
+/** Uses the same macro placement and escaping rules as rendering. */
 export function workflowValidationError(workflow: string): string | null {
   let substituted: string;
   try {
-    // Quotes, slashes and a newline exercise the characters whose JSON context
-    // matters; a plain "test" probe used to miss backslash-adjacent macros.
+    // Probe JSON-sensitive characters; plain text misses backslash-adjacent macros.
     substituted = expandWorkflowTemplate(workflow, 'test "quote" \\ slash\nline', 1);
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
@@ -343,23 +308,12 @@ export interface TreeNode {
   generationToken: number | null;
 }
 
-/** Server -> client WebSocket events. Delta frames are deliberately terse. */
 export type ServerEvent =
   | { t: 'hello' }
   | { t: 'invalidate'; entity: InvalidateEntity }
-  /** Full snapshot; sent on subscribe (and used as the client's resync fallback). */
-  | {
-      t: 'tree';
-      conversationId: number;
-      messages: Message[];
-      activeLeafId: number | null;
-      mutationRevision: number;
-    }
-  /**
-   * Incremental structural update: `nodes` lists every message in the tree
-   * (absent ids were deleted); `messages` carries full bodies only for
-   * messages created or edited since the last frame.
-   */
+  /** Subscribe/resync snapshot. */
+  | ({ t: 'tree' } & TreeSnapshot)
+  /** nodes lists the whole tree (absent ids were deleted); messages carries changed bodies. */
   | {
       t: 'treePatch';
       conversationId: number;
@@ -386,5 +340,4 @@ export type ServerEvent =
       preview?: string;
     };
 
-/** Client -> server WebSocket commands. */
 export type ClientCommand = { sub: number | null };

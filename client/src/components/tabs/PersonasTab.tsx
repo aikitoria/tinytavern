@@ -54,13 +54,7 @@ export default function PersonasTab() {
           name={editor.selected()?.name ?? '?'}
           upload={(file) => api.uploadPersonaAvatar(editor.selectedId() as number, file)}
           remove={() => api.deletePersonaAvatar(editor.selectedId() as number)}
-          generate={
-            avatarGenerationAvailable()
-              ? async () => {
-                  setAvatarGen(true);
-                }
-              : undefined
-          }
+          generate={avatarGenerationAvailable() ? () => setAvatarGen(true) : undefined}
           onDone={editor.flashSaved}
           onError={editor.setStatus}
         />

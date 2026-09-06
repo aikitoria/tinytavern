@@ -1,3 +1,4 @@
+import { publicMessage } from './mediaUrls.ts';
 import type { WebSocket } from 'ws';
 import type { Message, TreeSnapshot } from '@minitavern/shared';
 import {
@@ -14,7 +15,7 @@ import { getConversationRevision } from './conversationRevision.ts';
 export function treeSnapshot(conversationId: number): TreeSnapshot {
   return {
     conversationId,
-    messages: mergeLiveBuffers(getTreeMessages(conversationId)),
+    messages: mergeLiveBuffers(getTreeMessages(conversationId)).map(publicMessage),
     activeLeafId: getActiveLeafId(conversationId),
     mutationRevision: getConversationRevision(conversationId),
   };
@@ -22,14 +23,8 @@ export function treeSnapshot(conversationId: number): TreeSnapshot {
 
 const pendingTreeBroadcasts = new Set<number>();
 
-/**
- * Push the current tree structure to all subscribers of a conversation
- * (after any structural change). Coalesced per microtask: a request that
- * mutates the tree several times produces a single frame. The frame is an
- * incremental patch — structure for every message, full bodies only for
- * messages created/edited since the last frame (subscribers got a full
- * snapshot on subscribe, and frames arrive in order).
- */
+/** Coalesce mutations per microtask into full structure plus changed bodies.
+ * Subscribers already have a snapshot and receive frames in order. */
 export function broadcastTree(conversationId: number): void {
   if (pendingTreeBroadcasts.has(conversationId)) return;
   pendingTreeBroadcasts.add(conversationId);
@@ -46,7 +41,7 @@ export function broadcastTree(conversationId: number): void {
       activeLeafId: getActiveLeafId(conversationId),
       mutationRevision: getConversationRevision(conversationId),
       nodes: getTreeNodes(conversationId),
-      messages: mergeLiveBuffers(bodies),
+      messages: mergeLiveBuffers(bodies).map(publicMessage),
     });
   });
 }

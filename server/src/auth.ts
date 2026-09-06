@@ -1,9 +1,11 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isTrustedProxy } from './proxy.ts';
 import { stmt } from './db.ts';
 
 const PASSWORD_KEY = 'access_password_hash';
-const SESSION_COOKIE = 'minitavern_session';
+const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'minitavern_session';
+if (!/^[a-zA-Z0-9_]+$/.test(SESSION_COOKIE)) throw new Error('Invalid SESSION_COOKIE_NAME');
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PASSWORD_LENGTH = 1024;
 
@@ -11,8 +13,7 @@ function sessionHash(token: string): string {
   return createHash('sha256').update(token).digest('base64url');
 }
 
-// Expired rows from devices that never return are pruned at process startup;
-// individual expiry is still checked on every authenticated request.
+// Prune abandoned sessions at startup; requests still check expiry individually.
 stmt('DELETE FROM auth_sessions WHERE expires_at <= ?').run(Date.now());
 
 function storedPasswordHash(): string | null {
@@ -60,7 +61,7 @@ function verifyPassword(password: string, encoded: string): boolean {
   }
 }
 
-/** Replaces the password hash and revokes every existing login session. */
+/** Changing or removing the password revokes all sessions. */
 export function setAccessPassword(password: string | null): void {
   validateNewPassword(password);
   if (password === null) stmt('DELETE FROM settings WHERE key = ?').run(PASSWORD_KEY);
@@ -108,7 +109,10 @@ export function passwordMatches(password: string): boolean {
 }
 
 function cookieSecurity(req: IncomingMessage): string {
-  return (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted ? '; Secure' : '';
+  return (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted ||
+    (isTrustedProxy(req) && req.headers['x-forwarded-proto'] === 'https')
+    ? '; Secure'
+    : '';
 }
 
 export function startSession(req: IncomingMessage, res: ServerResponse): void {

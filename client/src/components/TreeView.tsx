@@ -1,20 +1,11 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
 import type { Message } from '@minitavern/shared';
 import { api } from '../state/api.ts';
-import {
-  activePath,
-  childrenByParent,
-  navigateTree,
-  personasEnabled,
-  selectedCharacter,
-  selectedPersona,
-  setState,
-  state,
-} from '../state/store.ts';
+import { activePath, childrenByParent, navigateTree, setState, state } from '../state/store.ts';
 import '../styles/treeview.css';
 import MobileSidebarButton from './MobileSidebarButton.tsx';
+import { speakerName, snippet } from './treeSummary.ts';
 
-/** Branch icon for the header button (kept here so the feature is self-contained). */
 export function TreeIcon() {
   return (
     <svg
@@ -36,40 +27,18 @@ export function TreeIcon() {
   );
 }
 
-/** Mirrors MessageNode's name resolution: persona for user, tool label, character default. */
-function speakerName(message: Message): string {
-  if (message.role === 'user') {
-    return (personasEnabled() ? selectedPersona() : null)?.name ?? 'You';
-  }
-  if (message.role === 'tool') return message.name ?? 'Tool';
-  if (message.role === 'system') return message.name ?? 'System';
-  return message.name ?? selectedCharacter()?.name ?? 'Assistant';
-}
-
-function snippet(message: Message): string {
-  // No visual truncation here: the row clips with a CSS ellipsis at its right
-  // edge. The 500-char slice is only a DOM-size cap for huge messages.
-  const text = message.content.replace(/\s+/g, ' ').trim();
-  if (text) return text.length > 500 ? text.slice(0, 500) : text;
-  if (message.images.length > 0 || message.imagePending) return '[image]';
-  return '(empty)';
-}
-
-/** Activating a node restores the chain beneath it (deep-restore), so any click
- * is a full branch switch; the chat updates itself from the resulting treePatch. */
+/** Activation restores the descendant chain through the authoritative treePatch. */
 async function activate(message: Message): Promise<void> {
   if (state.treeNavigationPending) return;
   if (message.id === state.tree.activeLeafId) {
     setState('viewMode', 'chat');
     return;
   }
-  const ok = await navigateTree(() =>
-    api.activate(message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-  );
+  const ok = await navigateTree(() => api.activate(message.id, state.tree));
   if (ok) setState('viewMode', 'chat');
 }
 
-/** Search query, shared between the pane (filtering) and the bottom bar (input). */
+/** Shared between the tree filter and composer search input. */
 const [query, setQuery] = createSignal('');
 
 /** Search result: matching message ids, plus their ancestors so the tree keeps its shape. */
@@ -121,11 +90,8 @@ function TreeNode(props: { message: Message; activeIds: Set<number>; filter: Tre
   );
 }
 
-/** Full-pane branch tree for the active conversation (drawn like the trace view). */
 export default function TreeView() {
-  /** Ids on the active path, root -> active leaf. */
   const activeIds = createMemo(() => new Set(activePath().map((message) => message.id)));
-  /** Non-null while searching: matches plus the ancestor chains that reach them. */
   const filter = createMemo<TreeFilter | null>(() => {
     const q = query().trim().toLowerCase();
     if (!q) return null;

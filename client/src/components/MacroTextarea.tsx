@@ -43,12 +43,7 @@ function segments(text: string, keys: Set<string>, template: boolean): Segment[]
   return out;
 }
 
-/**
- * Textarea with live macro highlighting: recognized macros get an orange
- * backdrop, anything {{bracketed}} the prompt renderer won't substitute gets
- * bright red. Rendering is a transparent-text overlay behind the (transparent
- * background) textarea, so the caret and text metrics stay fully native.
- */
+/** An overlay highlights macros while preserving native textarea text metrics and caret. */
 export default function MacroTextarea(props: {
   ref?: HTMLTextAreaElement | ((el: HTMLTextAreaElement) => void);
   /** Enables the template macro set ({{system}}, {{#if x}}…) on top of {{char}}/{{user}}. */
@@ -73,9 +68,7 @@ export default function MacroTextarea(props: {
   let area: HTMLTextAreaElement | undefined;
   let observer: ResizeObserver | undefined;
 
-  // A scrolled textarea shows a scrollbar that narrows its wrap width; mirror
-  // that on the overlay (right inset = scrollbar width) and track scrollTop,
-  // otherwise the pills drift out of alignment.
+  // Match the textarea's scrollbar inset and scroll position to keep highlights aligned.
   const sync = () => {
     if (!area) return;
     overlay.style.right = `${Math.max(0, area.offsetWidth - area.clientWidth - 2)}px`;
@@ -87,8 +80,7 @@ export default function MacroTextarea(props: {
   });
   onCleanup(() => observer?.disconnect());
 
-  // The settings editors load values imperatively via el.value = …, which
-  // fires no event; intercept the property so those writes re-render too.
+  // Intercept editor .value loads: they fire no input event.
   const attach = (el: HTMLTextAreaElement) => {
     area = el;
     const base = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
@@ -99,7 +91,7 @@ export default function MacroTextarea(props: {
         setText(String(next ?? ''));
       },
     });
-    observer = new ResizeObserver(sync); // manual resize handle, layout changes
+    observer = new ResizeObserver(sync);
     observer.observe(el);
     (props.ref as ((el: HTMLTextAreaElement) => void) | undefined)?.(el);
   };

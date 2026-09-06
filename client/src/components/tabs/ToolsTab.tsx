@@ -3,8 +3,6 @@ import { Dynamic } from 'solid-js/web';
 import { PLUGINS } from '../../plugins/index.ts';
 import { createDetailNav } from '../../util.ts';
 
-/** Master-detail plugin settings: plugins with a settings page on the left,
- * the selected plugin's page on the right. */
 export default function ToolsTab() {
   const pages = PLUGINS.filter((plugin) => plugin.settingsPage);
   const [selected, setSelected] = createSignal(pages[0]?.id ?? '');

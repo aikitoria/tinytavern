@@ -1,6 +1,5 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import { Portal } from 'solid-js/web';
-import { useDismiss } from '../util.ts';
+import { For, createSignal } from 'solid-js';
+import DropdownSurface from './DropdownSurface.tsx';
 
 const CARD_WIDTH = 460;
 const VIEWPORT_GUTTER = 8;
@@ -26,76 +25,24 @@ const TEMPLATE: [string, string][] = [
   ],
 ];
 
-/** "?" chip that pops a reference card of the macros usable in the adjacent field. */
 export default function MacroHelp(props: {
   template?: boolean;
-  /** Exclusive row set replacing the built-ins (e.g. a plugin's workflow macros). */
+  /** Replace the built-in rows. */
   rows?: [string, string][];
-  /** Rows appended after the built-ins (e.g. a plugin's {{instruction}}). */
+  /** Append to the built-in rows. */
   extra?: [string, string][];
 }) {
   const [open, setOpen] = createSignal(false);
-  const [position, setPosition] = createSignal({
-    left: VIEWPORT_GUTTER,
-    top: VIEWPORT_GUTTER,
-    width: CARD_WIDTH,
-    maxHeight: 320,
-  });
   let root: HTMLSpanElement | undefined;
-  let card: HTMLDivElement | undefined;
+  let trigger: HTMLButtonElement | undefined;
 
-  useDismiss(
-    () => root,
-    open,
-    () => setOpen(false),
-    () => card,
-  );
-
-  // Basics first, then content slots in built-in template order, syntax last.
   const rows = () =>
     props.rows ?? [...(props.template ? [...BASIC, ...TEMPLATE] : BASIC), ...(props.extra ?? [])];
-
-  const reposition = () => {
-    if (!open() || !root || !card) return;
-    const anchor = root.getBoundingClientRect();
-    const width = Math.max(
-      0,
-      Math.min(CARD_WIDTH, document.documentElement.clientWidth - VIEWPORT_GUTTER * 2),
-    );
-    const left = Math.min(
-      Math.max(anchor.left - VIEWPORT_GUTTER, VIEWPORT_GUTTER),
-      document.documentElement.clientWidth - width - VIEWPORT_GUTTER,
-    );
-    const availableBelow = window.innerHeight - anchor.bottom - CARD_GAP - VIEWPORT_GUTTER;
-    const availableAbove = anchor.top - CARD_GAP - VIEWPORT_GUTTER;
-    const naturalHeight = card.scrollHeight;
-    const openAbove = naturalHeight > availableBelow && availableAbove > availableBelow;
-    const maxHeight = Math.max(80, openAbove ? availableAbove : availableBelow);
-    const top = openAbove
-      ? Math.max(VIEWPORT_GUTTER, anchor.top - Math.min(naturalHeight, maxHeight) - CARD_GAP)
-      : anchor.bottom + CARD_GAP;
-    setPosition({ left, top, width, maxHeight });
-  };
-
-  createEffect(() => {
-    if (!open()) return;
-    queueMicrotask(() => {
-      reposition();
-      requestAnimationFrame(reposition);
-    });
-  });
-  onMount(() => {
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-  });
-  onCleanup(() => {
-    window.removeEventListener('resize', reposition);
-    window.removeEventListener('scroll', reposition, true);
-  });
 
   return (
     <span class="macro-help" ref={root}>
       <button
+        ref={trigger}
         class="help-btn"
         title="Available macros"
         aria-label="Available macros"
@@ -105,32 +52,29 @@ export default function MacroHelp(props: {
       >
         ?
       </button>
-      <Show when={open()}>
-        <Portal>
-          <div
-            ref={card}
-            class="help-card popover-surface"
-            role="dialog"
-            aria-label="Available macros"
-            style={{
-              left: `${position().left}px`,
-              top: `${position().top}px`,
-              width: `${position().width}px`,
-              'max-height': `${position().maxHeight}px`,
-            }}
-          >
-            <div class="help-title">Available macros</div>
-            <For each={rows()}>
-              {([macro, description]) => (
-                <div class="help-row">
-                  <code>{macro}</code>
-                  <span>{description}</span>
-                </div>
-              )}
-            </For>
-          </div>
-        </Portal>
-      </Show>
+      <DropdownSurface
+        open={open()}
+        anchor={() => root}
+        focusTarget={() => trigger}
+        onClose={() => setOpen(false)}
+        class="help-card"
+        role="dialog"
+        ariaLabel="Available macros"
+        minWidth={CARD_WIDTH}
+        viewportGutter={VIEWPORT_GUTTER}
+        anchorInset={-VIEWPORT_GUTTER}
+        gap={CARD_GAP}
+      >
+        <div class="help-title">Available macros</div>
+        <For each={rows()}>
+          {([macro, description]) => (
+            <div class="help-row">
+              <code>{macro}</code>
+              <span>{description}</span>
+            </div>
+          )}
+        </For>
+      </DropdownSurface>
     </span>
   );
 }

@@ -1,3 +1,4 @@
+import { behindCaddy, isTrustedProxy } from './proxy.ts';
 import { BlockList, isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 
@@ -12,16 +13,14 @@ export function normalizeAddress(address: string): string {
 }
 
 export interface IpAllowlist {
-  /** The effective allowlist string (for logging). */
   configured: string;
   isAllowed(address: string | undefined): boolean;
 }
 
-/** Single source of truth for allowlist parsing — the Vite dev server imports this too. */
+/** Shared with the Vite dev server. */
 export function createIpAllowlist(env: string | undefined): IpAllowlist {
   const configured = env === undefined ? DEFAULT_IP_ALLOWLIST : env.trim();
-  // An explicitly empty variable disables the IP layer. This is distinct from
-  // an unset variable, which keeps the private-network default above.
+  // Empty disables the IP layer; unset retains private-network defaults.
   if (configured === '') {
     return { configured, isAllowed: () => true };
   }
@@ -58,12 +57,14 @@ export function createIpAllowlist(env: string | undefined): IpAllowlist {
 const allowlist = createIpAllowlist(process.env.MINITAVERN_IP_ALLOWLIST);
 
 export function requestIp(req: IncomingMessage): string | null {
-  const address = req.socket.remoteAddress;
+  const address = isTrustedProxy(req)
+    ? (req.headers['x-minitavern-client-ip'] as string | undefined)
+    : req.socket.remoteAddress;
   return address ? normalizeAddress(address) : null;
 }
 
 export function isRequestIpAllowed(req: IncomingMessage): boolean {
-  return allowlist.isAllowed(req.socket.remoteAddress);
+  return (!behindCaddy || isTrustedProxy(req)) && allowlist.isAllowed(requestIp(req) ?? undefined);
 }
 
 function requestHostMatchesOrigin(host: string | undefined, origin: URL): boolean {
@@ -78,8 +79,7 @@ function requestHostMatchesOrigin(host: string | undefined, origin: URL): boolea
 }
 
 /**
- * Browser requests must be same-origin. Non-browser clients (which send
- * neither Origin nor Fetch Metadata) remain usable for scripts and native apps.
+ * Require same-origin browser requests; allow clients without Origin or Fetch Metadata.
  */
 export function isRequestOriginAllowed(req: IncomingMessage): boolean {
   const rawOrigin = req.headers.origin;

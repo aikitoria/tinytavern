@@ -4,13 +4,11 @@ import DOMPurify from 'dompurify';
 
 let hljsPromise: Promise<typeof import('highlight.js')> | null = null;
 
-// Segments that must never get quote-wrapping: fenced code (also unclosed,
-// mid-stream), inline code, and raw HTML tags.
+// Exclude code (including unclosed streaming fences) and HTML tags from quote wrapping.
 const PROTECTED_SPLIT = /(```[\s\S]*?(?:```|$)|`[^`\n]*`|<[^>\n]*>)/;
 const QUOTE_RE = /"[^"\n]+"|“[^”\n]+”/g;
 
-/** Message Markdown is untrusted model output. Media URLs must never trigger
- * browser requests; generated images use the app's dedicated image viewer. */
+/** Untrusted Markdown must not trigger media requests; generated images use the viewer. */
 const FORBIDDEN_MEDIA_TAGS = [
   'img',
   'picture',
@@ -41,13 +39,23 @@ function escapeHtml(text: string): string {
   });
 }
 
+const COPY_CODE_BUTTON =
+  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code">⧉</button>';
 const markdownRenderer = new Renderer();
+let hasRawCodeBlocks = false;
+// Preserve marked's escaping, language classes and newline; wrap before sanitization
+// to avoid reparenting DOM each frame.
+markdownRenderer.code = (token) =>
+  `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${COPY_CODE_BUTTON}</div>\n`;
+markdownRenderer.html = (token) => {
+  // Multiline HTML survives instruction filtering; decorate after sanitizing its nesting.
+  if (/<pre[\s/>]/i.test(token.text)) hasRawCodeBlocks = true;
+  return Renderer.prototype.html.call(markdownRenderer, token);
+};
 markdownRenderer.image = ({ text }) =>
   `<span class="markdown-media-omitted">${escapeHtml(text.trim() || 'Media omitted')}</span>`;
 
-/** Angle-bracket instructions are model control text, not visible message
- * content. Strip them only outside code, and never across a line boundary, so
- * examples/snippets and ordinary multiline text remain exact. */
+/** Hide angle-bracket model instructions, preserving code and multiline text. */
 function hideAngleInstructions(src: string): string {
   let out = '';
   let i = 0;
@@ -58,8 +66,7 @@ function hideAngleInstructions(src: string): string {
       let run = 1;
       while (src[i + run] === '`') run++;
 
-      // Three or more ticks open/close a fenced block. Its contents may span
-      // lines and must pass through byte-for-byte.
+      // Preserve fenced contents byte-for-byte, including multiline examples.
       if (run >= 3) {
         if (fenceTicks === 0) fenceTicks = run;
         else if (run >= fenceTicks) fenceTicks = 0;
@@ -68,8 +75,7 @@ function hideAngleInstructions(src: string): string {
         continue;
       }
 
-      // Inline Markdown code uses a matching run of one or two backticks.
-      // Protect the entire span, including any angle-bracket examples in it.
+      // Protect inline code, including angle-bracket examples.
       if (fenceTicks === 0) {
         let close = src.indexOf('`', i + run);
         while (close !== -1) {
@@ -107,11 +113,7 @@ function hideAngleInstructions(src: string): string {
   return out;
 }
 
-/**
- * While streaming, close any still-open markers (quotes, *, **, `) at the end
- * of the buffer so emphasis and dialogue color immediately as they stream in,
- * instead of waiting for the closing marker to arrive.
- */
+/** Close unfinished markers so emphasis and dialogue color appear during streaming. */
 function autoclose(src: string): string {
   // Inside an unclosed code fence marked already renders everything as code.
   if ((src.match(/```/g) ?? []).length % 2 === 1) return src;
@@ -132,11 +134,7 @@ function autoclose(src: string): string {
   return out + closers.join('');
 }
 
-/**
- * Wraps "quoted" spans in the markdown SOURCE so the markdown inside them
- * (e.g. "Wow, *she said*") still parses — the span passes through marked as
- * inline raw HTML while its contents keep being processed.
- */
+/** Wrap quotes before parsing so Markdown inside them still renders. */
 function markQuotes(src: string): string {
   return src
     .split(PROTECTED_SPLIT)
@@ -151,31 +149,24 @@ export default function Markdown(props: { content: string; streaming: boolean })
   let container: HTMLDivElement | undefined;
   let raf = 0;
 
-  const decorateCodeBlocks = () => {
-    if (!container) return;
-    container.querySelectorAll('pre').forEach((pre) => {
-      if (pre.parentElement?.classList.contains('code-block-wrap') || !pre.querySelector('code')) {
+  const decorateRawCodeBlocks = () => {
+    container?.querySelectorAll('pre').forEach((pre) => {
+      if (pre.parentElement?.classList.contains('code-block-wrap') || !pre.querySelector('code'))
         return;
-      }
       const wrap = document.createElement('div');
       wrap.className = 'code-block-wrap';
-      pre.before(wrap);
+      pre.replaceWith(wrap);
       wrap.append(pre);
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'icon-btn code-copy-btn';
-      button.title = 'Copy code';
-      button.setAttribute('aria-label', 'Copy code');
-      button.textContent = '⧉';
-      wrap.append(button);
+      wrap.insertAdjacentHTML('beforeend', COPY_CODE_BUTTON);
     });
   };
 
   const render = () => {
     const src = hideAngleInstructions(props.streaming ? autoclose(props.content) : props.content);
+    hasRawCodeBlocks = false;
     const parsed = marked.parse(markQuotes(src), { async: false, renderer: markdownRenderer });
     setHtml(DOMPurify.sanitize(parsed, { FORBID_TAGS: FORBIDDEN_MEDIA_TAGS }));
-    queueMicrotask(decorateCodeBlocks);
+    if (hasRawCodeBlocks) queueMicrotask(decorateRawCodeBlocks);
   };
 
   const highlight = async () => {
@@ -183,8 +174,7 @@ export default function Markdown(props: { content: string; streaming: boolean })
       'pre code[class*="language-"]:not(.hljs, .no-highlight)',
     );
     if (!blocks?.length) return;
-    // The full build is lazy-loaded only when the model explicitly labels a
-    // fence. Unlabelled fences remain plain text instead of being guessed.
+    // Load highlighting only for labelled fences; never guess a language.
     hljsPromise ??= import('highlight.js');
     const hljs = (await hljsPromise).default;
     blocks.forEach((block) => {
@@ -196,7 +186,6 @@ export default function Markdown(props: { content: string; streaming: boolean })
       }
       hljs.highlightElement(block);
     });
-    decorateCodeBlocks();
   };
 
   const copyCode = async (event: MouseEvent) => {
@@ -206,31 +195,24 @@ export default function Markdown(props: { content: string; streaming: boolean })
     const code = button.closest('.code-block-wrap')?.querySelector('code');
     if (!code) return;
     try {
-      // Marked appends one newline to fenced code output. Remove that renderer
-      // artifact without eating any additional blank lines from the source.
+      // Remove only marked's appended newline, preserving source blank lines.
       await navigator.clipboard.writeText((code.textContent ?? '').replace(/\n$/, ''));
       button.textContent = '✓';
       button.title = 'Copied';
       button.setAttribute('aria-label', 'Code copied');
       button.classList.add('copied');
-      window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.textContent = '⧉';
-        button.title = 'Copy code';
-        button.setAttribute('aria-label', 'Copy code');
-        button.classList.remove('copied');
-      }, 1200);
     } catch {
       button.textContent = '!';
       button.title = 'Copy failed';
       button.setAttribute('aria-label', 'Copy failed');
-      window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.textContent = '⧉';
-        button.title = 'Copy code';
-        button.setAttribute('aria-label', 'Copy code');
-      }, 1200);
     }
+    window.setTimeout(() => {
+      if (!button.isConnected) return;
+      button.textContent = '⧉';
+      button.title = 'Copy code';
+      button.setAttribute('aria-label', 'Copy code');
+      button.classList.remove('copied');
+    }, 1200);
   };
 
   createEffect(() => {

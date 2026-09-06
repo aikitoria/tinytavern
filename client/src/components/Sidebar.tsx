@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, on } from 'solid-js';
 import type { Character, Conversation } from '@minitavern/shared';
 import { api } from '../state/api.ts';
+import { createCharacterGroups } from '../state/characterGroups.ts';
 import {
   deleteConversation,
   duplicateConversation,
@@ -46,7 +47,7 @@ export default function Sidebar() {
     setNewChatQuery('');
   };
 
-  // Apply only if the query hasn't changed while the request was in flight.
+  // Ignore responses for superseded queries.
   const runSearch = (q: string) => {
     void api
       .search(q)
@@ -67,9 +68,7 @@ export default function Sidebar() {
     searchTimer = window.setTimeout(() => runSearch(q), 250);
   };
 
-  // Results otherwise only refresh on typing — re-run the query when the
-  // conversation list changes (a delete/rename elsewhere would leave stale,
-  // still-clickable entries).
+  // Remove stale search entries after deletes/renames elsewhere.
   createEffect(
     on(
       () => state.conversations.map((c) => `${c.id}:${c.title}`).join('\n'),
@@ -96,28 +95,8 @@ export default function Sidebar() {
     });
   };
 
-  const characterFolderExists = (id: number) => state.characterFolders.some((f) => f.id === id);
-  const normalizedNewChatQuery = () => newChatQuery().trim().toLocaleLowerCase();
-  const characterMatches = (character: Character) =>
-    !normalizedNewChatQuery() ||
-    character.name.toLocaleLowerCase().includes(normalizedNewChatQuery());
-  const rootCharacters = () =>
-    state.characters.filter(
-      (character) =>
-        (character.folderId == null || !characterFolderExists(character.folderId)) &&
-        characterMatches(character),
-    );
-  const charactersInFolder = (id: number) =>
-    state.characters.filter(
-      (character) => character.folderId === id && characterMatches(character),
-    );
-  const newChatSearchActive = () => normalizedNewChatQuery().length > 0;
-  const matchingNewChatCharacters = () =>
-    rootCharacters().length +
-    state.characterFolders.reduce(
-      (total, folder) => total + charactersInFolder(folder.id).length,
-      0,
-    );
+  const { rootCharacters, charactersInFolder, searchActive, matchingCharacterCount } =
+    createCharacterGroups(newChatQuery);
 
   const remove = async (id: number, event: MouseEvent) => {
     event.stopPropagation();
@@ -149,9 +128,7 @@ export default function Sidebar() {
   const characterOf = (characterId: number | null) =>
     characterId != null ? state.characters.find((c) => c.id === characterId) : undefined;
 
-  // state.conversations is sorted by updatedAt desc, so first-appearance
-  // order gives groups ordered by their most recent conversation and keeps
-  // each group's conversations in the same order as the flat list.
+  // Input is newest-first; first appearance preserves recency within and across groups.
   const convGroups = createMemo<ConvGroup[]>(() => {
     const byKey = new Map<string, ConvGroup>();
     const groups: ConvGroup[] = [];
@@ -300,7 +277,7 @@ export default function Sidebar() {
               onInput={(event) => setNewChatQuery(event.currentTarget.value)}
             />
           </div>
-          {/* Characterless fallback, only when no characters exist (Assistant is normally a seeded character). */}
+          {/* Assistant is normally a seeded character. */}
           <Show when={state.characters.length === 0}>
             <button onClick={() => create(null)}>
               <span class="avatar avatar-fallback">A</span> Assistant
@@ -312,21 +289,17 @@ export default function Sidebar() {
                 <div class="new-chat-folder">
                   <button
                     class="new-chat-folder-toggle"
-                    aria-expanded={
-                      newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                    }
+                    aria-expanded={searchActive() || !collapsedCharacterFolders().has(folder.id)}
                     onClick={() => {
-                      if (!newChatSearchActive()) toggleCharacterFolder(folder.id);
+                      if (!searchActive()) toggleCharacterFolder(folder.id);
                     }}
                   >
                     <span class="tree-disclosure">
-                      {newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)
-                        ? '▾'
-                        : '▸'}
+                      {searchActive() || !collapsedCharacterFolders().has(folder.id) ? '▾' : '▸'}
                     </span>
                     <span>{folder.name}</span>
                   </button>
-                  <Show when={newChatSearchActive() || !collapsedCharacterFolders().has(folder.id)}>
+                  <Show when={searchActive() || !collapsedCharacterFolders().has(folder.id)}>
                     <For each={charactersInFolder(folder.id)}>
                       {(character) => (
                         <button class="new-chat-folder-child" onClick={() => create(character.id)}>
@@ -346,7 +319,7 @@ export default function Sidebar() {
               </button>
             )}
           </For>
-          <Show when={newChatSearchActive() && matchingNewChatCharacters() === 0}>
+          <Show when={searchActive() && matchingCharacterCount() === 0}>
             <p class="hint search-empty">No matches.</p>
           </Show>
         </DropdownSurface>

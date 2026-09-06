@@ -1,8 +1,4 @@
-/* 2D zoomable tree map: the whole conversation tree as a pan/zoom canvas of
-   fixed-size message cards. The composer stays visible (like trace mode). */
-
-/* Map mode layout: lift the 820px conversation cap; the map fills the pane
-   and pans itself, so the chat scroller must not scroll. */
+/* The map handles panning, so disable chat scrolling. */
 .chat.chat-map {
   overflow: hidden;
   scrollbar-gutter: auto;
@@ -31,12 +27,10 @@
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  /* no will-change: the world can be enormous, and a pre-rastered compositor
-     layer of that size exceeds GPU texture limits (blanked UI at low zoom) */
+  /* No will-change: world-sized compositor layers exceed GPU texture limits. */
 }
 
-/* Edges are drawn in screen space on this viewport-sized canvas (under the
-   cards), so no world-sized layer ever exists. */
+/* Screen-space edges avoid world-sized layers. */
 .treemap-edges-canvas {
   position: absolute;
   inset: 0;
@@ -62,7 +56,6 @@
   overflow: hidden;
 }
 
-/* The active path stands out; the active leaf gets the accent outline. */
 .treemap-card.treemap-on-path {
   border-color: color-mix(in srgb, var(--secondary) 45%, var(--border));
 }
@@ -72,7 +65,6 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-/* Full message cards adapt to the fixed slot. */
 .treemap-card .msg {
   gap: var(--space-2);
   padding: var(--space-2);
@@ -85,10 +77,8 @@
   display: none;
 }
 
-/* Low-zoom tile: role dot + speaker name + two-line snippet. Everything is
-   em-based off the inline font-size, which the component scales inversely
-   with the zoom so the text stays a constant screen size (and the fixed
-   slot clips the overflow) — the layout itself never changes with zoom. */
+/* Inverse-zoom font sizing keeps em-based tiles constant on screen;
+   fixed slots clip overflow without relayout. */
 .treemap-mini {
   display: flex;
   flex-direction: column;
@@ -136,7 +126,6 @@
   color: var(--text);
 }
 
-/* Toolbar overlay (top-right): zoom in/out, fit, center on active leaf. */
 .treemap-toolbar {
   position: absolute;
   top: var(--space-3);
@@ -146,7 +135,7 @@
   gap: var(--space-1);
   padding: var(--space-1);
   background: var(--bg-panel);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border: 1px solid var(--border-emphasis);
   border-radius: var(--radius-control-group);
   box-shadow: 0 10px 34px color-mix(in srgb, var(--shadow) 45%, transparent);
 }

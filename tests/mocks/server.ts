@@ -1,7 +1,4 @@
-// Minimal OpenAI-compatible mock for end-to-end testing: streams a canned
-// response (with reasoning_content) token by token. Also mocks the ComfyUI
-// API surface the image plugin uses (/prompt, /history, /view + DELETE /view,
-// /ws progress).
+// E2E mock for OpenAI completions and ComfyUI rendering, progress, and output cleanup.
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -9,9 +6,7 @@ import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.PORT ?? 9800);
 
-/** Per-token streaming delay; e2e runs (E2E_MOCK is set) default to a fast
- * cadence. Keep >= ~3 ms: several tests act mid-stream and need the
- * generation to still be in flight. */
+/** Keep >= ~3 ms so tests can act while generation is in flight. */
 const TOKEN_MS = Number(process.env.MOCK_TOKEN_MS ?? (process.env.E2E_MOCK ? 3 : 15));
 
 const LOREM =
@@ -23,7 +18,7 @@ const MOCK_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
-const MOCK_JPEG = readFileSync(new URL('../docs/chat.jpg', import.meta.url));
+const MOCK_JPEG = readFileSync(new URL('../../docs/chat.jpg', import.meta.url));
 const MOCK_WEBP = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
 type ComfyOutputKind = 'png' | 'jpeg' | 'webp' | 'html' | 'svg' | 'polyglot';
 const COMFY_OUTPUTS: Record<ComfyOutputKind, { filename: string; type: string; data: Buffer }> = {
@@ -57,7 +52,6 @@ let dieAfterContent: string | null = null;
 let lastComfyWorkflow: unknown = null;
 let lastComfyPreviewMethod: string | null = null;
 let lastModelAuthorization: string | null = null;
-/** Last chat completion request, streaming or not (auto-title, avatar prompt). */
 interface CompletionRecord {
   system: string | null;
   user: string | null;
@@ -207,8 +201,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: 'mock comfy submission failure' }));
         return;
       }
-      // uuid like real ComfyUI — a shared prefix would collide the server's
-      // promptId-derived image filenames.
+      // UUIDs avoid collisions in promptId-derived image filenames.
       const promptId = randomUUID();
       comfyJobs.set(promptId, {
         readyAt: Date.now() + 400,
@@ -217,7 +210,6 @@ const server = http.createServer((req, res) => {
       });
       nextComfyOutput = 'png';
       if (comfyFailRenders > 0) comfyFailRenders--;
-      // Step progress over the ws, like ComfyUI's sampler events.
       setTimeout(() => {
         for (const client of wss.clients) {
           client.send(
@@ -290,8 +282,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if ((req.method === 'GET' || req.method === 'DELETE') && req.url?.startsWith('/view')) {
-    // Real ComfyUI 404s without the exact file params — serving (or deleting)
-    // unconditionally would leave the server's URL construction untested.
+    // Match ComfyUI's strict file parameters to test the server's URL construction.
     const q = new URL(req.url, 'http://mock').searchParams;
     const output = Object.values(COMFY_OUTPUTS).find(
       (candidate) => candidate.filename === q.get('filename'),
@@ -301,8 +292,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === 'DELETE') {
-      // Recorded, not actually removed: every mock job reports the same
-      // filename, so a real removal would break later renders.
+      // Record deletion only: later jobs reuse these output files.
       comfyDeleted.push({ filename: output.filename, subfolder: '', type: 'output' });
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ deleted: true }));
@@ -318,8 +308,7 @@ const server = http.createServer((req, res) => {
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       console.log('[mock] body received:', body.length, 'bytes');
-      // A malformed body must fail the one request, not throw in the 'end'
-      // handler and kill the whole mock (cascading e2e timeouts).
+      // Catch malformed JSON here so the event callback cannot crash the mock.
       let parsed: {
         model?: string;
         max_tokens?: number;
@@ -376,9 +365,7 @@ const server = http.createServer((req, res) => {
         continueFinalMessage: parsed.continue_final_message === true,
       };
       completionLog.push(lastCompletion);
-      // Non-streaming callers (the server's auto-title side task) get a plain
-      // JSON completion and must never consume the one-shot controls below —
-      // those are armed for streaming chat generations only.
+      // Auto-title and other non-streaming calls must not consume streaming failure controls.
       if (parsed.stream === false) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
@@ -408,8 +395,7 @@ const server = http.createServer((req, res) => {
       nextTokenMs = null;
       const send = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-      // Mid-stream connection death: emit the armed partial output, then cut
-      // the socket so the client's retry path has to resume from it.
+      // Force retries to resume from partial output.
       if (dieAfterContent != null) {
         const partialContent = dieAfterContent;
         dieAfterContent = null;

@@ -13,11 +13,7 @@ export function changedFields<D extends RecordDraft>(base: D, draft: D): Partial
   ) as Partial<D>;
 }
 
-/**
- * Incorporates a remote representation into a form: untouched fields refresh,
- * while locally edited fields are preserved and flagged if the server changed
- * the same field since the editor's baseline.
- */
+/** Refresh untouched fields; preserve local edits and flag divergent remote changes. */
 export function mergeRemoteDraft<D extends RecordDraft>(
   base: D,
   draft: D,

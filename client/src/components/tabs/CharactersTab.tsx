@@ -1,7 +1,8 @@
 import { For, Show, createSignal } from 'solid-js';
 import type { Character } from '@minitavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@minitavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE } from '@minitavern/shared';
 import { api } from '../../state/api.ts';
+import { createCharacterGroups } from '../../state/characterGroups.ts';
 import { state } from '../../state/store.ts';
 import { avatarGenerationAvailable } from '../../plugins/imageGeneration.tsx';
 import AvatarGenerateModal from '../../plugins/AvatarGenerateModal.tsx';
@@ -10,6 +11,7 @@ import { confirmAction } from '../../state/confirm.ts';
 import Avatar from '../Avatar.tsx';
 import AvatarRow from '../AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
+import TemplateFields, { type TemplateFieldsHandle } from '../TemplateFields.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
 import Modal from '../Modal.tsx';
@@ -35,13 +37,7 @@ export default function CharactersTab() {
   let customEl!: HTMLTextAreaElement;
   let templateEl!: SelectHandle;
   let disableBackgroundSwipeEl!: HTMLInputElement;
-  let customTemplateEl!: HTMLTextAreaElement;
-  let customPrologueEl!: HTMLTextAreaElement;
-  let customReasoningPrefillEl!: HTMLTextAreaElement;
-  let customMessagePrefillEl!: HTMLTextAreaElement;
-  let customPrefixEl!: HTMLInputElement;
-  let customUsesPersonasEl!: HTMLInputElement;
-  let customSteerEl!: HTMLTextAreaElement;
+  let templateFields!: TemplateFieldsHandle;
   let cardInput!: HTMLInputElement;
 
   const editor = createEntityEditor({
@@ -59,13 +55,7 @@ export default function CharactersTab() {
       disableBackgroundSwipeEl.checked = character?.disableBackgroundSwipeGeneration ?? false;
       templateEl.value =
         character?.customTemplate != null ? 'custom' : String(character?.templateId ?? '');
-      customTemplateEl.value = character?.customTemplate?.content ?? '';
-      customPrologueEl.value = character?.customTemplate?.userPrologue ?? '';
-      customReasoningPrefillEl.value = character?.customTemplate?.reasoningPrefill ?? '';
-      customMessagePrefillEl.value = character?.customTemplate?.messagePrefill ?? '';
-      customPrefixEl.checked = character?.customTemplate?.prefixNames ?? false;
-      customUsesPersonasEl.checked = character?.customTemplate?.usesPersonas ?? true;
-      customSteerEl.value = character?.customTemplate?.steerTemplate ?? DEFAULT_STEER_TEMPLATE;
+      templateFields.value = character?.customTemplate;
       setCustomPrompt(character?.customPrompt != null);
       setCustomTemplate(character?.customTemplate != null);
     },
@@ -83,18 +73,7 @@ export default function CharactersTab() {
         customPrompt: promptChoice === 'custom' ? customEl.value : null,
         templateId: templateChoice && templateChoice !== 'custom' ? Number(templateChoice) : null,
         disableBackgroundSwipeGeneration: disableBackgroundSwipeEl.checked,
-        customTemplate:
-          templateChoice === 'custom'
-            ? {
-                content: customTemplateEl.value,
-                userPrologue: customPrologueEl.value,
-                reasoningPrefill: customReasoningPrefillEl.value,
-                messagePrefill: customMessagePrefillEl.value,
-                prefixNames: customPrefixEl.checked,
-                usesPersonas: customUsesPersonasEl.checked,
-                steerTemplate: customSteerEl.value,
-              }
-            : null,
+        customTemplate: templateChoice === 'custom' ? templateFields.value : null,
       };
     },
     create: api.createCharacter,
@@ -113,28 +92,8 @@ export default function CharactersTab() {
       return next;
     });
   };
-  const characterFolderExists = (id: number) => state.characterFolders.some((f) => f.id === id);
-  const normalizedCharacterQuery = () => characterQuery().trim().toLocaleLowerCase();
-  const characterMatches = (character: Character) =>
-    !normalizedCharacterQuery() ||
-    character.name.toLocaleLowerCase().includes(normalizedCharacterQuery());
-  const rootCharacters = () =>
-    state.characters.filter(
-      (character) =>
-        (character.folderId == null || !characterFolderExists(character.folderId)) &&
-        characterMatches(character),
-    );
-  const charactersInFolder = (id: number) =>
-    state.characters.filter(
-      (character) => character.folderId === id && characterMatches(character),
-    );
-  const searchActive = () => normalizedCharacterQuery().length > 0;
-  const matchingCharacterCount = () =>
-    rootCharacters().length +
-    state.characterFolders.reduce(
-      (total, folder) => total + charactersInFolder(folder.id).length,
-      0,
-    );
+  const { rootCharacters, charactersInFolder, searchActive, matchingCharacterCount } =
+    createCharacterGroups(characterQuery);
 
   const editFolder = (id: number | null, currentName = '') => {
     setFolderName(currentName);
@@ -207,8 +166,7 @@ export default function CharactersTab() {
     }
     const last = imported.at(-1);
     if (last) {
-      // The list refreshes via WS invalidate; load the form straight from the
-      // final response instead of racing those refetches.
+      // Load the response directly to avoid racing WS-triggered list refetches.
       editor.adopt(last);
     }
     if (failed.length > 0) {
@@ -340,13 +298,7 @@ export default function CharactersTab() {
               name={editor.selected()?.name ?? '?'}
               upload={(file) => api.uploadCharacterAvatar(editor.selectedId() as number, file)}
               remove={() => api.deleteCharacterAvatar(editor.selectedId() as number)}
-              generate={
-                avatarGenerationAvailable()
-                  ? async () => {
-                      setAvatarGen(true);
-                    }
-                  : undefined
-              }
+              generate={avatarGenerationAvailable() ? () => setAvatarGen(true) : undefined}
               onDone={editor.flashSaved}
               onError={editor.setStatus}
             />
@@ -432,9 +384,11 @@ export default function CharactersTab() {
             onChange={(value) => {
               const custom = value === 'custom';
               setCustomTemplate(custom);
-              // Start from the built-in template rather than a blank page.
-              if (custom && !customTemplateEl.value)
-                customTemplateEl.value = DEFAULT_PROMPT_TEMPLATE;
+              if (custom && !templateFields.value.content)
+                templateFields.value = {
+                  ...templateFields.value,
+                  content: DEFAULT_PROMPT_TEMPLATE,
+                };
             }}
             options={[
               { value: '', label: 'Global default' },
@@ -458,85 +412,7 @@ export default function CharactersTab() {
           classList={{ hidden: !customTemplate() }}
         >
           <h3>Advanced template overrides</h3>
-          <Show when={customTemplate()}>
-            <label>
-              Custom template — system prompt <MacroHelp template />
-            </label>
-          </Show>
-          <MacroTextarea
-            ref={customTemplateEl}
-            template
-            class="mono"
-            classList={{ hidden: !customTemplate() }}
-          />
-          <Show when={customTemplate()}>
-            <label>
-              First user message (optional — sent as a fake user turn before the history){' '}
-              <MacroHelp template />
-            </label>
-          </Show>
-          <MacroTextarea
-            ref={customPrologueEl}
-            template
-            class="mono"
-            classList={{ hidden: !customTemplate() }}
-            placeholder="Leave empty to send no fake user message"
-          />
-          <Show when={customTemplate()}>
-            <label>
-              Custom template — reasoning prefill (optional) <MacroHelp template />
-            </label>
-          </Show>
-          <MacroTextarea
-            ref={customReasoningPrefillEl}
-            template
-            class="mono"
-            classList={{ hidden: !customTemplate() }}
-            placeholder="Leave empty to let the model start reasoning"
-          />
-          <Show when={customTemplate()}>
-            <label>
-              Custom template — assistant message prefill (optional) <MacroHelp template />
-            </label>
-          </Show>
-          <MacroTextarea
-            ref={customMessagePrefillEl}
-            template
-            class="mono"
-            classList={{ hidden: !customTemplate() }}
-            placeholder="Leave empty to let the model start the visible reply"
-          />
-          <Show when={customTemplate()}>
-            <p class="hint">
-              A reasoning prefill continues the model's reasoning. Adding a message prefill
-              continues the visible reply from that text. Both become part of the saved response.
-            </p>
-          </Show>
-          <label class="check-row" classList={{ hidden: !customTemplate() }}>
-            <input ref={customPrefixEl} type="checkbox" />
-            Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill
-            the reply with the current speaker name (see /char)
-          </label>
-          <label class="check-row" classList={{ hidden: !customTemplate() }}>
-            <input ref={customUsesPersonasEl} type="checkbox" />
-            Uses personas — when off, chats with this character ignore the persona entirely ("
-            {'{{user}}'}" becomes "User", the persona description is not sent)
-          </label>
-          <Show when={customTemplate()}>
-            <label>Custom template — steer template (regenerate with instruction)</label>
-          </Show>
-          <MacroTextarea
-            ref={customSteerEl}
-            keys={['instruction']}
-            rows={2}
-            classList={{ hidden: !customTemplate() }}
-          />
-          <Show when={customTemplate()}>
-            <p class="hint">
-              {'{{instruction}}'} is replaced with your instruction and injected into that
-              regeneration's prompt only. Leave empty to use the built-in default.
-            </p>
-          </Show>
+          <TemplateFields ref={templateFields} inline />
         </section>
       </EntityEditorPane>
       <Show when={folderDialog()}>

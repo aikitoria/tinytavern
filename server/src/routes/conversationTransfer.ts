@@ -161,7 +161,6 @@ function exportImage(path: string): { mime: TransferAsset['mime']; data: Buffer 
   return { mime: format.mime, data };
 }
 
-/** Build the stable, self-contained representation used by the download route. */
 export function exportPortableConversation(conversationId: number): PortableConversationV1 {
   const convRow = stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId) as
     Record<string, unknown> | undefined;
@@ -287,8 +286,7 @@ function parsePortableConversation(raw: unknown): {
     persona: parseReference(sourceConversation.persona, 'conversation.persona'),
     endpoint: parseReference(sourceConversation.endpoint, 'conversation.endpoint'),
     speakerName: nullableString(sourceConversation.speakerName, 'conversation.speakerName'),
-    // Additive V1 field: exports from before scenario overrides omit it and
-    // therefore import with the original inherited behavior.
+    // Older V1 exports omit this field and retain inherited scenario behavior.
     scenarioOverride: nullableString(
       sourceConversation.scenarioOverride,
       'conversation.scenarioOverride',
@@ -407,8 +405,7 @@ function parsePortableConversation(raw: unknown): {
       }
     }
   }
-  // Linear-time parent-cycle validation. Re-walking every ancestor from every
-  // message would make a valid 10k-message chain quadratic.
+  // Cache completed walks to keep cycle detection linear on deep chains.
   const visit = new Map<number, 1 | 2>();
   for (const start of messages) {
     if (visit.get(start.id) === 2) continue;
@@ -545,7 +542,6 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
   }
 }
 
-/** Download the full conversation, including every branch and embedded image asset. */
 route.get('/api/conversations/:id/export', ({ params, res }) => {
   const payload = exportPortableConversation(positiveId(params.id));
   const filename = payload.conversation.title.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'chat';

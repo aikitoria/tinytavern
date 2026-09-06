@@ -56,8 +56,7 @@ export default function EndpointsTab() {
       return {
         name: nameEl.value,
         baseUrl: urlEl.value,
-        // A stored key is only replaced by a non-empty value or an explicit
-        // Clear — an accidentally emptied field must not wipe it.
+        // An empty field preserves the stored key unless explicitly cleared.
         ...(!editingExisting() || keyEl.value !== '' || keyCleared()
           ? { apiKey: keyEl.value }
           : {}),

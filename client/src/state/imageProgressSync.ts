@@ -6,11 +6,7 @@ export interface ImageProgressValue {
 
 export type ImageProgressState = Record<number, ImageProgressValue>;
 
-/**
- * Accept progress only while the referenced message still exists and is
- * rendering. Repeated Comfy events are common; returning the existing object
- * for an identical value also prevents duplicate reactive updates.
- */
+/** Ignore stale events and preserve identity on duplicates to avoid reactive updates. */
 export function applyImageProgress(
   progress: ImageProgressState,
   messages: Readonly<Record<number, { imagePending: boolean } | undefined>>,
@@ -29,7 +25,7 @@ export function applyImageProgress(
   return { ...progress, [mid]: { ...current, ...update } };
 }
 
-/** Drop progress belonging to completed or deleted messages after a tree frame. */
+/** Reconcile ephemeral progress after a tree frame. */
 export function retainPendingImageProgress(
   progress: ImageProgressState,
   messages: Readonly<Record<number, { imagePending: boolean } | undefined>>,

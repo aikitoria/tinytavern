@@ -20,8 +20,7 @@ import MessageSelectionBar from './components/MessageSelectionBar.tsx';
 import GalleryModal from './components/GalleryModal.tsx';
 
 export default function App() {
-  // Boot is one-way: once booting() clears, fade the cover out and unmount it
-  // after the transition instead of popping it away.
+  // Boot is one-way; wait for the fade before unmounting its cover.
   const [bootGone, setBootGone] = createSignal(false);
   createEffect(() => {
     if (!booting()) setTimeout(() => setBootGone(true), 350);

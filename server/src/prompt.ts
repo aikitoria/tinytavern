@@ -20,10 +20,7 @@ export interface ChatMessage {
   reasoning_content?: string;
 }
 
-/** Appends while preserving strict non-empty alternating chat roles. Tree
- * edits and optional prologues can legitimately produce adjacent turns with
- * the same role; fold those into one upstream turn instead of sending a shape
- * rejected by strict OpenAI-compatible APIs. */
+/** Merge adjacent same-role turns from tree edits/prologues for strict upstream APIs. */
 export function appendChatMessage(messages: ChatMessage[], message: ChatMessage): void {
   if (message.role === 'system' && messages.length > 0) {
     const leading = messages[0]?.role === 'system' ? messages[0] : null;
@@ -83,35 +80,18 @@ function getTemplate(id: number | null): Template | null {
   return row ? toTemplate(row) : null;
 }
 
-interface ResolvedTemplate {
-  custom: CustomTemplate | null;
-  template: Template | null;
+/** Inline templates replace referenced templates entirely; field defaults apply at use sites. */
+function resolveTemplate(character: Character | null): CustomTemplate | null {
+  return (
+    character?.customTemplate ??
+    getTemplate(character?.templateId ?? null) ??
+    getTemplate(getSettings().defaultTemplateId)
+  );
 }
 
-/**
- * The template chain for a conversation: the character's inline customTemplate
- * wins, then the character's templateId reference, then the global default
- * template. An inline template replaces the referenced template entirely (it
- * carries the same settings a template entity has); per-field built-in
- * defaults (DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE) apply at the
- * point of use when the resolved value is absent or empty.
- */
-function resolveTemplate(character: Character | null): ResolvedTemplate {
-  const custom = character?.customTemplate ?? null;
-  const template = custom
-    ? null
-    : (getTemplate(character?.templateId ?? null) ?? getTemplate(getSettings().defaultTemplateId));
-  return { custom, template };
-}
-
-/**
- * The steer format for a conversation, resolved through the same chain as the
- * template itself. An empty steerTemplate (including old inline-template blobs
- * that predate the key) falls back to the built-in DEFAULT_STEER_TEMPLATE.
- */
+/** Old inline templates may lack steerTemplate; empty values also use the built-in default. */
 export function resolveSteerTemplate(conversation: Conversation): string {
-  const { custom, template } = resolveTemplate(getCharacter(conversation.characterId));
-  const raw = custom ? custom.steerTemplate : (template?.steerTemplate ?? '');
+  const raw = resolveTemplate(getCharacter(conversation.characterId))?.steerTemplate ?? '';
   return raw.trim() || DEFAULT_STEER_TEMPLATE;
 }
 
@@ -121,16 +101,9 @@ export function substituteMacros(text: string, charName: string, userName: strin
   );
 }
 
-/**
- * Renders the prompt template: {{#if key}}...{{/if}} blocks are dropped when
- * the slot is empty, {{key}} slots are substituted, and leftover blank runs
- * are collapsed so a natural-looking template produces clean output.
- */
+/** Render {{#if key}} blocks and {{key}} slots, then collapse excess blank lines. */
 export function renderTemplate(template: string, vars: Record<string, string>): string {
-  // Innermost-first (body may not contain another opener), looped to fixpoint so
-  // nested blocks resolve outward instead of the first opener grabbing the first closer.
-  // vars is a plain object: only own properties are slots, otherwise
-  // {{constructor}}/{{hasownproperty}} would resolve to Object.prototype members.
+  // Resolve nested blocks innermost-first; exclude Object.prototype members from slots.
   const lookup = (key: string): string | undefined =>
     Object.hasOwn(vars, key) ? vars[key] : undefined;
   let out = template;
@@ -150,11 +123,11 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
 
 export interface BuiltPrompt {
   messages: ChatMessage[];
-  /** Hidden reasoning to seed on a fresh assistant generation. */
+  /** Hidden reasoning seed for fresh generations. */
   reasoningPrefill: string | null;
-  /** Visible assistant content to seed on a fresh generation. */
+  /** Visible content seed for fresh generations. */
   messagePrefill: string | null;
-  /** "Name:" to prefill the assistant turn with, when the template prefixes speaker names. */
+  /** "Name:" when the template prefixes speaker names. */
   namePrefill: string | null;
   /** Hidden fallback appended to the final user turn when prefills are disabled. */
   disabledPrefillSpeakerNote: string | null;
@@ -163,12 +136,7 @@ export interface BuiltPrompt {
   userName: string;
 }
 
-/**
- * Assembles the upstream chat completion messages: the system message rendered
- * from the (user-editable) prompt template, then the active-path history.
- * `speakerName` is the name the reply being generated was stamped with
- * (defaults to the conversation's current speaker).
- */
+/** Build the system prompt and active-path history for the reply's stamped speakerName. */
 export function buildChatMessages(
   conversation: Conversation,
   history: Message[],
@@ -176,11 +144,9 @@ export function buildChatMessages(
 ): BuiltPrompt {
   const character = getCharacter(conversation.characterId);
   const settings = getSettings();
-  const { custom, template } = resolveTemplate(character);
+  const template = resolveTemplate(character);
 
-  // A template can opt the chat out of personas entirely: {{user}} becomes
-  // "User" and the persona description slot renders empty.
-  const usesPersonas = custom ? custom.usesPersonas : (template?.usesPersonas ?? true);
+  const usesPersonas = template?.usesPersonas ?? true;
   const persona = usesPersonas ? getPersona(conversation.personaId) : null;
   const charName = character?.name ?? 'Assistant';
   const userName = persona?.name ?? 'User';
@@ -200,25 +166,19 @@ export function buildChatMessages(
     char: charName,
     user: userName,
   };
-  const systemContent = renderTemplate(
-    (custom ? custom.content.trim() : template?.content.trim()) || DEFAULT_PROMPT_TEMPLATE,
-    vars,
-  );
-  // Optional fake first user message (e.g. introducing the character); empty = not emitted.
-  const prologueSource = custom ? custom.userPrologue : (template?.userPrologue ?? '');
+  const systemContent = renderTemplate(template?.content.trim() || DEFAULT_PROMPT_TEMPLATE, vars);
+  const prologueSource = template?.userPrologue ?? '';
   const prologue = prologueSource.trim() ? renderTemplate(prologueSource, vars) : '';
-  const reasoningPrefillSource = custom
-    ? custom.reasoningPrefill
-    : (template?.reasoningPrefill ?? '');
+  const reasoningPrefillSource = template?.reasoningPrefill ?? '';
   const reasoningPrefill = reasoningPrefillSource.trim()
     ? renderTemplate(reasoningPrefillSource, vars)
     : '';
-  const messagePrefillSource = custom ? custom.messagePrefill : (template?.messagePrefill ?? '');
+  const messagePrefillSource = template?.messagePrefill ?? '';
   const messagePrefill = messagePrefillSource.trim()
     ? renderTemplate(messagePrefillSource, vars)
     : '';
 
-  const prefixNames = custom ? custom.prefixNames : (template?.prefixNames ?? false);
+  const prefixNames = template?.prefixNames ?? false;
   const speakerFor = (msg: Message) =>
     msg.role === 'user' ? userName : msg.name?.trim() || charName;
 
@@ -230,11 +190,8 @@ export function buildChatMessages(
     if (msg.role === 'tool') continue; // plugin output is chat-visible only, never sent upstream
     const trimmedContent = msg.content.trim();
     const reasoning = msg.role === 'assistant' ? msg.reasoning?.trim() : '';
-    // Reasoning-only assistant turns are still replayed. Some APIs accept
-    // empty content alongside reasoning_content; the endpoint decides.
+    // Preserve reasoning-only assistant turns in history.
     if (trimmedContent.length === 0 && !reasoning) continue;
-    // Stored history only ever carries user/assistant (tool is skipped above),
-    // so every prefixed message has a speaker.
     const content = prefixNames
       ? `${speakerFor(msg).trim()}: ${trimmedContent}`
       : trimmedContent || '(No visible response)';
@@ -280,20 +237,13 @@ export function withDisabledPrefillSpeakerNote(built: BuiltPrompt): ChatMessage[
     const message = messages[userIndex]!;
     messages[userIndex] = { ...message, content: `${message.content}\n${note}` };
   } else {
-    // Root assistant generation can have no user history at all. The hidden
-    // handoff becomes a synthetic user turn, which both preserves the speaker
-    // instruction and gives strict chat APIs a valid turn to answer.
+    // Without user history, the handoff supplies a user turn for strict chat APIs.
     appendChatMessage(messages, { role: 'user', content: note });
   }
   return messages;
 }
 
-/**
- * Upstream request for a plugin tool generation: the normal chat context plus
- * the tool's prompt (macros expanded) as a trailing user turn. The resolved
- * template's reasoning prefill still seeds the generation, but visible-message
- * and name prefills do not — tool output is not a character reply.
- */
+/** Tool prompts retain chat context and reasoning prefill, but omit character reply prefills. */
 export function buildToolPrompt(
   conversation: Conversation,
   history: Message[],
@@ -313,13 +263,8 @@ export function buildToolPrompt(
   };
 }
 
-/**
- * Upstream request for a steered regeneration: the normal chat context (built
- * for the name the new sibling speaks with) plus the rendered steer text as a
- * trailing user message. That keeps strict user/assistant backends happy now
- * that the original assistant reply is included. The steer lives only in this
- * prompt — it is never stored, so later generations are unaffected.
- */
+/** The one-off steer follows the original reply as a user turn for strict chat APIs.
+ * It is never stored in history. */
 export function buildSteeredPrompt(
   conversation: Conversation,
   history: Message[],
@@ -331,9 +276,7 @@ export function buildSteeredPrompt(
   return built;
 }
 
-/** Appends the shared image-prompt revision exchange. Starting from an empty
- * array produces a standalone revision request; starting from roleplay context
- * preserves that context for the chat message regeneration flow. */
+/** Append an image revision task, optionally retaining existing roleplay context. */
 export function appendImagePromptRevisionTask(
   messages: ChatMessage[],
   original: string,
@@ -341,9 +284,7 @@ export function appendImagePromptRevisionTask(
   instruction: string,
 ): void {
   const originalBlock = `<original_image_prompt>\n${original.trim()}\n</original_image_prompt>`;
-  // Always represent the model-produced prompt as an assistant turn so its
-  // reasoning_content can be replayed too. Add a bridge when needed to retain
-  // strict user/assistant alternation.
+  // Replay the original prompt's reasoning as an assistant turn; bridge for strict alternation.
   if (messages.at(-1)?.role !== 'user') {
     appendChatMessage(messages, {
       role: 'user',
@@ -368,8 +309,7 @@ export function appendImagePromptRevisionTask(
   });
 }
 
-/** Standalone form of the same revision request, used by durable gallery
- * items even after their source conversation has been deleted. */
+/** Gallery revisions work even after the source conversation is deleted. */
 export function buildImagePromptRevisionMessages(
   original: string,
   instruction: string,
@@ -379,10 +319,7 @@ export function buildImagePromptRevisionMessages(
   return messages;
 }
 
-/** Revision of an image-tool output. The unchanged roleplay history stays as
- * the request prefix for cache reuse and contextual references. A strongly
- * delimited final user task tells the model that history is reference-only and
- * distinguishes the original image prompt from the requested change. */
+/** Keep history as an unchanged prefix for cache reuse and references; delimit the revision task. */
 export function buildSteeredToolPrompt(
   conversation: Conversation,
   history: Message[],

@@ -1,6 +1,4 @@
-# Dev stack with hot reload: source is bind-mounted read-write, but the git
-# folder, Dockerfile and compose files are shadowed read-only so container
-# processes can never modify them. Uses ./data-dev, not the prod ./data.
+# Read-only overlays protect repository metadata and deployment files during hot reload.
 x-dev-volumes: &dev-volumes
   volumes:
     - .:/app
@@ -18,11 +16,12 @@ services:
     command: node --watch-path=server/src --watch-path=shared/src server/src/index.ts
     environment:
       DATA_DIR: /app/data-dev
-      MINITAVERN_IP_ALLOWLIST: ""
+      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+      MEDIA_SIGNING_KEY_FILE: /app/.secrets/dev/media.key
+      CADDY_PROXY_KEY_FILE: /app/.secrets/dev/proxy.key
+      SESSION_COOKIE_NAME: minitavern_dev_session
     <<: *dev-volumes
-    ports:
-      - "5488:5487"
-    # Also joined to ComfyUI's network so the server can reach http://comfy:8588.
+    # Reach ComfyUI at http://comfy:8588 on its existing network.
     networks:
       - default
       - comfy
@@ -33,9 +32,7 @@ services:
     user: "1000:1000"
     command: npm run dev -w client
     environment:
-      VITE_PROXY_TARGET: http://server:5487
-      TLS_CERT_PATH: /certs/cert.pem
-      TLS_KEY_PATH: /certs/key.pem
+      CADDY_FRONTEND: "1"
       MINITAVERN_IP_ALLOWLIST: ""
     volumes:
       - .:/app
@@ -43,22 +40,40 @@ services:
       - ./Dockerfile:/app/Dockerfile:ro
       - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ./docker-compose.dev.yml:/app/docker-compose.dev.yml:ro
-      - ./certs:/certs:ro
-    ports:
-      - "5173:5173"
     depends_on:
       - server
 
-  # Fake OpenAI-compatible API for testing without a real backend:
-  #   docker compose -f docker-compose.dev.yml --profile mock up
-  # then add an endpoint with base URL http://mock:9800/v1 (from the server's
-  # point of view) in the UI.
+  caddy-dev:
+    build:
+      context: .
+      dockerfile: caddy/Dockerfile
+      target: caddy-dev
+    user: "1000:1000"
+    ports:
+      - "5173:5173/tcp"
+      - "5173:5173/udp"
+    environment:
+      PUBLIC_PORT: "5173"
+      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+    volumes:
+      - ./certs:/certs:ro
+      - ./.secrets/dev:/secrets:ro
+      - ./data-dev/images:/media/images:ro
+      - ./data-dev/avatars:/media/avatars:ro
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=0700
+      - /config:uid=1000,gid=1000,mode=0700
+    depends_on:
+      - server
+      - client
+
+  # Mock endpoint: http://mock:9800/v1 from the server. See AGENTS.md for isolated tests.
   mock:
     profiles: ["mock"]
     image: node:26-alpine
     working_dir: /app
     user: "1000:1000"
-    command: node scripts/mock-openai.ts
+    command: node tests/mocks/server.ts
     <<: *dev-volumes
     ports:
       - "9800:9800"

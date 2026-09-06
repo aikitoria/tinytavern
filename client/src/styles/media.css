@@ -1,0 +1,28 @@
+/* Callers own render lifecycles. */
+.image-crossfade {
+  display: grid;
+}
+
+.image-crossfade > img {
+  grid-area: 1 / 1;
+}
+
+.image-crossfade-underlay {
+  pointer-events: none;
+}
+
+.img-progress {
+  flex: 0 0 110px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.img-progress-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hot), var(--secondary));
+  border-radius: var(--radius-pill);
+  transition: width 0.2s ease;
+}

@@ -1,16 +1,11 @@
-// Focused regression for image-render conversation recency. Run with an
-// isolated DATA_DIR; this script creates messages and generated image files.
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { stmt } from '../server/src/db.ts';
-import { startImageRender } from '../server/src/comfy.ts';
-import { getMessage } from '../server/src/tree.ts';
+import { requireTestIsolation } from './isolation.ts';
 
-if (!process.env.DATA_DIR?.includes('image-recency-test')) {
-  throw new Error(
-    'Set an isolated DATA_DIR containing "image-recency-test" before running this test',
-  );
-}
+requireTestIsolation();
+const { stmt } = await import('../server/src/db.ts');
+const { startImageRender } = await import('../server/src/comfy.ts');
+const { getMessage } = await import('../server/src/tree.ts');
 
 let passed = 0;
 function assert(value: unknown, label: string): asserts value {
@@ -62,8 +57,7 @@ const mock = createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
-// The render path attempts an optional Comfy progress WebSocket. Refuse the
-// upgrade immediately so this focused test does not wait for its fallback.
+// Reject optional progress sockets immediately to avoid waiting for the fallback.
 mock.on('upgrade', (_req, socket) => socket.destroy());
 mock.listen(0, '127.0.0.1');
 await once(mock, 'listening');

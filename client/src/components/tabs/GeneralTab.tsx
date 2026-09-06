@@ -1,5 +1,4 @@
 import { Show, createEffect, createSignal, untrack } from 'solid-js';
-import { createStore, reconcile } from 'solid-js/store';
 import type { Settings } from '@minitavern/shared';
 import { api, ApiError } from '../../state/api.ts';
 import { applySettings, deleteAllConversations, setState, state } from '../../state/store.ts';
@@ -7,22 +6,11 @@ import { createSavedFlash, errorMessage } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
 import { confirmAction } from '../../state/confirm.ts';
 
-function snapshot(): Settings {
-  return { ...state.settings };
-}
-
-type SettingKey = Exclude<keyof Settings, 'revision' | 'hasPassword' | 'pluginSettings'>;
-const SETTING_KEYS: SettingKey[] = [
-  'autoExpandThinking',
-  'backgroundSwipeGeneration',
-  'parallelBackgroundSwipeGeneration',
-];
+type SettingKey =
+  'autoExpandThinking' | 'backgroundSwipeGeneration' | 'parallelBackgroundSwipeGeneration';
 
 export default function GeneralTab() {
-  const [draft, setDraft] = createStore<Settings>(snapshot());
-  const [dirty, setDirty] = createStore<Record<SettingKey, boolean>>(
-    Object.fromEntries(SETTING_KEYS.map((key) => [key, false])) as Record<SettingKey, boolean>,
-  );
+  const [overrides, setOverrides] = createSignal<Partial<Pick<Settings, SettingKey>>>({});
   const [baseRevision, setBaseRevision] = createSignal(state.settings.revision);
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
@@ -31,33 +19,23 @@ export default function GeneralTab() {
   const [deletingChats, setDeletingChats] = createSignal(false);
 
   const passwordDirty = () => password() !== '' || removePassword();
-  const isDirty = () => SETTING_KEYS.some((key) => dirty[key]) || passwordDirty();
-  const change = <K extends SettingKey>(key: K, value: Settings[K]) => {
-    setDraft(key, value);
-    setDirty(key, true);
-  };
+  const isDirty = () => Object.keys(overrides()).length > 0 || passwordDirty();
+  const value = (key: SettingKey) => overrides()[key] ?? state.settings[key];
+  const change = (key: SettingKey, value: boolean) =>
+    setOverrides((current) => ({ ...current, [key]: value }));
 
   createEffect(() => {
-    const latest = snapshot();
-    if (latest.revision === draft.revision) return;
-    const preserved = untrack(() =>
-      Object.fromEntries(SETTING_KEYS.filter((key) => dirty[key]).map((key) => [key, draft[key]])),
-    );
-    setDraft(reconcile({ ...latest, ...preserved }));
-    if (!untrack(isDirty)) setBaseRevision(latest.revision);
+    const revision = state.settings.revision;
+    if (!untrack(isDirty)) setBaseRevision(revision);
   });
 
   const save = async () => {
     try {
-      const patch = Object.fromEntries(
-        SETTING_KEYS.filter((key) => dirty[key]).map((key) => [key, draft[key]]),
-      ) as Partial<Settings>;
       if (!isDirty()) return true;
       const accessPassword = removePassword() ? null : password() || undefined;
-      const next = await api.putSettings(patch, baseRevision(), accessPassword);
+      const next = await api.putSettings(overrides(), baseRevision(), accessPassword);
       applySettings(next);
-      setDraft(reconcile(next));
-      for (const key of SETTING_KEYS) setDirty(key, false);
+      setOverrides({});
       setBaseRevision(next.revision);
       setPassword('');
       setRemovePassword(false);
@@ -68,11 +46,7 @@ export default function GeneralTab() {
       if (err instanceof ApiError && err.status === 409) {
         try {
           const latest = await api.settings();
-          const preserved = Object.fromEntries(
-            SETTING_KEYS.filter((key) => dirty[key]).map((key) => [key, draft[key]]),
-          );
           setState('settings', latest);
-          setDraft(reconcile({ ...latest, ...preserved }));
           setBaseRevision(latest.revision);
         } catch {
           /* Keep the original conflict visible if the refresh also fails. */
@@ -84,8 +58,7 @@ export default function GeneralTab() {
   };
 
   const discard = () => {
-    setDraft(reconcile(snapshot()));
-    for (const key of SETTING_KEYS) setDirty(key, false);
+    setOverrides({});
     setBaseRevision(state.settings.revision);
     setPassword('');
     setRemovePassword(false);
@@ -124,7 +97,9 @@ export default function GeneralTab() {
         id="settings-access-password"
         type="password"
         autocomplete="new-password"
-        placeholder={draft.hasPassword ? 'Enter a new password to replace it' : 'No password set'}
+        placeholder={
+          state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
+        }
         value={password()}
         disabled={removePassword()}
         onInput={(event) => {
@@ -133,11 +108,11 @@ export default function GeneralTab() {
         }}
       />
       <p class="hint">
-        {draft.hasPassword
+        {state.settings.hasPassword
           ? 'A password is set. Leave this blank to keep it unchanged.'
           : 'Optional. When set, all API, media, and WebSocket access requires a login session.'}
       </p>
-      <Show when={draft.hasPassword}>
+      <Show when={state.settings.hasPassword}>
         <label class="check-row">
           <input
             type="checkbox"
@@ -154,7 +129,7 @@ export default function GeneralTab() {
       <label class="check-row">
         <input
           type="checkbox"
-          checked={draft.autoExpandThinking}
+          checked={value('autoExpandThinking')}
           onChange={(e) => change('autoExpandThinking', e.currentTarget.checked)}
         />
         Auto-expand thinking while the model reasons (collapses once the reply starts)
@@ -163,7 +138,7 @@ export default function GeneralTab() {
       <label class="check-row">
         <input
           type="checkbox"
-          checked={draft.backgroundSwipeGeneration}
+          checked={value('backgroundSwipeGeneration')}
           onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
         />
         Background Swipe Generation (keep one unread assistant swipe prepared ahead)
@@ -172,8 +147,8 @@ export default function GeneralTab() {
       <label class="check-row">
         <input
           type="checkbox"
-          checked={draft.parallelBackgroundSwipeGeneration}
-          disabled={!draft.backgroundSwipeGeneration}
+          checked={value('parallelBackgroundSwipeGeneration')}
+          disabled={!value('backgroundSwipeGeneration')}
           onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
         />
         Generate the background swipe alongside the primary reply

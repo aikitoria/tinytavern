@@ -2,7 +2,6 @@ import { For, Show, createResource } from 'solid-js';
 import { api } from '../state/api.ts';
 import { state } from '../state/store.ts';
 
-/** Debug view: the exact upstream request messages for the current branch. */
 export default function TraceView() {
   const [trace] = createResource(
     () => ({

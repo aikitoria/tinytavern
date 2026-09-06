@@ -1,15 +1,4 @@
-/* Branch tree view: full conversation-pane view (like the trace view), no
-   conversation width cap — deep trees scroll horizontally. The search bar
-   replaces the composer at the bottom while the view is active. */
-
-.treeview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-/* Tree mode layout: lift the 820px conversation cap and let the tree grow
-   past the viewport to the right instead of squeezing. */
+/* Deep trees scroll horizontally instead of squeezing into the chat width cap. */
 .chat.chat-tree {
   overflow: auto;
 }
@@ -20,8 +9,6 @@
   min-width: 100%;
 }
 
-/* Search bar: reuses the .composer pill, minus the width cap, with a plain
-   input in place of the textarea. */
 .treeview-search {
   max-width: none;
 }
@@ -30,7 +17,7 @@
   flex: 1;
   background: none;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   padding: 9px var(--space-3);
 }
 
@@ -73,8 +60,7 @@
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  /* Hug the row's own content: the outline/background must not stretch to the
-     widest row (the pane is uncapped and scrolls horizontally). */
+  /* Keep each row's outline from stretching to the widest row. */
   width: max-content;
   max-width: 100%;
   padding: var(--space-1) var(--space-2);
@@ -117,7 +103,7 @@
 .treeview-snippet {
   flex: 1;
   min-width: 0;
-  /* Long rows would make the uncapped pane needlessly wide — clip at 100ch. */
+  /* Bound the width of the uncapped pane. */
   max-width: 100ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -125,7 +111,6 @@
   color: var(--text-dim);
 }
 
-/* The active path stands out; the leaf gets the accent fill. */
 .treeview-on-path {
   border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
@@ -150,10 +135,6 @@
 
 .treeview-status {
   flex: none;
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--text-dim);
 }
 

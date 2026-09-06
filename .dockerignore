@@ -1,0 +1,8 @@
+.git
+node_modules
+**/node_modules
+data
+data-dev
+certs
+.secrets
+client/dist

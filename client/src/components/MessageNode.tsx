@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
 import type { Message } from '@minitavern/shared';
 import type { PendingSwipe } from '../state/store.ts';
 import { api } from '../state/api.ts';
@@ -48,7 +48,7 @@ const ThinkingIcon = () => (
   </svg>
 );
 
-// Shared across all messages: on touch layouts, actions show only on the last-tapped message.
+// On touch layouts, only the last-tapped message shows actions.
 const [touchedId, setTouchedId] = createSignal<number | null>(null);
 
 // At most one ⋯ menu is open at a time across the message list.
@@ -76,9 +76,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   const siblings = () => siblingsOf(props.message);
   const siblingIndex = () => siblings().findIndex((m) => m.id === props.message.id);
 
-  // Whether this message sits below the swiped sibling group, on the outgoing
-  // (requireOutgoing) or incoming side. Walks the ancestor chain up to the
-  // sibling group of the swipe.
+  // Match descendants of the outgoing or incoming swipe branch.
   const isBelowSwipe = (p: PendingSwipe, requireOutgoing: boolean): boolean => {
     let cur = props.message.parentId;
     while (cur != null) {
@@ -92,9 +90,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     return false;
   };
 
-  // Mount-time swipe context: the incoming sibling slides its content in from
-  // the side the swipe came from; a freshly revealed descendant of it slides
-  // in whole (name row and tools included).
+  // Capture at mount: siblings slide content only; descendants include their header and tools.
   const swipeAtMount = pendingSwipe();
   const enterAs =
     swipeAtMount && swipeAtMount.outgoingId !== props.message.id
@@ -106,10 +102,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       : null;
   const enterDir = enterAs ? swipeAtMount!.dir : 0;
 
-  // While this node is on the outgoing side of a swipe it slides fully out
-  // (content-only at the swipe position, whole message for descendants) and
-  // holds offscreen until the replacing tree frame unmounts it. A failed
-  // swipe clears pendingSwipe, springing everything back.
+  // Hold outgoing nodes offscreen until the tree frame unmounts them.
+  // Failed swipes clear pendingSwipe and spring back.
   const exitInfo = (): { dir: 1 | -1; whole: boolean } | null => {
     const p = pendingSwipe();
     if (!p) return null;
@@ -119,9 +113,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   };
   const slideOut = (dir: 1 | -1) => `translateX(${dir === 1 ? -105 : 105}%)`;
 
-  // SillyTavern-style swipe gesture: swipe left for the next alternative,
-  // right for the previous. Assistant/plugin gestures stay on the active leaf;
-  // user forks can be ancestors because saving one immediately adds a reply.
+  // User forks may be ancestors because saving one immediately adds a reply.
   const [dragX, setDragX] = createSignal(0);
   const [dragging, setDragging] = createSignal(false);
   let pointerX = 0;
@@ -130,13 +122,10 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   let pointerTarget: HTMLElement | null = null;
   let horizontal = false;
 
-  // Optionally show the reasoning live while the model thinks with no answer text yet.
   const reasoningOpen = () =>
     showReasoning() || (state.settings.autoExpandThinking && streaming() && !props.message.content);
 
-  // An active descendant generation makes switching this ancestor incompatible
-  // with the server's foreground-generation guard. Preserve the intentional
-  // forward action on the active streaming leaf ("swipe past generation").
+  // Match the server generation guard while allowing swipes past a streaming leaf.
   const ancestorNavigationBlocked = () =>
     streamingMessage() != null && state.tree.activeLeafId !== props.message.id;
 
@@ -159,9 +148,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     horizontal = false;
   };
 
-  // Pointer capture keeps the gesture alive while streaming deltas resize and
-  // autoscroll the message beneath the finger. Touch events alone can be
-  // cancelled by that layout movement on mobile browsers.
+  // Pointer capture survives streaming resize/autoscroll that can cancel mobile touch events.
   const onPointerDown = (e: PointerEvent) => {
     if (e.pointerType !== 'touch' || !swipeable() || pointerId != null) return;
     pointerX = e.clientX;
@@ -201,8 +188,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     resetPointerSwipe();
   };
 
-  // A browser/system cancellation is not a completed gesture, even if the
-  // drag had already crossed the navigation threshold.
+  // Cancellation must not navigate, even after crossing the swipe threshold.
   const onPointerCancel = (e: PointerEvent) => {
     if (e.pointerId === pointerId) resetPointerSwipe();
   };
@@ -214,9 +200,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       touchedId() !== props.message.id &&
       (event.target as Element).closest?.('.msg-image')
     ) {
-      // Full-bleed images leave no spare card surface to tap. Consume the
-      // first image tap to reveal its controls; a second tap reaches the
-      // image viewer's click handler normally.
+      // Full-bleed images need the first tap for controls; the second opens the viewer.
       event.preventDefault();
       event.stopPropagation();
       setTouchedId(props.message.id);
@@ -242,73 +226,54 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     }
   });
 
-  const saveInPlace = async () => {
-    const saved = await navigateTree(() =>
-      api.editMessage(
-        props.message.id,
-        editArea!.value,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
-      ),
-    );
-    if (saved) setEditing(false);
-  };
-
-  const saveAsBranch = async () => {
-    const saved = await navigateTree(() =>
-      api.editBranch(
-        props.message.id,
-        editArea!.value,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
-      ),
-    );
+  const saveEdit = async (edit: typeof api.editMessage) => {
+    const saved = await navigateTree(() => edit(props.message.id, editArea!.value, state.tree));
     if (saved) setEditing(false);
   };
 
   const remove = () => {
-    void navigateTree(() =>
-      api.deleteMessage(props.message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-    );
+    void navigateTree(() => api.deleteMessage(props.message.id, state.tree));
   };
   const removeSwipe = () => {
     const pluginDelete = claimedView()?.deleteSwipe;
     if (pluginDelete && claimedView()?.canDeleteSwipe?.(props.message)) {
       void navigateTree(() => pluginDelete(props.message));
     } else {
-      void navigateTree(() =>
-        api.deleteSwipe(props.message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-      );
+      void navigateTree(() => api.deleteSwipe(props.message.id, state.tree));
     }
   };
 
   const copy = () => void navigator.clipboard.writeText(props.message.content);
 
-  // ---- ⋯ menu actions ----
   const menuOpen = () => moreMenuId() === props.message.id;
   const closeMenu = () => setMoreMenuId(null);
-  const selectRange = () => {
-    closeMenu();
-    startMessageSelection(props.message.id);
-  };
+  const MenuItem = (item: {
+    action: () => void;
+    disabled?: boolean;
+    danger?: boolean;
+    children: JSX.Element;
+  }) => (
+    <button
+      type="button"
+      role="menuitem"
+      classList={{ danger: item.danger }}
+      disabled={item.disabled}
+      onClick={() => {
+        closeMenu();
+        item.action();
+      }}
+    >
+      {item.children}
+    </button>
+  );
   const canMoveUp = () => props.message.parentId != null;
   const canMoveDown = () => (childrenByParent().get(props.message.id)?.length ?? 0) > 0;
   const duplicate = () =>
-    void navigateTree(() =>
-      api.duplicateMessage(props.message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-    );
+    void navigateTree(() => api.duplicateMessage(props.message.id, state.tree));
   const branchToConversation = () => void navigateTree(() => branchConversation(props.message.id));
   const move = (direction: 'up' | 'down') =>
-    void navigateTree(() =>
-      api.moveMessage(
-        props.message.id,
-        direction,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
-      ),
-    );
+    void navigateTree(() => api.moveMessage(props.message.id, direction, state.tree));
 
-  // Steered regeneration: new assistant/tool sibling with a one-off instruction.
   const [steerOpen, setSteerOpen] = createSignal(false);
   let steerArea: HTMLTextAreaElement | undefined;
   const openSteer = () => {
@@ -322,24 +287,20 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       api.regenerate(
         props.message.id,
         instruction,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
+        state.tree,
         claimedView()?.currentImageConfig?.(),
       ),
     );
     if (ok) setSteerOpen(false);
   };
 
-  // A plugin may own this tool message's rendering (header controls + body).
-  // Memoized so the view (and its closure state) survives message updates and
-  // is only recreated if the claim itself flips.
+  // Preserve plugin closure state across message updates until the claim changes.
   const claimedView = createMemo(() =>
     props.message.role === 'tool' ? findMessageView(props.message) : undefined,
   );
   const pluginView = createMemo(() => claimedView()?.create(() => props.message, { streaming }));
 
-  // A menu left open when this node unmounts (e.g. swiped away) must not
-  // reappear open on a later remount of the same message id.
+  // Do not reopen a stale menu when this message remounts.
   onCleanup(() => {
     if (moreMenuId() === props.message.id) setMoreMenuId(null);
   });
@@ -361,8 +322,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         'msg-range-selected': messageIsSelected(props.message.id),
         touched: touchedId() === props.message.id,
       }}
-      // In the tree map the card handles clicks (branch activation) and pans on
-      // touch, so tap-to-reveal and the swipe gesture are disabled via inMap.
+      // Tree-map cards own branch clicks and touch panning.
       onClick={() => {
         if (!props.inMap) setTouchedId(props.message.id);
       }}
@@ -518,87 +478,25 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       keyboardNavigation
                       autoFocus
                     >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          copy();
-                        }}
-                      >
-                        Copy
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={props.message.imagePending}
-                        onClick={() => {
-                          closeMenu();
-                          startEdit();
-                        }}
-                      >
+                      <MenuItem action={copy}>Copy</MenuItem>
+                      <MenuItem disabled={props.message.imagePending} action={startEdit}>
                         Edit
-                      </button>
+                      </MenuItem>
                       <div class="menu-separator" role="separator" />
                       <Show when={isAssistant() || (isTool() && claimedView() != null)}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            openSteer();
-                          }}
-                        >
-                          Regenerate
-                        </button>
+                        <MenuItem action={openSteer}>Regenerate</MenuItem>
                       </Show>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          duplicate();
-                        }}
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          branchToConversation();
-                        }}
-                      >
-                        Branch chat
-                      </button>
+                      <MenuItem action={duplicate}>Duplicate</MenuItem>
+                      <MenuItem action={branchToConversation}>Branch chat</MenuItem>
                       <div class="menu-separator" role="separator" />
-                      <button type="button" role="menuitem" onClick={selectRange}>
+                      <MenuItem action={() => startMessageSelection(props.message.id)}>
                         Select range
-                      </button>
+                      </MenuItem>
                       <Show when={canMoveUp()}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            move('up');
-                          }}
-                        >
-                          Move up
-                        </button>
+                        <MenuItem action={() => move('up')}>Move up</MenuItem>
                       </Show>
                       <Show when={canMoveDown()}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            move('down');
-                          }}
-                        >
-                          Move down
-                        </button>
+                        <MenuItem action={() => move('down')}>Move down</MenuItem>
                       </Show>
                       <div class="menu-separator" role="separator" />
                       <Show
@@ -606,29 +504,13 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                           claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1
                         }
                       >
-                        <button
-                          type="button"
-                          class="danger"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            removeSwipe();
-                          }}
-                        >
+                        <MenuItem danger action={removeSwipe}>
                           <TrashIcon /> Delete swipe
-                        </button>
+                        </MenuItem>
                       </Show>
-                      <button
-                        type="button"
-                        class="danger"
-                        role="menuitem"
-                        onClick={() => {
-                          closeMenu();
-                          remove();
-                        }}
-                      >
+                      <MenuItem danger action={remove}>
                         <TrashIcon /> Delete
-                      </button>
+                      </MenuItem>
                     </DropdownSurface>
                   </span>
                 </span>
@@ -666,10 +548,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 <textarea
                   ref={editArea}
                   onInput={(e) => {
-                    // Collapsing to auto to measure shrinks the scroller's content,
-                    // and the browser clamps scrollTop to the smaller maximum before
-                    // the full height is restored. Put the position back, or a
-                    // taller-than-viewport edit box scrolls itself off screen.
+                    // Measuring at auto height clamps scrollTop; restore it to keep tall edits visible.
                     const el = e.currentTarget;
                     const scroller = el.closest('.chat');
                     const top = scroller?.scrollTop;
@@ -679,11 +558,10 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                   }}
                   onKeyDown={(e) => {
                     if (e.isComposing) return; // IME candidate confirmation, not a command
-                    // Ctrl/Cmd+Enter submits as a new branch; Escape cancels.
-                    // Tool output has no branch semantics — save in place.
+                    // Tool output has no branch semantics; save in place.
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault();
-                      void (isTool() ? saveInPlace() : saveAsBranch());
+                      void saveEdit(isTool() ? api.editMessage : api.editBranch);
                     } else if (e.key === 'Escape') {
                       setEditing(false);
                     }
@@ -691,13 +569,13 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 />
                 <div class="msg-edit-actions">
                   <Show when={!isTool()}>
-                    <button class="primary-btn" onClick={() => void saveAsBranch()}>
+                    <button class="primary-btn" onClick={() => void saveEdit(api.editBranch)}>
                       {isUser() ? 'Send as branch' : 'Save as branch'}
                     </button>
                   </Show>
                   <button
                     classList={{ 'primary-btn': isTool() }}
-                    onClick={() => void saveInPlace()}
+                    onClick={() => void saveEdit(api.editMessage)}
                   >
                     Save in place
                   </button>
@@ -730,7 +608,6 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               placeholder="e.g. make it shorter and more casual"
               onKeyDown={(e) => {
                 if (e.isComposing) return; // IME candidate confirmation, not a command
-                // Ctrl/Cmd+Enter confirms; Escape cancels.
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                   e.preventDefault();
                   void confirmSteer();

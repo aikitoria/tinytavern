@@ -1,6 +1,5 @@
 import { stmt } from './db.ts';
 
-/** Current persisted optimistic-concurrency revision. */
 export function getConversationRevision(conversationId: number): number {
   const row = stmt('SELECT mutation_revision FROM conversations WHERE id = ?').get(
     conversationId,
@@ -8,7 +7,6 @@ export function getConversationRevision(conversationId: number): number {
   return row?.mutation_revision ?? 0;
 }
 
-/** Advances and returns the conversation's persisted optimistic-concurrency revision. */
 export function bumpConversationRevision(conversationId: number): number {
   const row = stmt(
     `UPDATE conversations SET mutation_revision = mutation_revision + 1

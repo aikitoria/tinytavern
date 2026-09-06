@@ -1,12 +1,6 @@
 import { onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
-/**
- * Fullscreen pan/zoom image viewer (interaction model borrowed from
- * SillyTavern's media modal): wheel zooms toward the cursor, pinch zooms
- * toward the touch midpoint, mouse or single-finger drag pans. Escape or a
- * backdrop click closes; double-click resets the view.
- */
 export default function ImageViewer(props: { src: string; onClose: () => void }) {
   let overlay!: HTMLDivElement;
   let img!: HTMLImageElement;
@@ -91,7 +85,6 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     if (pinching && e.touches.length === 2) {
       e.preventDefault();
       const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      // Pan by the midpoint travel, then zoom toward the midpoint.
       x += mid.x - lastMidX;
       y += mid.y - lastMidY;
       lastMidX = mid.x;
@@ -110,7 +103,6 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   };
   const onTouchEnd = (e: TouchEvent) => {
     if (e.touches.length === 1) {
-      // Pinch released into a single finger: continue as a pan from here.
       pinching = false;
       dragging = true;
       dragStartX = e.touches[0]!.clientX - x;
@@ -122,8 +114,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   };
 
   const onKey = (e: KeyboardEvent) => {
-    // Captured before ChatView's document listener: the chat must not swipe
-    // siblings (and unmount this very message) underneath the viewer.
+    // Capture before ChatView can swipe siblings and unmount the viewer's message.
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.stopPropagation();
       return;
@@ -134,31 +125,12 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
       return;
     }
     if (e.key === 'Tab') {
-      const controls = [
-        ...overlay.querySelectorAll<HTMLElement>('button, [href], [tabindex]'),
-      ].filter(
-        (element) =>
-          element !== overlay && !element.hasAttribute('disabled') && element.tabIndex >= 0,
-      );
-      if (controls.length === 0) {
-        e.preventDefault();
-        overlay.focus();
-        return;
-      }
-      const first = controls[0]!;
-      const last = controls[controls.length - 1]!;
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === overlay)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      e.preventDefault();
+      overlay.focus();
     }
   };
 
-  /** Exit native fullscreen first; fullscreenchange owns the eventual close.
-   * The fixed overlay remains a complete fallback when the API is unavailable. */
+  /** fullscreenchange closes the viewer after native fullscreen exits. */
   const close = () => {
     if (document.fullscreenElement === overlay) {
       void document.exitFullscreen().catch(() => props.onClose());
@@ -189,9 +161,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-    // Mount happens synchronously from the image click, while transient user
-    // activation is still available. If the browser refuses, the fixed
-    // viewport overlay continues to work as before.
+    // Synchronous mount retains click activation; the fixed overlay handles refusal.
     if (overlay.requestFullscreen) {
       void overlay.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
     }
@@ -222,8 +192,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
         }}
         onDblClick={reset}
         onWheel={onWheel}
-        // on: attaches directly to the element (not Solid's delegated document
-        // listener, which is passive for touch events and ignores preventDefault).
+        // Direct listeners allow preventDefault; Solid's delegated touch listeners are passive.
         on:touchstart={onTouchStart}
         on:touchmove={onTouchMove}
         on:touchend={onTouchEnd}

@@ -1,4 +1,3 @@
-/** Replaces an entity in-place, or prepends it when it is not present yet. */
 export function upsertById<T extends { id: number }>(items: readonly T[], item: T): T[] {
   const index = items.findIndex((candidate) => candidate.id === item.id);
   if (index === -1) return [item, ...items];
@@ -11,9 +10,8 @@ export function isCurrentSettingsRevision(current: number, incoming: number): bo
 }
 
 /**
- * Tracks the newest successfully applied request, rather than merely the newest
- * request that started. If request 2 fails, request 1 may still supply the last
- * useful snapshot; once request 2 succeeds, a late request 1 is stale.
+ * Only a successful newer request makes older responses stale;
+ * a failed request must not discard a still-useful older snapshot.
  */
 export class SuccessfulFetchSequence<K> {
   private next = new Map<K, number>();

@@ -1,3 +1,5 @@
+import { readSseData } from '@minitavern/shared';
+import { publicMessage } from './mediaUrls.ts';
 import type { Conversation, Endpoint, GenMeta, Message } from '@minitavern/shared';
 import { stmt, toEndpoint } from './db.ts';
 import { getMessage, getPathToMessage } from './tree.ts';
@@ -42,21 +44,17 @@ export function hasActiveGeneration(conversationId: number, exceptMessageId?: nu
   return false;
 }
 
-/** Tool prompts are route-time snapshots and tool rows never enter later chat
- * history, so they may safely overlap each other. Structural actions use this
- * stricter predicate when only a normal assistant stream should conflict. */
+/** Tool streams may overlap: prompts are snapshots and tool rows stay out of chat history. */
 export function hasActiveNonToolGeneration(conversationId: number): boolean {
   for (const gen of active.values()) {
     if (gen.conversationId !== conversationId) continue;
-    // A missing row is an unexpected transitional state; treat it as
-    // conflicting rather than allowing a second kind of generation through.
+    // Treat missing rows as conflicting to avoid overlapping unknown generations.
     if (getMessage(gen.mid)?.role !== 'tool') return true;
   }
   return false;
 }
 
-/** Active message ids in one conversation. Used by structural mutations to
- * stop only streams whose rows are actually about to be removed. */
+/** Lets structural mutations stop only streams whose rows will be removed. */
 export function activeGenerationMessageIds(conversationId: number): number[] {
   return [...active.values()]
     .filter((gen) => gen.conversationId === conversationId)
@@ -78,7 +76,6 @@ export function activeGenerationToken(mid: number): number | null {
   return active.get(mid)?.generationToken ?? null;
 }
 
-/** Marks a speculative stream as foreground once the user activates it. */
 export function promoteBackgroundGeneration(mid: number): boolean {
   const gen = active.get(mid);
   if (!gen?.background) return false;
@@ -87,8 +84,7 @@ export function promoteBackgroundGeneration(mid: number): boolean {
   return true;
 }
 
-/** Stops speculative generations — one conversation's, or all when omitted.
- * Returns the stopped message id (meaningful for the single-conversation case). */
+/** Omitting the conversation stops all; returns the last stopped message id. */
 export function stopBackgroundGenerations(conversationId?: number): number | null {
   let stopped: number | null = null;
   for (const gen of [...active.values()]) {
@@ -127,8 +123,7 @@ function flushToDb(gen: ActiveGen): void {
 }
 
 function finalize(gen: ActiveGen, status: 'done' | 'error' | 'stopped'): void {
-  // Identity check, not just key presence: `continue` reuses the message id,
-  // so a late abort from a stopped generation must not touch its successor.
+  // `continue` reuses message ids; late aborts must not touch a successor.
   if (active.get(gen.mid) !== gen) return;
   active.delete(gen.mid);
   clearInterval(gen.flushTimer);
@@ -149,11 +144,10 @@ function finalize(gen: ActiveGen, status: 'done' | 'error' | 'stopped'): void {
       t: 'final',
       conversationId: gen.conversationId,
       mutationRevision,
-      message: getMessage(gen.mid)!,
+      message: publicMessage(getMessage(gen.mid)!),
     });
   }
-  // Speculative fills never touch updated_at, so a conversation-list refetch
-  // would be a no-op — don't make every client do one per background swipe.
+  // Speculation leaves updated_at unchanged, so skip conversation-list refetches.
   if (!gen.background) invalidate('conversations');
   const callback = status === 'done' ? gen.onDone : status === 'error' ? gen.onError : undefined;
   if (callback) {
@@ -191,13 +185,8 @@ interface SseDelta {
 }
 
 /**
- * Starts streaming an assistant response into the (status='streaming')
- * message `mid`. Server-owned: independent of any client connection. Every
- * upstream delta is forwarded immediately over WS; the DB gets periodic
- * flushes plus a final write.
- *
- * With `resumeFrom`, the existing content is kept and sent upstream as a
- * trailing assistant message (prefill-style continue); new tokens append.
+ * Independent of client connections: forwards deltas immediately, batches DB writes.
+ * `resumeFrom` sends existing content as an assistant prefill and appends new tokens.
  */
 export function startGeneration(
   conversation: Conversation,
@@ -236,15 +225,10 @@ export function startGeneration(
       gen,
       isResumeInitially || gen.content.length > 0 || gen.reasoning.length > 0,
     ).catch((err: unknown) => {
-      if (active.get(mid) !== gen) return; // already stopped/finalized (or superseded by a resume)
-      // Transient upstream failures on foreground generations are retried in
-      // place, resuming from the partial content. Background swipes have
-      // their own retry loop in speculation.ts. Permanent errors (4xx, e.g.
-      // context length exceeded) surface immediately.
+      if (active.get(mid) !== gen) return;
+      // Foreground retries resume partial content; speculation.ts owns background retries.
       if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err, gen)) {
-        // Disabled assistant prefills cannot carry either accumulated field.
-        // Keeping those buffers and appending a fresh answer would corrupt the
-        // message, so preserve the partial result as an error instead.
+        // Without prefills, retrying would append a fresh answer to the partial result.
         if (
           gen.requestContext?.endpoint.prefillMode === 'disabled' &&
           (gen.content.length > 0 || gen.reasoning.length > 0)
@@ -275,12 +259,9 @@ export function startGeneration(
   launch(0);
 }
 
-/** A wedged backend must not leave a message spinning forever. */
 const IDLE_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RETRIES = 2;
 
-/** Per-conversation endpoint override first, then the global active endpoint.
- * A null conversation resolves the global active endpoint directly. */
 function resolveEndpoint(conversation: Conversation | null): Endpoint {
   const endpointId = conversation?.endpointId ?? getSettings().activeEndpointId;
   const endpointRow = endpointId
@@ -293,24 +274,19 @@ function resolveEndpoint(conversation: Conversation | null): Endpoint {
   return toEndpoint(endpointRow);
 }
 
-/** Whether this conversation's endpoint can continue an existing assistant message. */
 export function supportsAssistantContinuation(conversation: Conversation): boolean {
   return resolveEndpoint(conversation).prefillMode !== 'disabled';
 }
 
-/**
- * One-shot non-streaming completion for silent side tasks (auto-titling,
- * avatar prompt writing). Deliberately outside the generation machinery: no
- * message rows, no deltas, no retries — the caller decides what a failure
- * means. A null conversation uses the globally active endpoint.
- */
-export async function chatCompletionOnce(
-  conversation: Conversation | null,
+/** Shared wire construction; callers retain their own deadlines and retry policy. */
+function completionRequest(
+  endpoint: Endpoint,
   messages: ChatMessage[],
-  maxTokens: number,
-): Promise<string> {
-  const endpoint = resolveEndpoint(conversation);
-  const res = await fetch(`${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+  stream: boolean,
+  parameters: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Response> {
+  return fetch(`${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -319,11 +295,30 @@ export async function chatCompletionOnce(
     body: JSON.stringify({
       ...(endpoint.model ? { model: endpoint.model } : {}),
       messages,
-      stream: false,
-      max_tokens: maxTokens,
+      stream,
+      ...parameters,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal,
   });
+}
+
+/**
+ * Side-task completion without message rows or retries; callers handle failures.
+ * A null conversation uses the global endpoint.
+ */
+export async function chatCompletionOnce(
+  conversation: Conversation | null,
+  messages: ChatMessage[],
+  maxTokens: number,
+): Promise<string> {
+  const endpoint = resolveEndpoint(conversation);
+  const res = await completionRequest(
+    endpoint,
+    messages,
+    false,
+    { max_tokens: maxTokens },
+    AbortSignal.timeout(30_000),
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
@@ -334,9 +329,6 @@ export async function chatCompletionOnce(
   const message = json.choices?.[0]?.message;
   const content = message?.content;
   if (typeof content === 'string' && content.trim()) return content;
-  // Empty content has a few distinct causes worth naming: a moderation
-  // refusal, a reasoning model that spent the whole token budget on
-  // reasoning_content, or an upstream that returned nothing at all.
   if (typeof message?.refusal === 'string' && message.refusal.trim()) {
     throw new Error(`The model refused: ${message.refusal.trim().slice(0, 300)}`);
   }
@@ -349,9 +341,8 @@ export async function chatCompletionOnce(
 }
 
 /**
- * Streaming variant of chatCompletionOnce: relays content deltas to onDelta
- * as they arrive and resolves with the full text. Reasoning deltas are
- * skipped; the same refusal/empty diagnosis applies to the final text.
+ * Side-task streaming completion: emits content deltas and returns the full text.
+ * Reasoning is skipped; refusal and empty replies are errors.
  */
 export async function streamChatCompletion(
   conversation: Conversation | null,
@@ -361,64 +352,41 @@ export async function streamChatCompletion(
   signal?: AbortSignal,
 ): Promise<string> {
   const endpoint = resolveEndpoint(conversation);
-  const res = await fetch(`${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      ...(endpoint.model ? { model: endpoint.model } : {}),
-      messages,
-      stream: true,
-      max_tokens: maxTokens,
-    }),
-    signal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000),
-  });
+  const res = await completionRequest(
+    endpoint,
+    messages,
+    true,
+    { max_tokens: maxTokens },
+    signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
   }
   if (!res.body) throw new Error('Upstream returned no response body');
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let content = '';
   let refusal = '';
   let sawReasoning = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      try {
-        const json = JSON.parse(data) as {
-          choices?: {
-            delta?: { content?: unknown; refusal?: unknown; reasoning_content?: unknown };
-          }[];
-        };
-        const delta = json.choices?.[0]?.delta;
-        if (typeof delta?.content === 'string' && delta.content) {
-          content += delta.content;
-          onDelta(delta.content);
-        }
-        if (typeof delta?.refusal === 'string') refusal += delta.refusal;
-        if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
-          sawReasoning = true;
-        }
-      } catch {
-        // Keepalive comments and partial frames are skippable.
-      }
+  await readSseData(res.body, (data) => {
+    if (!data || data === '[DONE]') return;
+    let json: {
+      choices?: { delta?: { content?: unknown; refusal?: unknown; reasoning_content?: unknown } }[];
+    };
+    try {
+      json = JSON.parse(data);
+    } catch {
+      return; // Ignore malformed upstream frames.
     }
-  }
+    const delta = json?.choices?.[0]?.delta;
+    if (typeof delta?.content === 'string' && delta.content) {
+      content += delta.content;
+      onDelta(delta.content);
+    }
+    if (typeof delta?.refusal === 'string') refusal += delta.refusal;
+    if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
+      sawReasoning = true;
+    }
+  });
   if (content.trim()) return content;
   if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
   if (sawReasoning) {
@@ -429,7 +397,6 @@ export async function streamChatCompletion(
   throw new Error('The model returned an empty reply');
 }
 
-/** Retryable: network failures, upstream 5xx/429, and idle timeouts — not 4xx. */
 function isTransientFailure(err: unknown, gen: ActiveGen): boolean {
   if (gen.meta.error?.startsWith('Upstream idle timeout')) return true;
   const message = err instanceof Error ? err.message : String(err);
@@ -442,17 +409,12 @@ function isTransientFailure(err: unknown, gen: ActiveGen): boolean {
 }
 
 async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean): Promise<void> {
-  // Resolve mutable configuration and history exactly once. A retry belongs to
-  // the same logical generation and must not silently switch endpoint, model,
-  // parameters, template, character, or ancestor content midway through it.
+  // Retries must reuse the original configuration and history.
   const context = (gen.requestContext ??= snapshotRequestContext(conversation, gen));
   const { endpoint, built } = context;
   gen.model = endpoint.model;
 
-  // A fresh character reply starts with the template's assistant seed in both
-  // the persisted buffers and the upstream trailing assistant message. A
-  // retry/resume already carries the complete accumulated buffers, so never
-  // apply the template twice. Disabled endpoints ignore all assistant seeds.
+  // Seed fresh replies only; retries/resumes already carry the template in their buffers.
   if (endpoint.prefillMode !== 'disabled' && !isResume) {
     if (built.reasoningPrefill) gen.reasoning = built.reasoningPrefill;
     if (built.messagePrefill) gen.content = built.messagePrefill;
@@ -460,18 +422,13 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   }
 
   // Copy the snapshotted list because continuation flags are added per attempt.
-  const messages =
+  const messages: (ChatMessage & { prefix?: boolean })[] =
     endpoint.prefillMode === 'disabled'
       ? withDisabledPrefillSpeakerNote(built)
       : built.messages.map((message) => ({ ...message }));
   const namePrefill = built.namePrefill;
-  // Prefill-style trailing assistant message (template seed, resumed content,
-  // reasoning, and/or "Name:"). A reasoning-only prefill deliberately has an
-  // empty content field: compatible reasoning APIs use reasoning_content to
-  // decide that they should continue thinking rather than start the answer.
-  // Not part of the official OpenAI spec — 'disabled' omits it entirely,
-  // 'none' lets the backend interpret it without extra flags, and
-  // 'vllm'/'deepseek' send their native continuation flags.
+  // Reasoning-only prefills keep content empty so compatible APIs continue thinking.
+  // Continuation is nonstandard: vLLM/DeepSeek require backend-specific flags.
   let prefilled = false;
   if (
     endpoint.prefillMode !== 'disabled' &&
@@ -492,13 +449,7 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
     appendChatMessage(messages, { role: 'assistant', content: namePrefill });
     prefilled = true;
   }
-  const upstreamMessages: Record<string, unknown>[] = messages.map((m) => ({ ...m }));
-  if (prefilled && endpoint.prefillMode === 'deepseek') {
-    upstreamMessages[upstreamMessages.length - 1] = {
-      ...upstreamMessages[upstreamMessages.length - 1],
-      prefix: true,
-    };
-  }
+  if (prefilled && endpoint.prefillMode === 'deepseek') messages.at(-1)!.prefix = true;
   const p = endpoint.genParams;
 
   // Idle watchdog: abort if the backend goes silent (including before headers).
@@ -513,16 +464,11 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   };
 
   try {
-    const res = await fetch(`${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        ...(endpoint.model ? { model: endpoint.model } : {}),
-        messages: upstreamMessages,
-        stream: true,
+    const res = await completionRequest(
+      endpoint,
+      messages,
+      true,
+      {
         ...(p.temperature != null ? { temperature: p.temperature } : {}),
         ...(p.topP != null ? { top_p: p.topP } : {}),
         ...(p.minP != null ? { min_p: p.minP } : {}),
@@ -533,18 +479,16 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
         ...(prefilled && endpoint.prefillMode === 'vllm'
           ? { continue_final_message: true, add_generation_prompt: false }
           : {}),
-      }),
-      signal: gen.abort.signal,
-    });
+      },
+      gen.abort.signal,
+    );
     resetIdle();
 
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
     }
-    // Even when assistant prefills are disabled, prefixed history can teach the
-    // model to emit "Name:" itself. Keep the expected prefix for output
-    // normalization without adding it to the upstream request.
+    // Prefixed history can cause "Name:" echoes even with prefills disabled.
     await consumeStream(res.body, gen, namePrefill, isResume, resetIdle);
   } finally {
     clearTimeout(idleTimer);
@@ -560,15 +504,15 @@ function snapshotRequestContext(
     ...resolved,
     genParams: { ...resolved.genParams },
   };
-  // A reply is based on its ancestors, not whichever sibling happens to be
-  // active. Tool generations already carry a fixed prompt override.
+  // Use this reply's ancestors, regardless of the currently active sibling.
+  const message = gen.promptOverride ? null : getMessage(gen.mid);
   const source =
     gen.promptOverride ??
     buildChatMessages(
       conversation,
-      getPathToMessage(getMessage(gen.mid)?.parentId ?? null),
+      getPathToMessage(message?.parentId ?? null),
       // Regenerations keep the speaker name stamped on their sibling.
-      getMessage(gen.mid)?.name ?? null,
+      message?.name ?? null,
     );
   const built: BuiltPrompt = {
     ...source,
@@ -584,8 +528,7 @@ async function consumeStream(
   isResume: boolean,
   resetIdle: () => void,
 ): Promise<void> {
-  // Backends without real prefill support tend to echo the "Name:" prefix at
-  // the start of their reply; hold back the first characters and strip it.
+  // Hold initial characters to strip echoed "Name:" prefixes.
   let holdback: string | null = namePrefill && !isResume ? '' : null;
   const passContent = (d: string): string => {
     if (holdback == null) return d;
@@ -602,12 +545,7 @@ async function consumeStream(
     return out;
   };
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const processLine = (rawLine: string): void => {
-    const line = rawLine.replace(/\r$/, '');
-    if (!line.startsWith('data:')) return;
-    const data = line.slice(5).trim();
+  const processData = (data: string): void => {
     if (!data || data === '[DONE]') return;
     let parsed: { choices?: { delta?: SseDelta }[] };
     try {
@@ -615,7 +553,7 @@ async function consumeStream(
     } catch {
       return;
     }
-    const delta = parsed.choices?.[0]?.delta;
+    const delta = parsed?.choices?.[0]?.delta;
     const d = delta?.content ?? undefined;
     const r = delta?.reasoning_content ?? delta?.reasoning ?? undefined;
     if (d == null && r == null) return;
@@ -624,7 +562,6 @@ async function consumeStream(
     if (r) gen.reasoning += r;
     if (dOut || r) gen.dirty = true;
     if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
-    // Latency first: forward each delta the moment it arrives.
     broadcastConv(gen.conversationId, {
       t: 'delta',
       mid: gen.mid,
@@ -633,27 +570,17 @@ async function consumeStream(
     });
   };
   try {
-    for await (const chunk of body) {
-      resetIdle();
-      buffer += decoder.decode(chunk as Uint8Array, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        processLine(line);
-        if (active.get(gen.mid) !== gen) return; // stopped while iterating
-      }
-    }
-    buffer += decoder.decode();
-    if (buffer) {
-      for (const line of buffer.split('\n')) processLine(line);
-    }
+    await readSseData(
+      body,
+      (data) => {
+        if (active.get(gen.mid) !== gen) return false;
+        processData(data);
+        return active.get(gen.mid) === gen;
+      },
+      resetIdle,
+    );
   } catch (err) {
-    // The stream died mid-holdback: a transient retry resumes from
-    // gen.content, so apply the same flush semantics as stream end or the
-    // held-back characters are silently lost. A holdback equal to the full
-    // prefill (case-insensitive) is dropped instead — the retry re-sends the
-    // prefill itself.
+    // Preserve held text for retries, except an exact name prefill that the retry re-sends.
     if (holdback?.trim() && active.get(gen.mid) === gen) {
       const probe = holdback.trimStart();
       if (probe.toLowerCase() !== namePrefill!.toLowerCase()) {
@@ -668,5 +595,5 @@ async function consumeStream(
     gen.content += holdback;
     broadcastConv(gen.conversationId, { t: 'delta', mid: gen.mid, d: holdback });
   }
-  finalize(gen, 'done'); // no-op if already stopped/superseded
+  finalize(gen, 'done');
 }

@@ -1,11 +1,8 @@
-// RACE-FREE-BY-SYNCHRONY: every route handler in this file is race-free only
-// because it runs fully synchronously between check and act (no `await`
-// mid-handler) — Node's single thread then serializes handlers against each
-// other and against generation/streaming callbacks. A single future `await`
-// mid-handler reopens the double-generation and active-leaf races the guards
-// below protect against.
-import { randomUUID } from 'node:crypto';
-import type { Conversation, GenerationKind, MessageStatus, Role } from '@minitavern/shared';
+// Keep route handlers synchronous between check and act: an `await` lets other
+// handlers or generation callbacks invalidate generation and active-leaf guards.
+import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
+import type { MessageRow } from './conversationCopies.ts';
+import type { Conversation } from '@minitavern/shared';
 import { stmt, toConversation, toMessage, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {
@@ -49,11 +46,10 @@ import {
   nextUnreadSibling,
   scheduleSpeculativeRetry,
 } from '../speculation.ts';
-import { requireExpectedActiveLeaf } from '../concurrency.ts';
+import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
 import {
   collectConversationImages,
   collectSiblingSubtreeImages,
-  copyImage,
   deleteImageFiles,
 } from '../images.ts';
 import { parseImageConfig, startImageRender } from '../comfy.ts';
@@ -62,7 +58,6 @@ import {
   objectBody,
   optionalNullableId,
   optionalNullableString,
-  optionalNumber,
   optionalString,
   positiveId,
   requiredString,
@@ -85,23 +80,16 @@ export function cancelBackgroundSwipe(conversationId: number): boolean {
   const mid = stopBackgroundGenerations(conversationId);
   if (mid == null) return false;
   deleteMessage(mid);
-  // Callers may still 400 before their own broadcast (duplicate/move guards);
-  // the deleted sibling must never linger on screen. Coalesced per microtask,
-  // so successful routes pay nothing extra.
+  // Broadcast even if the caller later rejects; microtask coalescing avoids duplicate frames.
   broadcastTree(conversationId);
   return true;
-}
-
-/** Speculation is useful only while a connected client is viewing the conversation. */
-export function isConversationWatched(conversationId: number): boolean {
-  return hasConversationSubscribers(conversationId);
 }
 
 /** Ensures the active assistant reply has one unread sibling ready or in progress. */
 export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   const message = getMessage(messageId);
   if (!message || message.role !== 'assistant') return;
-  if (!isConversationWatched(message.conversationId)) return;
+  if (!hasConversationSubscribers(message.conversationId)) return;
   const conversation = getConversation(message.conversationId);
   if (conversation.activeLeafId !== message.id) return;
   const settings = getSettings();
@@ -141,7 +129,7 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   startGeneration(getConversation(conversation.id), speculative.id, undefined, {
     background: true,
     onDone: () => {
-      if (isConversationWatched(conversation.id)) prepareNextSwipe(speculative.id);
+      if (hasConversationSubscribers(conversation.id)) prepareNextSwipe(speculative.id);
     },
     onError: () => {
       const row = getMessage(speculative.id);
@@ -152,10 +140,11 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
       }
       deleteMessage(speculative.id);
       broadcastTree(conversation.id);
-      if (!isConversationWatched(conversation.id)) return;
+      if (!hasConversationSubscribers(conversation.id)) return;
       scheduleSpeculativeRetry(conversation.id, retryAttempt + 1, () => {
         // Re-check at fire time: the last client may have left during the backoff.
-        if (isConversationWatched(conversation.id)) prepareNextSwipe(message.id, retryAttempt + 1);
+        if (hasConversationSubscribers(conversation.id))
+          prepareNextSwipe(message.id, retryAttempt + 1);
       });
     },
   });
@@ -167,12 +156,7 @@ export function prepareActiveSwipe(conversationId: number): void {
   if (leaf != null) prepareNextSwipe(leaf);
 }
 
-/**
- * Creates the empty streaming assistant message and kicks off generation.
- * `speakerName` overrides the conversation's current speaker (e.g. a
- * regeneration keeps the name its siblings were sent with). `promptOverride`
- * pins a pre-built prompt (steered regenerations) so retries stay consistent.
- */
+/** Regeneration preserves sibling speaker names; promptOverride keeps retries consistent. */
 export function spawnAssistantReply(
   conversation: Conversation,
   parentId: number | null,
@@ -192,7 +176,7 @@ export function spawnAssistantReply(
   startGeneration(getConversation(conversation.id), msg.id, undefined, {
     prompt: promptOverride,
     onDone: () => {
-      if (isConversationWatched(conversation.id)) prepareNextSwipe(msg.id);
+      if (hasConversationSubscribers(conversation.id)) prepareNextSwipe(msg.id);
       maybeAutoTitle(conversation.id, msg.id);
     },
     onError: () => {
@@ -212,7 +196,6 @@ function derivedTitle(content: string): string {
 const TITLE_INSTRUCTION =
   'Summarize this conversation in 3-6 words for a sidebar title. Reply with only the title, no quotes.';
 
-/** One-shot title completion; null on any failure (caller keeps the old title). */
 async function requestTitle(
   conv: Conversation,
   userText: string,
@@ -246,20 +229,13 @@ async function requestTitle(
   }
 }
 
-/**
- * LLM auto-titling: after the FIRST assistant reply in a "New chat"
- * conversation completes, replace the placeholder/fallback title with a
- * generated one. Runs even with no subscribed client (the reply itself was
- * foreground) and is silent on failure — the existing title stays.
- */
+/** Auto-title the first exchange even without subscribers; failures retain the existing title. */
 function maybeAutoTitle(conversationId: number, assistantMessageId: number): void {
   const conv = getConversation(conversationId);
   const history = getPathToMessage(getMessage(assistantMessageId)?.parentId ?? null);
-  // The first exchange is exactly one user message below the root.
   const first = history.length === 1 && history[0]!.role === 'user' ? history[0]! : null;
   if (!first) return;
-  // Anything but the placeholder or the first-message-derived fallback counts
-  // as a title the user (or a previous auto-title run) chose — leave it alone.
+  // Preserve titles chosen by the user or an earlier auto-title run.
   const fallback = derivedTitle(first.content);
   if (conv.title !== 'New chat' && conv.title !== fallback) return;
   const reply = getMessage(assistantMessageId)?.content ?? '';
@@ -269,8 +245,7 @@ function maybeAutoTitle(conversationId: number, assistantMessageId: number): voi
     const latest = stmt('SELECT title FROM conversations WHERE id = ?').get(conversationId) as
       { title: string } | undefined;
     if (!latest || (latest.title !== 'New chat' && latest.title !== fallback)) return;
-    // No updated_at bump: a title is metadata, not "new content" (same
-    // doctrine as the PATCH rename route).
+    // Title changes must not reorder the sidebar.
     stmt('UPDATE conversations SET title = ? WHERE id = ?').run(title, conversationId);
     invalidate('conversations');
   });
@@ -329,8 +304,7 @@ route.post('/api/conversations', ({ body }) => {
       `INSERT INTO conversations (title, character_id, persona_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`,
     ).run(
-      // Greeting-less chats (assistants) start as 'New chat' so the first
-      // message auto-titles them; greeting characters keep their name.
+      // The placeholder enables auto-titling for greeting-less chats.
       character?.firstMessage.trim() ? character.name : 'New chat',
       character?.id ?? null,
       persona?.id ?? null,
@@ -341,8 +315,7 @@ route.post('/api/conversations', ({ body }) => {
     if (character?.firstMessage.trim()) {
       const sub = (text: string) => substituteMacros(text, character.name, persona?.name ?? 'User');
       appendMessage(convId, 'assistant', sub(character.firstMessage), null);
-      // Imported cards may carry alternate greetings — seed them as root
-      // siblings so they're swipeable, without stealing the primary's active slot.
+      // Make alternate greetings swipeable while keeping the primary active.
       for (const alt of getAlternateGreetings(character.id)) {
         if (alt.trim())
           appendMessage(convId, 'assistant', sub(alt), null, 'done', null, null, false);
@@ -358,11 +331,7 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
   const id = positiveId(params.id);
   const conv = getConversation(id);
   const b = objectBody(body);
-  requireExpectedActiveLeaf(
-    id,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
+  requireBodyPrecondition(id, b);
   const title = optionalString(b, 'title');
   if (title !== undefined && !title.trim()) throw new HttpError(400, 'title is required');
   const characterId = optionalNullableId(b, 'characterId');
@@ -382,13 +351,11 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
     (endpointId !== undefined && endpointId !== conv.endpointId) ||
     (speakerName !== undefined && (speakerName?.trim() || null) !== conv.speakerName) ||
     (scenarioOverride !== undefined && scenarioOverride !== conv.scenarioOverride);
-  // Only prompt-affecting changes conflict with an in-flight reply; a title
-  // rename is always safe (the endpoint too is resolved once at gen start).
+  // Renaming is safe during generation; context changes are not.
   if (contextChanged && hasForegroundGeneration(id))
     throw new HttpError(409, 'a generation is already running in this conversation');
   if (contextChanged) discardSpeculativeSwipes(id);
-  // No updated_at bump: metadata edits are not "new content" and must not
-  // reorder the sidebar (same doctrine as setActiveLeaf).
+  // Metadata edits must not reorder the sidebar.
   stmt(
     `UPDATE conversations SET title = ?, character_id = ?, persona_id = ?, endpoint_id = ?, speaker_name = ?,
       scenario_override = ?
@@ -411,55 +378,22 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
 route.del('/api/conversations/:id', ({ params, req }) => {
   const id = positiveId(params.id);
   getConversation(id);
-  const query = new URL(req.url ?? '/', 'http://x').searchParams;
-  const rawLeaf = query.get('expectedActiveLeafId');
-  const rawRevision = query.get('expectedMutationRevision');
-  requireExpectedActiveLeaf(
-    id,
-    rawLeaf === 'null' ? null : rawLeaf == null ? undefined : Number(rawLeaf),
-    rawRevision == null ? undefined : Number(rawRevision),
-  );
+  requireQueryPrecondition(id, req.url);
   stopConversationGenerations(id);
   const doomedImages = collectConversationImages(id);
   stmt('DELETE FROM conversations WHERE id = ?').run(id);
   deleteImageFiles(doomedImages);
-  takeDirtyMessageIds(id); // drop pending patch state for the deleted tree
+  takeDirtyMessageIds(id);
   invalidate('conversations');
 });
 
-interface MessageRow {
-  id: number;
-  parent_id: number | null;
-  role: Role;
-  content: string;
-  reasoning: string | null;
-  status: MessageStatus;
-  active_child_id: number | null;
-  model: string | null;
-  gen_meta_json: string | null;
-  created_at: number;
-  name: string | null;
-  generation_kind: GenerationKind;
-  images_json: string;
-  active_image: number;
-  image_render_json: string | null;
-}
-
 /**
- * Duplicates a whole conversation: every message row is copied with its tree
- * links (parentId, activeChildId, activeLeafId) remapped through an old-id ->
- * new-id map, and every generated image file is copied so no file is ever
- * shared between two messages (hard-deleting one row would break the other).
- * In-flight generations are copied as plain rows: a 'streaming' status
- * becomes 'stopped' and a pending image render flag is dropped — the copy has
- * no process behind it (same doctrine as the boot repair for stuck rows).
+ * Copy images independently so deleting either conversation cannot break the other.
+ * Clear live generation state in copies because no process owns it.
  */
 route.post('/api/conversations/:id/duplicate', ({ params }) => {
   const id = positiveId(params.id);
   const conv = getConversation(id);
-  // Keep a stable source ordering for the old-id -> new-id mapping. Parent ids
-  // are deliberately NOT resolved in this pass: block moves and middle
-  // insertions can place an older row beneath a newer parent.
   const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
     id,
   ) as unknown as MessageRow[];
@@ -469,120 +403,45 @@ route.post('/api/conversations/:id/duplicate', ({ params }) => {
     ),
   );
   const sourceActivePath = getActivePath(id).map((message) => message.id);
-  // Titles follow the 60-char convention of derivedTitle/auto-title.
-  const suffix = ' (copy)';
-  const title =
-    conv.title.length + suffix.length > 60
-      ? `${conv.title.slice(0, 60 - suffix.length - 1)}…${suffix}`
-      : `${conv.title}${suffix}`;
-  const now = Date.now();
-  // Image files can't roll back with the SQL: files are created before the
-  // commit (so a committed row never references a missing file) and unlinked
-  // if anything fails; the startup orphan sweep is the crash-window backstop.
-  const writtenImages: string[] = [];
-  try {
-    const newId = transaction(() => {
-      const convResult = stmt(
-        `INSERT INTO conversations
-           (title, character_id, persona_id, endpoint_id, speaker_name, scenario_override,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        title,
-        conv.characterId,
-        conv.personaId,
-        conv.endpointId,
-        conv.speakerName,
-        conv.scenarioOverride,
-        now,
-        now,
+  const newId = copyConversation(conv, ' (copy)', (newConvId, writtenImages) => {
+    const idMap = new Map<number, number>();
+    for (const row of rows) {
+      const live = liveMessages.get(row.id)!;
+      idMap.set(row.id, insertCopiedMessage(newConvId, null, row, live, writtenImages));
+    }
+    // Remap links after all rows exist: moves and insertions can put older rows under newer ones.
+    for (const row of rows) {
+      const mappedParent = row.parent_id != null ? (idMap.get(row.parent_id) ?? null) : null;
+      const mappedChild =
+        row.active_child_id != null ? (idMap.get(row.active_child_id) ?? null) : null;
+      stmt('UPDATE messages SET parent_id = ?, active_child_id = ? WHERE id = ?').run(
+        mappedParent,
+        mappedChild,
+        idMap.get(row.id)!,
       );
-      const newConvId = Number(convResult.lastInsertRowid);
-      const idMap = new Map<number, number>();
-      for (const row of rows) {
-        const live = liveMessages.get(row.id)!;
-        const images: string[] = [];
-        for (const imagePath of JSON.parse(row.images_json) as string[]) {
-          const ext = imagePath.includes('.')
-            ? imagePath.slice(imagePath.lastIndexOf('.'))
-            : '.png';
-          const copied = copyImage(imagePath, `msg-dup-${randomUUID()}${ext}`);
-          if (copied == null) {
-            console.warn(`[conversations] duplicate: source image ${imagePath} is missing`);
-            continue;
-          }
-          writtenImages.push(copied);
-          images.push(copied);
-        }
-        const result = stmt(
-          `INSERT INTO messages
-             (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
-              model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
-              image_pending, image_render_json)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-        ).run(
-          newConvId,
-          null,
-          row.role,
-          live.content,
-          live.reasoning,
-          row.status === 'streaming' ? 'stopped' : row.status,
-          live.model,
-          row.gen_meta_json,
-          row.created_at,
-          row.name,
-          row.generation_kind,
-          JSON.stringify(images),
-          images.length > 0 ? Math.min(row.active_image, images.length - 1) : 0,
-          row.image_render_json,
-        );
-        idMap.set(row.id, Number(result.lastInsertRowid));
-      }
-      // Both links are remapped only after every destination row exists. A
-      // newer image revision can become the parent of an older continuation,
-      // and rotateDown can likewise invert id order.
-      for (const row of rows) {
-        const mappedParent = row.parent_id != null ? (idMap.get(row.parent_id) ?? null) : null;
-        const mappedChild =
-          row.active_child_id != null ? (idMap.get(row.active_child_id) ?? null) : null;
-        stmt('UPDATE messages SET parent_id = ?, active_child_id = ? WHERE id = ?').run(
-          mappedParent,
-          mappedChild,
-          idMap.get(row.id)!,
-        );
-      }
-      if (conv.activeLeafId != null) {
-        const mappedLeaf = idMap.get(conv.activeLeafId);
-        if (mappedLeaf != null) {
-          stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(
-            mappedLeaf,
-            newConvId,
-          );
-          const copiedPath = getPathToMessage(mappedLeaf).map((message) => message.id);
-          const expectedPath = sourceActivePath.map((sourceId) => idMap.get(sourceId)!);
-          if (
-            copiedPath.length !== expectedPath.length ||
-            copiedPath.some((messageId, index) => messageId !== expectedPath[index])
-          ) {
-            throw new Error('duplicated conversation active path failed validation');
-          }
+    }
+    if (conv.activeLeafId != null) {
+      const mappedLeaf = idMap.get(conv.activeLeafId);
+      if (mappedLeaf != null) {
+        stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(mappedLeaf, newConvId);
+        const copiedPath = getPathToMessage(mappedLeaf).map((message) => message.id);
+        const expectedPath = sourceActivePath.map((sourceId) => idMap.get(sourceId)!);
+        if (
+          copiedPath.length !== expectedPath.length ||
+          copiedPath.some((messageId, index) => messageId !== expectedPath[index])
+        ) {
+          throw new Error('duplicated conversation active path failed validation');
         }
       }
-      return newConvId;
-    });
-    invalidate('conversations');
-    return getConversation(newId);
-  } catch (err) {
-    deleteImageFiles(writtenImages);
-    throw err;
-  }
+    }
+  });
+  invalidate('conversations');
+  return getConversation(newId);
 });
 
 /**
- * Forks one message's ancestry into a separate linear conversation. Only the
- * root -> selected-message path is copied: sibling swipes and every descendant
- * below the selection stay in the source conversation. Generated image files
- * are copied rather than shared, preserving hard-delete ownership.
+ * Copy only the selected ancestry, excluding siblings and descendants.
+ * Independent image copies preserve hard-delete ownership.
  */
 route.post('/api/messages/:id/branch-conversation', ({ params }) => {
   const messageId = positiveId(params.id);
@@ -595,88 +454,22 @@ route.post('/api/messages/:id/branch-conversation', ({ params }) => {
       stmt('SELECT * FROM messages WHERE id = ?').get(message.id) as unknown as MessageRow,
   );
   const liveMessages = new Map(mergeLiveBuffers(path).map((message) => [message.id, message]));
-  const suffix = ' (branch)';
-  const title =
-    conv.title.length + suffix.length > 60
-      ? `${conv.title.slice(0, 60 - suffix.length - 1)}…${suffix}`
-      : `${conv.title}${suffix}`;
-  const now = Date.now();
-  const writtenImages: string[] = [];
+  const newId = copyConversation(conv, ' (branch)', (newConvId, writtenImages) => {
+    let parentId: number | null = null;
 
-  try {
-    const newId = transaction(() => {
-      const convResult = stmt(
-        `INSERT INTO conversations
-           (title, character_id, persona_id, endpoint_id, speaker_name, scenario_override,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        title,
-        conv.characterId,
-        conv.personaId,
-        conv.endpointId,
-        conv.speakerName,
-        conv.scenarioOverride,
-        now,
-        now,
-      );
-      const newConvId = Number(convResult.lastInsertRowid);
-      let parentId: number | null = null;
-
-      for (const row of rows) {
-        const live = liveMessages.get(row.id)!;
-        const images: string[] = [];
-        for (const imagePath of JSON.parse(row.images_json) as string[]) {
-          const ext = imagePath.includes('.')
-            ? imagePath.slice(imagePath.lastIndexOf('.'))
-            : '.png';
-          const copied = copyImage(imagePath, `msg-branch-${randomUUID()}${ext}`);
-          if (copied == null) {
-            console.warn(`[conversations] branch: source image ${imagePath} is missing`);
-            continue;
-          }
-          writtenImages.push(copied);
-          images.push(copied);
-        }
-
-        const copiedId: number = Number(
-          stmt(
-            `INSERT INTO messages
-             (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
-              model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
-              image_pending, image_render_json)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'normal', ?, ?, 0, ?)`,
-          ).run(
-            newConvId,
-            parentId,
-            row.role,
-            live.content,
-            live.reasoning,
-            row.status === 'streaming' ? 'stopped' : row.status,
-            live.model,
-            row.gen_meta_json,
-            row.created_at,
-            row.name,
-            JSON.stringify(images),
-            images.length > 0 ? Math.min(row.active_image, images.length - 1) : 0,
-            row.image_render_json,
-          ).lastInsertRowid,
-        );
-        if (parentId != null) {
-          stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(copiedId, parentId);
-        }
-        parentId = copiedId;
+    for (const row of rows) {
+      const live = liveMessages.get(row.id)!;
+      const copiedId = insertCopiedMessage(newConvId, parentId, row, live, writtenImages, 'normal');
+      if (parentId != null) {
+        stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(copiedId, parentId);
       }
+      parentId = copiedId;
+    }
 
-      stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(parentId, newConvId);
-      return newConvId;
-    });
-    invalidate('conversations');
-    return getConversation(newId);
-  } catch (err) {
-    deleteImageFiles(writtenImages);
-    throw err;
-  }
+    stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(parentId, newConvId);
+  });
+  invalidate('conversations');
+  return getConversation(newId);
 });
 
 route.get('/api/conversations/:id/tree', ({ params }) => {
@@ -685,20 +478,12 @@ route.get('/api/conversations/:id/tree', ({ params }) => {
   return treeSnapshot(id);
 });
 
-/**
- * Runs a plugin tool prompt as a foreground generation: the output streams
- * into a role='tool' message appended at the active leaf. Tool messages are
- * chat-visible but excluded from future prompt history. The prompt gets the
- * full chat context and is macro-expanded server-side ({{char}}/{{user}}).
- */
 route.post('/api/conversations/:id/tool', ({ params, body }) => {
   const id = positiveId(params.id);
   const conv = getConversation(id);
   const b = objectBody(body);
   const prompt = requiredString(b, 'prompt');
   const label = optionalNullableString(b, 'label');
-  // Optional image rendering: once the text generation completes, its output
-  // is substituted into the ComfyUI workflow and rendered asynchronously.
   let image: { workflow: string; comfyUrl: string } | null = null;
   if (b.image != null) {
     try {
@@ -707,24 +492,15 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
       throw new HttpError(400, err instanceof Error ? err.message : String(err));
     }
   }
-  requireExpectedActiveLeaf(
-    id,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
-  // An in-flight speculative swipe is deliberately discarded and not refilled:
-  // once the tool output is the leaf, the previous reply can't be swiped
-  // without a branch switch, which restarts speculation on its own.
+  requireBodyPrecondition(id, b);
+  // Don't refill speculation: swiping the previous reply requires a branch switch, which refills.
   cancelBackgroundSwipe(id);
-  // Tool prompts are immutable snapshots and tool output is excluded from
-  // chat history, so multiple image/tool prompts can stream independently.
-  // A normal assistant reply still conflicts: its incomplete row is part of
-  // the conversational turn this tool would otherwise be appended beneath.
+  // Tool streams can overlap: each snapshots history, which excludes tool output.
+  // Assistant streams conflict because their incomplete replies enter that history.
   if (hasActiveNonToolGeneration(id))
     throw new HttpError(409, 'a generation is already running in this conversation');
 
-  // Build from the pre-tool history: the tool message itself must not appear
-  // in its own context, and a fixed prompt keeps retries consistent.
+  // Snapshot pre-tool history so retries use the same context.
   const built = buildToolPrompt(conv, getActivePath(id), prompt);
   const msg = appendMessage(
     id,
@@ -735,9 +511,7 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
     null,
     label?.trim() || null,
   );
-  // Store the render config (so more alternatives can be generated later) and
-  // flag the pending render; finalize() clears the flag if the text generation
-  // ends any way other than 'done'.
+  // Retain config for later alternatives; finalize() clears pending on non-done completion.
   if (image) {
     stmt('UPDATE messages SET image_pending = 1, image_render_json = ? WHERE id = ?').run(
       JSON.stringify(image),
@@ -783,10 +557,6 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
   };
 });
 
-/**
- * Search: FTS5 word/prefix match over message contents (with generated
- * snippets), plus a substring match over conversation titles.
- */
 route.get('/api/search', ({ req }) => {
   const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q')?.trim() ?? '';
   if (!q) return [];
@@ -800,15 +570,12 @@ route.get('/api/search', ({ req }) => {
     like,
   ) as Record<string, unknown>[];
 
-  // Contents: quote each token as an FTS phrase (user input is not FTS
-  // syntax); the last token matches as a prefix for search-as-you-type.
+  // Treat tokens as literal phrases; prefix-match the last for search-as-you-type.
   const tokens = q.split(/\s+/).filter(Boolean);
   const ftsQuery = tokens
     .map((token, i) => `"${token.replaceAll('"', '""')}"${i === tokens.length - 1 ? '*' : ''}`)
     .join(' ');
-  // Dedupe at the conversation level without a raw-hit cap: otherwise one chat
-  // with hundreds of matching messages can crowd every other chat out before
-  // JS gets a chance to dedupe it.
+  // Dedupe before limiting so one chat's matching messages cannot crowd out other chats.
   const contentRows = ftsQuery
     ? (stmt(
         `SELECT DISTINCT c.*
@@ -827,9 +594,7 @@ route.get('/api/search', ({ req }) => {
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 50);
 
-  // snippet() must stay in a plain FTS select. Resolve it only for the at-most
-  // 50 conversations that will actually be returned, keeping the best-ranked
-  // matching message within each conversation.
+  // snippet() requires a plain FTS select; query only the conversations being returned.
   const bestSnippet = stmt(
     `SELECT snippet(messages_fts, 0, '', '', '…', 24) AS snip
      FROM messages_fts
@@ -851,11 +616,7 @@ route.post('/api/conversations/:id/messages', ({ params, body }) => {
   const conv = getConversation(id);
   const b = objectBody(body);
   const content = requiredString(b, 'content');
-  requireExpectedActiveLeaf(
-    id,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
+  requireBodyPrecondition(id, b);
   cancelBackgroundSwipe(id);
   if (hasActiveGeneration(id))
     throw new HttpError(409, 'a generation is already running in this conversation');
@@ -878,11 +639,7 @@ route.post('/api/conversations/:id/delete-tail', ({ params, body }) => {
   if (!Number.isSafeInteger(count) || (count as number) <= 0) {
     throw new HttpError(400, 'count must be a positive integer');
   }
-  requireExpectedActiveLeaf(
-    id,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
+  requireBodyPrecondition(id, b);
   const path = getActivePath(id);
   if (path.length === 0) throw new HttpError(400, 'conversation has no messages to delete');
   const cutoff = path[Math.max(0, path.length - (count as number))]!;

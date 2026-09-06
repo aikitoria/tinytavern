@@ -79,8 +79,7 @@ const BUILTIN_COMMANDS: PluginCommand[] = [
       await api.patchConversation(
         state.selectedId,
         { speakerName: args.trim() || null },
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
+        state.tree,
       );
     },
   },
@@ -94,14 +93,7 @@ const BUILTIN_COMMANDS: PluginCommand[] = [
         throw new Error('Usage: /del <positive count>');
       }
       if (state.selectedId == null) throw new Error('no conversation selected');
-      return navigateTree(() =>
-        api.deleteTail(
-          state.selectedId!,
-          count,
-          state.tree.activeLeafId,
-          state.tree.mutationRevision,
-        ),
-      );
+      return navigateTree(() => api.deleteTail(state.selectedId!, count, state.tree));
     },
   },
   {
@@ -119,8 +111,7 @@ const BUILTIN_COMMANDS: PluginCommand[] = [
 
 const COMMANDS: PluginCommand[] = [...BUILTIN_COMMANDS, ...pluginCommands];
 
-// Dispatch is first-match — a plugin reusing a name would be silently
-// shadowed. Surface it loudly at startup instead.
+// First-match dispatch silently shadows duplicate command names.
 {
   const seen = new Set<string>();
   for (const cmd of COMMANDS) {
@@ -176,17 +167,8 @@ export default function Composer() {
   const resize = () => {
     if (!area) return;
     area.style.height = 'auto';
-    const style = getComputedStyle(area);
-    const singleLineHeight =
-      Number.parseFloat(style.lineHeight) +
-      Number.parseFloat(style.paddingTop) +
-      Number.parseFloat(style.paddingBottom);
-    const multiline = area.scrollHeight > singleLineHeight + 1;
-    area.classList.toggle('composer-input-multiline', multiline);
-    area.closest('.composer')?.classList.toggle('composer-multiline', multiline);
     area.style.height = `${Math.min(area.scrollHeight, 200)}px`;
-    // Only scroll once the max height is actually reached; otherwise sub-pixel
-    // rounding makes the browser show a scrollbar on a single line.
+    // Suppress single-line scrollbars caused by sub-pixel rounding.
     area.style.overflowY = area.scrollHeight > 200 ? 'auto' : 'hidden';
   };
 
@@ -216,11 +198,8 @@ export default function Composer() {
     if (streamingMessage() || draftCompletionActive()) return;
     setText('');
     queueMicrotask(resize);
-    const sent = await navigateTree(() =>
-      api.send(id, content, state.tree.activeLeafId, state.tree.mutationRevision),
-    );
-    // Restore on failure so nothing is lost — unless the user typed something
-    // new during the round-trip, which must not be clobbered.
+    const sent = await navigateTree(() => api.send(id, content, state.tree));
+    // Restore failed sends without clobbering text typed during the request.
     if (!sent && !text()) {
       setText(content);
       queueMicrotask(resize); // value bindings fire no input event, so re-grow manually
@@ -237,7 +216,6 @@ export default function Composer() {
       void api.stopGeneration(msg.id, msg.generationToken).catch(() => {});
   };
 
-  // Resume = continue the last assistant reply in place (prefill-style).
   const resumable = () => {
     const endpointId = selectedConversation()?.endpointId ?? state.settings.activeEndpointId;
     const endpoint = state.endpoints.find((candidate) => candidate.id === endpointId);
@@ -254,10 +232,7 @@ export default function Composer() {
 
   const resume = () => {
     const msg = resumable();
-    if (msg)
-      void navigateTree(() =>
-        api.resume(msg.id, state.tree.activeLeafId, state.tree.mutationRevision),
-      );
+    if (msg) void navigateTree(() => api.resume(msg.id, state.tree));
   };
 
   const continueDraft = async () => {
@@ -307,9 +282,7 @@ export default function Composer() {
         return;
       }
     }
-    // ↑ in an empty composer: edit the last sent user message in place.
-    // Chat view only — in trace view no MessageNode is mounted to consume the
-    // request, and the stale signal would pop an editor open much later.
+    // Outside chat, no MessageNode consumes the edit request; it would open a stale editor later.
     if (event.key === 'ArrowUp' && !text() && state.viewMode === 'chat') {
       const lastUser = [...activePath()].reverse().find((m) => m.role === 'user');
       if (lastUser) {
@@ -318,7 +291,6 @@ export default function Composer() {
       }
       return;
     }
-    // Desktop: Enter sends, Shift+Enter newline. Touch: Enter is newline, use the button.
     if (event.key === 'Enter' && !event.shiftKey && !coarsePointer) {
       event.preventDefault();
       void send();

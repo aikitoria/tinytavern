@@ -73,7 +73,6 @@ export default function Header() {
     return id != null ? state.personas.find((persona) => persona.id === id) : undefined;
   };
 
-  // The endpoint generations actually use: conversation override, else global.
   const activeEndpoint = () => {
     const id = contextValue('endpointId') ?? state.settings.activeEndpointId;
     return id != null ? state.endpoints.find((endpoint) => endpoint.id === id) : undefined;
@@ -89,8 +88,7 @@ export default function Header() {
       const updated = await api.patchConversation(
         conv.id,
         { [field]: value },
-        state.tree.conversationId === conv.id ? state.tree.activeLeafId : conv.activeLeafId,
-        state.tree.conversationId === conv.id ? state.tree.mutationRevision : conv.mutationRevision,
+        state.tree.conversationId === conv.id ? state.tree : conv,
       );
       setState('conversations', (conversations) =>
         conversations.map((conversation) =>
@@ -106,8 +104,7 @@ export default function Header() {
     }
   };
 
-  // On mobile this header sits inside the sidebar: every action here targets
-  // the chat behind it, so get the panel out of the way.
+  // The mobile header lives inside the sidebar, which would obscure the chat.
   const show = (modal: 'settings' | 'conversation') => {
     closeSidebar();
     openModal(modal);
@@ -139,10 +136,7 @@ export default function Header() {
         .patchConversation(
           conv.id,
           { title },
-          state.tree.conversationId === conv.id ? state.tree.activeLeafId : conv.activeLeafId,
-          state.tree.conversationId === conv.id
-            ? state.tree.mutationRevision
-            : conv.mutationRevision,
+          state.tree.conversationId === conv.id ? state.tree : conv,
         )
         .catch((err) => toast(errorMessage(err)));
     }

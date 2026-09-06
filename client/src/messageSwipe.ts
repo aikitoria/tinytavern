@@ -2,8 +2,6 @@ import type { Message } from '@minitavern/shared';
 import { findMessageView } from './plugins/index.ts';
 import { streamingMessage, swipeToSibling } from './state/store.ts';
 
-/** Whether the message has ordinary chat alternatives or a plugin-owned
- * alternative action. Shared by pointer, button, and keyboard entry points. */
 export function messageSupportsSwipe(message: Message): boolean {
   return (
     message.role === 'assistant' ||
@@ -12,11 +10,8 @@ export function messageSupportsSwipe(message: Message): boolean {
   );
 }
 
-/** One swipe dispatcher for desktop Left/Right and mobile horizontal gestures.
- * Forward on a streaming assistant uses advance(), which stops the current
- * stream and starts its next sibling. A plugin owns equivalent behavior for
- * tool messages (the image plugin stops an in-flight prompt before rendering).
- * Backward navigation remains blocked while a reply is streaming. */
+/** Forward swipes can stop an assistant stream and start its next sibling;
+ * plugins own equivalent behavior for tool messages. */
 export function swipeMessage(message: Message, dir: 1 | -1): boolean {
   const pluginSwipe = findMessageView(message)?.swipe;
   if (pluginSwipe) {

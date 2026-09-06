@@ -9,8 +9,6 @@ import { getActiveLeafId, getPathToMessage, setActiveLeaf } from './tree.ts';
 const retryTimers = new Map<number, NodeJS.Timeout>();
 let refillHandler: ((conversationId?: number) => void) | null = null;
 
-/** Base backoff between background refill retries; e2e runs (E2E_BASE is
- * set) default to a fast cadence. */
 const RETRY_BACKOFF_MS = Number(
   process.env.SPECULATION_BACKOFF_MS ?? (process.env.E2E_BASE ? 50 : 500),
 );
@@ -32,9 +30,7 @@ export function cancelSpeculativeRetries(conversationId?: number): void {
   retryTimers.clear();
 }
 
-/** A speculative swipe is a convenience; a persistently failing endpoint must
- * not be hammered forever. The budget resets on any explicit user action
- * (send, activate, advance, subscribe) since those restart at attempt 0. */
+/** Bound endpoint failures; explicit user actions reset the budget to attempt 0. */
 const MAX_RETRY_ATTEMPTS = 8;
 
 /** Keeps retrying failed background requests without creating concurrent refills. */
@@ -69,17 +65,14 @@ export function discardSpeculativeSwipes(conversationId?: number): void {
     `SELECT DISTINCT conversation_id FROM messages
        WHERE generation_kind = 'speculative' AND (? IS NULL OR conversation_id = ?)`,
   ).all(cid, cid) as { conversation_id: number }[];
-  // Keep each active path before the cascade. Speculative rows should normally
-  // be inactive and childless, but recovery must not leave active_leaf_id
-  // dangling if an older bug promoted one without normalizing it.
+  // Preserve paths to repair active_leaf_id if legacy bugs left an active speculative row.
   const activePaths = new Map(
     rows.map(({ conversation_id }) => [
       conversation_id,
       getPathToMessage(getActiveLeafId(conversation_id)).map((message) => message.id),
     ]),
   );
-  // Speculative rows can in principle carry images (render-image is role-agnostic);
-  // the hard-delete guarantee covers this path too.
+  // render-image is role-agnostic, so speculative rows may own images too.
   const doomedImages = (
     stmt(
       `WITH RECURSIVE doomed(id) AS (
@@ -114,10 +107,7 @@ export function markSwipeRead(messageId: number): void {
   stmt("UPDATE messages SET generation_kind = 'normal' WHERE id = ?").run(messageId);
 }
 
-/**
- * Prunes failed (error/stopped) speculative siblings after `message` and
- * returns the id of the next sibling to advance to, if one remains.
- */
+/** Prunes failed speculative siblings before choosing the next sibling. */
 export function nextUnreadSibling(message: Message): number | null {
   const doomedImages = (
     stmt(

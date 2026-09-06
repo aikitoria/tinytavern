@@ -1,0 +1,43 @@
+{
+	auto_https off
+	admin localhost:2019
+}
+
+https://:{$PUBLIC_PORT:5487} {
+	tls /certs/cert.pem /certs/key.pem
+	route {
+		@denied not remote_ip {$CADDY_ALLOWED_IPS:0.0.0.0/0 ::/0}
+		respond @denied "IP address is not allowed" 403
+		header X-Content-Type-Options nosniff
+
+		@media path /images /images/* /avatars /avatars/*
+		handle @media {
+			route {
+				@signed {
+					method GET HEAD
+					minitavern_signed_url /secrets/media.key
+				}
+				handle @signed {
+					header Cache-Control "private, no-store"
+					header Referrer-Policy no-referrer
+					root * /media
+					file_server
+				}
+				handle {
+					header Cache-Control "private, no-store"
+					respond "Invalid or expired media URL" 403
+				}
+			}
+		}
+		@backend path /api/* /ws
+		handle @backend {
+			reverse_proxy {$BACKEND:server:5487} {
+				header_up X-Minitavern-Proxy {$MINITAVERN_PROXY_TOKEN}
+				header_up X-Minitavern-Client-IP {remote_host}
+			}
+		}
+		handle {
+			import /etc/caddy/frontend.caddy
+		}
+	}
+}

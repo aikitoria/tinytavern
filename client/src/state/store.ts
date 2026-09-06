@@ -72,7 +72,6 @@ interface AppState {
   booted: boolean;
   selectedId: number | null;
   sidebarOpen: boolean;
-  /** Sidebar: group the browse list by character instead of one flat list. */
   groupByCharacter: boolean;
   modal: ModalKind;
   /** 'trace' replaces the timeline with the assembled upstream request;
@@ -109,19 +108,13 @@ export const [state, setState] = createStore<AppState>({
 let toastCounter = 0;
 export type ToastKind = 'error' | 'warning' | 'info' | 'success';
 
-/** Transient error/info notification, bottom corner, auto-dismisses. */
 export function toast(text: string, kind: ToastKind = 'error'): void {
   const id = ++toastCounter;
   setState('toasts', (toasts) => [...toasts, { id, text, kind }]);
   setTimeout(() => setState('toasts', (toasts) => toasts.filter((t) => t.id !== id)), 4500);
 }
 
-// ---- Derived state ----
-
-/**
- * App-lifetime memo: rooted explicitly (and intentionally never disposed) so
- * Solid's dev mode doesn't warn about computations created outside a root.
- */
+/** App-lifetime root avoids Solid's warning about unowned computations; never disposed. */
 const globalMemo = <T>(fn: () => T) => createRoot(() => createMemo(fn));
 
 export const selectedConversation = globalMemo(
@@ -142,7 +135,6 @@ export const selectedPersona = globalMemo(() => {
     : null;
 });
 
-/** Whether the effective template of the selected chat uses personas at all. */
 export const personasEnabled = globalMemo(() => {
   const character = selectedCharacter();
   if (character?.customTemplate) return character.customTemplate.usesPersonas;
@@ -152,7 +144,7 @@ export const personasEnabled = globalMemo(() => {
   return template?.usesPersonas ?? true;
 });
 
-/** Active path, root -> leaf, walked up via parent pointers from the active leaf. */
+/** Root-to-leaf order. */
 export const activePath = globalMemo<Message[]>(() => {
   const tree = state.tree;
   const path: Message[] = [];
@@ -166,7 +158,7 @@ export const activePath = globalMemo<Message[]>(() => {
   return path.reverse();
 });
 
-/** parentId (or -1 for roots) -> ordered children; drives the < n/m > branch navigation. */
+/** Roots use key -1; children are ordered by id. */
 export const childrenByParent = globalMemo<Map<number, Message[]>>(() => {
   const map = new Map<number, Message[]>();
   for (const msg of Object.values(state.tree.messages)) {
@@ -190,13 +182,10 @@ export const streamingMessage = globalMemo<Message | null>(() => {
   return null;
 });
 
-// ---- Loaders ----
-
 const LAST_CONVERSATION_KEY = 'minitavern.lastConversationId';
 let conversationsLoaded = false;
 let selectionRestored = false;
-/** First tree snapshot applied — the boot cover only waits for the initial
- * (hash-restored) tree, not for every later conversation switch. */
+/** The boot cover waits only for the initial restored tree. */
 const [initialTreeLoaded, setInitialTreeLoaded] = createSignal(false);
 
 function persistSelectedConversation(id: number | null): void {
@@ -208,16 +197,10 @@ function persistSelectedConversation(id: number | null): void {
   }
 }
 
-// Refetches can overlap (invalidate bursts, reconnect loadAll racing an
-// invalidate) and resolve out of order; applying an older response after a
-// newer one — or after a local write like newConversation's insert — would
-// revert state, so each entity tracks a fetch sequence and stale responses
-// are dropped.
+// Overlapping refetches can resolve out of order; reject stale responses per entity.
 const fetchSeq = new SuccessfulFetchSequence<InvalidateEntity>();
 
-// Conversation deletes broadcast an invalidation before the initiating HTTP
-// request resolves. Remember locally initiated deletes so that refresh can't
-// mistake that race for a deletion performed by another client.
+// Delete invalidations can beat the HTTP response; don't mistake local deletes for peer deletes.
 const locallyDeletingConversationIds = new Set<number>();
 let locallyDeletingAllConversations = false;
 
@@ -229,8 +212,7 @@ function loader<T>(
   return async () => {
     const seq = fetchSeq.start(entity);
     const data = await fetch();
-    // A later-started request that failed must not suppress this useful result.
-    // Conversely, once a later request succeeds, this response is stale.
+    // Only a later successful request makes this response stale.
     if (!fetchSeq.accept(entity, seq)) return;
     apply(data);
   };
@@ -286,8 +268,6 @@ export async function loadAll(): Promise<void> {
   setState('booted', true);
 }
 
-// ---- WS event handling ----
-
 export function handleServerEvent(ev: ServerEvent): void {
   switch (ev.t) {
     case 'hello':
@@ -312,9 +292,7 @@ export function handleServerEvent(ev: ServerEvent): void {
           );
         });
         consumePendingSwipe(ev.conversationId, ev.activeLeafId);
-        // A render may have finished while we were disconnected — progress for
-        // messages the snapshot shows as no longer pending is stale and must
-        // not front-run the next render on the same message.
+        // Renders completed while disconnected must not leave stale progress for the next render.
         setImageProgress((progress) => retainPendingImageProgress(progress, state.tree.messages));
       }
       break;
@@ -325,9 +303,7 @@ export function handleServerEvent(ev: ServerEvent): void {
       const bodies = new Map(ev.messages.map((m) => [m.id, m]));
       // A node we've never seen and no body for means a missed frame — resync.
       if (ev.nodes.some((node) => !bodies.has(node.id) && !state.tree.messages[node.id])) {
-        // Every repeat subscribe() makes the server push a full snapshot, so
-        // don't stack resyncs while one is already in flight (cleared when the
-        // `tree` snapshot arrives).
+        // Repeat subscriptions push snapshots; allow only one outstanding resync.
         if (resyncPendingFor !== ev.conversationId) {
           resyncPendingFor = ev.conversationId;
           resyncTree();
@@ -349,10 +325,7 @@ export function handleServerEvent(ev: ServerEvent): void {
               const body = bodies.get(node.id);
               if (body) {
                 const existing = messages[node.id];
-                // Merge into the existing object: replacing it would change
-                // identity and remount the whole MessageNode (destroying UI
-                // state like open viewers) since the timeline is keyed by
-                // reference.
+                // The timeline is keyed by reference; preserve identity to retain MessageNode UI state.
                 if (existing) Object.assign(existing, body);
                 else messages[node.id] = body;
                 if (!body.imagePending) clearImageProgress(node.id);
@@ -391,15 +364,12 @@ export function handleServerEvent(ev: ServerEvent): void {
       // A final for an abandoned conversation (mid-switch) must not toast here.
       if (ev.conversationId !== state.selectedId) break;
       setState('tree', 'mutationRevision', ev.mutationRevision);
-      // Surface upstream API failures (e.g. context length exceeded) loudly.
       // Speculative swipes retry quietly in the background.
       if (ev.message.status === 'error' && ev.message.generationKind !== 'speculative') {
         toast(ev.message.genMeta?.error ?? 'Generation failed');
       }
       if (state.tree.messages[ev.message.id]) {
-        // Merge into the existing object like treePatch does: replacing it
-        // would change identity and remount the whole MessageNode (destroying
-        // UI state like open viewers) since the timeline is keyed by reference.
+        // Preserve MessageNode identity and UI state, as in treePatch.
         setState(
           'tree',
           'messages',
@@ -428,8 +398,7 @@ export function handleServerEvent(ev: ServerEvent): void {
 /** Per-message image render progress (ephemeral; only read while imagePending). */
 export const [imageProgress, setImageProgress] = createSignal<ImageProgressState>({});
 
-/** Dropped once a body shows the render finished — a later render on the same
- * message must not open with the previous one's final progress. */
+/** Prevent a later render from showing the previous render's progress. */
 function clearImageProgress(mid: number): void {
   setImageProgress((progress) => {
     if (!(mid in progress)) return progress;
@@ -439,18 +408,10 @@ function clearImageProgress(mid: number): void {
   });
 }
 
-// ---- Actions ----
-
-/** Conversation a gap-triggered resync is already in flight for (null = none).
- * Cleared when the requested `tree` snapshot arrives. */
+/** Outstanding gap-triggered resync; cleared by its tree snapshot. */
 let resyncPendingFor: number | null = null;
 
-/**
- * Re-request the tree by re-subscribing: the server pushes a fresh snapshot
- * on repeat subs, and it arrives in-order with patches/deltas on the WS
- * channel — a REST fetch could race a concurrent patch and revert an edited
- * body that would never be resent.
- */
+/** WS snapshots stay ordered with patches/deltas; a REST fetch could revert an edited body. */
 function resyncTree(): void {
   if (state.selectedId != null) subscribe(state.selectedId);
 }
@@ -464,8 +425,7 @@ export function selectConversation(id: number | null): void {
     setState('selectedId', id);
     setState('sidebarOpen', false);
     setState('viewMode', 'chat');
-    // conversationId is only set when the tree snapshot arrives — its absence
-    // marks the tree as still loading.
+    // A null conversationId marks loading until the snapshot arrives.
     setState('tree', {
       conversationId: null,
       messages: {},
@@ -473,8 +433,7 @@ export function selectConversation(id: number | null): void {
       mutationRevision: 0,
     });
   });
-  // A swipe animation pending in the previous conversation must not leak into
-  // this one's freshly mounted nodes.
+  // Prevent the previous conversation's swipe animation from leaking into new nodes.
   setPendingSwipe(null);
   setImageProgress({});
   subscribe(id);
@@ -487,8 +446,7 @@ export async function navigateTree(action: () => Promise<unknown>): Promise<bool
   setState('treeNavigationPending', true);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // A blackholed fetch never settles; without a timeout the pending flag
-    // would stay set and wedge every tree navigation on this client.
+    // A blackholed fetch must not leave all tree navigation permanently pending.
     await Promise.race([
       action(),
       new Promise<never>((_, reject) => {
@@ -509,8 +467,6 @@ export async function navigateTree(action: () => Promise<unknown>): Promise<bool
   }
 }
 
-// ---- Swipe navigation (shared by the touch gesture, ‹ › buttons and arrow keys) ----
-
 export interface PendingSwipe {
   /** Unique operation identity; message ids can recur across rapid back-and-forth swipes. */
   token: number;
@@ -528,9 +484,7 @@ export interface PendingSwipe {
 export const [pendingSwipe, setPendingSwipe] = createSignal<PendingSwipe | null>(null);
 let swipeToken = 0;
 
-/** The authoritative tree frame consumes an animation only after it reflects
- * the branch change. This leaves `pendingSwipe` set while Solid mounts the
- * incoming path, then prevents later unrelated mounts from inheriting it. */
+/** Keep the animation through the branch-change mount, then clear it before unrelated mounts. */
 function consumePendingSwipe(conversationId: number, activeLeafId: number | null): void {
   setPendingSwipe((pending) => afterTreeFrame(pending, conversationId, activeLeafId));
 }
@@ -542,25 +496,18 @@ function clearPendingSwipe(token: number): void {
 /** Set to a message id to ask that MessageNode to open its in-place editor (composer ↑ key). */
 export const [editRequestId, setEditRequestId] = createSignal<number | null>(null);
 
-/**
- * Switch to a sibling with a directional slide: the outgoing message animates
- * fully out while `pendingSwipe` is set, and the incoming sibling slides in
- * from the opposite side as it mounts. Swiping an assistant message past the
- * end generates a new sibling (advance).
- */
+/** pendingSwipe holds the outgoing slide until the incoming sibling mounts. */
 export async function swipeToSibling(message: Message, dir: 1 | -1): Promise<void> {
   if (state.treeNavigationPending) return;
   const siblings = siblingsOf(message);
   const idx = siblings.findIndex((m) => m.id === message.id);
   let action: (() => Promise<unknown>) | null = null;
-  // Only assistant messages generate new siblings past the end; user and tool
-  // messages can just switch between existing ones.
+  // Only assistants generate new siblings past the end.
   if (dir === -1 || message.role !== 'assistant') {
     const target = siblings[idx + dir];
-    if (target)
-      action = () => api.activate(target.id, state.tree.activeLeafId, state.tree.mutationRevision);
+    if (target) action = () => api.activate(target.id, state.tree);
   } else {
-    action = () => api.advance(message.id, state.tree.activeLeafId, state.tree.mutationRevision);
+    action = () => api.advance(message.id, state.tree);
   }
   if (!action) return;
   const token = ++swipeToken;
@@ -577,24 +524,21 @@ export async function swipeToSibling(message: Message, dir: 1 | -1): Promise<voi
     clearPendingSwipe(token); // spring back, unless a newer swipe has replaced this one
     return;
   }
-  // Normally the matching tree frame consumes the operation almost
-  // immediately. If the HTTP mutation succeeded but its frame went to a stale
-  // mobile-PWA socket, replace the connection while keeping the outgoing side
-  // held until the reconnect snapshot mounts the authoritative branch.
+  // A successful mutation may send its frame to a stale mobile-PWA socket.
+  // Reconnect, holding the outgoing slide until the snapshot mounts the branch.
   setTimeout(() => {
     if (pendingSwipe()?.token === token) refreshWs();
   }, 750);
-  // A truly offline client must eventually spring back rather than leave the
-  // old side held offscreen forever. A successful reconnect consumes this
-  // operation from its full tree frame long before this fallback.
+  // Spring back if reconnect never supplies the authoritative tree.
   setTimeout(() => clearPendingSwipe(token), 5000);
 }
 
 export async function newConversation(characterId: number | null): Promise<void> {
-  const conv = await api.createConversation(characterId);
-  // The invalidate GET may beat this POST response, so this must be an upsert.
-  // Then re-read authoritative ordering/existence: a peer may already have
-  // deleted the row while this response was delayed.
+  await openCreatedConversation(await api.createConversation(characterId));
+}
+
+async function openCreatedConversation(conv: Conversation): Promise<void> {
+  // Invalidation GETs can beat this POST; upsert, then refetch for ordering and peer deletions.
   setState('conversations', (list) => upsertById(list, conv));
   let verified = false;
   try {
@@ -608,15 +552,13 @@ export async function newConversation(characterId: number | null): Promise<void>
   }
 }
 
-/** Applies a local settings response unless a newer revision is already visible. */
 export function applySettings(next: Settings): boolean {
   if (!isCurrentSettingsRevision(state.settings.revision, next.revision)) return false;
   setState('settings', next);
   return true;
 }
 
-/** Upserts a write response because its invalidate-triggered GET may resolve
- * before or after the initiating request. */
+/** The invalidation GET may arrive before or after this write response. */
 export function applyGalleryItem(item: GalleryItem): void {
   setState('gallery', (items) =>
     upsertById(items, item).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id),
@@ -629,11 +571,7 @@ export async function deleteConversation(id: number): Promise<void> {
     const conversation = state.conversations.find((candidate) => candidate.id === id);
     if (!conversation) throw new Error(`conversation ${id} not found`);
     const selected = state.tree.conversationId === id;
-    await api.deleteConversation(
-      id,
-      selected ? state.tree.activeLeafId : conversation.activeLeafId,
-      selected ? state.tree.mutationRevision : conversation.mutationRevision,
-    );
+    await api.deleteConversation(id, selected ? state.tree : conversation);
     if (state.selectedId === id) selectConversation(null);
   } finally {
     locallyDeletingConversationIds.delete(id);
@@ -653,35 +591,12 @@ export async function deleteAllConversations(): Promise<number> {
 }
 
 export async function duplicateConversation(id: number): Promise<void> {
-  const conv = await api.duplicateConversation(id);
-  setState('conversations', (list) => upsertById(list, conv));
-  let verified = false;
-  try {
-    await loaders.conversations();
-    verified = true;
-  } catch (err) {
-    console.error(err);
-  }
-  if (!verified || state.conversations.some((conversation) => conversation.id === conv.id)) {
-    selectConversation(conv.id);
-  }
+  await openCreatedConversation(await api.duplicateConversation(id));
 }
 
-/** Creates and opens a new linear conversation containing the selected
- * message and its complete ancestor chain. */
+/** Copy only the selected message and its ancestry into a new linear conversation. */
 export async function branchConversation(messageId: number): Promise<void> {
-  const conv = await api.branchConversation(messageId);
-  setState('conversations', (list) => upsertById(list, conv));
-  let verified = false;
-  try {
-    await loaders.conversations();
-    verified = true;
-  } catch (err) {
-    console.error(err);
-  }
-  if (!verified || state.conversations.some((conversation) => conversation.id === conv.id)) {
-    selectConversation(conv.id);
-  }
+  await openCreatedConversation(await api.branchConversation(messageId));
 }
 
 export function restoreConversationSelection(): void {
@@ -711,16 +626,13 @@ export function toggleSidebar(): void {
   setState('sidebarOpen', (open) => !open);
 }
 
-/** Mirrors the mobile layout breakpoint in app.css — mobile-only bottom-bar
- * controls are mounted only in that layout instead of merely hidden by CSS. */
+/** Match app.css so mobile controls are mounted only in the mobile layout. */
 const mobileQuery = matchMedia('(max-width: 767px), (pointer: coarse) and (max-width: 1024px)');
 const [isMobileLayout, setIsMobileLayout] = createSignal(mobileQuery.matches);
 mobileQuery.addEventListener('change', (e) => setIsMobileLayout(e.matches));
 export { isMobileLayout };
 
-/** The mobile header bar is only up while the sidebar is: acting on one of its
- * controls means the user is done with both. No-op on desktop, where the
- * sidebar is static and `open` is unstyled. */
+/** Also closes the mobile header; desktop ignores the sidebar's open state. */
 export function closeSidebar(): void {
   setState('sidebarOpen', false);
 }

@@ -16,8 +16,7 @@ assert.deepEqual(updated[1], { value: 3, max: 10 });
 // Duplicate events must not trigger another reactive store write.
 assert.equal(applyImageProgress(updated, messages, 1, { value: 3, max: 10 }), updated);
 
-// Binary preview events merge with numeric progress, and later sampler steps
-// retain the most recent preview until the authoritative message completes.
+// Sampler updates retain the latest preview until authoritative completion.
 const withPreview = applyImageProgress(updated, messages, 1, {
   preview: 'data:image/jpeg;base64,preview',
 });

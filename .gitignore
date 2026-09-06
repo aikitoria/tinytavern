@@ -5,3 +5,5 @@ data-dev/
 certs/
 *.local
 .env
+
+.secrets/

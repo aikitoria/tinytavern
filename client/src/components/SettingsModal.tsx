@@ -1,10 +1,13 @@
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { openModal } from '../state/store.ts';
 import Modal from './Modal.tsx';
-import { SettingsGuardProvider } from './SettingsGuard.tsx';
-import type { SettingsSectionActions } from './SettingsGuard.tsx';
+import {
+  createSettingsNavigation,
+  SettingsGuardProvider,
+  SettingsNavigationPrompt,
+} from './SettingsGuard.tsx';
 import GeneralTab from './tabs/GeneralTab.tsx';
 import EndpointsTab from './tabs/EndpointsTab.tsx';
 import PresetsTab from './tabs/PresetsTab.tsx';
@@ -28,8 +31,7 @@ const canScroll = (element: HTMLElement, deltaY: number) =>
     ? element.scrollTop > 1
     : element.scrollTop + element.clientHeight < element.scrollHeight - 1;
 
-/** The modal body scrolls simple tabs, while master-detail tabs scroll their
- * detail form. Find whichever scroll owner encloses this field. */
+/** Scroll ownership varies by tab: modal body or detail form. */
 function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
   const modal = area.closest<HTMLElement>('.settings-modal');
   for (
@@ -50,11 +52,8 @@ function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
 
 export default function SettingsModal() {
   const [tab, setTab] = createSignal('general');
-  const [promptOpen, setPromptOpen] = createSignal(false);
-  const [saving, setSaving] = createSignal(false);
+  const navigation = createSettingsNavigation();
   const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS[0]!;
-  let activeActions: SettingsSectionActions | undefined;
-  let pendingNavigation: (() => void) | undefined;
 
   const onWheel = (event: WheelEvent) => {
     if (!event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -62,8 +61,7 @@ export default function SettingsModal() {
     if (!(target instanceof Element)) return;
     const area = target.closest<HTMLTextAreaElement>('.settings-modal textarea');
     if (!area) return;
-    // Focusing a multiline editor explicitly opts into its native wheel
-    // behavior, including what happens at its own scroll boundaries.
+    // Focus opts into native textarea scrolling, including boundary behavior.
     if (document.activeElement === area) return;
     const owner = settingsScrollOwner(area);
     if (!owner || !canScroll(owner, event.deltaY)) return;
@@ -77,24 +75,9 @@ export default function SettingsModal() {
   onMount(() => document.addEventListener('wheel', onWheel, { capture: true, passive: false }));
   onCleanup(() => document.removeEventListener('wheel', onWheel, true));
 
-  const register = (actions: SettingsSectionActions) => {
-    activeActions = actions;
-    return () => {
-      if (activeActions === actions) activeActions = undefined;
-    };
-  };
-
-  const navigate = (action: () => void) => {
-    if (!activeActions?.isDirty()) {
-      action();
-      return;
-    }
-    pendingNavigation = action;
-    setPromptOpen(true);
-  };
   const chooseTab = (key: string, after?: () => void) => {
     if (key !== tab())
-      navigate(() => {
+      navigation.navigate(() => {
         setTab(key);
         after?.();
       });
@@ -116,40 +99,14 @@ export default function SettingsModal() {
     );
   };
 
-  const finishNavigation = () => {
-    const action = pendingNavigation;
-    pendingNavigation = undefined;
-    setPromptOpen(false);
-    action?.();
-  };
-
-  const saveAndContinue = async () => {
-    if (!activeActions || saving()) return;
-    setSaving(true);
-    const saved = await activeActions.save();
-    setSaving(false);
-    if (saved) finishNavigation();
-    else cancelNavigation();
-  };
-
-  const discardAndContinue = () => {
-    activeActions?.discard();
-    finishNavigation();
-  };
-
-  const cancelNavigation = () => {
-    pendingNavigation = undefined;
-    setPromptOpen(false);
-  };
-
   return (
     <>
       <Modal
         title="Settings"
         class="settings-modal"
-        onClose={() => navigate(() => openModal(null))}
+        onClose={() => navigation.navigate(() => openModal(null))}
         headerExtra={
-          <div class="tabs" role="tablist" aria-label="Settings sections">
+          <div class="tab-strip tabs" role="tablist" aria-label="Settings sections">
             <For each={TABS}>
               {(t, index) => (
                 <button
@@ -177,34 +134,14 @@ export default function SettingsModal() {
           role="tabpanel"
           aria-labelledby={`settings-tab-${tab()}`}
         >
-          <SettingsGuardProvider register={register} navigate={navigate}>
+          <SettingsGuardProvider register={navigation.register} navigate={navigation.navigate}>
             <Dynamic component={activeTab().component} />
           </SettingsGuardProvider>
         </div>
       </Modal>
-      <Show when={promptOpen()}>
-        <Modal
-          title="Save changes?"
-          class="confirm-modal"
-          backdropClass="confirm-backdrop"
-          onClose={cancelNavigation}
-        >
-          <p class="confirm-message">
-            You have unsaved changes. Save them before leaving this settings page?
-          </p>
-          <div class="form-actions confirm-actions">
-            <button class="primary-btn" disabled={saving()} onClick={() => void saveAndContinue()}>
-              {saving() ? 'Saving…' : 'Save'}
-            </button>
-            <button disabled={saving()} onClick={discardAndContinue}>
-              Discard
-            </button>
-            <button data-modal-initial-focus disabled={saving()} onClick={cancelNavigation}>
-              Cancel
-            </button>
-          </div>
-        </Modal>
-      </Show>
+      <SettingsNavigationPrompt navigation={navigation}>
+        You have unsaved changes. Save them before leaving this settings page?
+      </SettingsNavigationPrompt>
     </>
   );
 }

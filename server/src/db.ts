@@ -21,9 +21,7 @@ export const AVATAR_DIR = join(DATA_DIR, 'avatars');
 export const IMAGES_DIR = join(DATA_DIR, 'images');
 const DB_PATH = process.env.DB_PATH ?? join(DATA_DIR, 'minitavern.db');
 
-// Chats and endpoint credentials are plaintext in SQLite. Keep both newly
-// created files and SQLite's later-created WAL/SHM sidecars private, regardless
-// of the host/container's inherited umask.
+// SQLite holds plaintext chats and credentials; keep future WAL/SHM sidecars private too.
 process.umask(0o077);
 function privateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
@@ -37,9 +35,8 @@ privateDirectory(IMAGES_DIR);
 export const db = new DatabaseSync(DB_PATH);
 chmodSync(DB_PATH, 0o600);
 db.exec('PRAGMA foreign_keys = ON');
-// WAL avoids a full journal cycle (two fsyncs) per write — this matters for
-// the periodic streaming flushes. NORMAL is durable enough under WAL: a crash
-// can only lose the last transactions, never corrupt the database.
+// WAL + NORMAL reduces fsyncs during streaming; a crash may lose recent commits,
+// but does not corrupt the database.
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA synchronous = NORMAL');
 for (const sidecar of [`${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
@@ -49,12 +46,10 @@ for (const sidecar of [`${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 }
-// Auto-checkpointing (default: every ~4MB) keeps the WAL bounded; this only
-// truncates the file back after a large write burst instead of leaving it at
-// its high-water mark.
+// Auto-checkpointing bounds the WAL; reclaim its high-water allocation after write bursts.
 db.exec('PRAGMA journal_size_limit = 67108864');
 
-/** Memoized prepare: every query in the codebase is one of a bounded set of SQL strings. */
+// Query strings form a bounded set, so this cache needs no eviction.
 const stmtCache = new Map<string, StatementSync>();
 export function stmt(sql: string): StatementSync {
   let prepared = stmtCache.get(sql);
@@ -65,15 +60,21 @@ export function stmt(sql: string): StatementSync {
   return prepared;
 }
 
-// Schema migrations (DDL + seeds only). Settings that move between scopes are
-// not carried over — they reset to defaults and get re-picked in the UI.
-const { user_version: version } = db.prepare('PRAGMA user_version').get() as {
+// Migrations cover DDL and seeds; settings moved between scopes reset to defaults.
+const { user_version: version } = stmt('PRAGMA user_version').get() as {
   user_version: number;
 };
 
-if (version < 1) {
+function migrate(target: number, apply: () => void): void {
+  if (version >= target) return;
+  transaction(() => {
+    apply();
+    db.exec(`PRAGMA user_version = ${target}`);
+  });
+}
+
+migrate(1, () => {
   db.exec(`
-    BEGIN;
     CREATE TABLE settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -139,21 +140,19 @@ if (version < 1) {
     CREATE INDEX idx_messages_conversation ON messages(conversation_id);
     CREATE INDEX idx_messages_parent ON messages(parent_id);
   `);
-  db.prepare('INSERT INTO presets (name, content, created_at) VALUES (?, ?, ?)').run(
+  stmt('INSERT INTO presets (name, content, created_at) VALUES (?, ?, ?)').run(
     'Default assistant',
     'You are {{char}}, a helpful assistant talking to {{user}}. Answer accurately and concisely.',
     Date.now(),
   );
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
+  stmt('INSERT INTO settings (key, value) VALUES (?, ?)').run(
     'app',
     JSON.stringify({ ...DEFAULT_SETTINGS, defaultPresetId: 1, defaultTemplateId: 1 }),
   );
-  db.exec('PRAGMA user_version = 1; COMMIT;');
-}
+});
 
-if (version < 2) {
+migrate(2, () => {
   db.exec(`
-    BEGIN;
     CREATE TABLE templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -161,88 +160,64 @@ if (version < 2) {
       created_at INTEGER NOT NULL
     );
   `);
-  db.prepare('INSERT INTO templates (name, content, created_at) VALUES (?, ?, ?)').run(
+  stmt('INSERT INTO templates (name, content, created_at) VALUES (?, ?, ?)').run(
     'Default',
     DEFAULT_PROMPT_TEMPLATE,
     Date.now(),
   );
-  db.exec('PRAGMA user_version = 2; COMMIT;');
-}
+});
 
-if (version < 3) {
+migrate(3, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE templates ADD COLUMN user_prologue TEXT NOT NULL DEFAULT '';
     ALTER TABLE characters ADD COLUMN template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL;
-    PRAGMA user_version = 3;
-    COMMIT;
   `);
-}
+});
 
-if (version < 4) {
+migrate(4, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE conversations ADD COLUMN speaker_name TEXT;
     ALTER TABLE messages ADD COLUMN name TEXT;
     ALTER TABLE templates ADD COLUMN prefix_names INTEGER NOT NULL DEFAULT 0;
-    PRAGMA user_version = 4;
-    COMMIT;
   `);
-}
+});
 
-if (version < 5) {
+migrate(5, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE endpoints ADD COLUMN gen_params_json TEXT NOT NULL DEFAULT '{}';
-    PRAGMA user_version = 5;
-    COMMIT;
   `);
-}
+});
 
-if (version < 6) {
+migrate(6, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE endpoints ADD COLUMN model TEXT;
-    PRAGMA user_version = 6;
-    COMMIT;
   `);
-}
+});
 
-if (version < 7) {
+migrate(7, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE endpoints ADD COLUMN prefill_mode TEXT NOT NULL DEFAULT 'none';
-    PRAGMA user_version = 7;
-    COMMIT;
   `);
-}
+});
 
-if (version < 8) {
+migrate(8, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE messages ADD COLUMN generation_kind TEXT NOT NULL DEFAULT 'normal';
-    PRAGMA user_version = 8;
-    COMMIT;
   `);
-}
+});
 
 // model/gen_params_json were superseded by endpoint-owned settings and never read.
 // endpoint_id stays: it becomes the per-conversation endpoint override.
-if (version < 9) {
+migrate(9, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE conversations DROP COLUMN model;
     ALTER TABLE conversations DROP COLUMN gen_params_json;
-    PRAGMA user_version = 9;
-    COMMIT;
   `);
-}
+});
 
-// Full-text search over message contents (external-content FTS5, kept in sync
-// by triggers so the message body is stored only once).
-if (version < 10) {
+// External-content FTS5 avoids storing message bodies twice.
+migrate(10, () => {
   db.exec(`
-    BEGIN;
     CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='id');
     CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
       INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
@@ -255,111 +230,72 @@ if (version < 10) {
       INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
     END;
     INSERT INTO messages_fts(rowid, content) SELECT id, content FROM messages;
-    PRAGMA user_version = 10;
-    COMMIT;
   `);
-}
+});
 
-// The bare assistant becomes an editable character: new chats pick it from the
-// character list, and its preset/template overrides apply like any character's.
-// Multiple assistants are simply more characters.
-if (version < 11) {
-  db.exec('BEGIN');
-  db.prepare(
+// Represent the default assistant as an ordinary editable character.
+migrate(11, () => {
+  stmt(
     `INSERT INTO characters (name, personality, scenario, first_message, created_at)
      VALUES ('Assistant', '', '', '', ?)`,
   ).run(Date.now());
-  db.exec('PRAGMA user_version = 11');
-  db.exec('COMMIT');
-}
+});
 
-// Inline template override on characters, parallel to custom_prompt: replaces
-// the template content (no prologue or name prefixing in custom mode).
-if (version < 12) {
+migrate(12, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE characters ADD COLUMN custom_template TEXT;
-    PRAGMA user_version = 12;
-    COMMIT;
   `);
-}
+});
 
-// Templates can opt a chat out of the persona feature entirely.
-if (version < 13) {
+migrate(13, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE templates ADD COLUMN uses_personas INTEGER NOT NULL DEFAULT 1;
-    PRAGMA user_version = 13;
-    COMMIT;
   `);
-}
+});
 
-// Generated image attached to a message (plugin tool output): NULL, the
-// 'pending' placeholder while rendering, or a served /images/ path.
-if (version < 14) {
+// Legacy image values: NULL, 'pending', or an /images/ path.
+migrate(14, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE messages ADD COLUMN image TEXT;
-    PRAGMA user_version = 14;
-    COMMIT;
   `);
-}
+});
 
-// Image swipes: a message carries a list of generated images plus the stored
-// render config so alternatives can be re-rendered with a fresh seed.
-if (version < 15) {
+migrate(15, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE messages ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE messages ADD COLUMN active_image INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE messages ADD COLUMN image_pending INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE messages ADD COLUMN image_render_json TEXT;
     UPDATE messages SET images_json = json_array(image) WHERE image IS NOT NULL AND image <> 'pending';
     ALTER TABLE messages DROP COLUMN image;
-    PRAGMA user_version = 15;
-    COMMIT;
   `);
-}
+});
 
-// Steer format moves from a global setting to a per-template field, resolved
-// through the same chain as the template itself. Existing rows keep the empty
-// default, which resolves to DEFAULT_STEER_TEMPLATE (same text as before).
-if (version < 16) {
+// Steer format now follows template resolution; empty retains DEFAULT_STEER_TEMPLATE.
+migrate(16, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE templates ADD COLUMN steer_template TEXT NOT NULL DEFAULT '';
-    PRAGMA user_version = 16;
-    COMMIT;
   `);
-}
+});
 
-// Example conversation partials on characters (SillyTavern mes_example),
-// substituted into templates via the {{examples}} slot.
-if (version < 17) {
+// SillyTavern mes_example partials expand through {{examples}}.
+migrate(17, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE characters ADD COLUMN examples TEXT NOT NULL DEFAULT '';
-    PRAGMA user_version = 17;
-    COMMIT;
   `);
-}
+});
 
 // Optimistic conversation concurrency and generation ABA protection.
-if (version < 18) {
+migrate(18, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE conversations ADD COLUMN mutation_revision INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE messages ADD COLUMN generation_token INTEGER;
-    PRAGMA user_version = 18;
-    COMMIT;
   `);
-}
+});
 
-// One-level character folders. A character can belong to one folder; deleting
-// the folder returns its characters to the root of the picker tree.
-if (version < 19) {
+// Deleting a folder returns its characters to the picker root.
+migrate(19, () => {
   db.exec(`
-    BEGIN;
     CREATE TABLE character_folders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -367,57 +303,39 @@ if (version < 19) {
     );
     ALTER TABLE characters ADD COLUMN folder_id INTEGER
       REFERENCES character_folders(id) ON DELETE SET NULL;
-    PRAGMA user_version = 19;
-    COMMIT;
   `);
-}
+});
 
-// Login sessions survive ordinary process/container restarts. Only a SHA-256
-// digest of the opaque cookie token is stored; changing/removing the password
-// clears this table through auth.ts.
-if (version < 20) {
+// Persist SHA-256 token digests across restarts; auth.ts clears sessions on password changes.
+migrate(20, () => {
   db.exec(`
-    BEGIN;
     CREATE TABLE auth_sessions (
       token_hash TEXT PRIMARY KEY,
       expires_at INTEGER NOT NULL,
       created_at INTEGER NOT NULL
     );
     CREATE INDEX auth_sessions_expiry ON auth_sessions(expires_at);
-    PRAGMA user_version = 20;
-    COMMIT;
   `);
-}
+});
 
-// Templates can seed both parts of a reasoning-model assistant turn. Keeping
-// them separate maps directly onto OpenAI-compatible content/reasoning_content.
-if (version < 21) {
+// Separate prefills map to OpenAI-compatible content/reasoning_content.
+migrate(21, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE templates ADD COLUMN reasoning_prefill TEXT NOT NULL DEFAULT '';
     ALTER TABLE templates ADD COLUMN message_prefill TEXT NOT NULL DEFAULT '';
-    PRAGMA user_version = 21;
-    COMMIT;
   `);
-}
+});
 
-// A conversation can replace its character's scenario without mutating the
-// shared character. NULL inherits; an empty string deliberately removes it.
-if (version < 22) {
+// NULL inherits the character scenario; an empty string suppresses it.
+migrate(22, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE conversations ADD COLUMN scenario_override TEXT;
-    PRAGMA user_version = 22;
-    COMMIT;
   `);
-}
+});
 
-// Saved image swipes own independent file copies and prompt/render snapshots.
-// Source foreign keys are navigation metadata only and become NULL on delete;
-// gallery content itself never cascades with a message or conversation.
-if (version < 23) {
+// Gallery items own file copies and prompt/render snapshots; source links never own them.
+migrate(23, () => {
   db.exec(`
-    BEGIN;
     CREATE TABLE gallery_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
@@ -433,17 +351,12 @@ if (version < 23) {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX idx_gallery_character ON gallery_items(character_id, updated_at DESC);
-    PRAGMA user_version = 23;
-    COMMIT;
   `);
-}
+});
 
-// Gallery generation creates separate cards, not within-card swipes. Preserve
-// any alternatives created by early development builds by splitting them into
-// independent rows before collapsing storage to one image path per item.
-if (version < 24) {
+// Preserve early dev-build image alternatives as separate rows before dropping swipe storage.
+migrate(24, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE gallery_items ADD COLUMN image TEXT;
     UPDATE gallery_items SET image = json_extract(images_json, '$[0]');
     INSERT INTO gallery_items
@@ -457,51 +370,32 @@ if (version < 24) {
     WHERE CAST(j.key AS INTEGER) > 0;
     ALTER TABLE gallery_items DROP COLUMN images_json;
     ALTER TABLE gallery_items DROP COLUMN active_image;
-    PRAGMA user_version = 24;
-    COMMIT;
   `);
-}
+});
 
 // Characters inherit the global speculation setting unless explicitly disabled.
-if (version < 25) {
+migrate(25, () => {
   db.exec(`
-    BEGIN;
     ALTER TABLE characters ADD COLUMN disable_background_swipe_generation INTEGER NOT NULL DEFAULT 0;
-    PRAGMA user_version = 25;
-    COMMIT;
   `);
-}
+});
 
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
-db.prepare(
-  "DELETE FROM messages WHERE status = 'streaming' AND generation_kind = 'speculative'",
-).run();
-db.prepare(
+stmt("DELETE FROM messages WHERE status = 'streaming' AND generation_kind = 'speculative'").run();
+stmt(
   `UPDATE messages SET status = 'error',
    gen_meta_json = json_object('error', 'Server restarted during generation') WHERE status = 'streaming'`,
 ).run();
 // Image renders don't survive a restart either: clear stale pending flags.
-db.prepare('UPDATE messages SET image_pending = 0 WHERE image_pending = 1').run();
-
-let txDepth = 0;
+stmt('UPDATE messages SET image_pending = 0 WHERE image_pending = 1').run();
 
 /**
- * Nestable: only the outermost call opens/commits; an inner throw rolls back everything.
- * There are NO savepoint semantics: an inner transaction that throws is only
- * rolled back if the outer caller lets the exception propagate — catching it
- * inside the outer transaction keeps the inner writes and commits them.
+ * Only the outermost call opens/commits; there are no savepoints.
+ * Inner failures roll back only if propagated; catching them commits the inner writes.
  */
 export function transaction<T>(fn: () => T): T {
-  if (txDepth > 0) {
-    txDepth++;
-    try {
-      return fn();
-    } finally {
-      txDepth--;
-    }
-  }
-  txDepth = 1;
+  if (db.isTransaction) return fn();
   db.exec('BEGIN');
   try {
     const result = fn();
@@ -510,8 +404,6 @@ export function transaction<T>(fn: () => T): T {
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
-  } finally {
-    txDepth = 0;
   }
 }
 

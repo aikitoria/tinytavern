@@ -22,7 +22,7 @@ import type { EntityTable } from './entityUtils.ts';
 
 export interface EntityField<T> {
   column: string;
-  /** Returns the SQL value for this column; `cur` is undefined on create. */
+  /** SQL value; `cur` is undefined on create. */
   value: (b: JsonObject, cur: T | undefined) => string | number | null;
 }
 
@@ -38,7 +38,7 @@ export interface EntityConfig<T extends { id: number }> {
   /** Entities that denormalize references to this one, re-fetched after a delete. */
   invalidateOnDelete?: InvalidateEntity[];
   onDelete?: (id: number) => void;
-  /** Copies side-band state (e.g. avatar files) after a row was duplicated. */
+  /** Copies external state (e.g. avatar files) after row duplication. */
   onDuplicate?: (sourceId: number, newId: number) => void;
 }
 
@@ -70,7 +70,6 @@ export function nullableTextField<T>(
   };
 }
 
-/** Foreign-key field: validates that a non-null id exists in `refTable`. */
 export function refIdField<T>(
   key: string,
   column: string,
@@ -88,9 +87,7 @@ export function refIdField<T>(
 }
 
 /**
- * Registers the standard list/create/patch/delete routes for a simple entity
- * table. Patches merge field-by-field against the current row; patch and
- * delete discard speculative swipes since any entity can affect prompts.
+ * Patches merge fields; patch/delete discard speculative swipes because entities affect prompts.
  */
 export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T>): void {
   const publish = (dto: T): T => (cfg.toPublic ? cfg.toPublic(dto) : dto);
@@ -109,9 +106,7 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     return publish(cfg.toDto(rowById(cfg.table, Number(result.lastInsertRowid))));
   });
 
-  // Duplicates the full row (not just the field spec), so columns outside the
-  // editable surface (secrets like api_key, import blobs like card_json) carry
-  // over. The copy is referenced by nothing, so prompts are unaffected.
+  // Include noneditable columns (api_key, card_json); the unreferenced copy cannot affect prompts.
   route.post(`/api/${cfg.table}/:id/duplicate`, ({ params }) => {
     const id = positiveId(params.id);
     const row = rowById(cfg.table, id);

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Repository instructions for coding agents. `AGENTS.md` links to this file.
 
 ## Project
 
@@ -10,14 +10,67 @@ MiniTavern: self-hosted chat frontend for OpenAI-compatible LLM APIs with tree-s
 
 The user keeps stacks running while working. Treat them as someone else's live session:
 
-- **Dev stack** (`docker-compose.dev.yml`: `server`, `client`, host port 5488/5173, state in `./data-dev`) is the user's live hot-reload environment. Never `up`, `stop`, `restart`, or attach `--profile mock` to it. Code edits hot-reload on their own — no restart is ever needed.
-- **Prod stack** (`docker-compose.yml`: container `minitavern`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
+- **Dev stack** (`docker-compose.dev.yml`: `server`, `client`, `caddy-dev`, HTTPS host port 5173, state in `./data-dev`) is the user's live hot-reload environment. Never `up`, `stop`, `restart`, or attach `--profile mock` to it. Application source edits hot-reload on their own. Caddy image/configuration or Compose changes require deployment; do not deploy unless the user requests it.
+- **Prod stack** (`docker-compose.yml`: Node container `minitavern` plus `caddy-prod`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
 - Never run tests or ad-hoc scripts against either live server — the e2e suite mutates global settings, creates endpoints/conversations, and would repoint the active endpoint at the mock mid-session.
 - One-off throwaway containers are always safe: `docker compose -f docker-compose.dev.yml run --rm --no-deps server <cmd>` (used for typecheck/format below). It does not start or affect stack services.
 
 ## Screenshots
 
 When the user references a screenshot by bare filename (e.g. `chrome_o4vT3bpfcy.png`), the file is in `/raid/share/` — Read it from there before responding.
+
+## Stack setup and maintenance
+
+Both stacks use Caddy for HTTPS and public HTTP/1.1, HTTP/2 and HTTP/3 traffic.
+Only Caddy publishes application ports. Node serves APIs and WebSockets over
+internal HTTP; Vite serves the dev client and HMR over internal HTTP.
+
+| Stack       | Compose file             | Public URL            | Services                        | Data         |
+| ----------- | ------------------------ | --------------------- | ------------------------------- | ------------ |
+| Production  | `docker-compose.yml`     | `https://<host>:5487` | `minitavern`, `caddy-prod`      | `./data`     |
+| Development | `docker-compose.dev.yml` | `https://<host>:5173` | `server`, `client`, `caddy-dev` | `./data-dev` |
+
+Both require `certs/cert.pem`, `certs/key.pem`, and the external Docker network
+`my-bridge-network`. Services run as UID/GID `1000:1000`; media directories and
+private files must be accessible to that user. `scripts/init-caddy.sh --media-dirs`
+creates directories and separate dev/prod media-signing and proxy keys under
+`.secrets/`, preserving existing keys. Never log or commit those keys.
+
+For a new installation or an explicitly requested deployment:
+
+```sh
+./scripts/init-caddy.sh --media-dirs
+
+# Production: Node image plus Caddy image containing the compiled client.
+docker compose -f docker-compose.yml build
+docker compose -f docker-compose.yml up -d --no-build minitavern caddy-prod
+
+# Development: bind-mounted application sources and Caddy in front of Vite.
+docker compose -f docker-compose.dev.yml run --rm --no-deps server npm install
+docker compose -f docker-compose.dev.yml build caddy-dev
+docker compose -f docker-compose.dev.yml up -d --no-build server client caddy-dev
+```
+
+The stacks share a Compose project name and use distinct service names. Never
+use `--remove-orphans`: it can remove the other stack. For a Caddy-only change,
+build that service and apply it with `up -d --no-deps --no-build caddy-dev` or
+`caddy-prod` using the appropriate Compose file. Application source edits in
+dev need no container action. Do not attach the mock profile to the live stack;
+use the isolated regression command below.
+
+Reload certificate files through the wrapper, which reads the proxy key before
+Caddy adapts its configuration:
+
+```sh
+docker compose -f docker-compose.yml exec caddy-prod minitavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose -f docker-compose.dev.yml exec caddy-dev minitavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Production database backup: `docker compose exec minitavern node server/src/backup.ts /data/backups/<unique-name>.db`.
+The helper uses SQLite's online backup API and refuses to overwrite files. Never
+copy an active database file directly; the WAL may contain committed changes.
+A full backup also needs the media directories. Preserve `.secrets/` across
+container replacements.
 
 ## Commands
 
@@ -31,24 +84,37 @@ docker compose -f docker-compose.dev.yml run --rm --no-deps server npm run check
 # Format (Prettier, enforced repo-wide)
 docker compose -f docker-compose.dev.yml run --rm --no-deps server npm run format
 
-# E2E tests (the only test suite) — run fully ISOLATED, never against the live stacks:
+# Standalone regressions: launcher creates temporary data/DB paths before importing server code
+docker compose -f docker-compose.dev.yml run --rm --no-deps server npm test
+
+# HTTP E2E tests — run fully ISOLATED, never against the live stacks:
 # separate compose project, server+mock inside one throwaway container,
 # container-local DATA_DIR, non-default ports.
 docker compose -p minitavern-e2e -f docker-compose.dev.yml run --rm --no-deps \
+  -e MEDIA_SIGNING_KEY_FILE= -e CADDY_PROXY_KEY_FILE= -e SESSION_COOKIE_NAME=minitavern_session \
   -e DATA_DIR=/tmp/e2e-data -e E2E_BASE=http://127.0.0.1:15487 -e E2E_MOCK=http://127.0.0.1:19800/v1 \
   server sh -c 'PORT=15487 node server/src/index.ts >/tmp/server.log 2>&1 & \
-    PORT=19800 node scripts/mock-openai.ts >/tmp/mock.log 2>&1 & \
-    sleep 2; node scripts/e2e.ts; ec=$?; tail -5 /tmp/server.log; exit $ec'
+    PORT=19800 node tests/mocks/server.ts >/tmp/mock.log 2>&1 & \
+    sleep 2; npm run test:e2e; ec=$?; tail -5 /tmp/server.log; exit $ec'
 # Afterwards: docker network rm minitavern-e2e_default
 ```
 
+`npm test` discovers all `tests/*.test.ts` files and runs each in a separate
+process with temporary data and database paths. Filter by filename stem with
+`npm test -- client-sync` (or multiple stems). `npm run test:e2e` runs the feature
+modules under `tests/e2e/` in their declared order; the runner passes shared
+fixtures between scenarios. Its mock server is `tests/mocks/server.ts`. Keep
+HTTP E2E runs isolated as shown above. Both suites are part of normal validation.
+
 The presence of `E2E_BASE`/`E2E_MOCK` automatically switches the server and mock to fast timing (mock token cadence 3 ms, comfy poll 100 ms, speculation backoff 50 ms — production defaults are 15/1500/500), so a full run takes ~20 s instead of >1 min. `MOCK_TOKEN_MS`/`COMFY_POLL_MS`/`SPECULATION_BACKOFF_MS` override; keep tokens >= ~3 ms — several tests act mid-stream and need the generation to still be in flight.
+
+**Caddy edge**: `caddy/Caddyfile` selects `/images/*` and `/avatars/*` for the local `minitavern_signed_url` matcher, which only validates the exact signed URI and expiry. Node signs outgoing DTOs in `mediaUrls.ts` (24-hour URLs, reused to avoid repeated signing; no client renewal), never DB/export/copy paths. Caddy serves media directly from read-only directory mounts with `Cache-Control: private, no-store`; signed URLs remain valid until expiry regardless of session revocation. APIs/WS stay session-authenticated in Node. `proxy.ts` requires a private header that Caddy overwrites before accepting original-client-IP/protocol headers. Only Caddy publishes application TCP/UDP ports; dev proxies Vite/HMR, prod serves its compiled client. `.secrets/{dev,prod}` keys are initialized by `scripts/init-caddy.sh`; changes apply on container recreation, never restart/recreate the live stacks during implementation. The isolated HTTP regression command above disables Caddy credentials for its container-local server and mock.
 
 There is no server build step: Node 26 runs the TypeScript sources directly (`node server/src/index.ts`). Only the client is bundled (Vite), and only for production.
 
 ## Architecture
 
-npm workspaces: `shared/` (types only), `server/` (dependency-light Node: `node:sqlite`, `ws`, hand-rolled router), `client/` (SolidJS + Vite).
+npm workspaces: `shared/` (contracts and the callback-based SSE frame reader), `server/` (dependency-light Node: `node:sqlite`, `ws`, hand-rolled router), `client/` (SolidJS + Vite).
 
 **`shared/src/index.ts` is the contract.** All entity types (`Message`, `Conversation`, `Character`, `Endpoint`, …), the WebSocket protocol (`ServerEvent` / `ClientCommand`), and default settings live here and are imported by both sides. Protocol changes start in this file.
 
@@ -81,11 +147,11 @@ Each WebSocket client subscribes to at most one conversation (`events.ts`). The 
 
 **Tree map** (`client/src/components/TreeMap.tsx`): `viewMode: 'map'` renders the whole message tree as a pan/zoom canvas — O(n) layout off `childrenByParent()` (leaves get successive rows, parents center on children, depth → columns), fixed 640×240 cards each mounting a real `MessageNode inMap` (touch gestures disabled; action chrome hidden via treemap.css), bezier edges drawn in screen space on a viewport-sized canvas (no world-sized layers — they exceed GPU texture limits and blank the UI at extreme zoom-out; likewise no `will-change` on the content layer), ImageViewer-style transform pan/zoom, and rAF viewport culling. The layout never changes with zoom (no relayout jumps): below scale 0.45 a card swaps its MessageNode for a snippet tile whose font scales inversely with zoom (constant screen size, em-based CSS in treemap.css, fixed slot clips overflow). Opens centered on the active leaf at scale 1; click activates the branch (stay in map), double-click jumps back to chat.
 
-**Plugins** (`client/src/plugins/`): a client-side plugin (contract in `api.ts`, registry in `index.ts`) contributes composer tools-menu buttons, slash commands, a page in Settings → Tools (`ToolsTab` renders any plugin with a `settingsPage`), and a `messageView` — it claims tool messages by their data and `create()` returns `Header`/`Body` render functions sharing per-message state via closures (MessageNode delegates to them); an optional `swipe` handles both global Left/Right and horizontal touch gestures when the claimed message is last above the composer. Plugin CSS lives in a plugin-owned stylesheet imported by the plugin module. Plugin settings persist in `Settings.pluginSettings[pluginId]` (arbitrary JSON blob, revision-guarded like all settings, synced via the settings invalidate; `pluginSettings()`/`savePluginSettings()` helpers). The Image Generation plugin is the reference: `/image [instruction]` expands `{{instruction}}` client-side, then runs a **tool generation**; swiping forward while its prompt is streaming cancels it before rendering.
+**Plugins** (`client/src/plugins/`): a client-side plugin (contract in `api.ts`, registry in `index.ts`) contributes composer tools-menu buttons, slash commands, a page in Settings → Tools (`ToolsTab` renders any plugin with a `settingsPage`), and a `messageView` — it claims tool messages by their data and `create()` returns `Header`/`Body` render functions sharing per-message state via closures (MessageNode delegates to them); an optional `swipe` handles both global Left/Right and horizontal touch gestures when the claimed message is last above the composer. Plugin CSS lives in a plugin-owned stylesheet imported by the plugin module. Plugin settings persist in `Settings.pluginSettings[pluginId]` (arbitrary JSON blob, revision-guarded like all settings, synced via the settings invalidate; `pluginSettings()` reads merged defaults; editors save through `api.putSettings` using their loaded revision). The Image Generation plugin is the reference: `/image [instruction]` expands `{{instruction}}` client-side, then runs a **tool generation**; swiping forward while its prompt is streaming cancels it before rendering.
 
 **Tool generations** (`POST /api/conversations/:id/tool`): a plugin prompt runs as a foreground generation streaming into a `role: 'tool'` message appended at the active leaf — so the normal streaming/retry machinery applies unchanged. The prompt gets the full chat context plus the macro-expanded prompt as a trailing user turn (`buildToolPrompt`; `{{char}}`/`{{user}}` expand server-side, no name prefill), snapshotted at route time via the generation's `promptOverride` so retries stay consistent. Tool messages are chat-visible but skipped by `buildChatMessages`, so they never enter later prompt history; they can't be swiped/advanced/resumed (assistant-role guards on both sides). Multiple tool prompts may stream concurrently because each is an independent snapshot; deleting an older tool block preserves active descendants and only stops streams whose rows are actually deleted. Starting one discards an in-flight speculative swipe without refilling (a branch switch restarts speculation anyway).
 
-**Image rendering** (`server/src/comfy.ts`): a tool request may carry `image: { workflow, comfyUrl }` (ComfyUI API-format JSON with `{{prompt}}`/`{{seed}}` slots, validated at route time, persisted on the message as `image_render_json`). When the text generation completes, the server expands `{{prompt}}` (JSON-string-escaped message content) and `{{seed}}` (fresh random int per render), submits to ComfyUI with `extra_data.preview_method = 'taesd'`, and listens on the job-scoped Comfy WebSocket. JSON sampler progress and validated binary JPEG/PNG preview frames are relayed as ephemeral `imageProgress` events; previews live only in client progress state and replace the placeholder until the final image arrives. Polling `/history` still drives completion, so the socket is optional. The server downloads the output, appends it to the message's `images[]` (served immutable under `/images/`, stored in `DATA_DIR/images`), then drops ComfyUI's copy with a fire-and-forget `DELETE /view` (same params as the download; our copy is the durable one, so failures are only logged) — this lives in `renderToBuffer`, so every render path including avatar generation cleans up. `imagePending` flags an in-flight render (cleared by finalize on non-done text generations, by the failure path with `genMeta.imageError`, and at boot). `POST /api/messages/:id/render-image` re-renders with a fresh seed; the client supplies the currently selected workflow, which replaces the stored snapshot, while a missing current selection falls back to `image_render_json`. `/:id/active-image` persists the selected alternative; `/:id/delete-image` removes the selected within-message image swipe, hard-deletes its file, and selects the nearest survivor while retaining the prompt/message (including when no images remain). **Image files are hard-deleted with their rows**: every deletion path collects doomed paths before the SQL and unlinks after commit (`server/src/images.ts`), with a startup sweep of unreferenced files as the crash-window backstop. The compose files join the external `my-bridge-network` so the server reaches ComfyUI at `http://comfy:8588`; the mock implements the ComfyUI surface (`/prompt`, `/history`, `/view` — GET and DELETE, both with strict file params — ws progress and binary previews) for e2e, including failure injection via `/control/comfy-fail-next?stage=prompt|render&count=N` and a `/control/comfy-deleted` log of deleted outputs.
+**Image rendering** (`server/src/comfy.ts`): a tool request may carry `image: { workflow, comfyUrl }` (ComfyUI API-format JSON with `{{prompt}}`/`{{seed}}` slots, validated at route time, persisted on the message as `image_render_json`). When the text generation completes, the server expands `{{prompt}}` (JSON-string-escaped message content) and `{{seed}}` (fresh random int per render), submits to ComfyUI with `extra_data.preview_method = 'taesd'`, and listens on the job-scoped Comfy WebSocket. JSON sampler progress and validated binary JPEG/PNG preview frames are relayed as ephemeral `imageProgress` events; previews live only in client progress state and replace the placeholder until the final image arrives. Polling `/history` still drives completion, so the socket is optional. The server downloads the output, appends it to the message's `images[]` (served with `Cache-Control: private, no-store` under `/images/`, stored in `DATA_DIR/images`), then drops ComfyUI's copy with a fire-and-forget `DELETE /view` (same params as the download; our copy is the durable one, so failures are only logged) — this lives in `renderToBuffer`, so every render path including avatar generation cleans up. `imagePending` flags an in-flight render (cleared by finalize on non-done text generations, by the failure path with `genMeta.imageError`, and at boot). `POST /api/messages/:id/render-image` re-renders with a fresh seed; the client supplies the currently selected workflow, which replaces the stored snapshot, while a missing current selection falls back to `image_render_json`. `/:id/active-image` persists the selected alternative; `/:id/delete-image` removes the selected within-message image swipe, hard-deletes its file, and selects the nearest survivor while retaining the prompt/message (including when no images remain). **Image files are hard-deleted with their rows**: every deletion path collects doomed paths before the SQL and unlinks after commit (`server/src/images.ts`), with a startup sweep of unreferenced files as the crash-window backstop. The compose files join the external `my-bridge-network` so the server reaches ComfyUI at `http://comfy:8588`; the mock implements the ComfyUI surface (`/prompt`, `/history`, `/view` — GET and DELETE, both with strict file params — ws progress and binary previews) for e2e, including failure injection via `/control/comfy-fail-next?stage=prompt|render&count=N` and a `/control/comfy-deleted` log of deleted outputs.
 
 **Saved image gallery** (`server/src/routes/gallery.ts`): saving a specific message image swipe copies the raster to a gallery-owned file and snapshots its prompt, render configuration, character name, and optional source links in `gallery_items`. The `source_message_id`, `source_conversation_id`, and `character_id` foreign keys use `ON DELETE SET NULL`; they are navigation/grouping metadata, never ownership, so deleting the source swipe/message/conversation/character cannot delete or orphan the gallery copy. Gallery generation opens an editable prompt form; its second form can SSE-stream an LLM revision from the current prompt plus an edit instruction using the same `appendImagePromptRevisionTask` as chat image regeneration, even after the source chat is gone. Rendering uses the submitted prompt with the currently selected workflow (or the saved workflow fallback) to create a separate gallery item rather than appending an alternative to its source; a job-scoped SSE stream shared with avatar rendering carries live sampler progress and preview frames for the pending card. Selection mode can bulk-delete arbitrary saved items through one transactional route; gallery deletion owns only gallery paths. `sweepOrphanedImages()` treats message image arrays and gallery image paths as live references.
 
@@ -101,6 +167,6 @@ Each WebSocket client subscribes to at most one conversation (`events.ts`). The 
 
 **Speculative swipes** (`server/src/speculation.ts`): when `backgroundSwipeGeneration` is on, the server keeps one unread assistant sibling ahead of the active leaf (`generationKind: 'speculative'`), only while the conversation has a connected viewer and its character has not opted out via `disableBackgroundSwipeGeneration`. By default preparation waits for the primary reply to finish; `parallelBackgroundSwipeGeneration` allows the active streaming reply and its one speculative sibling to overlap (at most two streams, still only one unread alternative). Swiping to the prepared reply stops the outgoing primary, promotes the prepared reply, and refills under the same limit. Stopping/failing the primary, leaving the last subscription, or changing branches cancels in-flight background work and retries. Context changes discard prepared swipes; refill retries use backoff capped at 8 attempts, with explicit user actions resetting the budget.
 
-**Access control**: every HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`; the Vite dev server has an equivalent plugin in `client/vite.config.ts`). Configured via `MINITAVERN_IP_ALLOWLIST` in a gitignored `.env`; defaults allow loopback + private ranges, while an explicitly empty value allows all addresses. Docker-internal traffic (e.g. the mock, e2e runs) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes, avatars, generated images, and WebSocket upgrades require an opaque HTTP-only session cookie. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
+**Access control**: Caddy applies the configured source-IP allowlist to the entire application; every Node HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`, using the client IP forwarded by the trusted Caddy service). Configured via `MINITAVERN_IP_ALLOWLIST` in a gitignored `.env`; the Compose files default to an empty value, which allows all addresses. Docker-internal traffic (e.g. the mock, e2e runs) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes and WebSocket upgrades require an opaque HTTP-only session cookie. Caddy media routes use expiring signed URLs issued through authenticated DTOs. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
 
-**Mock LLM** (`scripts/mock-openai.ts`): OpenAI-compatible streaming endpoint at `http://mock:9800/v1` (from inside the compose network) with `/control/*` endpoints to inject failures; the e2e suite drives it.
+**Mock LLM** (`tests/mocks/server.ts`): OpenAI-compatible streaming endpoint at `http://mock:9800/v1` (from inside the compose network) with `/control/*` endpoints to inject failures; the e2e suite drives it.

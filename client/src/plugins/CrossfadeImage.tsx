@@ -7,10 +7,8 @@ interface ImageLayer {
 }
 
 /**
- * Keeps the previous image underneath long enough for each new source to fade
- * in. This matters for ComfyUI previews, whose data URL changes every few
- * sampler steps; a transition on `img[src]` alone would still snap because the
- * browser replaces the pixels in the existing element.
+ * Retain the previous image during fades; changing img.src replaces pixels
+ * immediately, so an opacity transition on one element would still snap.
  */
 export default function CrossfadeImage(props: {
   src: string;
@@ -30,24 +28,18 @@ export default function CrossfadeImage(props: {
     if (current?.src === src) return;
 
     const layer = { id: ++nextId, src, fade: current != null };
-    // At most one underlay is useful. Dropping older previews also keeps the
-    // large transient data URLs from accumulating during a long render.
+    // Keep one underlay to bound retained preview data URLs.
     setLayers((existing) => [...existing.slice(-1), layer]);
   });
 
   const reveal = (layer: ImageLayer, image: HTMLImageElement) => {
     // A superseded preview may finish decoding after its replacement.
     if (layer.id !== currentId()) return;
-    // The first image has no previous frame to cross-fade from. This is also
-    // how existing image messages appear immediately on initial page load.
     if (!layer.fade) {
       image.style.opacity = '1';
       return;
     }
 
-    // Web Animations drives the actual image element's alpha after decoding:
-    // the new frame is already stacked above its predecessor at opacity 0,
-    // then reaches 1 before the predecessor is removed.
     const animation = image.animate([{ opacity: 0 }, { opacity: 1 }], {
       duration: 300,
       easing: 'ease-out',
@@ -86,9 +78,7 @@ export default function CrossfadeImage(props: {
               alt={current() ? props.alt : ''}
               aria-hidden={!current()}
               class={props.class}
-              // Later grid items naturally paint above earlier ones, so the
-              // incoming frame needs no z-index. An ever-increasing value
-              // would eventually cover the message header controls.
+              // Grid order stacks frames; increasing z-index would eventually cover controls.
               style={{ opacity: layer.fade ? 0 : 1 }}
               classList={{
                 ...(props.classList ?? {}),

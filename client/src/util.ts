@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js';
+import { createEffect, createSignal, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
 import { confirmAction } from './state/confirm.ts';
@@ -16,8 +16,7 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
   /** Server-side copy of the saved row (secrets and files included). */
   duplicate: (id: number) => Promise<T>;
   deletePrompt: string;
-  /** Initial selection for a freshly mounted editor (e.g. the tab's global
-   * default): a valid id starts on that item instead of the blank "new" form. */
+  /** Select this saved item on mount when it exists. */
   initialId?: () => number | null;
   /** Selecting a saved row also selects it for use. `null` represents the
    * editor's virtual built-in/none row; new drafts activate after creation. */
@@ -26,39 +25,6 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
 
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Popover dismiss wiring: close on click outside `root`/`additionalRoot` or on Escape.
- * Call from component setup — the document listeners live for the component's
- * lifetime and are cleaned up with it. */
-export function useDismiss(
-  root: () => HTMLElement | undefined,
-  open: () => boolean,
-  close: () => void,
-  additionalRoot?: () => HTMLElement | undefined,
-): void {
-  const onDocClick = (event: MouseEvent) => {
-    const el = root();
-    const additional = additionalRoot?.();
-    if (
-      open() &&
-      el &&
-      !el.contains(event.target as Node) &&
-      !additional?.contains(event.target as Node)
-    )
-      close();
-  };
-  const onDocKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') close();
-  };
-  onMount(() => {
-    document.addEventListener('click', onDocClick);
-    document.addEventListener('keydown', onDocKey);
-  });
-  onCleanup(() => {
-    document.removeEventListener('click', onDocClick);
-    document.removeEventListener('keydown', onDocKey);
-  });
 }
 
 export function numberOrNull(value: string): number | null {
@@ -122,19 +88,15 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     requestNavigation(() => applySelection(id));
   };
   const closeDetail = () => requestNavigation(rawNav.closeDetail);
-  /** Select-and-load an item that may not be in items() yet (e.g. a fresh
-   * import whose WS invalidate refetch hasn't landed). */
+  /** Load an item before its invalidate refetch reaches items(). */
   const adopt = (item: T) => {
     rawNav.openDetail();
     setSelectedId(item.id);
     load(item);
     activate(item.id);
   };
-  // Seed the initial form once the refs exist: the configured default entity
-  // when one resolves (selected directly, without opening the mobile detail
-  // view), else the built-in/none choice for activating editors or the "new"
-  // form for ordinary editors. Raw DOM defaults diverge from load(undefined)
-  // (e.g. a Select with no '' option stays '').
+  // Wait for refs, then load without opening mobile detail. DOM defaults can
+  // differ from load(undefined), especially for Select values.
   onMount(() => {
     if (selectedId() !== 'new') return;
     const initialId = options.initialId?.();
@@ -147,9 +109,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     load(item);
   });
 
-  // Invalidation refetches reconcile the selected DTO in-place. Keep a clean
-  // form current; preserve a dirty form and require an explicit reload when a
-  // peer changed its server baseline.
+  // Refetches reconcile DTOs in place; preserve dirty forms when their baseline changes.
   createEffect(() => {
     const id = selectedId();
     if (id === 'new') return;
@@ -211,8 +171,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       }
       setSelectedId(item.id);
       setStatus('');
-      // Reload the server's representation so normalized values (and secrets
-      // such as an endpoint key) do not immediately look dirty after saving.
+      // Server-normalized values and secrets must become the new clean baseline.
       load(item);
       if (id === 'new') activate(item.id);
       flashSaved();
@@ -222,8 +181,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       return false;
     }
   };
-  // Copies the saved server state, so unsaved edits first go through the
-  // navigation guard (save/discard prompt) like any selection change.
+  // Duplication copies saved state, so resolve unsaved edits through the navigation guard.
   const duplicate = () => {
     const id = selectedId();
     if (typeof id !== 'number') return;
@@ -295,7 +253,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   };
 }
 
-/** Mobile master-detail paging: list page ⇄ detail page (desktop shows both, ignores this). */
+/** Mobile list/detail paging; desktop shows both. */
 export function createDetailNav() {
   const [detailOpen, setDetailOpen] = createSignal(false);
   return {
@@ -319,7 +277,6 @@ export function createSavedFlash(): [() => boolean, () => void] {
   ];
 }
 
-/** Triggers a browser download of a server URL (content-disposition attachment). */
 export function download(url: string): void {
   const a = document.createElement('a');
   a.href = url;

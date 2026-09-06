@@ -35,17 +35,14 @@ export class DraftSuffixFilter {
 }
 
 /**
- * Adds the composer draft as an upstream-only instruction while keeping strict
- * chat APIs happy: every message has visible content and user/assistant roles
- * alternate. Consecutive history turns of the same role are folded together
- * instead of inventing a fake assistant response.
+ * Add the upstream-only draft instruction with nonempty, alternating turns
+ * for strict chat APIs; merge consecutive same-role messages.
  */
 export function buildDraftCompletionMessages(history: ChatMessage[], draft: string): ChatMessage[] {
   const normalized: ChatMessage[] = [];
   for (const source of history) {
     const content = source.content.trim();
-    // A reasoning-only response cannot be submitted to APIs which require
-    // non-empty messages. Preserve its reasoning alongside a neutral marker.
+    // Strict APIs need visible content even for reasoning-only responses.
     if (!content && !source.reasoning_content?.trim()) continue;
     const message: ChatMessage = {
       ...source,

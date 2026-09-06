@@ -1,9 +1,7 @@
 import type { Ctx } from './router.ts';
 import { HttpError } from './router.ts';
 
-/** Job-scoped SSE listeners shared by avatar and gallery renders. Random job
- * ids are capability-like: progress reaches only the client that opened the
- * matching stream instead of being broadcast to every connected browser. */
+/** Random job IDs restrict avatar/gallery progress to matching SSE listeners. */
 const listenersByJob = new Map<string, Set<Ctx['res']>>();
 
 export function renderJobId(raw: string): string {
@@ -51,8 +49,7 @@ export async function streamRenderProgress(ctx: Ctx): Promise<void> {
     'cache-control': 'no-cache',
     connection: 'keep-alive',
   });
-  // Send headers immediately so the client can register before submitting the
-  // render without racing the first sampler event.
+  // Flush headers before render submission to avoid racing the first sampler event.
   ctx.res.write(': ready\n\n');
   await new Promise<void>((resolve) => {
     ctx.res.once('close', resolve);

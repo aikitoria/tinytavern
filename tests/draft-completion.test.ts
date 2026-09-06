@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import {
-  buildDraftCompletionMessages,
-  DraftSuffixFilter,
-} from '../server/src/draftCompletionPrompt.ts';
+import { requireTestIsolation } from './isolation.ts';
+
+requireTestIsolation();
+const { buildDraftCompletionMessages, DraftSuffixFilter } =
+  await import('../server/src/draftCompletionPrompt.ts');
 
 const alternating = buildDraftCompletionMessages(
   [

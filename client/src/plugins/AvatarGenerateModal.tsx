@@ -4,15 +4,9 @@ import { errorMessage } from '../util.ts';
 import Modal from '../components/Modal.tsx';
 import { avatarPromptTemplates, avatarRenderConfig } from './imageGeneration.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
+import SamplerProgress from './SamplerProgress.tsx';
 
-/**
- * Interactive avatar generation popup: streams the LLM portrait prompt into
- * an editable textarea (macros expanded server-side from the entity), then
- * renders it with the configured avatar workflow. The user can regenerate
- * (fresh seed), edit the text and render again, save the result as the
- * avatar, or cancel — nothing is stored until "Use this avatar" uploads the
- * PNG through the normal avatar route.
- */
+/** Prompt and render previews stay transient until "Use this avatar" uploads the PNG. */
 export default function AvatarGenerateModal(props: {
   kind: 'character' | 'persona';
   id: number;
@@ -29,26 +23,6 @@ export default function AvatarGenerateModal(props: {
   const promptAbort = new AbortController();
   let renderAbort: AbortController | undefined;
   let disposed = false;
-
-  /** Sampler step progress while rendering (falls back to a bare spinner
-   * until the first progress event arrives). */
-  const Progress = () => (
-    <Show when={progress()} fallback={<span class="spinner spinner-wait" />}>
-      {(p) => (
-        <>
-          <span class="img-progress">
-            <span
-              class="img-progress-fill"
-              style={{ width: `${Math.round((p().value / p().max) * 100)}%` }}
-            />
-          </span>
-          <span class="avatar-gen-steps">
-            {p().value}/{p().max}
-          </span>
-        </>
-      )}
-    </Show>
-  );
 
   const render = async () => {
     const image = avatarRenderConfig();
@@ -69,9 +43,7 @@ export default function AvatarGenerateModal(props: {
     setRendering(true);
     setError('');
     try {
-      // Establish the private progress stream before submitting the render so
-      // even the first sampler step is observed. Progress is optional: a
-      // broken stream must not prevent image generation itself.
+      // Subscribe before rendering to capture the first step; progress must not block rendering.
       try {
         const stream = await api.openAvatarRenderProgress(
           jobId,
@@ -130,8 +102,7 @@ export default function AvatarGenerateModal(props: {
       } finally {
         if (!disposed) setStreaming(false);
       }
-      // Only a complete prompt is safe to render. A failed stream may have
-      // emitted a plausible-looking but truncated prefix.
+      // Failed streams may contain partial prompts that should not be rendered.
       if (completed && !promptAbort.signal.aborted && !disposed) await render();
     })();
   });
@@ -186,7 +157,11 @@ export default function AvatarGenerateModal(props: {
             fallback={
               <div class="avatar-gen-placeholder">
                 <Show when={rendering()} fallback={streaming() ? 'Waiting for the prompt…' : null}>
-                  <Progress />
+                  <SamplerProgress
+                    progress={progress()}
+                    stepsClass="avatar-gen-steps"
+                    fallback={<span class="spinner spinner-wait" />}
+                  />
                 </Show>
               </div>
             }
@@ -201,7 +176,11 @@ export default function AvatarGenerateModal(props: {
             )}
           </Show>
           <Show when={rendering() && (previewUrl() || imageUrl())}>
-            <Progress />
+            <SamplerProgress
+              progress={progress()}
+              stepsClass="avatar-gen-steps"
+              fallback={<span class="spinner spinner-wait" />}
+            />
           </Show>
         </div>
         <div class="form-actions">

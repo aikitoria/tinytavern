@@ -1,49 +1,18 @@
-/* Image Generation plugin styles: tool-message image display, render
- * progress, and the settings-page workflow editor. Imported by the plugin
- * module — core styles stay in styles/app.css. */
+/* Image plugin variants. Shared controls and media primitives live in styles/. */
 
-/* Generated image attached to a tool message: fills the message width. */
+/* The message body supplies rounded clipping. */
 .msg-image {
   display: block;
   width: 100%;
-  border-radius: var(--radius-panel);
-  border: 1px solid var(--border);
   cursor: zoom-in;
-}
-
-/* Preview frames are separate img elements so the prior frame can remain
-   visible beneath the new one during the fade. Grid stacking preserves the
-   image's natural layout without an absolutely positioned size jump. */
-.image-crossfade {
-  display: grid;
-}
-
-.image-crossfade > img {
-  grid-area: 1 / 1;
-}
-
-.image-crossfade-underlay {
-  pointer-events: none;
 }
 
 .msg-image-crossfade {
   width: 100%;
-  margin-top: var(--space-2);
-}
-
-.msg-full-bleed .msg-image-crossfade {
-  margin-top: 0;
 }
 
 .msg-full-bleed .msg-swipe:has(> .reasoning-text, > .msg-content) .msg-image-crossfade {
   border-top: 1px solid var(--border);
-}
-
-.msg-full-bleed .msg-image {
-  border: none;
-  /* The full-bleed message body is the single rounded clipping shell for the
-     image, crossfade frames, and overlay controls. Avoid double-rounded seams. */
-  border-radius: 0;
 }
 
 .msg-image-live {
@@ -54,7 +23,6 @@
   opacity: 0.92;
 }
 
-/* Compact render indicator in the message header. */
 .msg-image-pending {
   display: inline-flex;
   align-items: center;
@@ -63,26 +31,7 @@
   font-size: 12.5px;
 }
 
-.img-progress {
-  flex: 0 0 110px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-raised);
-  overflow: hidden;
-}
-
-.img-progress-fill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-hot), var(--secondary));
-  border-radius: var(--radius-pill);
-  transition: width 0.2s ease;
-}
-
-/* Workflow details use the same quiet card language as rename/check controls
- * elsewhere in Settings. */
-/* Give plugin-owned navigation a real top slot in the scrolling detail pane.
- * The mobile Back control remains above it, then scrolls away naturally. */
+/* Keep mobile Back above the sticky tabs so it scrolls away. */
 .master-detail > .form:has(> .image-settings-tabs) {
   padding-top: 0;
 }
@@ -91,21 +40,11 @@
   position: sticky;
   top: 0;
   z-index: 3;
-  display: flex;
-  gap: var(--space-1);
   flex: none;
-  min-width: 0;
   margin: 0 calc(-1 * var(--space-4)) var(--space-2);
   padding: var(--space-2) var(--space-4);
-  overflow-x: auto;
-  overflow-y: hidden;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  scrollbar-width: none;
-}
-
-.image-settings-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .settings-modal .form .image-settings-tab {
@@ -114,7 +53,7 @@
 }
 
 .image-settings-panel {
-  margin-top: 0 !important;
+  margin-top: 0;
 }
 
 .master-detail > .form > .image-settings-notice {
@@ -127,20 +66,11 @@
 }
 
 .workflow-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
   margin-top: var(--space-1);
   padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--bg);
 }
 
 .prompt-preset-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
@@ -157,16 +87,8 @@
   margin-top: var(--space-2);
 }
 
-.prompt-preset-toolbar .select-btn,
-.prompt-preset-toolbar > button {
-  min-height: 40px;
-}
-
-/* MacroTextarea's highlight layer is absolutely positioned. Give prompt
-   editors an explicit containing/stacking context so Chrome cannot briefly
-   place that layer against the modal viewport during reactive preset loads. */
+/* Contain MacroTextarea's absolute highlight layer during reactive preset loads in Chrome. */
 .prompt-preset-editor .macro-box {
-  position: relative;
   width: 100%;
   contain: layout paint;
   isolation: isolate;
@@ -185,9 +107,6 @@
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
 }
 
 .prompt-preset-rename > label {
@@ -208,7 +127,6 @@
   margin-top: var(--space-2);
 }
 
-/* Live workflow-macro presence indicators under the workflow editor. */
 .macro-checks {
   display: flex;
   flex-direction: column;
@@ -226,16 +144,9 @@
   color: var(--md-quote);
 }
 
-/* Avatar generation popup: editable streamed prompt + render preview. Sits
-   inside the shared .form styling; the modal shrinks to fit its content. */
 .modal:has(.avatar-gen) {
   height: auto;
   max-height: min(85dvh, 720px);
-}
-
-.avatar-gen textarea {
-  width: 100%;
-  resize: vertical;
 }
 
 .avatar-gen-preview {

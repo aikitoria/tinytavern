@@ -35,15 +35,7 @@ export default function MessageSelectionBar() {
     const canMove =
       direction === 'up' ? selected.start > 0 : selected.end < selected.pathLength - 1;
     if (!canMove) return;
-    await navigateTree(() =>
-      api.moveMessageRange(
-        selected.messageIds,
-        direction,
-        1,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
-      ),
-    );
+    await navigateTree(() => api.moveMessageRange(selected.messageIds, direction, 1, state.tree));
   };
 
   const moveRange = async () => {
@@ -60,8 +52,7 @@ export default function MessageSelectionBar() {
         selected.messageIds,
         target < selected.start ? 'up' : 'down',
         steps,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
+        state.tree,
       ),
     );
     if (ok) {
@@ -84,13 +75,7 @@ export default function MessageSelectionBar() {
     ) {
       return;
     }
-    const ok = await navigateTree(() =>
-      api.deleteMessageRange(
-        selected.messageIds,
-        state.tree.activeLeafId,
-        state.tree.mutationRevision,
-      ),
-    );
+    const ok = await navigateTree(() => api.deleteMessageRange(selected.messageIds, state.tree));
     if (ok) clearMessageSelection();
   };
 

@@ -6,6 +6,7 @@ import type { GalleryRenderState } from '../state/store.ts';
 import { confirmAction } from '../state/confirm.ts';
 import { errorMessage } from '../util.ts';
 import { activeImageRenderConfig } from '../plugins/imageGeneration.tsx';
+import SamplerProgress from '../plugins/SamplerProgress.tsx';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import GalleryIcon from './GalleryIcon.tsx';
@@ -34,11 +35,6 @@ interface GalleryGroup {
 }
 
 function GalleryPendingCard(props: { render: GalleryRenderState }) {
-  const progress = () =>
-    props.render.value !== undefined && props.render.max
-      ? { value: props.render.value, max: props.render.max }
-      : null;
-
   return (
     <article class="gallery-card gallery-pending-card" aria-label="Rendering new gallery image">
       <Show
@@ -53,21 +49,7 @@ function GalleryPendingCard(props: { render: GalleryRenderState }) {
       </Show>
       <span class="gallery-pending-status">
         <span class="spinner" />
-        <Show when={progress()} fallback={<span>Rendering…</span>}>
-          {(current) => (
-            <>
-              <span class="img-progress">
-                <span
-                  class="img-progress-fill"
-                  style={{ width: `${Math.round((current().value / current().max) * 100)}%` }}
-                />
-              </span>
-              <span>
-                {current().value}/{current().max}
-              </span>
-            </>
-          )}
-        </Show>
+        <SamplerProgress progress={props.render} fallback={<span>Rendering…</span>} />
       </span>
     </article>
   );
@@ -316,7 +298,7 @@ function GalleryCard(props: {
           <div class="gallery-prompt-dialog form">
             <form
               id={renderFormId}
-              class="gallery-prompt-render-form"
+              class="form-stack gallery-prompt-render-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 generate();
@@ -334,7 +316,7 @@ function GalleryCard(props: {
             </form>
             <form
               id={revisionFormId}
-              class="gallery-prompt-revision-form"
+              class="form-stack inset-card gallery-prompt-revision-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 void revisePrompt();

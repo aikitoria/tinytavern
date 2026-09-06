@@ -2,7 +2,6 @@ import { For, Show } from 'solid-js';
 import type { JSX } from 'solid-js';
 import type { EditorId, NoticeKind } from '../util.ts';
 
-/** The subset of createEntityEditor's return value the pane needs. */
 interface PaneEditor {
   selectedId: () => EditorId;
   saved: () => boolean;
@@ -16,25 +15,21 @@ interface PaneEditor {
   duplicate: () => void;
 }
 
-/**
- * Master-detail scaffolding shared by the settings CRUD tabs: the entity list
- * with "+ New", the mobile back button, and the Create/Save/Discard/Delete
- * action row with saved-flash and status hint. The form fields are children.
- */
+/** Shared settings editor shell; children supply the form fields. */
 export default function EntityEditorPane<T extends { id: number }>(props: {
   editor: PaneEditor;
   items: readonly T[];
   itemLabel: (item: T) => JSX.Element;
   newLabel: string;
-  /** Extra list-header content rendered beside "+ New" (e.g. card import). */
+  /** Content beside "+ New". */
   listActions?: JSX.Element;
-  /** Optional filtering control between the list actions and list contents. */
+  /** Filter between list actions and contents. */
   listSearch?: JSX.Element;
-  /** Extra action buttons for existing entities, before Delete (e.g. Export). */
+  /** Actions for existing entities, before Delete. */
   extraActions?: JSX.Element;
-  /** Custom hierarchy for lists that are not flat (e.g. character folders). */
+  /** Replaces the flat list, e.g. with character folders. */
   listContent?: JSX.Element;
-  /** Current global/default entity for editors whose selection also controls use. */
+  /** Entity currently in use, independent of editor selection. */
   activeId?: number | null;
   /** Virtual list row for a nullable built-in/none setting. */
   defaultOption?: { label: string; description: string };

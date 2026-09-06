@@ -17,12 +17,7 @@ interface Position {
   ready: boolean;
 }
 
-/**
- * Shared portaled dropdown surface. It owns viewport collision handling,
- * outside/Escape dismissal, scroll/resize repositioning, optional menu-key
- * navigation, and focus restoration. Triggers keep their own semantics and
- * state, while every popup gets the same behavior and stacking layer.
- */
+/** Shared popup positioning, dismissal and focus handling; triggers own semantics and state. */
 export default function DropdownSurface(props: {
   open: boolean;
   anchor: () => HTMLElement | undefined;
@@ -92,8 +87,7 @@ export default function DropdownSurface(props: {
         : (props.minWidth ?? anchorWidth);
     }
     const width = Math.min(requestedWidth, availableWidth);
-    // Measure at the final width so wrapped labels cannot make the first
-    // placement calculation choose the wrong side of the trigger.
+    // Final-width wrapping must determine which side of the trigger has room.
     surface.style.width = `${width}px`;
     const measuredHeight = surface.scrollHeight;
     const spaceAbove = Math.max(0, rect.top - gap - gutter);
@@ -185,8 +179,7 @@ export default function DropdownSurface(props: {
     setPosition((current) => ({ ...current, ready: false }));
     queueMicrotask(() => {
       if (!props.open) return;
-      // Establish intrinsic dimensions while hidden, then reveal only after
-      // the browser has completed a layout pass for the portaled content.
+      // Reveal only after the portaled content has completed a layout pass.
       reposition(false);
       focusFrame = requestAnimationFrame(() => {
         if (reposition() && props.autoFocus) focusInitialItem();

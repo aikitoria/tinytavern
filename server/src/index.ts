@@ -1,3 +1,4 @@
+import { caddyEnabled } from './mediaUrls.ts';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -101,8 +102,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   const pathname = url.pathname;
 
   if (pathname.startsWith('/api/')) {
-    // API responses may contain conversations or credentials. Never retain
-    // them in a browser or intermediary cache across logout/password changes.
+    // Prevent private API data surviving logout/password changes in caches.
     res.setHeader('cache-control', 'private, no-store');
     if (!isRequestOriginAllowed(req)) {
       res
@@ -110,8 +110,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         .end(JSON.stringify({ error: 'cross-site requests are not allowed' }));
       return;
     }
-    // These are the only API endpoints needed before login. The IP and
-    // same-origin checks above still apply; all application data stays gated.
+    // Pre-login endpoints still require IP and same-origin checks.
     const publicAuthEndpoint =
       pathname === '/api/auth/status' ||
       pathname === '/api/auth/login' ||
@@ -126,6 +125,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     res
       .writeHead(404, { 'content-type': 'application/json' })
       .end(JSON.stringify({ error: 'not found' }));
+    return;
+  }
+
+  if (caddyEnabled) {
+    res.writeHead(404).end('not found');
     return;
   }
 
@@ -226,8 +230,7 @@ if (certPath && keyPath) {
       .end();
   });
   listener = net.createServer((socket) => {
-    // A peer that connects but never sends a byte must not pin the socket
-    // forever — destroy it if the first byte doesn't arrive in time.
+    // Bound sockets held by peers that never send the first byte.
     const sniffTimeout = setTimeout(() => socket.destroy(), 10_000);
     socket.once('readable', () => {
       clearTimeout(sniffTimeout);
@@ -256,8 +259,7 @@ setUnsubscribeHandler((conversationId) => {
   }
 });
 setSubscribeHandler((ws, conversationId) => {
-  // Runs inside the ws 'message' listener with no upstream containment (the
-  // HTTP side has one in router.ts) — an escaping throw would crash the process.
+  // The ws listener has no upstream catch; an escaping throw crashes the process.
   try {
     sendTreeTo(ws, conversationId);
     prepareActiveSwipe(conversationId);

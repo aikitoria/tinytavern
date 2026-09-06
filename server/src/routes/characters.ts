@@ -1,3 +1,5 @@
+import { publicAvatar } from '../mediaUrls.ts';
+import { defineAvatarRoutes } from './avatarRoutes.ts';
 import type { Character, CustomTemplate } from '@minitavern/shared';
 import { stmt, toCharacter } from '../db.ts';
 import { invalidate } from '../events.ts';
@@ -25,6 +27,7 @@ import { rowById } from './entityUtils.ts';
 defineEntityRoutes<Character>({
   table: 'characters',
   toDto: toCharacter,
+  toPublic: publicAvatar,
   fields: [
     nameField((cur) => cur.name),
     refIdField('folderId', 'folder_id', 'character_folders', (cur) => cur.folderId),
@@ -77,29 +80,7 @@ defineEntityRoutes<Character>({
   },
 });
 
-route.put(
-  '/api/characters/:id/avatar',
-  ({ params, raw }: Ctx) => {
-    const id = positiveId(params.id);
-    rowById('characters', id);
-    if (!raw?.length) throw new HttpError(400, 'image body is required');
-    const avatar = saveAvatar('character', id, raw);
-    stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(avatar, id);
-    deleteObsoleteAvatarFiles('character', id);
-    invalidate('characters');
-    return toCharacter(rowById('characters', id));
-  },
-  { rawBody: true },
-);
-
-route.del('/api/characters/:id/avatar', ({ params }: Ctx) => {
-  const id = positiveId(params.id);
-  rowById('characters', id);
-  deleteAvatarFiles('character', id);
-  stmt('UPDATE characters SET avatar = NULL WHERE id = ?').run(id);
-  invalidate('characters');
-  return toCharacter(rowById('characters', id));
-});
+defineAvatarRoutes('character', (row) => publicAvatar(toCharacter(row)));
 
 route.post(
   '/api/characters/import-card',
@@ -135,12 +116,11 @@ route.post(
     stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(avatar, id);
     deleteObsoleteAvatarFiles('character', id);
     invalidate('characters');
-    return toCharacter(rowById('characters', id));
+    return publicAvatar(toCharacter(rowById('characters', id)));
   },
   { rawBody: true },
 );
 
-/** Export a character as a SillyTavern-compatible V2 PNG card. */
 route.get('/api/characters/:id/card', ({ params, res }) => {
   const id = positiveId(params.id);
   const row = rowById('characters', id);
@@ -159,14 +139,12 @@ route.get('/api/characters/:id/card', ({ params, res }) => {
       scenario: character.scenario,
       mes_example: character.examples,
       first_mes: character.firstMessage,
-      // The normalized current state is authoritative. Falling back to the
-      // imported blob would resurrect a system prompt the user explicitly cleared.
+      // Falling back to the imported blob would resurrect an explicitly cleared prompt.
       system_prompt: character.customPrompt ?? '',
     },
   };
   let base = readAvatarFile('character', id);
-  // Legacy uploads trusted the content-type header, so an old .png file may
-  // not actually be one — export with the placeholder instead of a 500.
+  // Legacy uploads trusted Content-Type; invalid PNGs need the placeholder.
   if (base && !isPng(base)) base = null;
   const png = buildCharacterCard(base ?? makePlaceholderPng(), card);
   res

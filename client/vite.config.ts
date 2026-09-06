@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import solid from 'vite-plugin-solid';
-// The vite config runs under Node (outside the client tsconfig), so it can
-// share the server's allowlist parser instead of duplicating it.
+// Vite config runs under Node, so it can import the server parser.
 import { createIpAllowlist } from '../server/src/ipAccess.ts';
 
+const behindCaddy = process.env.CADDY_FRONTEND === '1';
 const target = process.env.VITE_PROXY_TARGET ?? 'http://localhost:5487';
 const allowlist = createIpAllowlist(process.env.MINITAVERN_IP_ALLOWLIST);
 const ipAllowed = (address?: string) => allowlist.isAllowed(address);
@@ -24,7 +24,6 @@ const ipAllowlistPlugin: Plugin = {
   },
 };
 
-// Serve the dev client over HTTPS with the same cert as prod when available.
 const certPath = process.env.TLS_CERT_PATH;
 const keyPath = process.env.TLS_KEY_PATH;
 const https =
@@ -39,12 +38,14 @@ export default defineConfig({
     host: true,
     port: 5173,
     allowedHosts: true,
-    https,
-    proxy: {
-      '/api': { target },
-      '/avatars': { target },
-      '/images': { target },
-      '/ws': { target, ws: true },
-    },
+    https: behindCaddy ? undefined : https,
+    proxy: behindCaddy
+      ? undefined
+      : {
+          '/api': { target },
+          '/avatars': { target },
+          '/images': { target },
+          '/ws': { target, ws: true },
+        },
   },
 });

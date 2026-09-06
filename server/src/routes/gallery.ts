@@ -1,8 +1,9 @@
+import { publicGalleryItem } from '../mediaUrls.ts';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import type { GalleryItem } from '@minitavern/shared';
-import { stmt, toGalleryItem, transaction } from '../db.ts';
-import { openProgressSocket, parseImageConfig, renderToBuffer } from '../comfy.ts';
+import { stmt, toGalleryItem as canonicalGalleryItem, transaction } from '../db.ts';
+import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { invalidate } from '../events.ts';
 import { streamChatCompletion } from '../generation.ts';
 import { copyImage, deleteImageFiles, saveImage } from '../images.ts';
@@ -16,6 +17,7 @@ import {
   renderJobId,
   streamRenderProgress,
 } from '../renderProgress.ts';
+import { streamResponse } from './streamResponse.ts';
 import { objectBody, positiveId, requiredString } from '../validation.ts';
 
 const GALLERY_SELECT = `
@@ -55,8 +57,7 @@ route.get('/api/gallery', () =>
   ),
 );
 
-/** Saves one specific image swipe as an independent file copy. Source links
- * support recognition/navigation only and are deliberately ON DELETE SET NULL. */
+/** Own the image copy; source links use ON DELETE SET NULL for navigation only. */
 route.post('/api/gallery', ({ body }) => {
   const b = objectBody(body);
   if (!Number.isSafeInteger(b.messageId) || (b.messageId as number) <= 0) {
@@ -171,46 +172,25 @@ async function reviseGalleryPrompt(ctx: Ctx): Promise<void> {
   if (activePromptRevisions.has(id)) {
     throw new HttpError(409, 'a prompt revision is already running for this gallery item');
   }
-  const abort = new AbortController();
-  const onClose = () => {
-    if (!ctx.res.writableEnded) abort.abort();
-  };
-  ctx.res.on('close', onClose);
-  if (ctx.res.destroyed) abort.abort();
   activePromptRevisions.add(id);
   try {
-    ctx.res.writeHead(200, {
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-    });
-    try {
+    await streamResponse(ctx.res, async (send, signal) => {
       await streamChatCompletion(
         null,
         buildImagePromptRevisionMessages(prompt, instruction),
         PROMPT_REVISION_MAX_TOKENS,
-        (delta) => ctx.res.write(`data: ${JSON.stringify({ d: delta })}\n\n`),
-        abort.signal,
+        (d) => send({ d }),
+        signal,
       );
-      if (!abort.signal.aborted) ctx.res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    } catch (err) {
-      if (!abort.signal.aborted) {
-        ctx.res.write(
-          `data: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`,
-        );
-      }
-    }
-    ctx.res.end();
+    });
   } finally {
-    ctx.res.off('close', onClose);
     activePromptRevisions.delete(id);
   }
 }
 
 route.post('/api/gallery/:id/revise-prompt', reviseGalleryPrompt);
 
-/** Generates a new, independent gallery item from this item's snapshotted
- * prompt/character. It never appends a swipe to or mutates the source item. */
+/** Render into a new gallery item, preserving the source item. */
 route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
   const id = positiveId(params.id);
   const row = requireGalleryItem(id);
@@ -232,24 +212,15 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
   activeRenders.add(id);
   let saved: string | null = null;
   let committed = false;
-  const clientId = jobId ? randomUUID() : undefined;
-  let progressSocket: Awaited<ReturnType<typeof openProgressSocket>> = null;
   try {
-    progressSocket = jobId
-      ? await openProgressSocket(
-          config.comfyUrl.replace(/\/+$/, ''),
-          clientId!,
-          (value, max) => publishRenderProgress(jobId, value, max),
-          (preview) => publishRenderPreview(jobId, preview),
-        )
-      : null;
     let result: Awaited<ReturnType<typeof renderToBuffer>>;
     try {
       result = await renderToBuffer({
         comfyUrl: config.comfyUrl,
         workflow: config.workflow,
         prompt,
-        clientId,
+        onProgress: jobId ? (value, max) => publishRenderProgress(jobId, value, max) : undefined,
+        onPreview: jobId ? (preview) => publishRenderPreview(jobId, preview) : undefined,
       });
     } catch (err) {
       throw new HttpError(502, err instanceof Error ? err.message : String(err));
@@ -286,7 +257,6 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
     return created;
   } finally {
     activeRenders.delete(id);
-    progressSocket?.close();
     if (jobId) finishRenderProgress(jobId);
     if (saved && !committed) deleteImageFiles([saved]);
   }
@@ -300,3 +270,7 @@ route.del('/api/gallery/:id', ({ params }) => {
   }
   deleteGalleryRows([id]);
 });
+
+function toGalleryItem(row: Record<string, unknown>): GalleryItem {
+  return publicGalleryItem(canonicalGalleryItem(row));
+}

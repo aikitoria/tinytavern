@@ -11,12 +11,8 @@ export interface SelectHandle {
   value: string;
 }
 
-/**
- * Custom dropdown replacing native <select>: the popup repositions on scroll
- * instead of closing (native popups dismiss on any wheel tick, which trackpads
- * emit while merely moving the cursor). Supports controlled use (value +
- * onChange) and the imperative handle used by the settings editors.
- */
+/** Repositions on scroll to avoid native select dismissal on stray trackpad wheel events.
+ * Supports controlled values and imperative settings-editor refs. */
 export default function Select(props: {
   options: SelectOption[];
   value?: string;

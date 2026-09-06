@@ -41,17 +41,14 @@ function endpointApiKey(body: Record<string, unknown>, current?: Endpoint): stri
   if (supplied !== undefined) return supplied;
   if (!current) return '';
   const nextBaseUrl = baseUrl(optionalString(body, 'baseUrl'), current.baseUrl);
-  // A redacted client may preserve a secret only while it still targets the
-  // same scheme/host/port. Retargeting requires the key to be entered again.
+  // Changing origin requires re-entering the key; redacted clients cannot forward it.
   return new URL(nextBaseUrl).origin === new URL(current.baseUrl).origin ? current.apiKey : '';
 }
 
 function genParams(value: unknown, current: GenParams = {}, replace = false): GenParams {
   if (value === undefined) return current;
   const b = objectBody(value);
-  // API PATCHes are field-level: supplying one sampling parameter must not
-  // silently erase all the others. The first-party editor explicitly requests
-  // replacement because its form submits the complete visible parameter set.
+  // PATCH merges parameters; the editor requests replacement for its complete form.
   const next: GenParams = replace ? {} : { ...current };
   const temperature = optionalNumber(b, 'temperature');
   const topP = optionalNumber(b, 'topP');
@@ -122,8 +119,7 @@ defineEntityRoutes<Endpoint>({
     },
   ],
   settingsRef: 'activeEndpointId',
-  // conversations.endpoint_id is ON DELETE SET NULL — clients must drop the
-  // stale per-conversation override, same as characters/personas.
+  // ON DELETE SET NULL clears conversation overrides; refetch them.
   invalidateOnDelete: ['conversations'],
 });
 
@@ -136,8 +132,7 @@ route.get('/api/endpoints/:id/models', async ({ params }) => {
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
-    // undici hides the real failure (ECONNREFUSED, ENOTFOUND, TLS, ...) in err.cause
-    // behind a generic "fetch failed" TypeError.
+    // undici puts connection details in cause behind a generic "fetch failed".
     const cause = (err as { cause?: { code?: string; message?: string } }).cause;
     const reason = err instanceof Error ? err.message : String(err);
     const detail = cause?.code ?? cause?.message;

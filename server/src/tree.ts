@@ -3,8 +3,7 @@ import { stmt, toMessage, transaction } from './db.ts';
 import { collectMessageImages, collectSubtreeImages, deleteImageFiles } from './images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
 
-// Messages created or edited since the last tree broadcast, per conversation.
-// The coalesced broadcast drains this to know which full bodies to include.
+// Full bodies owed to the next coalesced tree broadcast, per conversation.
 const dirtyMessages = new Map<number, Set<number>>();
 
 export function markMessageDirty(conversationId: number, messageId: number): void {
@@ -77,7 +76,7 @@ export function getActiveLeafId(conversationId: number): number | null {
   return row?.active_leaf_id ?? null;
 }
 
-/** Active path, root -> leaf, computed by walking parent pointers up from the leaf. */
+/** Active path in root-to-leaf order. */
 export function getActivePath(conversationId: number): Message[] {
   return getPathToMessage(getActiveLeafId(conversationId));
 }
@@ -85,7 +84,6 @@ export function getActivePath(conversationId: number): Message[] {
 /** Path from the root through a specific message, independent of the active branch. */
 export function getPathToMessage(messageId: number | null): Message[] {
   if (messageId == null) return [];
-  // Single recursive query, leaf -> root; reversed in JS.
   const rows = stmt(
     `WITH RECURSIVE path AS (
        SELECT * FROM messages WHERE id = ?
@@ -98,17 +96,14 @@ export function getPathToMessage(messageId: number | null): Message[] {
 }
 
 /**
- * Sets the conversation's active leaf and repoints active_child_id along the
- * whole new path. That invariant is what lets a later branch switch restore
- * the deep chain that was active beneath any node.
+ * Repoint active_child_id along the entire path so branch switches can restore
+ * the previously active descendants of any node.
  */
 export function setActiveLeaf(conversationId: number, leafId: number | null): void {
-  // Deliberately does NOT touch updated_at: branch switching is reading, not
-  // writing — content-creating routes bump the timestamp themselves.
+  // Only content-creating routes bump updated_at; branch switches must not reorder chats.
   stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(leafId, conversationId);
   bumpConversationRevision(conversationId);
   if (leafId == null) return;
-  // One statement: each ancestor's active_child_id points at its child on the leaf's path.
   stmt(
     `WITH RECURSIVE path(id, parent_id) AS (
        SELECT id, parent_id FROM messages WHERE id = ?
@@ -182,11 +177,8 @@ export function appendMessage(
   });
 }
 
-/** Inserts a message as the sole child immediately after an existing node.
- * Every former child branch moves below the inserted message, and the source's
- * remembered active child moves with them. If the source already had a visible
- * continuation, its deep active leaf stays active; otherwise the insertion
- * becomes the new leaf. */
+/** Insert above all existing child branches, preserving their remembered path.
+ * Keep an existing continuation active; otherwise activate the inserted message. */
 export function insertMessageAfter(
   conversationId: number,
   role: Role,
@@ -239,8 +231,7 @@ export function insertMessageAfter(
     ).run(id, conversationId, afterId, id);
     stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(id, afterId);
 
-    // Re-running setActiveLeaf repairs active-child pointers through the new
-    // link while preserving an existing deep continuation.
+    // Repair active-child pointers through the insertion without losing the continuation.
     setActiveLeaf(conversationId, leaf == null || leaf === afterId ? id : leaf);
     return getMessage(id)!;
   });
@@ -253,7 +244,6 @@ function newestChildId(conversationId: number, parentId: number | null): number 
   return row?.id ?? null;
 }
 
-/** Splices one visible block while already inside the caller's transaction. */
 function spliceMessageInTransaction(messageId: number): string[] {
   const row = getRow(messageId);
   if (!row) return [];
@@ -269,22 +259,16 @@ function spliceMessageInTransaction(messageId: number): string[] {
       messageId,
     ) as { id: number }[]
   ).map((r) => r.id);
-  // The message's own images plus every doomed sibling subtree's, collected
-  // before the deletes cascade; unlinked only after the commit succeeds.
+  // Collect before cascading deletes; unlink only after commit.
   const doomedImages = [
     ...collectMessageImages(messageId),
     ...siblingIds.flatMap((id) => collectSubtreeImages(id)),
   ];
   const leaf = getActiveLeafId(conversationId);
-  // Order matters: drop the sibling group first (their subtrees cascade),
-  // THEN reparent this message's children — reparenting first would put
-  // them into the very group being deleted.
+  // Delete siblings before reparenting children into their group.
   for (const id of siblingIds) stmt('DELETE FROM messages WHERE id = ?').run(id);
   stmt('UPDATE messages SET parent_id = ? WHERE parent_id = ?').run(parentId, messageId);
   stmt('DELETE FROM messages WHERE id = ?').run(messageId);
-  // Re-derive the leaf: descend through the removed node's remembered child
-  // when it was the leaf itself; keep it if it survived (the visible chain);
-  // otherwise it died inside a sibling subtree — fall back near the parent.
   let newLeaf: number | null;
   if (leaf === messageId) {
     newLeaf = activeChildId != null ? descendToLeaf(activeChildId) : parentId;
@@ -299,11 +283,8 @@ function spliceMessageInTransaction(messageId: number): string[] {
 }
 
 /**
- * "Remove this block from the screen" — the delete button's semantics. Each
- * selected message AND its sibling swipes are deleted (an alternative's
- * subtree dies with it), while the visible continuation below the range
- * reattaches above it. A contiguous range is committed atomically, and image
- * files are unlinked only after that commit succeeds.
+ * Delete selected blocks and their sibling subtrees, reattaching the visible
+ * continuation above the range. Commit atomically before unlinking images.
  */
 export function spliceMessages(messageIds: readonly number[]): void {
   const doomedImages: string[] = [];
@@ -320,27 +301,21 @@ export function spliceMessage(messageId: number): void {
 }
 
 /**
- * Moves a message's block one step down the visible chain by rotating it with
- * its active child's block: the child group rises to the parent, the whole
- * sibling group of `messageId` (its swipes included) reattaches under the
- * risen child, and the child's former children reattach under `messageId`.
- * Returns false when there is no block below.
+ * Rotate with the active child: its sibling group rises above messageId
+ * and its swipes; its former children move beneath messageId.
+ * Return false when there is no block below.
  */
 export function rotateDown(messageId: number): boolean {
   const row = getRow(messageId);
   if (!row) return false;
   const { conversation_id: conversationId, parent_id: parentId } = row;
-  // active_child_id can be stale (rotations leave the moved message pointing
-  // at its former child, now its parent) — trusting it here would corrupt the
-  // tree, so verify it is a real child before use.
+  // A stale active_child_id may point to the parent after rotation; verify the relationship.
   const remembered =
     row.active_child_id != null && getRow(row.active_child_id)?.parent_id === messageId
       ? row.active_child_id
       : null;
   const childB = remembered ?? newestChildId(conversationId, messageId);
   if (childB == null) return false;
-  // The risen child's remembered descent becomes the moved message's: those
-  // grandchildren are about to become its children.
   const bActiveChild = getRow(childB)!.active_child_id;
 
   const groupIds = (sql: string, ...binds: (number | null)[]) =>
@@ -364,19 +339,14 @@ export function rotateDown(messageId: number): boolean {
     reparent(messageId, groupC);
     reparent(parentId, groupB);
     reparent(childB, groupA);
-    // Repair the moved message's remembered child (its old one is now its
-    // parent): continue through the risen child's former descent.
+    // The old child is now the parent; inherit its remembered descent.
     stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(bActiveChild, messageId);
-    // The old leaf stays the leaf unless it was the risen child itself (then
-    // the moved message, now the bottom block, becomes the leaf).
     setActiveLeaf(conversationId, leaf === childB ? messageId : leaf);
   });
   return true;
 }
 
-/** Deletes one message swipe and its whole subtree (FK cascade), repairing the
- * active path if it contained that subtree. Used both by the explicit
- * Delete-swipe action and by speculative-swipe cleanup. */
+/** Delete one swipe and its subtree, repairing the active path if affected. */
 export function deleteMessage(messageId: number): void {
   const row = getRow(messageId);
   if (!row) return;
@@ -390,10 +360,8 @@ export function deleteMessage(messageId: number): void {
       const sibling = newestChildId(conversationId, parentId);
       const replacementLeaf = sibling != null ? descendToLeaf(sibling) : parentId;
       if (replacementLeaf != null) {
-        // A completed prepared swipe is still tagged speculative until it is
-        // explicitly revealed. Delete-swipe can reveal it indirectly, so
-        // normalize every speculative node on the replacement path before a
-        // later context invalidation bulk-deletes it and its descendants.
+        // Deletion can reveal speculative swipes. Promote the replacement path
+        // so later context invalidation cannot delete it and its descendants.
         stmt(
           `WITH RECURSIVE path(id, parent_id) AS (
              SELECT id, parent_id FROM messages WHERE id = ?

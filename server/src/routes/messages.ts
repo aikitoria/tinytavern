@@ -1,10 +1,7 @@
-// RACE-FREE-BY-SYNCHRONY: every route handler in this file is race-free only
-// because it runs fully synchronously between check and act (no `await`
-// mid-handler) — Node's single thread then serializes handlers against each
-// other and against generation/streaming callbacks. A single future `await`
-// mid-handler reopens the double-generation and active-leaf races the guards
-// below protect against.
-import { randomUUID } from 'node:crypto';
+import { publicMessage } from '../mediaUrls.ts';
+// Keep check-and-act synchronous: an await lets handlers and generation callbacks
+// interleave, reopening double-generation and active-leaf races.
+import { copyMessageImages } from './conversationCopies.ts';
 import { stmt, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {
@@ -34,23 +31,21 @@ import {
   stopGeneration,
 } from '../generation.ts';
 import { broadcastTree } from '../sync.ts';
-import { invalidate } from '../events.ts';
+import { invalidate, hasConversationSubscribers } from '../events.ts';
 import {
   cancelBackgroundSwipe,
   getConversation,
-  isConversationWatched,
   prepareNextSwipe,
   spawnAssistantReply,
   touchConversation,
 } from './conversations.ts';
-import { objectBody, positiveId, requiredString } from '../validation.ts';
-import { optionalNullableId, optionalNumber } from '../validation.ts';
-import { requireExpectedActiveLeaf } from '../concurrency.ts';
+import { objectBody, optionalNumber, positiveId, requiredString } from '../validation.ts';
+import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
 import { discardSpeculativeSwipes, markSwipeRead, nextUnreadSibling } from '../speculation.ts';
 import { parseImageConfig, startImageRender } from '../comfy.ts';
 import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../prompt.ts';
 import { bumpConversationRevision } from '../conversationRevision.ts';
-import { copyImage, deleteImageFiles } from '../images.ts';
+import { deleteImageFiles } from '../images.ts';
 
 function requireMessage(id: number) {
   const msg = getMessage(id);
@@ -74,9 +69,8 @@ function requireDeleteCompatible(conversationId: number): void {
   }
 }
 
-/** A block splice deletes the selected row and every sibling subtree, but its
- * own descendants survive and move up one level. Stop only active tool streams
- * that fall inside that exact deletion set. */
+/** Splicing deletes this row and sibling subtrees; its own descendants survive.
+ * Stop only streams in the deletion set. */
 function stopGenerationsDeletedBySplice(message: ReturnType<typeof requireMessage>): void {
   for (const mid of activeGenerationMessageIds(message.conversationId)) {
     if (mid === message.id) {
@@ -91,20 +85,10 @@ function stopGenerationsDeletedBySplice(message: ReturnType<typeof requireMessag
   }
 }
 
-/** Delete-swipe removes the selected row and its entire subtree. */
 function stopGenerationsInSubtree(message: ReturnType<typeof requireMessage>): void {
   for (const mid of activeGenerationMessageIds(message.conversationId)) {
     if (getPathToMessage(mid).some((node) => node.id === message.id)) stopGeneration(mid);
   }
-}
-
-function requireExpectedLeaf(message: ReturnType<typeof requireMessage>, body: unknown): void {
-  const b = objectBody(body);
-  requireExpectedActiveLeaf(
-    message.conversationId,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
 }
 
 function messageIdsFromBody(body: Record<string, unknown>): number[] {
@@ -142,7 +126,7 @@ function requireActiveMessageRange(messageIds: readonly number[]): {
   return { conversationId, pathLength: path.length, start };
 }
 
-/** Resume: continue the last assistant reply in place via prefill-style trailing assistant message. */
+/** Resume in place with an assistant prefill. */
 route.post('/api/messages/:id/continue', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   if (msg.role !== 'assistant') throw new HttpError(400, 'only assistant messages can be resumed');
@@ -153,7 +137,7 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
     throw new HttpError(409, 'an image render is running for this message');
   }
   const conv = getConversation(msg.conversationId);
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
   if (conv.activeLeafId !== msg.id)
     throw new HttpError(400, 'only the last message on the branch can be resumed');
   if (!supportsAssistantContinuation(conv)) {
@@ -168,7 +152,7 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
     { content: msg.content, reasoning: msg.reasoning ?? '' },
     {
       onDone: () => {
-        if (isConversationWatched(msg.conversationId)) prepareNextSwipe(msg.id);
+        if (hasConversationSubscribers(msg.conversationId)) prepareNextSwipe(msg.id);
       },
       onError: () => {
         if (getActiveLeafId(msg.conversationId) === msg.id)
@@ -186,13 +170,12 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
 route.post('/api/messages/:id/advance', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   if (msg.role !== 'assistant') throw new HttpError(400, 'only assistant messages can advance');
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
 
   const nextId = nextUnreadSibling(msg);
 
   if (nextId != null) {
-    // Revealing a not-yet-seen speculative reply is "new content" for the
-    // sidebar, exactly like generating it in the foreground would have been.
+    // Revealing an unread swipe counts as new content for sidebar ordering.
     const wasUnread = getMessage(nextId)?.generationKind === 'speculative';
     if (hasActiveGeneration(msg.conversationId)) {
       stopGeneration(msg.id);
@@ -228,13 +211,8 @@ route.post('/api/messages/:id/advance', ({ params, body }) => {
   return { activeLeafId: mid, assistantMessageId: mid };
 });
 
-/**
- * Steered regeneration: assistant output becomes a sibling swipe; revised
- * image-tool output becomes a new child message immediately after the source.
- * The instruction is rendered into the conversation's resolved steer template
- * and injected into this generation's prompt only — it never enters history.
- * Tool revisions retain their image render configuration.
- */
+/** Assistant revisions become sibling swipes; tool revisions become children
+ * retaining their render config. The instruction never enters history. */
 route.post('/api/messages/:id/regenerate', ({ params, body }) => {
   let msg = requireMessage(positiveId(params.id));
   if (msg.role !== 'assistant' && msg.role !== 'tool') {
@@ -242,16 +220,12 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
   }
   const b = objectBody(body);
   const instruction = requiredString(b, 'instruction');
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
   requireIdle(msg.conversationId);
-  // requireIdle may have deleted the message itself (in-flight speculative
-  // sibling); re-fetch before building on it (same as duplicate).
+  // requireIdle may delete this message if it is an in-flight speculative sibling.
   msg = requireMessage(msg.id);
   const conv = getConversation(msg.conversationId);
-  // Snapshot the steered prompt at route time (the tool-generation pattern):
-  // retries must resend exactly this prompt, whatever changes later. Simple
-  // macro substitution, not the template engine. Function replacer so '$'
-  // sequences in the instruction stay literal.
+  // Snapshot the prompt now so retries reuse it even if context changes.
   if (msg.role === 'tool') {
     if (!msg.content.trim()) throw new HttpError(400, 'tool message has no output to revise');
     if (msg.imagePending) throw new HttpError(409, 'an image render is running for this message');
@@ -312,32 +286,24 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
       assistantMessageId: next.id,
     };
   }
+  // A function replacer keeps '$' sequences in the instruction literal.
   const steer = resolveSteerTemplate(conv).replaceAll(/\{\{instruction\}\}/gi, () => instruction);
-  // The temporary upstream context includes the target reply so the model can
-  // actually revise it. The new stored message still uses msg.parentId below,
-  // making it a sibling; the original never becomes part of the new branch.
+  // Include the original in upstream context, but store the revision as a sibling.
   const prompt = buildSteeredPrompt(conv, getPathToMessage(msg.id), steer, msg.name);
   const mid = spawnAssistantReply(conv, msg.parentId, msg.name, prompt);
   invalidate('conversations');
   return { activeLeafId: mid, assistantMessageId: mid };
 });
 
-/** In-place edit (typo fixes, tweaking an AI reply) — no branch created. */
 route.patch('/api/messages/:id', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
   if (typeof b.content !== 'string') throw new HttpError(400, 'content is required');
   const content = b.content.trim();
   if (!content) throw new HttpError(400, 'content is required');
-  requireExpectedActiveLeaf(
-    msg.conversationId,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
+  requireBodyPrecondition(msg.conversationId, b);
   if (msg.status === 'streaming') throw new HttpError(409, 'message is still streaming');
-  // The renderer snapshots content when it starts. Editing that content while
-  // the job is pending would attach an image generated from the old prompt to
-  // the newly edited description.
+  // Pending renders use a prompt snapshot; editing would mismatch image and description.
   if (msg.imagePending) {
     throw new HttpError(409, 'an image render is running for this message');
   }
@@ -351,7 +317,7 @@ route.patch('/api/messages/:id', ({ params, body }) => {
   touchConversation(msg.conversationId);
   broadcastTree(msg.conversationId);
   invalidate('conversations');
-  return getMessage(msg.id);
+  return publicMessage(getMessage(msg.id));
 });
 
 /** Edit-as-branch: new sibling with the edited content; for user messages a reply is generated. */
@@ -360,11 +326,7 @@ route.post('/api/messages/:id/edit-branch', ({ params, body }) => {
   const b = objectBody(body);
   const content = (typeof b.content === 'string' ? b.content : '').trim();
   if (!content) throw new HttpError(400, 'content is required');
-  requireExpectedActiveLeaf(
-    msg.conversationId,
-    optionalNullableId(b, 'expectedActiveLeafId'),
-    optionalNumber(b, 'expectedMutationRevision'),
-  );
+  requireBodyPrecondition(msg.conversationId, b);
   requireIdle(msg.conversationId);
   const sibling = appendMessage(
     msg.conversationId,
@@ -389,11 +351,10 @@ route.post('/api/messages/:id/edit-branch', ({ params, body }) => {
 /** Branch switch: activate this sibling and restore its remembered descendant chain. */
 route.post('/api/messages/:id/activate', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
   const wasUnread = msg.generationKind === 'speculative';
   if (hasActiveGeneration(msg.conversationId)) {
-    // A prepared swipe can be selected before its primary reply has finished,
-    // including when the prepared swipe itself finished first.
+    // The prepared swipe may finish before its primary reply does.
     if (wasUnread) {
       const leafId = getActiveLeafId(msg.conversationId);
       const leaf = leafId == null ? null : getMessage(leafId);
@@ -417,55 +378,30 @@ route.post('/api/messages/:id/activate', ({ params, body }) => {
 
 route.del('/api/messages/:id', ({ params, req }) => {
   const msg = requireMessage(positiveId(params.id));
-  const rawExpected = new URL(req.url ?? '/', 'http://x').searchParams.get('expectedActiveLeafId');
-  const rawRevision = new URL(req.url ?? '/', 'http://x').searchParams.get(
-    'expectedMutationRevision',
-  );
-  const expected =
-    rawExpected === 'null' ? null : rawExpected == null ? undefined : Number(rawExpected);
-  requireExpectedActiveLeaf(
-    msg.conversationId,
-    expected,
-    rawRevision == null ? undefined : Number(rawRevision),
-  );
+  requireQueryPrecondition(msg.conversationId, req.url);
   requireDeleteCompatible(msg.conversationId);
   stopGenerationsDeletedBySplice(msg);
   // Removing a block changes the context every prepared swipe was generated for.
   discardSpeculativeSwipes(msg.conversationId);
-  // Splice, not subtree-delete: the tree below reattaches to the parent.
-  // Whole-branch removal is what /del (delete-tail) is for.
+  // Preserve the continuation; /del (delete-tail) removes the whole branch.
   spliceMessage(msg.id);
   touchConversation(msg.conversationId);
   broadcastTree(msg.conversationId);
   invalidate('conversations');
 });
 
-/** Deletes only this sibling alternative and its descendants. Unlike the
- * regular block delete above, sibling swipes survive and no descendants are
- * spliced upward into the remaining branch. */
+/** Delete this swipe's subtree, preserving other sibling alternatives. */
 route.del('/api/messages/:id/swipe', ({ params, req }) => {
   let msg = requireMessage(positiveId(params.id));
-  const rawExpected = new URL(req.url ?? '/', 'http://x').searchParams.get('expectedActiveLeafId');
-  const rawRevision = new URL(req.url ?? '/', 'http://x').searchParams.get(
-    'expectedMutationRevision',
-  );
-  const expected =
-    rawExpected === 'null' ? null : rawExpected == null ? undefined : Number(rawExpected);
-  requireExpectedActiveLeaf(
-    msg.conversationId,
-    expected,
-    rawRevision == null ? undefined : Number(rawRevision),
-  );
+  requireQueryPrecondition(msg.conversationId, req.url);
   const findAlternative = () =>
     stmt(
       'SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id != ? LIMIT 1',
     ).get(msg.conversationId, msg.parentId, msg.id);
-  // A true sole-child rejection must be side-effect free: in particular, do
-  // not cancel an unrelated background generation before returning 400.
+  // Reject a sole child before cleanup can cancel unrelated background work.
   if (!findAlternative()) throw new HttpError(400, 'message has no other swipe to activate');
   requireDeleteCompatible(msg.conversationId);
-  // Compatibility cleanup may remove an in-flight prepared sibling (or the
-  // requested speculative message itself), so validate the post-cleanup group.
+  // Cleanup may delete a speculative sibling or this message; revalidate both.
   msg = requireMessage(msg.id);
   if (!findAlternative()) throw new HttpError(400, 'message has no other swipe to activate');
   stopGenerationsInSubtree(msg);
@@ -476,9 +412,8 @@ route.del('/api/messages/:id/swipe', ({ params, req }) => {
   return { activeLeafId: getActiveLeafId(msg.conversationId) };
 });
 
-/** Moves a contiguous active-path range as one block. Every selected message's
- * sibling swipes travel with it, preserving the tree rather than flattening
- * the visible path. `steps` is the number of unselected slots to cross. */
+/** Move an active-path range with its sibling swipes.
+ * `steps` counts unselected slots crossed. */
 route.post('/api/message-ranges/move', ({ body }) => {
   const b = objectBody(body);
   const messageIds = messageIdsFromBody(b);
@@ -491,7 +426,7 @@ route.post('/api/message-ranges/move', ({ body }) => {
   if (!Number.isSafeInteger(steps) || (steps as number) <= 0) {
     throw new HttpError(400, 'steps must be a positive integer');
   }
-  requireExpectedLeaf(first, body);
+  requireBodyPrecondition(first.conversationId, body);
   const initialRange = requireActiveMessageRange(messageIds);
   const initialAvailableSteps =
     direction === 'up'
@@ -528,14 +463,12 @@ route.post('/api/message-ranges/move', ({ body }) => {
   };
 });
 
-/** Deletes a contiguous visible range atomically. Each selected block's swipe
- * alternatives are deleted with it; the continuation after the range is
- * spliced back onto the block before the range. */
+/** Delete a visible range and its swipe alternatives, preserving the continuation. */
 route.post('/api/message-ranges/delete', ({ body }) => {
   const b = objectBody(body);
   const messageIds = messageIdsFromBody(b);
   const first = requireMessage(messageIds[0]!);
-  requireExpectedLeaf(first, body);
+  requireBodyPrecondition(first.conversationId, body);
   requireActiveMessageRange(messageIds);
   requireDeleteCompatible(first.conversationId);
   const range = requireActiveMessageRange(messageIds);
@@ -550,8 +483,7 @@ route.post('/api/message-ranges/delete', ({ body }) => {
   return { activeLeafId: getActiveLeafId(range.conversationId) };
 });
 
-/** Moves a message's block one step up or down the visible chain. Down rotates
- * it with its active child's block; up is the same rotation on the parent. */
+/** Down rotates with the active child's block; up rotates the parent. */
 route.post('/api/messages/:id/move', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
@@ -559,7 +491,7 @@ route.post('/api/messages/:id/move', ({ params, body }) => {
   if (direction !== 'up' && direction !== 'down') {
     throw new HttpError(400, "direction must be 'up' or 'down'");
   }
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
   requireIdle(msg.conversationId);
   if (!getActivePath(msg.conversationId).some((m) => m.id === msg.id)) {
     throw new HttpError(400, 'message is not on the active branch');
@@ -573,33 +505,21 @@ route.post('/api/messages/:id/move', ({ params, body }) => {
   return { activeLeafId: getActiveLeafId(msg.conversationId) };
 });
 
-/** Inserts a duplicate immediately after the selected message. Existing
- * children move beneath the copy so the visible continuation and active leaf
- * survive. Generated images use independent files for safe hard deletion. */
+/** Insert a copy before existing children, preserving the continuation and active leaf.
+ * Image files are independent so either copy can be hard-deleted safely. */
 route.post('/api/messages/:id/duplicate', ({ params, body }) => {
   let msg = requireMessage(positiveId(params.id));
-  requireExpectedLeaf(msg, body);
+  requireBodyPrecondition(msg.conversationId, body);
   requireIdle(msg.conversationId);
-  // requireIdle may have deleted the message itself (in-flight speculative
-  // sibling); re-fetch, and only completed content is worth copying.
+  // requireIdle may delete this message if it is an in-flight speculative sibling.
   msg = requireMessage(msg.id);
   if (msg.status !== 'done') {
     throw new HttpError(400, 'only completed messages can be duplicated');
   }
   discardSpeculativeSwipes(msg.conversationId);
   const copiedImages: string[] = [];
-  let copiedActiveImage = 0;
   try {
-    for (const [sourceIndex, imagePath] of msg.images.entries()) {
-      const ext = imagePath.includes('.') ? imagePath.slice(imagePath.lastIndexOf('.')) : '.png';
-      const copied = copyImage(imagePath, `msg-copy-${randomUUID()}${ext}`);
-      if (copied == null) {
-        console.warn(`[messages] duplicate: source image ${imagePath} is missing`);
-        continue;
-      }
-      if (sourceIndex === msg.activeImage) copiedActiveImage = copiedImages.length;
-      copiedImages.push(copied);
-    }
+    const { images, activeImage } = copyMessageImages(msg, copiedImages);
     const copy = transaction(() => {
       const inserted = insertMessageAfter(
         msg.conversationId,
@@ -620,8 +540,8 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
       ).run(
         msg.reasoning,
         renderRow.image_render_json,
-        JSON.stringify(copiedImages),
-        copiedActiveImage,
+        JSON.stringify(images),
+        activeImage,
         inserted.id,
       );
       touchConversation(msg.conversationId);
@@ -636,13 +556,11 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
   }
 });
 
-/** Renders another image alternative with the message's current content and a
- * fresh seed. A caller-supplied current workflow replaces the stored snapshot;
- * without one, the stored configuration remains the fallback. */
+/** Render a fresh image alternative; a supplied workflow replaces the saved config. */
 route.post('/api/messages/:id/render-image', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = body == null ? {} : objectBody(body);
-  requireExpectedLeaf(msg, b);
+  requireBodyPrecondition(msg.conversationId, b);
   if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
     throw new HttpError(400, 'message is not on the active branch');
   }
@@ -685,11 +603,10 @@ route.post('/api/messages/:id/render-image', ({ params, body }) => {
   return { rendering: true };
 });
 
-/** Selects which image alternative a message displays (persisted, synced). */
 route.post('/api/messages/:id/active-image', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
-  requireExpectedLeaf(msg, b);
+  requireBodyPrecondition(msg.conversationId, b);
   if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
     throw new HttpError(400, 'message is not on the active branch');
   }
@@ -708,13 +625,11 @@ route.post('/api/messages/:id/active-image', ({ params, body }) => {
   broadcastTree(msg.conversationId);
 });
 
-/** Removes one generated image alternative while preserving the prompt and
- * message row. The selected index moves to the next image at the same slot,
- * or the previous image when the deleted one was last. */
+/** Remove one image alternative, preserving the prompt and selecting the nearest survivor. */
 route.post('/api/messages/:id/delete-image', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
-  requireExpectedLeaf(msg, b);
+  requireBodyPrecondition(msg.conversationId, b);
   if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
     throw new HttpError(400, 'message is not on the active branch');
   }
@@ -746,7 +661,7 @@ route.post('/api/messages/:id/delete-image', ({ params, body }) => {
   deleteImageFiles([removed!]);
   broadcastTree(msg.conversationId);
   invalidate('conversations');
-  return getMessage(msg.id);
+  return publicMessage(getMessage(msg.id));
 });
 
 route.post('/api/generations/:id/stop', ({ params, body }) => {

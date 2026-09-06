@@ -17,9 +17,7 @@ export default function ChatView() {
     const top = scroller.scrollTop;
     const movingUp = top < lastScrollTop - 1;
     const atBottom = scroller.scrollHeight - top - scroller.clientHeight < 2;
-    // Any upward movement is an explicit request to stop following, even if
-    // it only moved a few pixels from the bottom. Scrolling fully back down
-    // opts into following again.
+    // Upward intent overrides the at-bottom tolerance.
     if (movingUp) stickToBottom = false;
     else if (atBottom) stickToBottom = true;
     lastScrollTop = top;
@@ -43,16 +41,12 @@ export default function ChatView() {
     if (!touch) return;
     const dx = touch.clientX - lastTouchX;
     const dy = touch.clientY - lastTouchY;
-    // A downward finger drag scrolls toward older content. Ignore horizontal
-    // message-swipe gestures and disengage before the browser moves the page.
+    // Disengage before scrolling toward older content; ignore horizontal swipes.
     if (dy > 0 && Math.abs(dy) > Math.abs(dx)) stickToBottom = false;
     lastTouchX = touch.clientX;
     lastTouchY = touch.clientY;
   };
 
-  // Arrow keys operate the last swipeable item above the composer: plugin
-  // media alternatives take priority, then ordinary assistant siblings.
-  // Anything non-empty and editable keeps its normal caret behavior.
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.repeat) return;
@@ -87,7 +81,6 @@ export default function ChatView() {
   onMount(() => document.addEventListener('keydown', onKey));
   onCleanup(() => document.removeEventListener('keydown', onKey));
 
-  // A freshly loaded conversation (reload, switch) starts at the bottom.
   createEffect(() => {
     if (state.tree.conversationId == null) return;
     stickToBottom = true;
@@ -97,14 +90,12 @@ export default function ChatView() {
     });
   });
 
-  // Content height changes (markdown settling, font swap, typing dots,
-  // streaming growth) keep the view pinned while anchored at the bottom.
+  // Catch layout changes beyond token updates, including markdown and font settling.
   const resizeObserver = new ResizeObserver(() => {
     if (stickToBottom) scroller.scrollTop = scroller.scrollHeight;
   });
   onCleanup(() => resizeObserver.disconnect());
 
-  // Follow the stream / new messages while the user is near the bottom.
   createEffect(() => {
     const path = activePath();
     const last = path[path.length - 1];
@@ -126,8 +117,7 @@ export default function ChatView() {
       <Show
         when={selectedConversation()}
         fallback={
-          // Render nothing until server state has loaded once — otherwise the
-          // welcome screen flashes for a few frames on every reload.
+          // Hide until booted to prevent a welcome-screen flash on reload.
           <div class="chat-empty" classList={{ hidden: !state.booted }}>
             <h1>MiniTavern</h1>
             <p>Small but mighty.</p>

@@ -1,4 +1,5 @@
 import { deflateSync, inflateSync } from 'node:zlib';
+import { chunk } from './pngChunk.ts';
 
 export interface ParsedCard {
   name: string;
@@ -67,7 +68,7 @@ function extractTextChunks(png: Buffer): Map<string, string> {
         const compressed = data[nul + 1] === 1;
         if (data[nul + 1] !== 0 && !compressed) throw new Error('Invalid iTXt compression flag');
         if (data[nul + 2] !== 0) throw new Error('Unsupported iTXt compression method');
-        // Skip compression flag+method, then language tag and translated keyword (both NUL-terminated).
+        // Skip compression bytes, then the NUL-terminated language and translated keyword.
         let p = nul + 3;
         const languageEnd = data.indexOf(0, p);
         if (languageEnd === -1) throw new Error('Invalid iTXt language field');
@@ -143,36 +144,12 @@ export function parseCharacterCard(png: Buffer): ParsedCard {
     name: name.trim(),
     personality,
     scenario: scenario?.trim() ?? '',
-    // Stored as-is: SillyTavern separates multiple examples with <START>
-    // lines, which is exactly the format this field keeps.
+    // Preserve SillyTavern's <START>-separated examples.
     examples: examples?.trim() ?? '',
     firstMessage: firstMessage?.trim() ?? '',
     systemPrompt: systemPrompt?.trim() || null,
     raw: parsed,
   };
-}
-
-// ---- Card export ----
-
-const CRC_TABLE = new Uint32Array(256).map((_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-
-function crc32(buf: Buffer): number {
-  let c = 0xffffffff;
-  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function buildChunk(type: string, data: Buffer): Buffer {
-  const head = Buffer.concat([Buffer.from(type, 'latin1'), data]);
-  const out = Buffer.alloc(head.length + 8);
-  out.writeUInt32BE(data.length, 0);
-  head.copy(out, 4);
-  out.writeUInt32BE(crc32(head), head.length + 4);
-  return out;
 }
 
 /** Minimal fallback portrait for characters without a PNG avatar. */
@@ -195,16 +172,13 @@ export function makePlaceholderPng(): Buffer {
   ihdr[9] = 2; // RGB
   return Buffer.concat([
     PNG_SIGNATURE,
-    buildChunk('IHDR', ihdr),
-    buildChunk('IDAT', deflateSync(raw, { level: 9 })),
-    buildChunk('IEND', Buffer.alloc(0)),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
-/**
- * Embeds a V2 character card into a PNG: strips any existing chara/ccv3
- * chunks and inserts a fresh tEXt 'chara' chunk before IEND.
- */
+/** Replace existing chara/ccv3 metadata with a V2 tEXt 'chara' chunk. */
 export function buildCharacterCard(png: Buffer, card: unknown): Buffer {
   if (png.length < 8 || !png.subarray(0, 8).equals(PNG_SIGNATURE)) {
     throw new Error('avatar is not a PNG');
@@ -217,23 +191,23 @@ export function buildCharacterCard(png: Buffer, card: unknown): Buffer {
       throw new Error('PNG contains a truncated chunk');
     }
     const type = png.toString('latin1', off + 4, off + 8);
-    const chunk = png.subarray(off, off + 12 + length);
+    const rawChunk = png.subarray(off, off + 12 + length);
     off += 12 + length;
     if (type === 'tEXt' || type === 'iTXt') {
-      const data = chunk.subarray(8, 8 + length);
+      const data = rawChunk.subarray(8, 8 + length);
       const nul = data.indexOf(0);
       const keyword = nul > 0 ? data.toString('latin1', 0, nul) : '';
-      if (keyword === 'chara' || keyword === 'ccv3') continue; // strip old card
+      if (keyword === 'chara' || keyword === 'ccv3') continue;
     }
     if (type === 'IEND') break;
-    parts.push(chunk);
+    parts.push(rawChunk);
   }
   const payload = Buffer.concat([
     Buffer.from('chara', 'latin1'),
     Buffer.from([0]),
     Buffer.from(Buffer.from(JSON.stringify(card), 'utf8').toString('base64'), 'latin1'),
   ]);
-  parts.push(buildChunk('tEXt', payload));
-  parts.push(buildChunk('IEND', Buffer.alloc(0)));
+  parts.push(chunk('tEXt', payload));
+  parts.push(chunk('IEND', Buffer.alloc(0)));
   return Buffer.concat(parts);
 }

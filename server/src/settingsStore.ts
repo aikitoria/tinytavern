@@ -7,9 +7,7 @@ export function getSettings(): Settings {
   const row = stmt('SELECT value FROM settings WHERE key = ?').get('app') as
     { value: string } | undefined;
   if (!row) return { ...DEFAULT_SETTINGS };
-  // Stored blobs may carry keys that moved out of Settings (e.g. the old global
-  // steerTemplate) — keep only known keys so stale keys neither surface in the
-  // API nor get written back on the next save.
+  // Drop obsolete keys so they cannot leak into the API or future saves.
   const stored = JSON.parse(row.value) as Record<string, unknown>;
   const settings = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
   for (const key of Object.keys(settings)) {

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { appendChatMessage, withDisabledPrefillSpeakerNote } from '../server/src/prompt.ts';
 import type { BuiltPrompt, ChatMessage } from '../server/src/prompt.ts';
+import { requireTestIsolation } from './isolation.ts';
+
+requireTestIsolation();
+const { appendChatMessage, withDisabledPrefillSpeakerNote } =
+  await import('../server/src/prompt.ts');
 
 const messages: ChatMessage[] = [];
 appendChatMessage(messages, { role: 'user', content: 'first' });

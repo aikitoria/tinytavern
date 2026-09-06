@@ -3,20 +3,44 @@ services:
     build: .
     container_name: minitavern
     user: "1000:1000"
-    ports:
-      - "5487:5487"
     volumes:
       - ./data:/data
-      - ./certs:/certs:ro
+      - ./.secrets/prod:/secrets:ro
     environment:
-      TLS_CERT_PATH: /certs/cert.pem
-      TLS_KEY_PATH: /certs/key.pem
-      MINITAVERN_IP_ALLOWLIST: ""
+      MEDIA_SIGNING_KEY_FILE: /secrets/media.key
+      CADDY_PROXY_KEY_FILE: /secrets/proxy.key
+      SESSION_COOKIE_NAME: minitavern_prod_session
+      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
     restart: unless-stopped
     # Also joined to ComfyUI's network so the server can reach http://comfy:8588.
     networks:
       - default
       - comfy
+
+  caddy-prod:
+    build:
+      context: .
+      dockerfile: caddy/Dockerfile
+      target: caddy-prod
+    user: "1000:1000"
+    ports:
+      - "5487:5487/tcp"
+      - "5487:5487/udp"
+    environment:
+      PUBLIC_PORT: "5487"
+      BACKEND: minitavern:5487
+      MINITAVERN_IP_ALLOWLIST: "${MINITAVERN_IP_ALLOWLIST-}"
+    volumes:
+      - ./certs:/certs:ro
+      - ./.secrets/prod:/secrets:ro
+      - ./data/images:/media/images:ro
+      - ./data/avatars:/media/avatars:ro
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=0700
+      - /config:uid=1000,gid=1000,mode=0700
+    restart: unless-stopped
+    depends_on:
+      - minitavern
 
 networks:
   comfy:

@@ -1,13 +1,11 @@
 import { copyFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { crc32 } from 'node:zlib';
 import { IMAGES_DIR, stmt } from './db.ts';
 
 /**
- * Generated-image files on disk. Every deletion path that can remove messages
- * (block splice, sibling-subtree cascade, delete-tail, conversation delete)
- * collects the doomed rows' image paths FIRST and unlinks them after the SQL
- * commit — SQLite FK cascades can't touch the filesystem. sweepOrphanedImages()
- * runs at startup as the backstop for crash windows.
+ * Collect image paths before deleting rows, then unlink after commit; FK cascades
+ * cannot delete files. The startup sweep covers crash windows.
  */
 
 export interface RasterImageFormat {
@@ -16,18 +14,6 @@ export interface RasterImageFormat {
 }
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const CRC_TABLE = new Uint32Array(256).map((_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-
-function pngChunkCrc(data: Buffer, start: number, end: number): number {
-  let c = 0xffffffff;
-  for (let i = start; i < end; i++) c = CRC_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
 function isValidPng(data: Buffer): boolean {
   if (data.length < 45 || !data.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
   let off = 8;
@@ -38,7 +24,7 @@ function isValidPng(data: Buffer): boolean {
     const end = off + 12 + length;
     if (!Number.isSafeInteger(end) || end > data.length) return false;
     const type = data.toString('latin1', off + 4, off + 8);
-    if (data.readUInt32BE(off + 8 + length) !== pngChunkCrc(data, off + 4, off + 8 + length)) {
+    if (data.readUInt32BE(off + 8 + length) !== crc32(data.subarray(off + 4, off + 8 + length))) {
       return false;
     }
     if (chunks === 0) {
@@ -164,10 +150,8 @@ export function saveImage(name: string, data: Buffer): string {
 }
 
 /**
- * Copies a served image file under a new name (conversation duplication — two
- * message rows must never reference the same file, or hard-deleting one would
- * break the other). Returns the new served path, or null when the source file
- * is already missing (the reference was dangling before the copy).
+ * Copies must own separate files so deleting one message cannot break another.
+ * Returns the new served path, or null if the source is invalid or missing.
  */
 export function copyImage(imagePath: string, newName: string): string | null {
   const file = imageFile(imagePath);
@@ -195,7 +179,6 @@ export function deleteImageFiles(imagePaths: string[]): void {
   }
 }
 
-/** All image paths of a single message. */
 export function collectMessageImages(messageId: number): string[] {
   const rows = stmt(
     'SELECT j.value AS image FROM messages m, json_each(m.images_json) j WHERE m.id = ?',
@@ -203,7 +186,7 @@ export function collectMessageImages(messageId: number): string[] {
   return rows.map((row) => row.image);
 }
 
-/** Image paths of a message's whole subtree (the rows a delete would cascade to). */
+/** Includes every row reached by a cascading delete. */
 export function collectSubtreeImages(messageId: number): string[] {
   const rows = stmt(
     `WITH RECURSIVE doomed(id) AS (
@@ -217,7 +200,7 @@ export function collectSubtreeImages(messageId: number): string[] {
   return rows.map((row) => row.image);
 }
 
-/** Image paths of the subtrees rooted at every child of `parentId` (delete-tail scope). */
+/** Collects every child subtree of `parentId`, matching delete-tail scope. */
 export function collectSiblingSubtreeImages(
   conversationId: number,
   parentId: number | null,
@@ -234,7 +217,6 @@ export function collectSiblingSubtreeImages(
   return rows.map((row) => row.image);
 }
 
-/** All image paths in a conversation (conversation-delete scope). */
 export function collectConversationImages(conversationId: number): string[] {
   const rows = stmt(
     'SELECT j.value AS image FROM messages m, json_each(m.images_json) j WHERE m.conversation_id = ?',
@@ -242,8 +224,7 @@ export function collectConversationImages(conversationId: number): string[] {
   return rows.map((row) => row.image);
 }
 
-/** Startup backstop: delete files no message or gallery item references
- * (crash windows, late renders). */
+/** Removes files orphaned by crashes or late renders; gallery references also count. */
 export function sweepOrphanedImages(): void {
   const referenced = new Set(
     (

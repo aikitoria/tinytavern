@@ -1,23 +1,12 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Message } from '@minitavern/shared';
 import { api } from '../state/api.ts';
-import {
-  activePath,
-  childrenByParent,
-  navigateTree,
-  personasEnabled,
-  selectedCharacter,
-  selectedPersona,
-  setState,
-  state,
-} from '../state/store.ts';
+import { activePath, childrenByParent, navigateTree, setState, state } from '../state/store.ts';
 import MessageNode from './MessageNode.tsx';
+import { speakerName, snippet } from './treeSummary.ts';
 import '../styles/treemap.css';
 
-// Fixed card slots: the map never measures content and never relayouts, so
-// positions are stable at every zoom level (no layout jumps). Below
-// MINI_SCALE a card swaps its MessageNode for a snippet whose font scales
-// inversely with the zoom, keeping the text a constant screen size.
+// Fixed card slots keep layout independent of content and zoom.
 const CARD_W = 640;
 const CARD_H = 240;
 const COL_GAP = 60;
@@ -37,17 +26,12 @@ interface Pos {
   y: number;
 }
 
-/** A parent→child bezier in world coordinates, with a bounding box for
- * culling. Drawn onto a viewport-sized canvas in screen space (no giant SVG
- * layer — those blow past GPU texture limits on large trees). */
+/** World-coordinate bezier and culling bounds. */
 interface Edge {
-  id: number;
   x1: number;
   y1: number;
   c1x: number;
-  c1y: number;
   c2x: number;
-  c2y: number;
   x2: number;
   y2: number;
   minX: number;
@@ -57,39 +41,12 @@ interface Edge {
   onPath: boolean;
 }
 
-/** Mirrors MessageNode's name resolution (same duplication as TreeView). */
-function speakerName(message: Message): string {
-  if (message.role === 'user') {
-    return (personasEnabled() ? selectedPersona() : null)?.name ?? 'You';
-  }
-  if (message.role === 'tool') return message.name ?? 'Tool';
-  if (message.role === 'system') return message.name ?? 'System';
-  return message.name ?? selectedCharacter()?.name ?? 'Assistant';
-}
-
-function snippet(message: Message): string {
-  const text = message.content.replace(/\s+/g, ' ').trim();
-  if (text) return text.length > 500 ? text.slice(0, 500) : text;
-  if (message.images.length > 0 || message.imagePending) return '[image]';
-  return '(empty)';
-}
-
-/**
- * Zoomable 2D map of the whole message tree. Pan/zoom follows ImageViewer's
- * model (plain mutable transform written straight to the element); cards are
- * viewport-culled and swap between full MessageNodes and constant-screen-size
- * snippet tiles depending on zoom — the layout itself never changes, so
- * zooming is jump-free. Opens centered on the active leaf at full zoom.
- * Click activates a branch and stays in the map; double-click activates and
- * returns to the chat.
- */
 export default function TreeMap() {
   let root!: HTMLDivElement;
   let content!: HTMLDivElement;
   let edgesCanvas!: HTMLCanvasElement;
 
-  // Mutable camera; the `view` signal mirrors it (rAF-throttled) to drive
-  // viewport culling and the snippet swap without re-rendering per event.
+  // Mirror the mutable camera into `view` once per frame for culling and snippet swaps.
   let scale = 1;
   let x = 0;
   let y = 0;
@@ -97,14 +54,16 @@ export default function TreeMap() {
   const [viewport, setViewport] = createSignal({ w: 0, h: 0 });
   let rafId = 0;
 
-  /** DFS layout: leaves take successive row slots, parents sit at the mean of
-   * their children's rows; x = depth. Positions keyed by id so cards keyed by
-   * message reference never remount on relayout. */
-  const positions = createMemo(() => {
+  // Key positions by id to preserve message references and avoid remounting cards.
+  const layout = createMemo(() => {
     const byParent = childrenByParent();
-    const map = new Map<number, Pos>();
+    const positions = new Map<number, Pos>();
+    const ordered: Message[] = [];
+    let w = 0;
+    let h = 0;
     let row = 0;
     const walk = (message: Message, depth: number): number => {
+      ordered.push(message);
       const kids = byParent.get(message.id) ?? [];
       let y: number;
       if (kids.length === 0) {
@@ -114,30 +73,20 @@ export default function TreeMap() {
         for (const kid of kids) sum += walk(kid, depth + 1);
         y = sum / kids.length;
       }
-      map.set(message.id, { x: depth * COL_W, y });
+      const x = depth * COL_W;
+      positions.set(message.id, { x, y });
+      w = Math.max(w, x + CARD_W);
+      h = Math.max(h, y + CARD_H);
       return y;
     };
     for (const rootMsg of byParent.get(-1) ?? []) walk(rootMsg, 0);
-    return map;
+    return { positions, ordered, bounds: { w, h } };
   });
+  const positions = () => layout().positions;
+  const ordered = () => layout().ordered;
 
-  /** Messages in DFS order; stable references keep <For> from remounting cards. */
-  const ordered = createMemo<Message[]>(() => {
-    const byParent = childrenByParent();
-    const out: Message[] = [];
-    const walk = (message: Message) => {
-      out.push(message);
-      for (const kid of byParent.get(message.id) ?? []) walk(kid);
-    };
-    for (const rootMsg of byParent.get(-1) ?? []) walk(rootMsg);
-    return out;
-  });
-
-  /** Ids on the active path, root -> active leaf. */
   const activeIds = createMemo(() => new Set(activePath().map((message) => message.id)));
 
-  /** Cubic bezier per parent->child link, from the parent's right edge to the
-   * child's left edge, plus a bounding box for culling. */
   const edges = createMemo<Edge[]>(() => {
     const pos = positions();
     const onPath = activeIds();
@@ -153,13 +102,10 @@ export default function TreeMap() {
       const y2 = c.y + CARD_H / 2;
       const dx = Math.max(24, (x2 - x1) / 2);
       out.push({
-        id: message.id,
         x1,
         y1,
         c1x: x1 + dx,
-        c1y: y1,
         c2x: x2 - dx,
-        c2y: y2,
         x2,
         y2,
         minX: Math.min(x1, x2),
@@ -172,18 +118,7 @@ export default function TreeMap() {
     return out;
   });
 
-  /** World-space size of the laid-out tree; sizes the SVG layer. */
-  const bounds = createMemo(() => {
-    let w = 0;
-    let h = 0;
-    for (const p of positions().values()) {
-      w = Math.max(w, p.x + CARD_W);
-      h = Math.max(h, p.y + CARD_H);
-    }
-    return { w, h };
-  });
-
-  /** Visible rectangle in world coordinates (null until the pane is measured). */
+  /** Visible rectangle in world coordinates. */
   const visibleRect = createMemo(() => {
     const v = view();
     const vp = viewport();
@@ -196,7 +131,7 @@ export default function TreeMap() {
     };
   });
 
-  /** Cards/edges intersecting the visible rect plus one viewport of margin. */
+  // Keep one viewport of overscan to cover movement between frames.
   const visibleMessages = createMemo<Message[]>(() => {
     const rect = visibleRect();
     if (!rect) return ordered();
@@ -220,8 +155,7 @@ export default function TreeMap() {
     scheduleFrame();
   };
 
-  /** Draws the visible edges in screen space onto the viewport-sized canvas.
-   * World layers are gone — nothing here can exceed texture limits. */
+  // A viewport-sized canvas avoids GPU texture limits on large trees.
   const drawEdges = () => {
     const vp = viewport();
     if (!edgesCanvas || !vp.w || !vp.h) return;
@@ -257,9 +191,9 @@ export default function TreeMap() {
         ctx.moveTo(e.x1 * scale + x, e.y1 * scale + y);
         ctx.bezierCurveTo(
           e.c1x * scale + x,
-          e.c1y * scale + y,
+          e.y1 * scale + y,
           e.c2x * scale + x,
-          e.c2y * scale + y,
+          e.y2 * scale + y,
           e.x2 * scale + x,
           e.y2 * scale + y,
         );
@@ -277,8 +211,7 @@ export default function TreeMap() {
     });
   };
 
-  // Redraw edges when the layout or the pane size changes (pan/zoom frames
-  // come through apply → scheduleFrame).
+  // Pan/zoom schedules frames through apply(); layout and resize use this effect.
   createEffect(() => {
     edges();
     viewport();
@@ -302,10 +235,9 @@ export default function TreeMap() {
     zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, scale * factor);
   };
 
-  /** Scale/translate so the whole laid-out tree fits the viewport. */
   const fit = () => {
     const vp = viewport();
-    const b = bounds();
+    const b = layout().bounds;
     if (!vp.w || !vp.h || !b.w || !b.h) return;
     const pad = 40;
     scale = Math.min(
@@ -327,20 +259,15 @@ export default function TreeMap() {
     apply();
   };
 
-  /** Like TreeView's activate(), but stays in the map — the active-path
-   * highlight updates live off the resulting treePatch. */
   const activate = async (message: Message): Promise<boolean> => {
     if (state.treeNavigationPending) return false;
     if (message.id === state.tree.activeLeafId) return true;
-    return navigateTree(() =>
-      api.activate(message.id, state.tree.activeLeafId, state.tree.mutationRevision),
-    );
+    return navigateTree(() => api.activate(message.id, state.tree));
   };
 
   const onCardClick = (message: Message, e: MouseEvent) => {
     if (panMoved) return;
-    // Interactive elements inside the card (reasoning chip, plugin controls)
-    // keep their own behavior instead of triggering a branch switch.
+    // Card controls must not also switch branches.
     if ((e.target as Element).closest('button, a, input, textarea, select')) return;
     void activate(message);
   };
@@ -351,8 +278,6 @@ export default function TreeMap() {
       if (ok) setState('viewMode', 'chat');
     });
   };
-
-  // ---- Pan/zoom input ----
 
   let panning = false;
   /** Set once a gesture has moved past the click threshold; suppresses card clicks. */
@@ -399,9 +324,7 @@ export default function TreeMap() {
     panning = false;
     root.classList.remove('treemap-panning');
     if (moved) {
-      // Keep suppression through the synthetic click that immediately follows
-      // this mouseup, then allow the next independent card click. A synchronous
-      // reset could activate a card when a background drag ends over one.
+      // Defer reset past the synthetic click so ending a drag over a card cannot activate it.
       panClickResetTimer = window.setTimeout(() => {
         panMoved = false;
         panClickResetTimer = undefined;
@@ -447,7 +370,6 @@ export default function TreeMap() {
     if (pinching && e.touches.length === 2) {
       e.preventDefault();
       const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      // Pan by the midpoint travel, then zoom toward the midpoint.
       x += mid.x - lastMidX;
       y += mid.y - lastMidY;
       lastMidX = mid.x;
@@ -464,7 +386,7 @@ export default function TreeMap() {
       if (!touchDecided) {
         if (Math.hypot(dx, dy) <= 8) return;
         touchDecided = true;
-        // A mostly-vertical drag on a scrollable card scrolls the card instead.
+        // Leave vertical card scrolling to the browser.
         if (cardScroll && Math.abs(dy) > Math.abs(dx) * 1.2) {
           panning = false;
           return;
@@ -496,14 +418,12 @@ export default function TreeMap() {
   };
 
   const onWheel = (e: WheelEvent) => {
-    // The wheel always zooms the map — even over cards (their content scrolls
-    // via the scrollbar or a vertical touch drag instead).
+    // Cards scroll via scrollbar or touch; the wheel always zooms the map.
     e.preventDefault();
     zoomAt(e.clientX, e.clientY, scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
   };
 
-  // First render with a laid-out tree opens readable: centered on the active
-  // leaf at full zoom (fit only as a fallback when there is no leaf yet).
+  // Open at full scale on the active leaf for readability.
   let initialCameraDone = false;
   createEffect(() => {
     if (initialCameraDone || !viewport().w || positions().size === 0) return;
@@ -538,8 +458,7 @@ export default function TreeMap() {
       ref={root}
       class="treemap"
       onMouseDown={onMouseDown}
-      // on: attaches directly to the element (Solid's delegated listeners are
-      // passive for wheel/touch and can't preventDefault).
+      // Direct listeners allow preventDefault; Solid delegates wheel/touch passively.
       on:wheel={onWheel}
       on:touchstart={onTouchStart}
       on:touchmove={onTouchMove}
@@ -567,8 +486,7 @@ export default function TreeMap() {
               <Show
                 when={view().scale >= MINI_SCALE}
                 fallback={
-                  // Inverse font scaling keeps the tile text a constant screen
-                  // size at any zoom (capped); the fixed slot clips the rest.
+                  // Inverse scaling keeps text readable without changing the card layout.
                   <div
                     class="treemap-mini"
                     style={{ 'font-size': `${Math.min(12 / view().scale, 240)}px` }}

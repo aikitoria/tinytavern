@@ -8,7 +8,7 @@ const clients = new Map<WebSocket, { sub: number | null; alive: boolean }>();
 let onSubscribe: ((ws: WebSocket, conversationId: number) => void) | null = null;
 let onUnsubscribe: ((conversationId: number) => void) | null = null;
 
-/** Called whenever a client subscribes to a conversation (used to push the initial tree). */
+/** Push the initial tree on each subscription. */
 export function setSubscribeHandler(fn: (ws: WebSocket, conversationId: number) => void): void {
   onSubscribe = fn;
 }
@@ -102,7 +102,6 @@ export function sendTo(ws: WebSocket, ev: ServerEvent): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(ev));
 }
 
-/** Broadcast to every connected client. */
 export function broadcast(ev: ServerEvent): void {
   const payload = JSON.stringify(ev);
   for (const ws of clients.keys()) {
@@ -110,7 +109,6 @@ export function broadcast(ev: ServerEvent): void {
   }
 }
 
-/** Broadcast to clients subscribed to a specific conversation. */
 export function broadcastConv(conversationId: number, ev: ServerEvent): void {
   const payload = JSON.stringify(ev);
   for (const [ws, state] of clients) {
@@ -118,7 +116,6 @@ export function broadcastConv(conversationId: number, ev: ServerEvent): void {
   }
 }
 
-/** Conversations currently visible in at least one connected client. */
 export function subscribedConversationIds(): number[] {
   return [
     ...new Set([...clients.values()].flatMap((state) => (state.sub == null ? [] : [state.sub]))),

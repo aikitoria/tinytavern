@@ -1,18 +1,14 @@
-// Focused persistence test for the versioned, self-contained conversation
-// transfer format. Run with an isolated DATA_DIR; this script is destructive.
+// Run through npm test for isolated data; this script is destructive.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { IMAGES_DIR, stmt } from '../server/src/db.ts';
-import { deleteImageFiles, saveImage } from '../server/src/images.ts';
-import {
-  exportPortableConversation,
-  importPortableConversation,
-} from '../server/src/routes/conversationTransfer.ts';
-import { getPathToMessage } from '../server/src/tree.ts';
+import { requireTestIsolation } from './isolation.ts';
 
-if (!process.env.DATA_DIR?.includes('transfer-test')) {
-  throw new Error('Set an isolated DATA_DIR containing "transfer-test" before running this test');
-}
+requireTestIsolation();
+const { IMAGES_DIR, stmt } = await import('../server/src/db.ts');
+const { deleteImageFiles, saveImage } = await import('../server/src/images.ts');
+const { exportPortableConversation, importPortableConversation } =
+  await import('../server/src/routes/conversationTransfer.ts');
+const { getPathToMessage } = await import('../server/src/tree.ts');
 
 let passed = 0;
 function assert(value: unknown, label: string): asserts value {
@@ -60,8 +56,7 @@ const root = Number(
     null,
   ).lastInsertRowid,
 );
-// Insert the continuation before its eventual parent to cover middle-splice
-// trees whose parent id is greater than their child id.
+// Middle splices can give parents greater IDs than their children.
 const continuation = Number(
   insert.run(
     sourceConversationId,

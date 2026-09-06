@@ -60,9 +60,7 @@ function connect(): void {
     }
   };
   ws.onclose = (event) => {
-    // A deliberately replaced socket may close after its successor has
-    // already opened. Never let that stale callback clear or reconnect over
-    // the current connection.
+    // A replaced socket may close late; do not disturb its successor.
     if (sock !== ws) return;
     onStatus?.(false);
     sock = null;
@@ -88,8 +86,7 @@ export function refreshWs(): void {
 
 function queueResumeRefresh(): void {
   if (!started || resumeTimer != null) return;
-  // visibilitychange and online/pageshow can arrive together. Collapse the
-  // burst so a newly created replacement is not immediately replaced again.
+  // Coalesce visibility/online/pageshow bursts to avoid replacing the new socket again.
   resumeTimer = setTimeout(() => {
     resumeTimer = null;
     refreshWs();

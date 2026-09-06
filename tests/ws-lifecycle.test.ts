@@ -70,9 +70,8 @@ interface WsModule {
   stopWs(): void;
   subscribe(conversationId: number | null): void;
 }
-// Keep the browser module out of the server's DOM-free static type graph; this
-// test supplies its browser globals at runtime, while the client tsconfig type
-// checks the module itself with the real DOM library.
+// A dynamic path excludes browser code from the server's DOM-free type graph;
+// client tsconfig checks it, and this test supplies runtime browser globals.
 const wsModulePath = '../client/src/state/ws.ts';
 const { configureWs, startWs, stopWs, subscribe } = (await import(wsModulePath)) as WsModule;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -99,9 +98,8 @@ assert.deepEqual(
   [{ sub: 42 }],
 );
 
-// An apparently-open connection is replaced when the suspended PWA becomes
-// visible. Its synchronous close callback must not schedule another socket
-// over the replacement.
+// Replace apparently-open sockets on PWA resume without letting the old close
+// callback schedule another replacement.
 fakeDocument.visibilityState = 'visible';
 dispatch(documentListeners, 'visibilitychange');
 await delay(80);
