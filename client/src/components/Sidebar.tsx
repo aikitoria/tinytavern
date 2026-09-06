@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, on } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
 import type { Character, Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { createCharacterGroups } from '../state/characterGroups.ts';
@@ -38,9 +38,11 @@ export default function Sidebar() {
   >(new Set());
   const [query, setQuery] = createSignal('');
   const [results, setResults] = createSignal<SearchResult[] | null>(null);
+  const [conversationMenu, setConversationMenu] = createSignal<Conversation | null>(null);
   let searchTimer: number | undefined;
   let sidebarToolsRow: HTMLDivElement | undefined;
   let newChatButton: HTMLButtonElement | undefined;
+  let conversationMenuButton: HTMLButtonElement | undefined;
 
   const closeNewChatMenu = () => {
     setNewMenuOpen(false);
@@ -125,6 +127,14 @@ export default function Sidebar() {
     }
   };
 
+  const runConversationMenuAction = (action: 'duplicate' | 'delete', event: MouseEvent) => {
+    const conversation = conversationMenu();
+    if (!conversation) return;
+    setConversationMenu(null);
+    conversationMenuButton?.focus({ preventScroll: true });
+    void (action === 'duplicate' ? duplicate : remove)(conversation.id, event);
+  };
+
   const characterOf = (characterId: number | null) =>
     characterId != null ? state.characters.find((c) => c.id === characterId) : undefined;
 
@@ -146,58 +156,82 @@ export default function Sidebar() {
     return groups;
   });
 
-  const ConvItem = (props: { conv: Conversation; snippet?: string | null; expanded?: boolean }) => (
-    <div
-      class="conv-item"
-      classList={{
-        active: props.conv.id === state.selectedId,
-        'search-result': props.expanded,
-      }}
-      onClick={() => selectConversation(props.conv.id)}
-    >
-      <button
-        class="conv-select"
-        aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
+  const ConvItem = (props: { conv: Conversation; snippet?: string | null; expanded?: boolean }) => {
+    let menuButton: HTMLButtonElement | undefined;
+    onCleanup(() => {
+      if (conversationMenuButton === menuButton) setConversationMenu(null);
+    });
+
+    return (
+      <div
+        class="conv-item"
+        classList={{
+          active: props.conv.id === state.selectedId,
+          'search-result': props.expanded,
+        }}
+        onClick={() => selectConversation(props.conv.id)}
       >
-        <Show
-          when={characterOf(props.conv.characterId)}
-          fallback={<span class="avatar avatar-fallback">A</span>}
+        <button
+          class="conv-select"
+          aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
         >
-          {(character) => <Avatar src={character().avatar} name={character().name} />}
-        </Show>
-        <span class="conv-body">
-          <span class="conv-title">{props.conv.title}</span>
-          <Show when={props.snippet}>
-            <span class="conv-snippet">{props.snippet}</span>
+          <Show
+            when={characterOf(props.conv.characterId)}
+            fallback={<span class="avatar avatar-fallback">A</span>}
+          >
+            {(character) => <Avatar src={character().avatar} name={character().name} />}
           </Show>
+          <span class="conv-body">
+            <span class="conv-title">{props.conv.title}</span>
+            <Show when={props.snippet}>
+              <span class="conv-snippet">{props.snippet}</span>
+            </Show>
+          </span>
+        </button>
+        <span class="conv-actions" aria-label={`Actions for ${props.conv.title}`}>
+          <button
+            class="icon-btn conv-duplicate"
+            title="Duplicate"
+            aria-label={`Duplicate ${props.conv.title}`}
+            onClick={(e) => void duplicate(props.conv.id, e)}
+          >
+            ⧉
+          </button>
+          <button
+            class="icon-btn conv-delete"
+            title="Delete"
+            aria-label={`Delete ${props.conv.title}`}
+            onClick={(e) => void remove(props.conv.id, e)}
+          >
+            ✕
+          </button>
         </span>
-      </button>
-      <span class="conv-actions" aria-label={`Actions for ${props.conv.title}`}>
         <button
-          class="icon-btn conv-duplicate"
-          title="Duplicate"
-          aria-label={`Duplicate ${props.conv.title}`}
-          onClick={(e) => void duplicate(props.conv.id, e)}
+          ref={menuButton}
+          type="button"
+          class="icon-btn conv-menu-btn"
+          title="Conversation actions"
+          aria-label={`Actions for ${props.conv.title}`}
+          aria-haspopup="menu"
+          aria-expanded={conversationMenu()?.id === props.conv.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            const open = conversationMenu()?.id === props.conv.id;
+            conversationMenuButton = event.currentTarget;
+            setConversationMenu(open ? null : props.conv);
+          }}
         >
-          ⧉
+          ⋯
         </button>
-        <button
-          class="icon-btn conv-delete"
-          title="Delete"
-          aria-label={`Delete ${props.conv.title}`}
-          onClick={(e) => void remove(props.conv.id, e)}
-        >
-          ✕
-        </button>
-      </span>
-    </div>
-  );
+      </div>
+    );
+  };
 
   return (
     <aside class="sidebar" classList={{ open: state.sidebarOpen }}>
       <div class="sidebar-head">
         <span class="brand">
-          TinyTavern
+          <span class="brand-name">TinyTavern</span>
           <span
             class="conn-dot"
             classList={{ ok: state.connected }}
@@ -373,6 +407,35 @@ export default function Sidebar() {
           )}
         </Show>
       </nav>
+      <DropdownSurface
+        open={conversationMenu() != null}
+        anchor={() => conversationMenuButton}
+        onClose={() => setConversationMenu(null)}
+        class="conv-actions-menu"
+        role="menu"
+        ariaLabel={`Actions for ${conversationMenu()?.title ?? 'conversation'}`}
+        placement="auto"
+        align="end"
+        minWidth={160}
+        keyboardNavigation
+        autoFocus
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={(event) => runConversationMenuAction('duplicate', event)}
+        >
+          Duplicate
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="danger"
+          onClick={(event) => runConversationMenuAction('delete', event)}
+        >
+          Delete
+        </button>
+      </DropdownSurface>
     </aside>
   );
 }

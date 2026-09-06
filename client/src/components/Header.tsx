@@ -185,7 +185,12 @@ export default function Header() {
                 <Select
                   class={`header-context-select ${activeEndpoint() ? '' : 'header-context-warn'}`}
                   value={String(contextValue('endpointId') ?? '')}
-                  buttonLabel={`Endpoint · ${activeEndpoint()?.name ?? 'None'}`}
+                  buttonLabel={
+                    <>
+                      <span class="header-context-label">Endpoint</span>
+                      <span class="header-context-value">{activeEndpoint()?.name ?? 'None'}</span>
+                    </>
+                  }
                   ariaLabel="Conversation endpoint"
                   disabled={pendingContext() != null}
                   menuMinWidth={220}
@@ -210,8 +215,19 @@ export default function Header() {
                 <Select
                   class="header-context-select"
                   value={String(contextValue('personaId') ?? '')}
-                  buttonLabel={`Persona · ${personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}`}
-                  ariaLabel="Conversation persona"
+                  buttonLabel={
+                    <>
+                      <span class="header-context-label">Persona</span>
+                      <span class="header-context-value">
+                        {personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}
+                      </span>
+                    </>
+                  }
+                  ariaLabel={
+                    personasEnabled()
+                      ? 'Conversation persona'
+                      : 'Conversation persona: off for the current template'
+                  }
                   disabled={pendingContext() != null || !personasEnabled()}
                   menuMinWidth={220}
                   menuClass="header-dropdown-menu"

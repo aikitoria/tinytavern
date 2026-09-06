@@ -26,8 +26,8 @@
   --md-em: #bec5cf;
   --md-strong: #f7f7f8;
   --md-quote: var(--md-strong);
-  --message-surface: color-mix(in srgb, var(--bg-raised) 34%, var(--bg-panel));
-  --user-message-surface: color-mix(in srgb, var(--role-user) 9%, var(--bg-panel));
+  --message-surface: var(--bg-panel);
+  --user-message-surface: color-mix(in srgb, var(--role-user) 5%, var(--message-surface));
   --thinking-surface: color-mix(in srgb, var(--secondary) 8%, var(--bg-panel));
   /* Wrapper radii include the child radius, inset, and border. */
   --space-1: 4px;

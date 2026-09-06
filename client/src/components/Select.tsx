@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, createUniqueId } from 'solid-js';
+import { For, Show, createEffect, createSignal, createUniqueId, type JSX } from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
 
 export interface SelectOption {
@@ -20,7 +20,7 @@ export default function Select(props: {
   ref?: SelectHandle | ((handle: SelectHandle) => void);
   class?: string;
   ariaLabel?: string;
-  buttonLabel?: string;
+  buttonLabel?: JSX.Element;
   disabled?: boolean;
   menuMinWidth?: number;
   menuClass?: string;
