@@ -84,13 +84,11 @@ export default function Modal(props: {
     <Portal>
       {/* No close-on-backdrop-click: modals hold unsaved form state. */}
       <div
-        class={`modal-backdrop ${props.backdropClass ?? ''}`}
-        classList={{ 'fullscreen-backdrop': props.fullscreen }}
+        class={`modal-backdrop ${props.fullscreen ? 'fullscreen-backdrop' : ''} ${props.backdropClass ?? ''}`}
       >
         <div
           ref={dialog}
-          class={`modal ${props.class ?? ''}`}
-          classList={{ 'fullscreen-page': props.fullscreen }}
+          class={`modal ${props.fullscreen ? 'fullscreen-page' : ''} ${props.class ?? ''}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
