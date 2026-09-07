@@ -1,3 +1,4 @@
+import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { faChevronDown, faChevronRight, faPen, faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { For, Show, createSignal, onMount } from 'solid-js';
@@ -6,8 +7,8 @@ import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { createCharacterGroups } from '../../state/characterGroups.ts';
 import { state } from '../../state/store.ts';
-import { avatarGenerationAvailable } from '../../plugins/imageGeneration.tsx';
-import AvatarGenerateModal from '../../plugins/AvatarGenerateModal.tsx';
+import { avatarGenerationAvailable } from '../../images/imageGeneration.tsx';
+import AvatarGenerateModal from '../../images/AvatarGenerateModal.tsx';
 import { createEntityEditor, download, errorMessage } from '../../util.ts';
 import { confirmAction } from '../../state/confirm.ts';
 import Avatar from '../Avatar.tsx';
@@ -18,7 +19,6 @@ import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
 import Modal from '../Modal.tsx';
 import Select from '../Select.tsx';
-import type { SelectHandle } from '../Select.tsx';
 
 export default function CharactersTab() {
   const [customPrompt, setCustomPrompt] = createSignal(false);
@@ -27,18 +27,20 @@ export default function CharactersTab() {
   const [characterQuery, setCharacterQuery] = createSignal('');
   const [folderDialog, setFolderDialog] = createSignal<{ id: number | null } | null>(null);
   const [folderName, setFolderName] = createSignal('');
+  const folderNameField = createDefaultField(() => '');
   const [folderError, setFolderError] = createSignal('');
   const [folderSaving, setFolderSaving] = createSignal(false);
-  let nameEl!: HTMLInputElement;
-  let folderEl!: SelectHandle;
-  let personalityEl!: HTMLTextAreaElement;
-  let scenarioEl!: HTMLTextAreaElement;
-  let examplesEl!: HTMLTextAreaElement;
-  let firstMessageEl!: HTMLTextAreaElement;
-  let presetEl!: SelectHandle;
-  let customEl!: HTMLTextAreaElement;
-  let templateEl!: SelectHandle;
-  let disableBackgroundSwipeEl!: HTMLInputElement;
+  const nameEl = createDefaultField(() => '');
+  const chatNameEl = createDefaultField(() => '');
+  const folderEl = createDefaultField(() => '');
+  const personalityEl = createDefaultField(() => '');
+  const scenarioEl = createDefaultField(() => '');
+  const examplesEl = createDefaultField(() => '');
+  const firstMessageEl = createDefaultField(() => '');
+  const presetEl = createDefaultField(() => '');
+  const customEl = createDefaultField(() => '');
+  const templateEl = createDefaultField(() => '');
+  const disableBackgroundSwipeEl = createDefaultField(() => false);
   let templateFields!: TemplateFieldsHandle;
   let cardInput!: HTMLInputElement;
 
@@ -47,6 +49,7 @@ export default function CharactersTab() {
     initialId: () => state.settingsCharacterId,
     load: (character) => {
       nameEl.value = character?.name ?? '';
+      chatNameEl.value = character?.chatName ?? '';
       folderEl.value = String(character?.folderId ?? '');
       personalityEl.value = character?.personality ?? '';
       scenarioEl.value = character?.scenario ?? '';
@@ -55,7 +58,7 @@ export default function CharactersTab() {
       presetEl.value =
         character?.customPrompt != null ? 'custom' : String(character?.presetId ?? '');
       customEl.value = character?.customPrompt ?? '';
-      disableBackgroundSwipeEl.checked = character?.disableBackgroundSwipeGeneration ?? false;
+      disableBackgroundSwipeEl.value = character?.disableBackgroundSwipeGeneration ?? false;
       templateEl.value =
         character?.customTemplate != null ? 'custom' : String(character?.templateId ?? '');
       templateFields.value = character?.customTemplate;
@@ -67,6 +70,7 @@ export default function CharactersTab() {
       const templateChoice = templateEl.value;
       return {
         name: nameEl.value,
+        chatName: chatNameEl.value.trim() || null,
         folderId: folderEl.value ? Number(folderEl.value) : null,
         personality: personalityEl.value,
         scenario: scenarioEl.value,
@@ -75,7 +79,7 @@ export default function CharactersTab() {
         presetId: promptChoice && promptChoice !== 'custom' ? Number(promptChoice) : null,
         customPrompt: promptChoice === 'custom' ? customEl.value : null,
         templateId: templateChoice && templateChoice !== 'custom' ? Number(templateChoice) : null,
-        disableBackgroundSwipeGeneration: disableBackgroundSwipeEl.checked,
+        disableBackgroundSwipeGeneration: disableBackgroundSwipeEl.value,
         customTemplate: templateChoice === 'custom' ? templateFields.value : null,
       };
     },
@@ -321,11 +325,17 @@ export default function CharactersTab() {
             </Show>
           </Show>
 
-          <label>Name</label>
-          <input ref={nameEl} placeholder="Character name" />
-          <label>Folder</label>
+          <SettingLabel field={nameEl}>Name</SettingLabel>
+          <input ref={nameEl.ref} placeholder="Character name" />
+          <SettingLabel field={chatNameEl}>Chat name override</SettingLabel>
+          <input ref={chatNameEl.ref} placeholder="Use the character name" />
+          <p class="hint">
+            Used for {'{{char}}'} and message speaker names. The main name stays in character lists
+            and other UI.
+          </p>
+          <SettingLabel field={folderEl}>Folder</SettingLabel>
           <Select
-            ref={folderEl}
+            ref={folderEl.ref}
             ariaLabel="Character folder"
             options={[
               { value: '', label: 'No folder' },
@@ -339,35 +349,35 @@ export default function CharactersTab() {
 
         <section class="settings-section">
           <h3>Roleplay</h3>
-          <label>
+          <SettingLabel field={personalityEl}>
             Personality <MacroHelp />
-          </label>
-          <MacroTextarea ref={personalityEl} placeholder="Who is {{char}}?" />
-          <label>
+          </SettingLabel>
+          <MacroTextarea ref={personalityEl.ref} placeholder="Who is {{char}}?" />
+          <SettingLabel field={scenarioEl}>
             Scenario <MacroHelp />
-          </label>
-          <MacroTextarea ref={scenarioEl} placeholder="Setting / situation (optional)" />
-          <label>
+          </SettingLabel>
+          <MacroTextarea ref={scenarioEl.ref} placeholder="Setting / situation (optional)" />
+          <SettingLabel field={examplesEl}>
             Example conversations <MacroHelp />
-          </label>
+          </SettingLabel>
           <MacroTextarea
-            ref={examplesEl}
+            ref={examplesEl.ref}
             placeholder="Example dialogue between {{user}} and {{char}} (optional; separate with <START>)"
           />
-          <label>
+          <SettingLabel field={firstMessageEl}>
             First message <MacroHelp />
-          </label>
+          </SettingLabel>
           <MacroTextarea
-            ref={firstMessageEl}
+            ref={firstMessageEl.ref}
             placeholder="Greeting sent when a chat starts (optional)"
           />
         </section>
 
         <section class="settings-section">
           <h3>Prompting</h3>
-          <label>System prompt</label>
+          <SettingLabel field={presetEl}>System prompt</SettingLabel>
           <Select
-            ref={presetEl}
+            ref={presetEl.ref}
             ariaLabel="Character system prompt"
             onChange={(value) => setCustomPrompt(value === 'custom')}
             options={[
@@ -377,19 +387,19 @@ export default function CharactersTab() {
             ]}
           />
           <Show when={customPrompt()}>
-            <label>
+            <SettingLabel field={customEl}>
               Custom prompt text <MacroHelp />
-            </label>
+            </SettingLabel>
           </Show>
           <MacroTextarea
-            ref={customEl}
+            ref={customEl.ref}
             classList={{ hidden: !customPrompt() }}
             placeholder="Custom system prompt for this character"
           />
 
-          <label>Prompt template</label>
+          <SettingLabel field={templateEl}>Prompt template</SettingLabel>
           <Select
-            ref={templateEl}
+            ref={templateEl.ref}
             ariaLabel="Character prompt template"
             onChange={(value) => {
               const custom = value === 'custom';
@@ -410,17 +420,14 @@ export default function CharactersTab() {
 
         <section class="settings-section">
           <h3>Generation</h3>
-          <label class="check-row">
-            <input type="checkbox" ref={disableBackgroundSwipeEl} />
+          <SettingLabel field={disableBackgroundSwipeEl} check>
+            <input type="checkbox" ref={disableBackgroundSwipeEl.ref} />
             Disable background swipe generation
-          </label>
+          </SettingLabel>
           <p class="hint">Overrides the global setting for all chats with this character.</p>
         </section>
 
-        <section
-          class="settings-section settings-section-advanced"
-          classList={{ hidden: !customTemplate() }}
-        >
+        <section class="settings-section" classList={{ hidden: !customTemplate() }}>
           <h3>Advanced template overrides</h3>
           <TemplateFields ref={templateFields} inline />
         </section>
@@ -434,8 +441,11 @@ export default function CharactersTab() {
             onClose={() => setFolderDialog(null)}
           >
             <form class="form folder-dialog-form" onSubmit={saveFolder}>
-              <label for="folder-name">Folder name</label>
+              <SettingLabel field={folderNameField} for="folder-name">
+                Folder name
+              </SettingLabel>
               <input
+                ref={folderNameField.ref}
                 id="folder-name"
                 data-modal-initial-focus
                 value={folderName()}

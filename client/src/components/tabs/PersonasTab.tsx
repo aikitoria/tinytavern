@@ -1,9 +1,10 @@
+import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { Show, createSignal } from 'solid-js';
 import { api } from '../../state/api.ts';
 import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';
-import { avatarGenerationAvailable } from '../../plugins/imageGeneration.tsx';
-import AvatarGenerateModal from '../../plugins/AvatarGenerateModal.tsx';
+import { avatarGenerationAvailable } from '../../images/imageGeneration.tsx';
+import AvatarGenerateModal from '../../images/AvatarGenerateModal.tsx';
 import { createEntityEditor } from '../../util.ts';
 import Avatar from '../Avatar.tsx';
 import AvatarRow from '../AvatarRow.tsx';
@@ -13,8 +14,8 @@ import MacroTextarea from '../MacroTextarea.tsx';
 
 export default function PersonasTab() {
   const [avatarGen, setAvatarGen] = createSignal(false);
-  let nameEl!: HTMLInputElement;
-  let descriptionEl!: HTMLTextAreaElement;
+  const nameEl = createDefaultField(() => '');
+  const descriptionEl = createDefaultField(() => '');
 
   const editor = createEntityEditor({
     items: () => state.personas,
@@ -66,12 +67,15 @@ export default function PersonasTab() {
           />
         </Show>
       </Show>
-      <label>Name (used as {'{{user}}'})</label>
-      <input ref={nameEl} placeholder="Your name" />
-      <label>
+      <SettingLabel field={nameEl}>Name (used as {'{{user}}'})</SettingLabel>
+      <input ref={nameEl.ref} placeholder="Your name" />
+      <SettingLabel field={descriptionEl}>
         Description (injected into the prompt) <MacroHelp />
-      </label>
-      <MacroTextarea ref={descriptionEl} placeholder="A few sentences about {{user}} (optional)" />
+      </SettingLabel>
+      <MacroTextarea
+        ref={descriptionEl.ref}
+        placeholder="A few sentences about {{user}} (optional)"
+      />
     </EntityEditorPane>
   );
 }

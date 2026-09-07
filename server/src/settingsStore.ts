@@ -30,7 +30,8 @@ export type SettingsReferenceKey = Exclude<
   | 'backgroundSwipeGeneration'
   | 'parallelBackgroundSwipeGeneration'
   | 'hasPassword'
-  | 'pluginSettings'
+  | 'imageGeneration'
+  | 'gallery'
 >;
 
 export function clearSettingReference(key: SettingsReferenceKey, id: number): boolean {

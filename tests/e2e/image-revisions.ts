@@ -1,9 +1,10 @@
-import type { GalleryItem } from '@tinytavern/shared';
+import type { GalleryItem, Settings } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,
   assert,
   req,
+  putSettings,
   expectStatus,
   tree,
   fetchTrace,
@@ -143,6 +144,13 @@ export async function testImageRevisions(
   );
 
   console.log('== regenerate image tool in the middle of an existing chain ==');
+  const previousImages = (await req<Settings>('GET', '/api/settings')).imageGeneration;
+  await putSettings({
+    imageGeneration: {
+      ...previousImages,
+      promptRevisionTemplate: 'CHAT REVISION {{instruction}}\nKeep source: {{prompt}}',
+    },
+  });
   const insertedRevision = await req<{ assistantMessageId: number }>(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/regenerate`,
@@ -152,6 +160,23 @@ export async function testImageRevisions(
     (e) => e.t === 'final' && e.message.id === insertedRevision.assistantMessageId,
     'inserted image revision prompt finished',
   );
+  const configuredRevision = (await (
+    await fetch(`${MOCK_CONTROL}/control/last-completion`)
+  ).json()) as {
+    completion: { messages: { role: string; content: string }[] };
+  };
+  assert(
+    configuredRevision.completion.messages.at(-1)?.content ===
+      `CHAT REVISION Make the scene warmer.\nKeep source: ${regenMsg.content.trim()}`,
+    'chat image revision expands its global Images setting',
+  );
+  assert(
+    JSON.stringify(
+      configuredRevision.completion.messages.slice(0, imageRevisionTrace.messages.length),
+    ) === JSON.stringify(imageRevisionTrace.messages),
+    'custom image revision retains the unchanged chat prefix',
+  );
+  await putSettings({ imageGeneration: previousImages });
   const insertedSnap = await tree(conv2.id);
   const sourceAfterInsert = insertedSnap.messages.find((m) => m.id === imgRes.toolMessageId)!;
   const insertedMessage = insertedSnap.messages.find(

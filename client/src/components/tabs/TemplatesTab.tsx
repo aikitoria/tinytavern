@@ -1,3 +1,4 @@
+import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { api } from '../../state/api.ts';
 import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';
@@ -6,7 +7,7 @@ import EntityEditorPane from '../EntityEditorPane.tsx';
 import TemplateFields, { type TemplateFieldsHandle } from '../TemplateFields.tsx';
 
 export default function TemplatesTab() {
-  let nameEl!: HTMLInputElement;
+  const nameEl = createDefaultField(() => '');
   let fields!: TemplateFieldsHandle;
 
   const editor = createEntityEditor({
@@ -41,8 +42,11 @@ export default function TemplatesTab() {
           'The built-in prompt template is active. Select a saved template to make it the default.',
       }}
     >
-      <label>Name</label>
-      <input ref={nameEl} placeholder="Roleplay" />
+      <section class="settings-section">
+        <h3>Basics</h3>
+        <SettingLabel field={nameEl}>Name</SettingLabel>
+        <input ref={nameEl.ref} placeholder="Roleplay" />
+      </section>
       <TemplateFields ref={fields} />
     </EntityEditorPane>
   );

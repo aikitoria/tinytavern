@@ -9,7 +9,7 @@ import {
 import { faLightbulb, faTrashCan } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
-import type { Message } from '@tinytavern/shared';
+import { characterChatName, type Message } from '@tinytavern/shared';
 import type { PendingSwipe } from '../state/store.ts';
 import { api } from '../state/api.ts';
 import {
@@ -34,7 +34,7 @@ import {
   streamingMessage,
 } from '../state/store.ts';
 import { messageSupportsSwipe, swipeMessage } from '../messageSwipe.ts';
-import { findMessageView } from '../plugins/index.ts';
+import { imageMessage } from '../images/imageGeneration.tsx';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import Markdown from './Markdown.tsx';
@@ -61,7 +61,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       ? (persona()?.name ?? 'You')
       : isTool()
         ? (props.message.name ?? 'Tool')
-        : (props.message.name ?? selectedCharacter()?.name ?? 'Assistant');
+        : (props.message.name ?? characterChatName(selectedCharacter()));
   const avatarSrc = () => (isUser() ? persona()?.avatar : selectedCharacter()?.avatar);
   const streaming = () => props.message.status === 'streaming';
 
@@ -227,9 +227,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     void navigateTree(() => api.deleteMessage(props.message.id, state.tree));
   };
   const removeSwipe = () => {
-    const pluginDelete = claimedView()?.deleteSwipe;
-    if (pluginDelete && claimedView()?.canDeleteSwipe?.(props.message)) {
-      void navigateTree(() => pluginDelete(props.message));
+    const imageDelete = imageBehavior()?.deleteSwipe;
+    if (imageDelete && imageBehavior()?.canDeleteSwipe?.(props.message)) {
+      void navigateTree(() => imageDelete(props.message));
     } else {
       void navigateTree(() => api.deleteSwipe(props.message.id, state.tree));
     }
@@ -280,17 +280,17 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         props.message.id,
         instruction,
         state.tree,
-        claimedView()?.currentImageConfig?.(),
+        imageBehavior()?.currentImageConfig?.(),
       ),
     );
     if (ok) setSteerOpen(false);
   };
 
-  // Preserve plugin closure state across message updates until the claim changes.
-  const claimedView = createMemo(() =>
-    props.message.role === 'tool' ? findMessageView(props.message) : undefined,
+  // Preserve image view state across streaming and image updates.
+  const imageBehavior = createMemo(() =>
+    imageMessage.matches(props.message) ? imageMessage : undefined,
   );
-  const pluginView = createMemo(() => claimedView()?.create(() => props.message, { streaming }));
+  const imageView = createMemo(() => imageBehavior()?.create(() => props.message, { streaming }));
 
   // Do not reopen a stale menu when this message remounts.
   onCleanup(() => {
@@ -309,8 +309,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         'msg-assistant': isAssistant(),
         'msg-tool': isTool(),
         'msg-streaming': streaming(),
-        'msg-hide-name': pluginView()?.hideName === true,
-        'msg-full-bleed': pluginView()?.fullBleed?.() === true,
+        'msg-hide-name': imageView()?.hideName === true,
+        'msg-full-bleed': imageView()?.fullBleed?.() === true,
+        'msg-menu-open': menuOpen(),
         'msg-range-selected': messageIsSelected(props.message.id),
         touched: touchedId() === props.message.id,
       }}
@@ -331,7 +332,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               when={!isTool()}
               fallback={
                 <span class="avatar avatar-fallback tool-avatar">
-                  {pluginView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
+                  {imageView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
                 </span>
               }
             >
@@ -411,11 +412,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 </Show>
               </button>
             </Show>
-            {pluginView()?.Header?.()}
+            {imageView()?.Header?.()}
           </span>
           <span class="msg-tools-top msg-overlay-toolbar">
             <Show when={!messageSelectionActive()}>
-              {pluginView()?.HeaderTools?.()}
+              {imageView()?.HeaderTools?.()}
               <Show when={siblings().length > 1 || (isAssistant() && !editing())}>
                 <span class="branch-nav">
                   <button
@@ -497,7 +498,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                         Edit
                       </MenuItem>
                       <div class="menu-separator" role="separator" />
-                      <Show when={isAssistant() || (isTool() && claimedView() != null)}>
+                      <Show when={isAssistant() || (isTool() && imageBehavior() != null)}>
                         <MenuItem action={openSteer}>Regenerate</MenuItem>
                       </Show>
                       <MenuItem action={duplicate}>Duplicate</MenuItem>
@@ -515,7 +516,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       <div class="menu-separator" role="separator" />
                       <Show
                         when={
-                          claimedView()?.canDeleteSwipe?.(props.message) || siblings().length > 1
+                          imageBehavior()?.canDeleteSwipe?.(props.message) || siblings().length > 1
                         }
                       >
                         <MenuItem danger action={removeSwipe}>
@@ -598,8 +599,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               </div>
             }
           >
-            {pluginView() ? (
-              pluginView()!.Body()
+            {imageView() ? (
+              imageView()!.Body()
             ) : (
               <div class="msg-content">
                 <Markdown content={props.message.content} streaming={streaming()} />

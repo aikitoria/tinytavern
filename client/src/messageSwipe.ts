@@ -1,21 +1,16 @@
 import type { Message } from '@tinytavern/shared';
-import { findMessageView } from './plugins/index.ts';
+import { imageMessage } from './images/imageGeneration.tsx';
 import { streamingMessage, swipeToSibling } from './state/store.ts';
 
 export function messageSupportsSwipe(message: Message): boolean {
-  return (
-    message.role === 'assistant' ||
-    message.role === 'user' ||
-    findMessageView(message)?.swipe != null
-  );
+  return message.role === 'assistant' || message.role === 'user' || imageMessage.matches(message);
 }
 
 /** Forward swipes can stop an assistant stream and start its next sibling;
- * plugins own equivalent behavior for tool messages. */
+ * image messages handle their own alternatives. */
 export function swipeMessage(message: Message, dir: 1 | -1): boolean {
-  const pluginSwipe = findMessageView(message)?.swipe;
-  if (pluginSwipe) {
-    pluginSwipe(message, dir);
+  if (imageMessage.matches(message)) {
+    imageMessage.swipe(message, dir);
     return true;
   }
   if (message.role !== 'assistant' && message.role !== 'user') return false;

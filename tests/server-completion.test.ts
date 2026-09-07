@@ -42,6 +42,32 @@ try {
   assert.deepEqual(deltas, ['hé', '🦊']);
   assert.deepEqual(wire, { model: 'test-model', messages, stream: true, max_tokens: 71 });
 
+  stmt("UPDATE endpoints SET prefill_mode = 'vllm', gen_params_json = ? WHERE id = ?").run(
+    JSON.stringify({ temperature: 0, maxTokens: 99, reasoningEffort: 'high' }),
+    endpointId,
+  );
+  const seeded: string[] = [];
+  const options = {
+    useEndpointParameters: true,
+    reasoningPrefill: 'Think',
+    messagePrefill: 'Seed: ',
+  };
+  assert.equal(
+    await streamChatCompletion(null, messages, 71, (text) => seeded.push(text), undefined, options),
+    'Seed: hé🦊',
+  );
+  assert.deepEqual(seeded, ['Seed: ', 'hé', '🦊']);
+  assert.deepEqual(wire, {
+    model: 'test-model',
+    stream: true,
+    temperature: 0,
+    max_tokens: 99,
+    reasoning_effort: 'high',
+    continue_final_message: true,
+    add_generation_prompt: false,
+    messages: [...messages, { role: 'assistant', content: 'Seed: ', reasoning_content: 'Think' }],
+  });
+
   for (const [delta, diagnosis] of [
     [{ refusal: 'no thanks' }, /The model refused: no thanks/],
     [{ reasoning_content: 'thinking' }, /only reasoning/],
@@ -50,6 +76,17 @@ try {
     reply = () => new Response(frame(delta));
     await assert.rejects(
       streamChatCompletion(null, messages, 71, () => {}),
+      diagnosis,
+    );
+    await assert.rejects(
+      streamChatCompletion(
+        null,
+        messages,
+        71,
+        () => assert.fail('No generated content to emit'),
+        undefined,
+        options,
+      ),
       diagnosis,
     );
   }

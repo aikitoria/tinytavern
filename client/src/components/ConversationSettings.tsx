@@ -1,8 +1,9 @@
+import SettingLabel, { createDefaultField } from './SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
-import type { Conversation } from '@tinytavern/shared';
+import { characterChatName, type Conversation } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import {
   duplicateConversation,
@@ -49,6 +50,10 @@ function Editor(props: {
   navigate: (action: () => void) => void;
 }) {
   let scenarioEl: HTMLTextAreaElement | undefined;
+  const titleField = createDefaultField(() => 'New chat');
+  const speakerField = createDefaultField(() => '');
+  const personaField = createDefaultField(() => '');
+  const endpointField = createDefaultField(() => '');
   let base = snapshot(props.conv);
   const [draft, setDraft] = createStore<Draft>({ ...base });
   const [saved, flashSaved] = createSavedFlash();
@@ -137,8 +142,12 @@ function Editor(props: {
 
   return (
     <div class="form">
-      <label>Title</label>
-      <input value={draft.title} onChange={(e) => setDraft('title', e.currentTarget.value)} />
+      <SettingLabel field={titleField}>Title</SettingLabel>
+      <input
+        ref={titleField.ref}
+        value={draft.title}
+        onChange={(e) => setDraft('title', e.currentTarget.value)}
+      />
 
       <label>Character</label>
       <div class="conversation-character-value">
@@ -160,15 +169,19 @@ function Editor(props: {
         </Show>
       </div>
 
-      <label>Speaker name (assistant replies; empty = character's name, also set via /char)</label>
+      <SettingLabel field={speakerField}>
+        Speaker name (assistant replies; empty = character's name, also set via /char)
+      </SettingLabel>
       <input
+        ref={speakerField.ref}
         value={draft.speakerName ?? ''}
         onChange={(e) => setDraft('speakerName', e.currentTarget.value.trim() || null)}
-        placeholder={character()?.name ?? 'Assistant'}
+        placeholder={characterChatName(character())}
       />
 
-      <label>Persona</label>
+      <SettingLabel field={personaField}>Persona</SettingLabel>
       <Select
+        ref={personaField.ref}
         value={draft.personaId?.toString() ?? ''}
         ariaLabel="Conversation persona"
         onChange={(v) => setDraft('personaId', numberOrNull(v))}
@@ -178,8 +191,11 @@ function Editor(props: {
         ]}
       />
 
-      <label>Endpoint (overrides the global active endpoint for this conversation)</label>
+      <SettingLabel field={endpointField}>
+        Endpoint (overrides the global active endpoint for this conversation)
+      </SettingLabel>
       <Select
+        ref={endpointField.ref}
         value={draft.endpointId?.toString() ?? ''}
         ariaLabel="Conversation endpoint"
         onChange={(v) => setDraft('endpointId', numberOrNull(v))}
@@ -189,7 +205,11 @@ function Editor(props: {
         ]}
       />
 
-      <label class="check-row">
+      <SettingLabel
+        check
+        changed={draft.scenarioOverride !== null}
+        onRevert={() => setDraft('scenarioOverride', null)}
+      >
         <input
           type="checkbox"
           checked={draft.scenarioOverride !== null}
@@ -198,12 +218,15 @@ function Editor(props: {
           }
         />
         <span>Override the character scenario for this conversation</span>
-      </label>
+      </SettingLabel>
 
       <Show when={draft.scenarioOverride !== null}>
-        <label>
+        <SettingLabel
+          changed={draft.scenarioOverride !== null}
+          onRevert={() => setDraft('scenarioOverride', null)}
+        >
           Conversation scenario <MacroHelp />
-        </label>
+        </SettingLabel>
         <MacroTextarea
           ref={(el) => {
             scenarioEl = el;

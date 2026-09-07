@@ -1,6 +1,7 @@
 import { Show } from 'solid-js';
 import { errorMessage } from '../util.ts';
 import Avatar from './Avatar.tsx';
+import { RevertButton } from './SettingField.tsx';
 
 export default function AvatarRow(props: {
   src: string | null | undefined;
@@ -33,9 +34,7 @@ export default function AvatarRow(props: {
     <div class="avatar-row">
       <Avatar src={props.src} name={props.name} />
       <button onClick={() => input.click()}>Change avatar</button>
-      <Show when={props.src}>
-        <button onClick={() => void remove()}>Remove</button>
-      </Show>
+      <RevertButton changed={Boolean(props.src)} onRevert={() => void remove()} />
       <Show when={props.generate}>
         <button onClick={() => props.generate?.()}>Generate</button>
       </Show>

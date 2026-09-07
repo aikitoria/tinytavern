@@ -221,6 +221,15 @@ export const api = {
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
   gallery: () => request<GalleryItem[]>('GET', '/api/gallery'),
+  uploadGalleryImage: (file: File, characterId: number | null, characterName?: string) => {
+    const query = new URLSearchParams();
+    if (characterId != null) query.set('characterId', String(characterId));
+    else if (characterName) query.set('characterName', characterName);
+    return request<GalleryItem>('POST', `/api/gallery/upload?${query}`, undefined, {
+      rawBody: file,
+      contentType: file.type || 'application/octet-stream',
+    });
+  },
   saveGalleryImage: (messageId: number, index: number) =>
     request<{ item: GalleryItem; created: boolean }>('POST', '/api/gallery', {
       messageId,

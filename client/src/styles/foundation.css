@@ -7,7 +7,9 @@
   --bg-hover: #3d3f44;
   --border: #404248;
   --border-subtle: color-mix(in srgb, var(--border) 40%, transparent);
+  --border-control-surface: color-mix(in srgb, var(--border) 65%, transparent);
   --text: #f2f3f5;
+  --text-field: #c9cbd1;
   --text-dim: #a9abb2;
   --text-control: #969da7;
   --text-muted: #747780;
@@ -39,6 +41,7 @@
   --space-5: 20px;
   --space-6: 24px;
   --control-pad-y: 7px;
+  --control-height: 34px;
   --radius-control: 8px;
   --radius-panel: 12px;
   --radius-modal: 16px;
@@ -95,12 +98,16 @@ body {
 }
 
 :where(button) {
-  font: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: inherit;
+  font-style: inherit;
+  line-height: 20px;
   color: inherit;
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  padding: var(--control-pad-y) var(--space-3);
+  padding: 6px var(--space-2);
   cursor: pointer;
   transition:
     color 0.14s ease,
@@ -126,22 +133,33 @@ button:disabled {
   cursor: default;
 }
 
-input,
-select,
-textarea {
+:where(input, select, textarea) {
   font: inherit;
-  color: var(--text);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
+  font-weight: 400;
+  color: var(--text-field);
+  background: var(--bg);
+  border: 1px solid var(--border-control-surface);
   border-radius: var(--radius-control);
   padding: var(--control-pad-y) var(--space-3);
   width: 100%;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+  box-shadow: none;
 }
 
 input::placeholder,
 textarea::placeholder {
   color: var(--text-muted);
+}
+
+/* Text controls share the buttons' compact metrics throughout the application. */
+:where(input:not([type='checkbox'], [type='range'])) {
+  font-size: 13px;
+  line-height: 20px;
+  padding: 6px var(--space-2);
+}
+
+:where(textarea) {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 :is(input, select, textarea):focus,

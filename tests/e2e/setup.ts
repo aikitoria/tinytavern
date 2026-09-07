@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { statSync, unlinkSync } from 'node:fs';
+import { existsSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expandWorkflowTemplate, workflowValidationError } from '@tinytavern/shared';
@@ -186,14 +186,14 @@ export async function testSetup() {
 
   console.log('== private persistence + online backup ==');
   const dataDir = process.env.DATA_DIR!;
-  for (const path of [
-    dataDir,
-    join(dataDir, 'tinytavern.db'),
-    join(dataDir, 'tinytavern.db-wal'),
-    join(dataDir, 'tinytavern.db-shm'),
-  ]) {
+  for (const path of [dataDir, join(dataDir, 'tinytavern.db')]) {
     assert((statSync(path).mode & 0o077) === 0, `${path} is private to the server user`);
   }
+  assert(
+    !existsSync(join(dataDir, 'tinytavern.db-wal')) &&
+      !existsSync(join(dataDir, 'tinytavern.db-shm')),
+    'rollback journaling creates no persistent WAL or shared-memory files',
+  );
   const backupPath = join('/tmp', `tinytavern-e2e-backup-${randomUUID()}.db`);
   execFileSync('node', ['server/src/backup.ts', backupPath], {
     cwd: process.cwd(),
@@ -216,7 +216,7 @@ export async function testSetup() {
       };
       assert(
         liveEndpoints === backupEndpoints && integrity.integrity_check === 'ok',
-        'online backup is a complete, valid SQLite snapshot while WAL is active',
+        'online backup is a complete, valid SQLite snapshot while the server is running',
       );
     } finally {
       live.close();
@@ -281,18 +281,18 @@ export async function testSetup() {
     },
     400,
   );
-  const withPlugin = await putSettings({
-    pluginSettings: { imageGeneration: { describePrompt: 'test prompt' } },
+  const withImageSettings = await putSettings({
+    imageGeneration: { describePrompt: 'test prompt' },
   });
   assert(
-    (withPlugin.pluginSettings.imageGeneration as { describePrompt?: string }).describePrompt ===
+    (withImageSettings.imageGeneration as { describePrompt?: string }).describePrompt ===
       'test prompt',
-    'plugin settings round-trip through PUT /api/settings',
+    'image settings round-trip through PUT /api/settings',
   );
   await expectStatus(
     'PUT',
     '/api/settings',
-    { pluginSettings: 'nope', expectedRevision: withPlugin.revision },
+    { imageGeneration: 'nope', expectedRevision: withImageSettings.revision },
     400,
   );
 

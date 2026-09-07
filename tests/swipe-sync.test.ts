@@ -44,14 +44,14 @@ assert.match(
 );
 assert.match(messageNode, /swipeMessage\(props\.message, dir\)/);
 assert.equal(messageNode.match(/swipeMessage\(props\.message, [^)]+\)/g)?.length, 3);
-assert.match(messageNode, /claimedView\(\)\?\.canDeleteSwipe/);
+assert.match(messageNode, /imageBehavior\(\)\?\.canDeleteSwipe/);
 assert.match(chatView, /swipeMessage\(last, dir\)/);
 
 const messageSwipe = readFileSync(
   new URL('../client/src/messageSwipe.ts', import.meta.url),
   'utf8',
 );
-assert.match(messageSwipe, /pluginSwipe\(message, dir\)/);
+assert.match(messageSwipe, /imageMessage\.swipe\(message, dir\)/);
 assert.match(messageSwipe, /swipeToSibling\(message, dir\)/);
 assert.match(messageSwipe, /message\.role === 'assistant' \|\|\s+message\.role === 'user'/);
 assert.match(messageSwipe, /message\.role !== 'assistant' && message\.role !== 'user'/);
@@ -62,7 +62,7 @@ assert.match(store, /\}, 750\)/);
 assert.match(store, /setTimeout\(\(\) => clearPendingSwipe\(token\), 5000\)/);
 
 const imageGeneration = readFileSync(
-  new URL('../client/src/plugins/imageGeneration.tsx', import.meta.url),
+  new URL('../client/src/images/imageGeneration.tsx', import.meta.url),
   'utf8',
 );
 assert.match(imageGeneration, /if \(message\.status === 'streaming'\)/);

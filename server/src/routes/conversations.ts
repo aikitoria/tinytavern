@@ -2,7 +2,7 @@
 // handlers or generation callbacks invalidate generation and active-leaf guards.
 import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
 import type { MessageRow } from './conversationCopies.ts';
-import type { Conversation } from '@tinytavern/shared';
+import { characterChatName, type Conversation } from '@tinytavern/shared';
 import { stmt, toConversation, toMessage, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {
@@ -313,7 +313,8 @@ route.post('/api/conversations', ({ body }) => {
     );
     const convId = Number(result.lastInsertRowid);
     if (character?.firstMessage.trim()) {
-      const sub = (text: string) => substituteMacros(text, character.name, persona?.name ?? 'User');
+      const sub = (text: string) =>
+        substituteMacros(text, characterChatName(character), persona?.name ?? 'User');
       appendMessage(convId, 'assistant', sub(character.firstMessage), null);
       // Make alternate greetings swipeable while keeping the primary active.
       for (const alt of getAlternateGreetings(character.id)) {

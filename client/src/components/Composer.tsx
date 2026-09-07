@@ -7,8 +7,8 @@ import {
   draftCompletionActive,
   stopDraftCompletion,
 } from '../state/draftCompletion.ts';
-import type { PluginCommand } from '../plugins/api.ts';
-import { pluginCommands, pluginTools } from '../plugins/index.ts';
+import type { ComposerCommand } from '../composerCommands.ts';
+import { imageGenerationCommands, imageGenerationTools } from '../images/imageGeneration.tsx';
 import {
   activePath,
   deleteConversation,
@@ -25,7 +25,7 @@ import MobileSidebarButton from './MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
 
-const BUILTIN_COMMANDS: PluginCommand[] = [
+const BUILTIN_COMMANDS: ComposerCommand[] = [
   {
     name: 'char',
     params: '<name>',
@@ -66,14 +66,14 @@ const BUILTIN_COMMANDS: PluginCommand[] = [
   },
 ];
 
-const COMMANDS: PluginCommand[] = [...BUILTIN_COMMANDS, ...pluginCommands];
+const COMMANDS: ComposerCommand[] = [...BUILTIN_COMMANDS, ...imageGenerationCommands];
 
 // First-match dispatch silently shadows duplicate command names.
 {
   const seen = new Set<string>();
   for (const cmd of COMMANDS) {
     if (seen.has(cmd.name)) {
-      console.error(`[plugins] duplicate slash command /${cmd.name} — later registration is dead`);
+      console.error(`[composer] duplicate slash command /${cmd.name} — later registration is dead`);
     }
     seen.add(cmd.name);
   }
@@ -116,7 +116,7 @@ export default function Composer() {
     setSelIdx(0);
   });
 
-  const complete = (cmd: PluginCommand) => {
+  const complete = (cmd: ComposerCommand) => {
     setText(`/${cmd.name} `);
     area?.focus({ preventScroll: true });
   };
@@ -318,7 +318,7 @@ export default function Composer() {
             keyboardNavigation
             autoFocus
           >
-            <For each={pluginTools()}>
+            <For each={imageGenerationTools()}>
               {(tool) => (
                 <button
                   type="button"

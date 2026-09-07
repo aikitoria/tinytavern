@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { StatementSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { imageFileDimensions } from './imageDimensions.ts';
 import type {
   Character,
   CharacterFolder,
@@ -14,14 +15,19 @@ import type {
   Preset,
   Template,
 } from '@tinytavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS } from '@tinytavern/shared';
+import {
+  DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_SETTINGS,
+  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  DEFAULT_GALLERY_REVISION_TEMPLATE,
+} from '@tinytavern/shared';
 
 export const DATA_DIR = process.env.DATA_DIR ?? '/data';
 export const AVATAR_DIR = join(DATA_DIR, 'avatars');
 export const IMAGES_DIR = join(DATA_DIR, 'images');
 const DB_PATH = process.env.DB_PATH ?? join(DATA_DIR, 'tinytavern.db');
 
-// SQLite holds plaintext chats and credentials; keep future WAL/SHM sidecars private too.
+// SQLite holds plaintext chats and credentials; transient journals must stay private too.
 process.umask(0o077);
 function privateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
@@ -35,19 +41,12 @@ privateDirectory(IMAGES_DIR);
 export const db = new DatabaseSync(DB_PATH);
 chmodSync(DB_PATH, 0o600);
 db.exec('PRAGMA foreign_keys = ON');
-// WAL + NORMAL reduces fsyncs during streaming; a crash may lose recent commits,
-// but does not corrupt the database.
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA synchronous = NORMAL');
-for (const sidecar of [`${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
-  try {
-    chmodSync(sidecar, 0o600);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-}
-// Auto-checkpointing bounds the WAL; reclaim its high-water allocation after write bursts.
-db.exec('PRAGMA journal_size_limit = 67108864');
+// The online backup opens a separate connection; allow its short read locks to finish.
+db.exec('PRAGMA busy_timeout = 5000');
+// Streams stay in memory until they end. SQLite handles conversion of existing WAL databases;
+// EXTRA also syncs the directory after deleting the rollback journal at commit.
+db.exec('PRAGMA journal_mode = DELETE');
+db.exec('PRAGMA synchronous = EXTRA');
 
 // Query strings form a bounded set, so this cache needs no eviction.
 const stmtCache = new Map<string, StatementSync>();
@@ -380,6 +379,74 @@ migrate(25, () => {
   `);
 });
 
+// Persist gallery geometry once so clients can lay out rows before loading images.
+migrate(26, () => {
+  db.exec(`
+    ALTER TABLE gallery_items ADD COLUMN image_width INTEGER;
+    ALTER TABLE gallery_items ADD COLUMN image_height INTEGER;
+  `);
+  const rows = stmt('SELECT id, image FROM gallery_items WHERE image IS NOT NULL').all() as {
+    id: number;
+    image: string;
+  }[];
+  for (const row of rows) {
+    if (!row.image.startsWith('/images/')) continue;
+    const size = imageFileDimensions(join(IMAGES_DIR, basename(row.image)));
+    if (size)
+      stmt('UPDATE gallery_items SET image_width = ?, image_height = ? WHERE id = ?').run(
+        size.width,
+        size.height,
+        row.id,
+      );
+  }
+});
+
+// Promote the shipped image feature without reinterpreting or losing saved overrides.
+migrate(27, () => {
+  const row = stmt("SELECT value FROM settings WHERE key = 'app'").get() as
+    { value: string } | undefined;
+  if (!row) return;
+  const settings = JSON.parse(row.value) as Record<string, unknown>;
+  if (!Object.hasOwn(settings, 'pluginSettings')) return;
+  const legacy = settings.pluginSettings as { imageGeneration?: unknown } | null;
+  if (!Object.hasOwn(settings, 'imageGeneration')) {
+    settings.imageGeneration = legacy?.imageGeneration ?? {};
+  }
+  delete settings.pluginSettings;
+  const revision = Number.isSafeInteger(settings.revision) ? (settings.revision as number) : 0;
+  settings.revision = revision + 1;
+  stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(settings));
+});
+
+// Gallery revisions now define their complete standalone request.
+migrate(28, () => {
+  const row = stmt("SELECT value FROM settings WHERE key = 'app'").get() as
+    { value: string } | undefined;
+  if (!row) return;
+  const settings = JSON.parse(row.value) as Record<string, unknown>;
+  const gallery = settings.gallery as Record<string, unknown> | undefined;
+  if (!gallery || !Object.hasOwn(gallery, 'promptRevisionTemplate')) return;
+  if (!Object.hasOwn(gallery, 'promptRevision')) {
+    const previous = gallery.promptRevisionTemplate;
+    const template = { ...DEFAULT_GALLERY_REVISION_TEMPLATE };
+    if (typeof previous === 'string' && previous !== DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE) {
+      // Retain custom instructions verbatim and explicitly supply the original prompt.
+      template.systemPrompt = '';
+      template.userMessage =
+        '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>\n\n' + previous;
+    }
+    gallery.promptRevision = template;
+  }
+  delete gallery.promptRevisionTemplate;
+  const revision = Number.isSafeInteger(settings.revision) ? (settings.revision as number) : 0;
+  settings.revision = revision + 1;
+  stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(settings));
+});
+
+migrate(29, () => {
+  db.exec('ALTER TABLE characters ADD COLUMN chat_name TEXT');
+});
+
 // Generations don't survive a restart: finalize any rows a previous process left streaming.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 stmt("DELETE FROM messages WHERE status = 'streaming' AND generation_kind = 'speculative'").run();
@@ -470,6 +537,8 @@ export function toGalleryItem(r: Row): GalleryItem {
     sourceImage: (r.source_image as string | null) ?? null,
     prompt: r.prompt as string,
     image: r.image as string,
+    imageWidth: (r.image_width as number | null) ?? null,
+    imageHeight: (r.image_height as number | null) ?? null,
     hasImageRender: r.image_render_json != null,
     createdAt: r.created_at as number,
     updatedAt: r.updated_at as number,
@@ -496,6 +565,7 @@ export function toCharacter(r: Row): Character {
   return {
     id: r.id as number,
     name: r.name as string,
+    chatName: (r.chat_name as string | null) ?? null,
     folderId: (r.folder_id as number | null) ?? null,
     avatar: r.avatar as string | null,
     personality: r.personality as string,

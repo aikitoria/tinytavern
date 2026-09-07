@@ -1,9 +1,13 @@
 // Construct historical schemas in private temporary files before importing db.ts.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  DEFAULT_GALLERY_REVISION_TEMPLATE,
+} from '@tinytavern/shared';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = mkdtempSync(join(tmpdir(), 'tinytavern-migration-test-'));
@@ -31,6 +35,10 @@ function upgrade(path: string, code = '') {
 // Inverse DDL reconstructs each released schema independently of migrate().
 // Fixtures are empty while rewinding, then populated with historical data.
 const rewind: Record<number, string> = {
+  29: 'ALTER TABLE characters DROP COLUMN chat_name;',
+  28: '', // Gallery standalone template; settings JSON only.
+  27: '', // Settings JSON changed; no DDL to rewind.
+  26: 'ALTER TABLE gallery_items DROP COLUMN image_width; ALTER TABLE gallery_items DROP COLUMN image_height;',
   25: 'ALTER TABLE characters DROP COLUMN disable_background_swipe_generation;',
   24: `DROP TABLE gallery_items;
     CREATE TABLE gallery_items (
@@ -103,15 +111,15 @@ try {
   const freshPath = join(root, 'fresh.db');
   upgrade(freshPath);
   const fresh = new DatabaseSync(freshPath);
-  assert.equal(fresh.prepare('PRAGMA user_version').get()!.user_version, 25);
+  assert.equal(fresh.prepare('PRAGMA user_version').get()!.user_version, 29);
   const expectedSchema = schema(fresh);
   fresh.close();
 
-  for (let version = 1; version <= 25; version++) {
+  for (let version = 1; version <= 29; version++) {
     const path = join(root, `v${version}.db`);
     copyFileSync(freshPath, path);
     const fixture = new DatabaseSync(path);
-    for (let undo = 25; undo > version; undo--) fixture.exec(rewind[undo]!);
+    for (let undo = 29; undo > version; undo--) fixture.exec(rewind[undo]!);
     fixture.exec(`PRAGMA user_version = ${version};
       INSERT INTO characters (id, name, personality, card_json, created_at)
         VALUES (100, 'Historical character', 'Preserved personality', '{"custom":true}', 11);
@@ -135,12 +143,28 @@ try {
         VALUES (100, 'Historical character', 100, 100, '/images/source.png', 'Preserved prompt',
           '["/images/a.png","/images/b.png","/images/c.png"]', 2, '{"workflow":{}}', 20, 30);`);
     }
+    if (version === 25) {
+      const header = Buffer.alloc(24);
+      Buffer.from('89504e470d0a1a0a', 'hex').copy(header);
+      header.write('IHDR', 12);
+      header.writeUInt32BE(1600, 16);
+      header.writeUInt32BE(900, 20);
+      writeFileSync(join(root, 'images', 'dimensions.png'), header);
+      fixture.exec(`INSERT INTO gallery_items (character_name, prompt, image, created_at, updated_at)
+        VALUES ('Historical character', 'Original prompt', '/images/dimensions.png', 20, 30),
+               ('Historical character', 'Missing file prompt', '/images/missing.png', 21, 31);`);
+    }
     fixture.close();
     upgrade(path);
     const upgraded = new DatabaseSync(path);
     assert.deepEqual(schema(upgraded), expectedSchema, `schema upgraded from v${version}`);
-    assert.equal(upgraded.prepare('PRAGMA user_version').get()!.user_version, 25);
+    assert.equal(upgraded.prepare('PRAGMA user_version').get()!.user_version, 29);
     assert.equal(upgraded.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok');
+    assert.equal(
+      upgraded.prepare('SELECT chat_name FROM characters WHERE id = 100').get()!.chat_name,
+      null,
+      'Existing characters keep their display name as their chat name',
+    );
     assert.deepEqual(upgraded.prepare('PRAGMA foreign_key_check').all(), []);
     assert.equal(
       upgraded.prepare("SELECT count(*) AS n FROM characters WHERE name = 'Assistant'").get()!.n,
@@ -212,9 +236,130 @@ try {
         ],
       );
     }
+    if (version === 25) {
+      assert.deepEqual(
+        upgraded
+          .prepare('SELECT image_width, image_height FROM gallery_items ORDER BY id')
+          .all()
+          .map((row) => ({ ...row })),
+        [
+          { image_width: 1600, image_height: 900 },
+          { image_width: null, image_height: null },
+        ],
+      );
+    }
     upgraded.close();
     // Reopening an up-to-date database must not repeat seeds or migrations.
     upgrade(path);
+  }
+
+  const savedImageSettings = {
+    comfyUrl: 'http://preserved-comfy:8588',
+    workflows: [
+      { name: 'Landscape', json: '{"prompt":"{{prompt}}"}' },
+      { name: 'Portrait', json: '{"seed":{{seed}}}' },
+    ],
+    activeWorkflow: 'Landscape',
+    avatarWorkflow: 'Portrait',
+    promptPresets: {
+      describe: {
+        presets: [{ name: 'Detailed', prompt: 'Describe {{char}} in detail.' }],
+        active: 'Detailed',
+      },
+      avatar: {
+        presets: [{ name: 'Face', prompt: 'Portrait', context: '{{description}}' }],
+        active: 'Face',
+      },
+    },
+  };
+  const legacyImageSettings = {
+    describePrompt: 'Keep this exact prompt\n  and indentation',
+    instructionPrompt: 'Apply {{instruction}}',
+    avatarPrompt: 'Portrait of {{name}}',
+    workflowJson: '{"legacy":"{{prompt}}"}',
+    comfyUrl: 'http://legacy-comfy:8588',
+  };
+  for (const [name, imageSettings] of Object.entries({
+    presets: savedImageSettings,
+    legacy: legacyImageSettings,
+  })) {
+    const path = join(root, `image-settings-${name}.db`);
+    copyFileSync(freshPath, path);
+    const fixture = new DatabaseSync(path);
+    const previous = {
+      revision: 41,
+      activeEndpointId: 7,
+      backgroundSwipeGeneration: true,
+      pluginSettings: { imageGeneration: imageSettings },
+    };
+    fixture
+      .prepare("UPDATE settings SET value = ? WHERE key = 'app'")
+      .run(JSON.stringify(previous));
+    fixture.exec('ALTER TABLE characters DROP COLUMN chat_name; PRAGMA user_version = 26');
+    fixture.close();
+    upgrade(path);
+    const upgraded = new DatabaseSync(path);
+    const encoded = upgraded.prepare("SELECT value FROM settings WHERE key = 'app'").get()!.value;
+    assert.deepEqual(JSON.parse(encoded as string), {
+      revision: 42,
+      activeEndpointId: 7,
+      backgroundSwipeGeneration: true,
+      imageGeneration: imageSettings,
+    });
+    upgraded.close();
+    upgrade(path);
+    const reopened = new DatabaseSync(path);
+    assert.equal(
+      reopened.prepare("SELECT value FROM settings WHERE key = 'app'").get()!.value,
+      encoded,
+    );
+    reopened.close();
+  }
+
+  for (const [name, previousTemplate] of Object.entries({
+    default: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+    custom: 'Keep this exact custom text\n  Apply {{instruction}} and preserve $&',
+  })) {
+    const path = join(root, `gallery-template-${name}.db`);
+    copyFileSync(freshPath, path);
+    const fixture = new DatabaseSync(path);
+    const previous = {
+      revision: 52,
+      activeEndpointId: 7,
+      imageGeneration: savedImageSettings,
+      gallery: { promptRevisionTemplate: previousTemplate },
+    };
+    fixture
+      .prepare("UPDATE settings SET value = ? WHERE key = 'app'")
+      .run(JSON.stringify(previous));
+    fixture.exec('ALTER TABLE characters DROP COLUMN chat_name; PRAGMA user_version = 27');
+    fixture.close();
+    upgrade(path);
+    const upgraded = new DatabaseSync(path);
+    const encoded = upgraded.prepare("SELECT value FROM settings WHERE key = 'app'").get()!.value;
+    const expectedTemplate =
+      name === 'default'
+        ? DEFAULT_GALLERY_REVISION_TEMPLATE
+        : {
+            ...DEFAULT_GALLERY_REVISION_TEMPLATE,
+            systemPrompt: '',
+            userMessage:
+              '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>\n\n' +
+              previousTemplate,
+          };
+    assert.deepEqual(JSON.parse(encoded as string), {
+      ...previous,
+      revision: 53,
+      gallery: { promptRevision: expectedTemplate },
+    });
+    upgraded.close();
+    upgrade(path);
+    const reopened = new DatabaseSync(path);
+    assert.equal(
+      reopened.prepare("SELECT value FROM settings WHERE key = 'app'").get()!.value,
+      encoded,
+    );
+    reopened.close();
   }
 
   upgrade(
@@ -253,7 +398,7 @@ try {
   );
   rolledBack.close();
   console.log(
-    'Migration regressions passed: fresh schema, versions 1–25, data conversions, nested transactions and migration rollback.',
+    'Migration regressions passed: fresh schema, versions 1–29, preserved image settings and gallery templates, data conversions, nested transactions and migration rollback.',
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

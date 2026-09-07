@@ -1,0 +1,80 @@
+/* Shared shell for full-screen workspaces such as Gallery and Settings. */
+.modal-backdrop.fullscreen-backdrop {
+  padding: 0;
+  background: var(--bg);
+  backdrop-filter: none;
+}
+
+.modal.fullscreen-page {
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+  animation: none;
+}
+
+.fullscreen-page .modal-head {
+  flex: none;
+  min-height: var(--bar-h);
+  padding: var(--space-1) var(--space-4);
+  background: var(--bg-chrome);
+  border-color: var(--border-subtle);
+}
+
+.fullscreen-page .modal-title {
+  flex: none;
+}
+
+.fullscreen-page .modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.page-header-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-height);
+  height: var(--control-height);
+}
+
+.page-header-actions .page-back {
+  margin-right: auto;
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (max-width: 767px) {
+  /* Mobile pages scroll as a whole, including their header. */
+  .modal.fullscreen-page {
+    display: block;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-y: auto;
+    overflow-anchor: none;
+  }
+
+  .fullscreen-page .modal-body {
+    display: block;
+    overflow: visible;
+  }
+}

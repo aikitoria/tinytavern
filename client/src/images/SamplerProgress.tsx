@@ -4,6 +4,7 @@ import { Show, type JSX } from 'solid-js';
 export default function SamplerProgress(props: {
   progress?: { value?: number; max?: number } | null;
   stepsClass?: string;
+  stepsLabel?: string;
   fallback?: JSX.Element;
 }) {
   return (
@@ -18,6 +19,7 @@ export default function SamplerProgress(props: {
         />
       </span>
       <span class={props.stepsClass}>
+        {props.stepsLabel ? `${props.stepsLabel} ` : ''}
         {props.progress!.value}/{props.progress!.max}
       </span>
     </Show>

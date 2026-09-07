@@ -48,7 +48,7 @@ export default function MacroTextarea(props: {
   ref?: HTMLTextAreaElement | ((el: HTMLTextAreaElement) => void);
   /** Enables the template macro set ({{system}}, {{#if x}}…) on top of {{char}}/{{user}}. */
   template?: boolean;
-  /** Additional macro names to treat as valid (e.g. a plugin's {{instruction}}). */
+  /** Additional macro names to treat as valid (e.g. {{instruction}}). */
   extraKeys?: string[];
   /** Exclusive macro set: replaces the base {{char}}/{{user}} keys entirely. */
   keys?: string[];
@@ -85,6 +85,7 @@ export default function MacroTextarea(props: {
     area = el;
     const base = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
     Object.defineProperty(el, 'value', {
+      configurable: true,
       get: () => base.get!.call(el) as string,
       set: (next: unknown) => {
         base.set!.call(el, next);

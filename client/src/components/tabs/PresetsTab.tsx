@@ -1,3 +1,4 @@
+import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { api } from '../../state/api.ts';
 import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';
@@ -7,8 +8,8 @@ import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
 
 export default function PresetsTab() {
-  let nameEl!: HTMLInputElement;
-  let contentEl!: HTMLTextAreaElement;
+  const nameEl = createDefaultField(() => '');
+  const contentEl = createDefaultField(() => '');
   const editor = createEntityEditor({
     items: () => state.presets,
     load: (preset) => {
@@ -37,12 +38,18 @@ export default function PresetsTab() {
         description: 'Characters without their own prompt will leave the system-prompt slot empty.',
       }}
     >
-      <label>Name</label>
-      <input ref={nameEl} placeholder="Creative writer" />
-      <label>
-        System prompt <MacroHelp />
-      </label>
-      <MacroTextarea ref={contentEl} placeholder="You are {{char}}, …" />
+      <section class="settings-section">
+        <h3>Basics</h3>
+        <SettingLabel field={nameEl}>Name</SettingLabel>
+        <input ref={nameEl.ref} placeholder="Creative writer" />
+      </section>
+      <section class="settings-section">
+        <h3>System prompt</h3>
+        <SettingLabel field={contentEl}>
+          Instructions <MacroHelp />
+        </SettingLabel>
+        <MacroTextarea ref={contentEl.ref} placeholder="You are {{char}}, …" />
+      </section>
     </EntityEditorPane>
   );
 }

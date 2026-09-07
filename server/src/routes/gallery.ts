@@ -6,8 +6,16 @@ import { stmt, toGalleryItem as canonicalGalleryItem, transaction } from '../db.
 import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { invalidate } from '../events.ts';
 import { streamChatCompletion } from '../generation.ts';
-import { copyImage, deleteImageFiles, saveImage } from '../images.ts';
-import { buildImagePromptRevisionMessages } from '../prompt.ts';
+import {
+  copyImage,
+  deleteImageFiles,
+  rasterImageFormat,
+  saveImage,
+  savedImageDimensions,
+} from '../images.ts';
+import { imageDimensions } from '../imageDimensions.ts';
+import { buildGalleryRevisionPrompt } from '../prompt.ts';
+import { getSettings } from '../settingsStore.ts';
 import { HttpError, route } from '../router.ts';
 import type { Ctx } from '../router.ts';
 import {
@@ -57,6 +65,48 @@ route.get('/api/gallery', () =>
   ),
 );
 
+// One original per request avoids base64 copies and bounds concurrent upload memory.
+route.post(
+  '/api/gallery/upload',
+  ({ req, raw }) => {
+    if (!raw?.length) throw new HttpError(400, 'image file is empty');
+    const format = rasterImageFormat(raw);
+    const size = format && imageDimensions(raw);
+    if (!format || !size) throw new HttpError(400, 'Upload a valid PNG, JPEG, or WebP image');
+    const query = new URL(req.url!, 'http://localhost').searchParams;
+    const characterId = query.has('characterId') ? positiveId(query.get('characterId')!) : null;
+    let characterName = query.get('characterName')?.trim() || 'Uploads';
+    if (characterId != null) {
+      const character = stmt('SELECT name FROM characters WHERE id = ?').get(characterId) as
+        { name: string } | undefined;
+      if (!character) throw new HttpError(404, 'character not found');
+      characterName = character.name;
+    } else if (characterName.length > 500) throw new HttpError(400, 'character name is too long');
+    const saved = saveImage(`gallery-${randomUUID()}${format.ext}`, raw);
+    try {
+      const now = Date.now();
+      const result = stmt(`INSERT INTO gallery_items
+      (character_id, character_name, prompt, image, image_width, image_height, created_at, updated_at)
+      VALUES (?, ?, '', ?, ?, ?, ?, ?)`).run(
+        characterId,
+        characterName,
+        saved,
+        size.width,
+        size.height,
+        now,
+        now,
+      );
+      const item = galleryItem(Number(result.lastInsertRowid));
+      invalidate('gallery');
+      return item;
+    } catch (err) {
+      deleteImageFiles([saved]);
+      throw err;
+    }
+  },
+  { rawBody: true, maxBodyBytes: 64 * 1024 * 1024 },
+);
+
 /** Own the image copy; source links use ON DELETE SET NULL for navigation only. */
 route.post('/api/gallery', ({ body }) => {
   const b = objectBody(body);
@@ -96,12 +146,14 @@ route.post('/api/gallery', ({ body }) => {
   const copied = copyImage(sourceImage, `gallery-${randomUUID()}${ext}`);
   if (!copied) throw new HttpError(409, 'the source image file no longer exists');
   try {
+    const size = savedImageDimensions(copied);
     const now = Date.now();
     const result = stmt(
       `INSERT INTO gallery_items
          (character_id, character_name, source_conversation_id, source_message_id,
-          source_image, prompt, image, image_render_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          source_image, prompt, image, image_render_json, created_at, updated_at,
+          image_width, image_height)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       source.character_id,
       source.character_name,
@@ -113,6 +165,8 @@ route.post('/api/gallery', ({ body }) => {
       source.image_render_json,
       now,
       now,
+      size?.width ?? null,
+      size?.height ?? null,
     );
     const item = galleryItem(Number(result.lastInsertRowid));
     invalidate('gallery');
@@ -174,13 +228,23 @@ async function reviseGalleryPrompt(ctx: Ctx): Promise<void> {
   }
   activePromptRevisions.add(id);
   try {
+    const built = buildGalleryRevisionPrompt(
+      prompt,
+      instruction,
+      getSettings().gallery.promptRevision,
+    );
     await streamResponse(ctx.res, async (send, signal) => {
       await streamChatCompletion(
         null,
-        buildImagePromptRevisionMessages(prompt, instruction),
+        built.messages,
         PROMPT_REVISION_MAX_TOKENS,
         (d) => send({ d }),
         signal,
+        {
+          useEndpointParameters: true,
+          reasoningPrefill: built.reasoningPrefill,
+          messagePrefill: built.messagePrefill,
+        },
       );
     });
   } finally {
@@ -230,6 +294,7 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
       result.data,
     );
     const created = transaction(() => {
+      const size = imageDimensions(result.data);
       const characterId =
         row.character_id != null &&
         stmt('SELECT 1 FROM characters WHERE id = ?').get(row.character_id as number)
@@ -239,8 +304,9 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
       const inserted = stmt(
         `INSERT INTO gallery_items
            (character_id, character_name, source_conversation_id, source_message_id,
-            source_image, prompt, image, image_render_json, created_at, updated_at)
-         VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
+            source_image, prompt, image, image_render_json, created_at, updated_at,
+            image_width, image_height)
+         VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         characterId,
         (row.current_character_name as string | null) ?? (row.character_name as string),
@@ -249,6 +315,8 @@ route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
         JSON.stringify(config),
         now,
         now,
+        size?.width ?? null,
+        size?.height ?? null,
       );
       return galleryItem(Number(inserted.lastInsertRowid));
     });

@@ -11,6 +11,9 @@ export interface SelectOption {
 /** Imperative handle mimicking HTMLSelectElement's value contract for ref-based forms. */
 export interface SelectHandle {
   value: string;
+  /** Apply an explicit edit, including the controlled-value callback. */
+  change: (value: string) => void;
+  focus: () => void;
 }
 
 /** Repositions on scroll to avoid native select dismissal on stray trackpad wheel events.
@@ -46,6 +49,14 @@ export default function Select(props: {
     },
     set value(next: string) {
       setCurrent(next);
+    },
+    change(next) {
+      setCurrent(next);
+      setOpen(false);
+      props.onChange?.(next);
+    },
+    focus() {
+      button.focus({ preventScroll: true });
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);

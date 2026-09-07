@@ -1,13 +1,15 @@
 import { readSseData } from '@tinytavern/shared';
 import { publicMessage } from './mediaUrls.ts';
 import type { Conversation, Endpoint, GenMeta, Message } from '@tinytavern/shared';
-import { stmt, toEndpoint } from './db.ts';
+import { stmt, toEndpoint, toMessage, transaction } from './db.ts';
 import { getMessage, getPathToMessage } from './tree.ts';
 import { appendChatMessage, buildChatMessages, withDisabledPrefillSpeakerNote } from './prompt.ts';
 import type { BuiltPrompt, ChatMessage } from './prompt.ts';
 import { getSettings } from './settingsStore.ts';
 import { broadcastConv, invalidate } from './events.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
+import { generationParameters, prepareStandaloneCompletion } from './completionConfig.ts';
+import type { CompletionOptions } from './completionConfig.ts';
 
 interface ActiveGen {
   mid: number;
@@ -17,13 +19,10 @@ interface ActiveGen {
   /** Unknown (null) until run() resolves the active endpoint. */
   model: string | null;
   abort: AbortController;
-  flushTimer: NodeJS.Timeout;
   meta: GenMeta;
   background: boolean;
   generationToken: number;
-  /** New tokens since the last periodic DB flush. */
-  dirty: boolean;
-  /** Fixed upstream request (plugin tool generations) instead of the chat history. */
+  /** Fixed upstream request (tool generations) instead of the chat history. */
   promptOverride?: BuiltPrompt;
   /** Immutable endpoint + prompt context reused by every upstream attempt. */
   requestContext?: {
@@ -111,40 +110,40 @@ export function mergeLiveBuffers(messages: Message[]): Message[] {
   });
 }
 
-function flushToDb(gen: ActiveGen): void {
-  if (!gen.dirty) return;
-  gen.dirty = false;
-  stmt('UPDATE messages SET content = ?, reasoning = ?, model = ? WHERE id = ?').run(
-    gen.content,
-    gen.reasoning || null,
-    gen.model,
-    gen.mid,
-  );
-}
-
 function finalize(gen: ActiveGen, status: 'done' | 'error' | 'stopped'): void {
   // `continue` reuses message ids; late aborts must not touch a successor.
   if (active.get(gen.mid) !== gen) return;
-  active.delete(gen.mid);
-  clearInterval(gen.flushTimer);
   gen.content = gen.content.trim();
   gen.reasoning = gen.reasoning.trim();
-  // The message may have been deleted mid-stream (cascade or explicit delete).
-  const exists = stmt('SELECT id FROM messages WHERE id = ?').get(gen.mid);
-  if (exists) {
-    stmt(
-      'UPDATE messages SET content = ?, reasoning = ?, model = ?, status = ?, gen_meta_json = ? WHERE id = ?',
-    ).run(gen.content, gen.reasoning || null, gen.model, status, JSON.stringify(gen.meta), gen.mid);
-    // A stopped/failed generation never starts its image render — drop the pending flag.
-    if (status !== 'done') {
-      stmt('UPDATE messages SET image_pending = 0 WHERE id = ? AND image_pending = 1').run(gen.mid);
-    }
-    const mutationRevision = bumpConversationRevision(gen.conversationId);
+  // Persist the body, terminal status, render flag, and revision in one commit.
+  const finalized = transaction(() => {
+    const row = stmt(
+      `UPDATE messages SET content = ?, reasoning = ?, model = ?, status = ?, gen_meta_json = ?,
+       image_pending = CASE WHEN ? = 'done' THEN image_pending ELSE 0 END
+       WHERE id = ? RETURNING *`,
+    ).get(
+      gen.content,
+      gen.reasoning || null,
+      gen.model,
+      status,
+      JSON.stringify(gen.meta),
+      status,
+      gen.mid,
+    ) as Record<string, unknown> | undefined;
+    // A deleted message must never be recreated by a late stream callback.
+    if (!row) return null;
+    return {
+      message: toMessage(row),
+      mutationRevision: bumpConversationRevision(gen.conversationId),
+    };
+  });
+  active.delete(gen.mid);
+  if (finalized) {
     broadcastConv(gen.conversationId, {
       t: 'final',
       conversationId: gen.conversationId,
-      mutationRevision,
-      message: publicMessage(getMessage(gen.mid)!),
+      mutationRevision: finalized.mutationRevision,
+      message: publicMessage(finalized.message),
     });
   }
   // Speculation leaves updated_at unchanged, so skip conversation-list refetches.
@@ -178,6 +177,11 @@ export function stopConversationGenerations(conversationId: number): void {
   }
 }
 
+/** Graceful shutdown cancels and persists every active stream before SQLite closes. */
+export function stopAllGenerations(): void {
+  for (const mid of [...active.keys()]) stopGeneration(mid);
+}
+
 interface SseDelta {
   content?: string;
   reasoning_content?: string;
@@ -185,7 +189,7 @@ interface SseDelta {
 }
 
 /**
- * Independent of client connections: forwards deltas immediately, batches DB writes.
+ * Independent of client connections: forwards deltas immediately and persists only at finalization.
  * `resumeFrom` sends existing content as an assistant prefill and appends new tokens.
  */
 export function startGeneration(
@@ -199,8 +203,11 @@ export function startGeneration(
     onError?: () => void;
   },
 ): void {
-  const generationToken = bumpConversationRevision(conversation.id);
-  stmt('UPDATE messages SET generation_token = ? WHERE id = ?').run(generationToken, mid);
+  const generationToken = transaction(() => {
+    const token = bumpConversationRevision(conversation.id);
+    stmt('UPDATE messages SET generation_token = ? WHERE id = ?').run(token, mid);
+    return token;
+  });
   const gen: ActiveGen = {
     mid,
     conversationId: conversation.id,
@@ -208,11 +215,9 @@ export function startGeneration(
     reasoning: resumeFrom?.reasoning ?? '',
     model: null,
     abort: new AbortController(),
-    flushTimer: setInterval(() => flushToDb(gen), 500),
     meta: {},
     background: options?.background ?? false,
     generationToken,
-    dirty: false,
     promptOverride: options?.prompt,
     onDone: options?.onDone,
     onError: options?.onError,
@@ -350,13 +355,15 @@ export async function streamChatCompletion(
   maxTokens: number,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  options?: CompletionOptions,
 ): Promise<string> {
   const endpoint = resolveEndpoint(conversation);
+  const prepared = prepareStandaloneCompletion(endpoint, messages, maxTokens, options);
   const res = await completionRequest(
     endpoint,
-    messages,
+    prepared.messages,
     true,
-    { max_tokens: maxTokens },
+    prepared.parameters,
     signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
   );
   if (!res.ok) {
@@ -364,7 +371,9 @@ export async function streamChatCompletion(
     throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
   }
   if (!res.body) throw new Error('Upstream returned no response body');
-  let content = '';
+  let content = prepared.messagePrefill;
+  let emittedPrefill = false;
+  let receivedVisibleContent = false;
   let refusal = '';
   let sawReasoning = false;
   await readSseData(res.body, (data) => {
@@ -379,6 +388,11 @@ export async function streamChatCompletion(
     }
     const delta = json?.choices?.[0]?.delta;
     if (typeof delta?.content === 'string' && delta.content) {
+      if (!emittedPrefill && prepared.messagePrefill) {
+        emittedPrefill = true;
+        onDelta(prepared.messagePrefill);
+      }
+      if (delta.content.trim()) receivedVisibleContent = true;
       content += delta.content;
       onDelta(delta.content);
     }
@@ -387,7 +401,7 @@ export async function streamChatCompletion(
       sawReasoning = true;
     }
   });
-  if (content.trim()) return content;
+  if (receivedVisibleContent) return content;
   if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
   if (sawReasoning) {
     throw new Error(
@@ -418,7 +432,6 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   if (endpoint.prefillMode !== 'disabled' && !isResume) {
     if (built.reasoningPrefill) gen.reasoning = built.reasoningPrefill;
     if (built.messagePrefill) gen.content = built.messagePrefill;
-    if (built.reasoningPrefill || built.messagePrefill) gen.dirty = true;
   }
 
   // Copy the snapshotted list because continuation flags are added per attempt.
@@ -469,13 +482,7 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
       messages,
       true,
       {
-        ...(p.temperature != null ? { temperature: p.temperature } : {}),
-        ...(p.topP != null ? { top_p: p.topP } : {}),
-        ...(p.minP != null ? { min_p: p.minP } : {}),
-        ...(p.maxTokens != null ? { max_tokens: p.maxTokens } : {}),
-        ...(p.frequencyPenalty != null ? { frequency_penalty: p.frequencyPenalty } : {}),
-        ...(p.presencePenalty != null ? { presence_penalty: p.presencePenalty } : {}),
-        ...(p.reasoningEffort != null ? { reasoning_effort: p.reasoningEffort } : {}),
+        ...generationParameters(p),
         ...(prefilled && endpoint.prefillMode === 'vllm'
           ? { continue_final_message: true, add_generation_prompt: false }
           : {}),
@@ -560,7 +567,6 @@ async function consumeStream(
     const dOut = d != null ? passContent(d) : '';
     if (dOut) gen.content += dOut;
     if (r) gen.reasoning += r;
-    if (dOut || r) gen.dirty = true;
     if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
     broadcastConv(gen.conversationId, {
       t: 'delta',

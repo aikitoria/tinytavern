@@ -1,6 +1,6 @@
 export { readSseData } from './sse.ts';
 
-/** 'tool' messages are plugin output shown in the chat but excluded from prompt history. */
+/** 'tool' messages are tool output shown in the chat but excluded from prompt history. */
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 export type MessageStatus = 'done' | 'streaming' | 'error' | 'stopped';
 export type GenerationKind = 'normal' | 'speculative';
@@ -31,7 +31,7 @@ export interface Message {
   role: Role;
   content: string;
   reasoning: string | null;
-  /** Assistant speaker name or plugin tool label; null = character default. */
+  /** Assistant speaker name or tool label; null = character default. */
   name: string | null;
   status: MessageStatus;
   activeChildId: number | null;
@@ -62,6 +62,8 @@ export interface GalleryItem {
   sourceImage: string | null;
   prompt: string;
   image: string;
+  imageWidth: number | null;
+  imageHeight: number | null;
   hasImageRender: boolean;
   createdAt: number;
   updatedAt: number;
@@ -88,6 +90,8 @@ export interface Conversation {
 export interface Character {
   id: number;
   name: string;
+  /** Optional in-chat name for {{char}} and default assistant speaker labels. */
+  chatName: string | null;
   /** Optional one-level grouping in character pickers. */
   folderId: number | null;
   avatar: string | null;
@@ -104,6 +108,13 @@ export interface Character {
   /** Opt out of background swipes even when the global setting is enabled. */
   disableBackgroundSwipeGeneration: boolean;
   createdAt: number;
+}
+
+/** UI lists use Character.name; chat speakers and character macros use this name. */
+export function characterChatName(
+  character: Pick<Character, 'name' | 'chatName'> | null | undefined,
+): string {
+  return character?.chatName?.trim() || character?.name || 'Assistant';
 }
 
 export interface CharacterFolder {
@@ -166,6 +177,34 @@ export interface Endpoint {
   createdAt: number;
 }
 
+/** Saved image-generation overrides; omitted fields use the built-in defaults. */
+export interface ImageGenerationSettings extends Record<string, unknown> {
+  /** One global revision instruction for image prompts inside chats. */
+  promptRevisionTemplate?: string;
+  comfyUrl?: string;
+  workflows?: { name: string; json: string }[];
+  activeWorkflow?: string;
+  avatarWorkflow?: string;
+  promptPresets?: Record<
+    string,
+    {
+      presets: { name: string; prompt: string; context?: string }[];
+      active: string;
+    }
+  >;
+}
+
+export interface StandalonePromptTemplate {
+  systemPrompt: string;
+  userMessage: string;
+  reasoningPrefill: string;
+  messagePrefill: string;
+}
+
+export interface GallerySettings {
+  promptRevision: StandalonePromptTemplate;
+}
+
 export interface Settings {
   /** Monotonic server revision used to reject stale cross-device writes. */
   revision: number;
@@ -181,8 +220,8 @@ export interface Settings {
   parallelBackgroundSwipeGeneration: boolean;
   /** Whether the server has an access password. The password itself is never returned. */
   hasPassword: boolean;
-  /** Keyed by plugin id; each plugin defines its settings shape. */
-  pluginSettings: Record<string, Record<string, unknown>>;
+  imageGeneration: ImageGenerationSettings;
+  gallery: GallerySettings;
 }
 
 /** {{system}} resolves the preset/custom prompt; empty slots omit their {{#if}} blocks. */
@@ -203,6 +242,43 @@ export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 export const DEFAULT_STEER_TEMPLATE =
   '[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]';
 
+export const DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE =
+  '[IMAGE PROMPT REVISION TASK]\n' +
+  'The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ' +
+  'Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ' +
+  'Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n' +
+  'The immediately preceding assistant message contains the original image prompt.\n\n' +
+  '<revision_instruction>\n{{instruction}}\n</revision_instruction>';
+
+export const DEFAULT_GALLERY_REVISION_TEMPLATE: StandalonePromptTemplate = {
+  systemPrompt:
+    'Revise the supplied image-generation prompt and return only the complete revised prompt, ' +
+    'with no analysis, commentary, tags, or quotation marks. Preserve every detail that the ' +
+    'revision does not explicitly change. Do not modify anything else.',
+  userMessage:
+    '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>\n\n' +
+    '<revision_instruction>\n{{instruction}}\n</revision_instruction>',
+  reasoningPrefill: '',
+  messagePrefill: '',
+};
+
+export function imageRevisionTemplateError(template: string): string | null {
+  if (!/\{\{instruction\}\}/i.test(template))
+    return 'Include {{instruction}} in the revision template.';
+  return null;
+}
+
+export function galleryRevisionTemplateError(template: StandalonePromptTemplate): string | null {
+  if (!template.userMessage.trim()) return 'Enter a user message.';
+  const instructions = `${template.systemPrompt}\n${template.userMessage}`;
+  const invalid = imageRevisionTemplateError(instructions);
+  if (invalid) return invalid;
+  if (!/\{\{prompt\}\}/i.test(instructions)) {
+    return 'Include {{prompt}} in the system prompt or user message.';
+  }
+  return null;
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   revision: 0,
   defaultPresetId: null,
@@ -213,7 +289,8 @@ export const DEFAULT_SETTINGS: Settings = {
   backgroundSwipeGeneration: false,
   parallelBackgroundSwipeGeneration: false,
   hasPassword: false,
-  pluginSettings: {},
+  imageGeneration: {},
+  gallery: { promptRevision: DEFAULT_GALLERY_REVISION_TEMPLATE },
 };
 
 function workflowMacroPlacementError(workflow: string): string | null {

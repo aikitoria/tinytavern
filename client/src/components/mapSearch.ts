@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { Message } from '@tinytavern/shared';
+import { characterChatName, type Message } from '@tinytavern/shared';
 import { personasEnabled, selectedCharacter, selectedPersona } from '../state/store.ts';
 
 function speakerName(message: Message): string {
@@ -8,7 +8,7 @@ function speakerName(message: Message): string {
   }
   if (message.role === 'tool') return message.name ?? 'Tool';
   if (message.role === 'system') return message.name ?? 'System';
-  return message.name ?? selectedCharacter()?.name ?? 'Assistant';
+  return message.name ?? characterChatName(selectedCharacter());
 }
 
 export function snippet(message: Message, query: string): string {

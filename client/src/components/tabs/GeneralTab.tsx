@@ -1,3 +1,5 @@
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
+import SettingLabel from '../SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { Show, createEffect, createSignal, untrack } from 'solid-js';
@@ -24,7 +26,12 @@ export default function GeneralTab() {
   const isDirty = () => Object.keys(overrides()).length > 0 || passwordDirty();
   const value = (key: SettingKey) => overrides()[key] ?? state.settings[key];
   const change = (key: SettingKey, value: boolean) =>
-    setOverrides((current) => ({ ...current, [key]: value }));
+    setOverrides((current) => {
+      const next = { ...current };
+      if (value === state.settings[key]) delete next[key];
+      else next[key] = value;
+      return next;
+    });
 
   createEffect(() => {
     const revision = state.settings.revision;
@@ -94,72 +101,98 @@ export default function GeneralTab() {
 
   return (
     <div class="form">
-      <label for="settings-access-password">Access password</label>
-      <input
-        id="settings-access-password"
-        type="password"
-        autocomplete="new-password"
-        placeholder={
-          state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
-        }
-        value={password()}
-        disabled={removePassword()}
-        onInput={(event) => {
-          setPassword(event.currentTarget.value);
-          setRemovePassword(false);
-        }}
-      />
-      <p class="hint">
-        {state.settings.hasPassword
-          ? 'A password is set. Leave this blank to keep it unchanged.'
-          : 'Optional. When set, all API, media, and WebSocket access requires a login session.'}
-      </p>
-      <Show when={state.settings.hasPassword}>
-        <label class="check-row">
+      <section class="settings-section">
+        <h3>Access</h3>
+        <SettingLabel
+          for="settings-access-password"
+          changed={password() !== '' || (state.settings.hasPassword && !removePassword())}
+          onRevert={() => {
+            setPassword('');
+            setRemovePassword(state.settings.hasPassword);
+          }}
+        >
+          Access password
+        </SettingLabel>
+        <input
+          id="settings-access-password"
+          type="password"
+          autocomplete="new-password"
+          placeholder={
+            state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
+          }
+          value={password()}
+          disabled={removePassword()}
+          onInput={(event) => {
+            setPassword(event.currentTarget.value);
+            setRemovePassword(false);
+          }}
+        />
+        <p class="hint">
+          {removePassword()
+            ? 'The access password will be removed when you save.'
+            : state.settings.hasPassword
+              ? 'A password is set. Leave this blank to keep it unchanged.'
+              : 'Optional. When set, all API, media, and WebSocket access requires a login session.'}
+        </p>
+      </section>
+      <section class="settings-section">
+        <h3>Messages</h3>
+        <SettingLabel
+          check
+          changed={value('autoExpandThinking') !== DEFAULT_SETTINGS.autoExpandThinking}
+          onRevert={() => change('autoExpandThinking', DEFAULT_SETTINGS.autoExpandThinking)}
+        >
           <input
             type="checkbox"
-            checked={removePassword()}
-            onChange={(event) => {
-              setRemovePassword(event.currentTarget.checked);
-              if (event.currentTarget.checked) setPassword('');
-            }}
+            checked={value('autoExpandThinking')}
+            onChange={(e) => change('autoExpandThinking', e.currentTarget.checked)}
           />
-          Remove the access password
-        </label>
-      </Show>
+          Auto-expand thinking while the model reasons (collapses once the reply starts)
+        </SettingLabel>
 
-      <label class="check-row">
-        <input
-          type="checkbox"
-          checked={value('autoExpandThinking')}
-          onChange={(e) => change('autoExpandThinking', e.currentTarget.checked)}
-        />
-        Auto-expand thinking while the model reasons (collapses once the reply starts)
-      </label>
+        <SettingLabel
+          check
+          changed={
+            value('backgroundSwipeGeneration') !== DEFAULT_SETTINGS.backgroundSwipeGeneration
+          }
+          onRevert={() =>
+            change('backgroundSwipeGeneration', DEFAULT_SETTINGS.backgroundSwipeGeneration)
+          }
+        >
+          <input
+            type="checkbox"
+            checked={value('backgroundSwipeGeneration')}
+            onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
+          />
+          Background Swipe Generation (keep one unread assistant swipe prepared ahead)
+        </SettingLabel>
 
-      <label class="check-row">
-        <input
-          type="checkbox"
-          checked={value('backgroundSwipeGeneration')}
-          onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
-        />
-        Background Swipe Generation (keep one unread assistant swipe prepared ahead)
-      </label>
-
-      <label class="check-row">
-        <input
-          type="checkbox"
-          checked={value('parallelBackgroundSwipeGeneration')}
-          disabled={!value('backgroundSwipeGeneration')}
-          onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
-        />
-        Generate the background swipe alongside the primary reply
-      </label>
-      <p class="hint">
-        Allows two responses to generate at once. When off, the background swipe waits for the
-        primary reply to finish.
-      </p>
-
+        <SettingLabel
+          check
+          changed={
+            value('parallelBackgroundSwipeGeneration') !==
+            DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration
+          }
+          onRevert={() =>
+            change(
+              'parallelBackgroundSwipeGeneration',
+              DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration,
+            )
+          }
+        >
+          <input
+            type="checkbox"
+            checked={value('parallelBackgroundSwipeGeneration')}
+            disabled={!value('backgroundSwipeGeneration')}
+            onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
+          />
+          Generate the background swipe alongside the primary reply
+        </SettingLabel>
+        <p class="hint">
+          Allows two responses to generate at once. When off, the background swipe waits for the
+          primary reply to finish.
+        </p>
+      </section>
       <Show when={error()}>
         <p class="notice notice-error" role="alert">
           {error()}

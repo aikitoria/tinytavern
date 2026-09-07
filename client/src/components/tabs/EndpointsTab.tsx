@@ -1,3 +1,4 @@
+import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { Show, createSignal } from 'solid-js';
 import type { Endpoint, GenParams } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
@@ -6,23 +7,22 @@ import { state } from '../../state/store.ts';
 import { createEntityEditor, errorMessage } from '../../util.ts';
 import EntityEditorPane from '../EntityEditorPane.tsx';
 import Select from '../Select.tsx';
-import type { SelectHandle } from '../Select.tsx';
 
 export default function EndpointsTab() {
   const [model, setModel] = createSignal('');
   const [keyCleared, setKeyCleared] = createSignal(false);
   const [editingExisting, setEditingExisting] = createSignal(false);
-  let nameEl!: HTMLInputElement;
-  let urlEl!: HTMLInputElement;
-  let keyEl!: HTMLInputElement;
-  let tempEl!: HTMLInputElement;
-  let topPEl!: HTMLInputElement;
-  let minPEl!: HTMLInputElement;
-  let maxTokEl!: HTMLInputElement;
-  let freqEl!: HTMLInputElement;
-  let presEl!: HTMLInputElement;
-  let effortEl!: SelectHandle;
-  let prefillEl!: SelectHandle;
+  const nameEl = createDefaultField(() => '');
+  const urlEl = createDefaultField(() => '');
+  const keyEl = createDefaultField(() => '');
+  const tempEl = createDefaultField(() => '');
+  const topPEl = createDefaultField(() => '');
+  const minPEl = createDefaultField(() => '');
+  const maxTokEl = createDefaultField(() => '');
+  const freqEl = createDefaultField(() => '');
+  const presEl = createDefaultField(() => '');
+  const effortEl = createDefaultField(() => '');
+  const prefillEl = createDefaultField(() => 'none');
 
   const editor = createEntityEditor({
     items: () => state.endpoints,
@@ -113,16 +113,25 @@ export default function EndpointsTab() {
     >
       <section class="settings-section">
         <h3>Connection</h3>
-        <label>Name</label>
-        <input ref={nameEl} placeholder="Local llama.cpp" />
-        <label>Base URL</label>
+        <SettingLabel field={nameEl}>Name</SettingLabel>
+        <input ref={nameEl.ref} placeholder="Local llama.cpp" />
+        <SettingLabel field={urlEl}>Base URL</SettingLabel>
         <p class="hint">OpenAI-compatible URL through the `/v1` segment.</p>
-        <input ref={urlEl} placeholder="http://192.168.1.10:8080/v1" />
-        <label>API key</label>
+        <input ref={urlEl.ref} placeholder="http://192.168.1.10:8080/v1" />
+        <SettingLabel
+          field={keyEl}
+          changed={keyEl.changed() || (Boolean(editor.selected()?.hasApiKey) && !keyCleared())}
+          onRevert={() => {
+            keyEl.reset();
+            setKeyCleared(true);
+          }}
+        >
+          API key
+        </SettingLabel>
         <p class="hint">Optional. Stored server-side and never returned to the browser.</p>
         <div class="key-row">
           <input
-            ref={keyEl}
+            ref={keyEl.ref}
             placeholder={
               keyCleared()
                 ? 'Will be removed on save'
@@ -131,26 +140,18 @@ export default function EndpointsTab() {
                   : 'sk-…'
             }
           />
-          <Show when={editor.selected()?.hasApiKey && !keyCleared()}>
-            <button
-              onClick={() => {
-                keyEl.value = '';
-                setKeyCleared(true);
-              }}
-            >
-              Clear key
-            </button>
-          </Show>
         </div>
 
-        <label>Model</label>
+        <SettingLabel changed={model() !== ''} onRevert={() => setModel('')}>
+          Model
+        </SettingLabel>
         <p class="hint">Optional; leave blank to use the endpoint default.</p>
         <Show
           when={models().length > 0}
           fallback={
             <input
               value={model()}
-              onChange={(e) => setModel(e.currentTarget.value)}
+              onInput={(e) => setModel(e.currentTarget.value)}
               placeholder="model id (blank uses endpoint default)"
             />
           }
@@ -176,33 +177,33 @@ export default function EndpointsTab() {
           <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
           <div class="param-grid">
             <div>
-              <label>Temperature</label>
-              <input ref={tempEl} type="number" step="0.05" min="0" max="2" />
+              <SettingLabel field={tempEl}>Temperature</SettingLabel>
+              <input ref={tempEl.ref} type="number" step="0.05" min="0" max="2" />
             </div>
             <div>
-              <label>Top P</label>
-              <input ref={topPEl} type="number" step="0.05" min="0" max="1" />
+              <SettingLabel field={topPEl}>Top P</SettingLabel>
+              <input ref={topPEl.ref} type="number" step="0.05" min="0" max="1" />
             </div>
             <div>
-              <label>Min P</label>
-              <input ref={minPEl} type="number" step="0.01" min="0" max="1" />
+              <SettingLabel field={minPEl}>Min P</SettingLabel>
+              <input ref={minPEl.ref} type="number" step="0.01" min="0" max="1" />
             </div>
             <div>
-              <label>Max tokens</label>
-              <input ref={maxTokEl} type="number" step="1" min="1" />
+              <SettingLabel field={maxTokEl}>Max tokens</SettingLabel>
+              <input ref={maxTokEl.ref} type="number" step="1" min="1" />
             </div>
             <div>
-              <label>Freq. penalty</label>
-              <input ref={freqEl} type="number" step="0.05" min="-2" max="2" />
+              <SettingLabel field={freqEl}>Freq. penalty</SettingLabel>
+              <input ref={freqEl.ref} type="number" step="0.05" min="-2" max="2" />
             </div>
             <div>
-              <label>Pres. penalty</label>
-              <input ref={presEl} type="number" step="0.05" min="-2" max="2" />
+              <SettingLabel field={presEl}>Pres. penalty</SettingLabel>
+              <input ref={presEl.ref} type="number" step="0.05" min="-2" max="2" />
             </div>
             <div>
-              <label>Reasoning effort</label>
+              <SettingLabel field={effortEl}>Reasoning effort</SettingLabel>
               <Select
-                ref={effortEl}
+                ref={effortEl.ref}
                 ariaLabel="Reasoning effort"
                 options={[
                   { value: '', label: '— omit —' },
@@ -217,10 +218,10 @@ export default function EndpointsTab() {
             </div>
           </div>
 
-          <label>Prefill support</label>
+          <SettingLabel field={prefillEl}>Prefill support</SettingLabel>
           <p class="hint">Used by resume, speaker-name, and template prefills.</p>
           <Select
-            ref={prefillEl}
+            ref={prefillEl.ref}
             ariaLabel="Prefill support"
             options={[
               { value: 'disabled', label: 'Disabled (do not send prefills)' },

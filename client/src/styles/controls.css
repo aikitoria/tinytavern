@@ -3,8 +3,11 @@
 /* Keep the overlay visible between the wrapper background and native textarea text. */
 .macro-box {
   position: relative;
-  background: var(--bg-raised);
+  background: var(--bg);
   border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 .macro-box textarea {
@@ -79,12 +82,17 @@
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  height: var(--control-height);
+  background: var(--bg-panel);
+  border-color: var(--border-control-surface);
   color: var(--text);
   text-align: left;
 }
 
 .select-btn:hover:where(:not(:disabled)) {
-  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg-hover));
 }
 
 .select-label {
@@ -100,11 +108,11 @@
 }
 
 .popover-surface {
-  background: var(--popover-bg, var(--bg-panel));
-  border: 1px solid var(--popover-border, var(--border));
-  border-radius: var(--popover-radius, var(--radius-panel));
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
   overflow: hidden;
-  box-shadow: var(--popover-shadow, 0 8px 30px rgb(0 0 0 / 0.35));
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
 }
 
 .dropdown-surface {
@@ -139,7 +147,7 @@
 
 .popover-menu button:hover:not(:disabled),
 .popover-menu button.active,
-.popover-menu .select-option.highlighted {
+.popover-menu button.highlighted:not([aria-selected='true']) {
   background: var(--bg-hover);
 }
 
@@ -149,26 +157,10 @@
   background: var(--border);
 }
 
-.select-menu {
-  --popover-bg: color-mix(in srgb, var(--bg-panel) 94%, var(--accent-hot));
-  --popover-border: var(--border-emphasis);
-  --popover-radius: var(--radius-control-group);
-  --popover-shadow:
-    0 14px 44px color-mix(in srgb, var(--shadow) 76%, transparent),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
-
-  padding: var(--space-1);
-}
-
-.select-option {
-  border-radius: var(--radius-control);
-  padding: var(--space-2);
-  color: var(--text);
-}
-
-.select-option.selected {
-  color: var(--accent);
-  font-weight: 600;
+/* Every dropdown uses the same surface, rows, and selection treatment. */
+.popover-menu button[aria-selected='true'],
+.popover-menu button[aria-checked='true'] {
+  background: var(--bg-raised);
 }
 
 input[type='number'] {
@@ -304,6 +296,32 @@ input[type='number']::-webkit-inner-spin-button {
   margin-top: var(--space-2);
 }
 
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  margin-top: var(--space-2);
+}
+
+.setting-label > label {
+  margin: 0;
+  min-width: 0;
+}
+
+.setting-revert.icon-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.setting-revert.icon-btn:hover {
+  color: var(--text);
+}
+
 .tab {
   display: flex;
   align-items: center;
@@ -332,11 +350,11 @@ input[type='number']::-webkit-inner-spin-button {
 .tab.active,
 .entity-list button.active {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-raised));
+  background: color-mix(in srgb, var(--bg-raised) 50%, var(--bg-chrome));
 }
 
 .tab.active {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--bg-raised);
 }
 
 /* Layout primitives add no descendant form semantics. */
@@ -346,10 +364,10 @@ input[type='number']::-webkit-inner-spin-button {
   gap: var(--space-2);
 }
 
-:where(.inset-card, .settings-modal .form > .check-row) {
-  background: var(--bg);
+.field-group {
+  padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-control);
 }
 
 .tab-strip {

@@ -6,7 +6,8 @@ import { existsSync, readFileSync, watch } from 'node:fs';
 import { stat, readFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { AVATAR_DIR, IMAGES_DIR } from './db.ts';
+import { AVATAR_DIR, IMAGES_DIR, db } from './db.ts';
+import { stopAllGenerations } from './generation.ts';
 import { dispatch } from './router.ts';
 import {
   initWebSocket,
@@ -285,3 +286,16 @@ listener.listen(PORT, () => {
   );
   console.log(`IP allowlist: ${configuredIpAllowlist()}`);
 });
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    try {
+      stopAllGenerations();
+      db.close();
+      process.exit(0);
+    } catch (err) {
+      console.error('[shutdown] could not save active generations:', err);
+      process.exit(1);
+    }
+  });
+}

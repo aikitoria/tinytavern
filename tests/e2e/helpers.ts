@@ -24,7 +24,7 @@ export function assert(cond: unknown, label: string): asserts cond {
   console.log(`  ok: ${label}`);
 }
 
-/** Catch client entry and plugin export failures in Vite's development transform. */
+/** Catch client entry and built-in image export failures in Vite's development transform. */
 export async function assertClientDevModules(): Promise<void> {
   const clientRoot = join(process.cwd(), 'client');
   const vite = await createViteServer({
@@ -39,8 +39,9 @@ export async function assertClientDevModules(): Promise<void> {
     const paths = [
       '/src/index.tsx',
       '/src/App.tsx',
-      '/src/plugins/index.ts',
-      '/src/plugins/imageGeneration.tsx',
+      '/src/components/SettingsModal.tsx',
+      '/src/components/tabs/GalleryTab.tsx',
+      '/src/images/imageGeneration.tsx',
     ];
     const transformed = new Map<string, string>();
     for (const path of paths) {
@@ -49,18 +50,19 @@ export async function assertClientDevModules(): Promise<void> {
       // Source maps embed source text that could falsely satisfy runtime export checks.
       transformed.set(path, result!.code.split('\n//# sourceMappingURL=', 1)[0]!);
     }
-    assert(
-      /import\s*\{\s*imageGenerationPlugin\s*\}\s*from\s*["'][^"']*imageGeneration\.tsx(?:\?[^"']*)?["']/.test(
-        transformed.get('/src/plugins/index.ts')!,
-      ),
-      'the development plugin registry imports imageGenerationPlugin',
-    );
-    assert(
-      /export\s+const\s+imageGenerationPlugin\b|export\s*\{[^}]*\bimageGenerationPlugin\b[^}]*\}/.test(
-        transformed.get('/src/plugins/imageGeneration.tsx')!,
-      ),
-      'the transformed image plugin provides the named registry export',
-    );
+    for (const name of [
+      'imageMessage',
+      'imageGenerationCommands',
+      'imageGenerationTools',
+      'ImageGenerationSettingsPage',
+    ]) {
+      assert(
+        new RegExp(
+          `export\\s+(?:const|function)\\s+${name}\\b|export\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`,
+        ).test(transformed.get('/src/images/imageGeneration.tsx')!),
+        `the built-in image module exports ${name}`,
+      );
+    }
   } finally {
     await vite.close();
   }

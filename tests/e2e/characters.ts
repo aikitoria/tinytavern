@@ -62,6 +62,10 @@ export async function testCharacters(fixture: Pick<SetupFixture, 'persona'>) {
   for (const malformedCard of [
     { spec: 'chara_card_v2', data: { name: {} } },
     { spec: 'chara_card_v2', data: { name: 'Bad fields', scenario: 42 } },
+    {
+      spec: 'chara_card_v2',
+      data: { name: 'Bad chat name', extensions: { tinytavern: { chatName: 42 } } },
+    },
   ]) {
     const malformedRes = await fetch(`${BASE}/api/characters/import-card`, {
       method: 'POST',

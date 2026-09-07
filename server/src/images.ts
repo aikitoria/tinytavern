@@ -2,6 +2,7 @@ import { copyFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { crc32 } from 'node:zlib';
 import { IMAGES_DIR, stmt } from './db.ts';
+import { imageFileDimensions } from './imageDimensions.ts';
 
 /**
  * Collect image paths before deleting rows, then unlink after commit; FK cascades
@@ -142,6 +143,11 @@ function imageFile(imagePath: string): string | null {
   if (!imagePath.startsWith('/images/')) return null;
   const name = basename(imagePath.slice('/images/'.length));
   return name ? join(IMAGES_DIR, name) : null;
+}
+
+export function savedImageDimensions(imagePath: string) {
+  const file = imageFile(imagePath);
+  return file ? imageFileDimensions(file) : null;
 }
 
 export function saveImage(name: string, data: Buffer): string {

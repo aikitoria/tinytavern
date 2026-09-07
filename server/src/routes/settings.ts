@@ -11,6 +11,7 @@ import { prepareActiveSwipe } from './conversations.ts';
 import { bumpAllConversationRevisions } from '../conversationRevision.ts';
 import { broadcastTree } from '../sync.ts';
 import { clearSession, setAccessPassword, startSession, validateNewPassword } from '../auth.ts';
+import { parseGalleryRevisionTemplate, parseImageGenerationSettings } from '../imageSettings.ts';
 
 route.get('/api/settings', () => getSettings());
 
@@ -48,12 +49,14 @@ route.put('/api/settings', ({ req, res, body }) => {
       throw new HttpError(400, err instanceof Error ? err.message : String(err));
     }
   }
-  const pluginSettings = b.pluginSettings as Settings['pluginSettings'] | undefined;
-  if (pluginSettings !== undefined) {
-    const isPlainObject = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
-    if (!isPlainObject(pluginSettings) || !Object.values(pluginSettings).every(isPlainObject)) {
-      throw new HttpError(400, 'pluginSettings must be an object of per-plugin objects');
+  const imageGeneration = parseImageGenerationSettings(b.imageGeneration);
+  let gallery: Settings['gallery'] | undefined;
+  if (b.gallery !== undefined) {
+    if (b.gallery === null) {
+      throw new HttpError(400, 'gallery must be an object');
     }
+    const values = objectBody(b.gallery);
+    gallery = { promptRevision: parseGalleryRevisionTemplate(values.promptRevision) };
   }
   const next: Settings = {
     ...DEFAULT_SETTINGS,
@@ -65,7 +68,8 @@ route.put('/api/settings', ({ req, res, body }) => {
       ? {}
       : { parallelBackgroundSwipeGeneration }),
     ...(accessPassword === undefined ? {} : { hasPassword: accessPassword !== null }),
-    ...(pluginSettings === undefined ? {} : { pluginSettings }),
+    ...(imageGeneration === undefined ? {} : { imageGeneration }),
+    ...(gallery === undefined ? {} : { gallery }),
     revision: current.revision + 1,
   };
   putSettings(next);

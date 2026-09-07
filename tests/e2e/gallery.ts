@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { GalleryItem } from '@tinytavern/shared';
 import {
@@ -14,6 +14,7 @@ import {
   branchPath,
   activate,
 } from './helpers.ts';
+import { testGalleryRevisionConfig } from './gallery-revision-config.ts';
 import type { ImagesFixture } from './images.ts';
 import type { TemplatesFixture } from './templates.ts';
 import type { SetupFixture } from './setup.ts';
@@ -43,6 +44,107 @@ export async function testGallery(
   } = fixture;
 
   console.log('== durable saved-image gallery ==');
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const webp = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
+  const jpeg = readFileSync(new URL('../../docs/chat.jpg', import.meta.url));
+  const uploaded: GalleryItem[] = [];
+  for (const [bytes, ext] of [
+    [png, 'png'],
+    [jpeg, 'jpg'],
+    [webp, 'webp'],
+  ] as const) {
+    const response = await fetch(`${BASE}/api/gallery/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes,
+    });
+    assert(response.status === 200, `upload accepts ${ext} by its bytes`);
+    const item = (await response.json()) as GalleryItem;
+    uploaded.push(item);
+    const download = await fetch(`${BASE}${item.image}`);
+    assert(
+      item.characterName === 'Uploads' &&
+        item.characterId === null &&
+        item.sourceMessageId === null &&
+        item.sourceConversationId === null &&
+        !item.hasImageRender &&
+        item.image.endsWith(`.${ext}`) &&
+        item.imageWidth! > 0 &&
+        item.imageHeight! > 0 &&
+        Buffer.from(await download.arrayBuffer()).equals(bytes),
+      `uploaded ${ext} retains its original bytes and dimensions without source ownership`,
+    );
+  }
+  const uploadCharacter = await req<{ id: number }>('POST', '/api/characters', {
+    name: 'Upload owner',
+  });
+  const assignedResponse = await fetch(
+    `${BASE}/api/gallery/upload?characterId=${uploadCharacter.id}`,
+    {
+      method: 'POST',
+      body: png,
+    },
+  );
+  const assigned = (await assignedResponse.json()) as GalleryItem;
+  assert(
+    assignedResponse.ok &&
+      assigned.characterId === uploadCharacter.id &&
+      assigned.characterName === 'Upload owner',
+    'upload can use the selected character',
+  );
+  await req('DELETE', `/api/characters/${uploadCharacter.id}`);
+  const detachedUpload = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
+    (item) => item.id === assigned.id,
+  )!;
+  assert(
+    detachedUpload.characterId === null &&
+      detachedUpload.characterName === 'Upload owner' &&
+      (await fetch(`${BASE}${assigned.image}`)).ok,
+    'character deletion preserves uploads and their saved identity',
+  );
+  const beforeRejectedUploads = readdirSync(join(dataDir, 'images')).sort().join('\n');
+  for (const bytes of [
+    Buffer.alloc(0),
+    Buffer.from('<svg onload="alert(1)"></svg>'),
+    png.subarray(0, 30),
+    Buffer.concat([png, Buffer.from('<script>bad</script>')]),
+  ]) {
+    const response = await fetch(`${BASE}/api/gallery/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: bytes,
+    });
+    assert(
+      response.status === 400,
+      'upload rejects empty, active-content, truncated and trailing-content files',
+    );
+  }
+  for (const value of ['0', '-1', 'invalid', '999999999']) {
+    const response = await fetch(`${BASE}/api/gallery/upload?characterId=${value}`, {
+      method: 'POST',
+      body: png,
+    });
+    assert(
+      response.status === (value === '999999999' ? 404 : 400),
+      'upload validates the character before saving',
+    );
+  }
+  assert(
+    readdirSync(join(dataDir, 'images')).sort().join('\n') === beforeRejectedUploads,
+    'rejected uploads leave no files',
+  );
+  await req('POST', '/api/gallery/bulk-delete', {
+    ids: [...uploaded.map((item) => item.id), assigned.id],
+  });
+  assert(
+    (await Promise.all([...uploaded, assigned].map((item) => fetch(`${BASE}${item.image}`)))).every(
+      (response) => response.status === 404,
+    ),
+    'bulk deletion removes uploaded originals',
+  );
   const savedGallery = await req<{ item: GalleryItem; created: boolean }>('POST', '/api/gallery', {
     messageId: branchedImageMessage.id,
     index: branchedImageMessage.activeImage,
@@ -50,6 +152,8 @@ export async function testGallery(
   const savedGalleryImageUrl = savedGallery.item.image;
   assert(
     savedGallery.created &&
+      savedGallery.item.imageWidth! > 0 &&
+      savedGallery.item.imageHeight! > 0 &&
       savedGallery.item.prompt === branchedImageMessage.content &&
       savedGallery.item.sourceConversationId === imageBranch.id &&
       savedGallery.item.sourceMessageId === branchedImageMessage.id &&
@@ -75,7 +179,11 @@ export async function testGallery(
   );
   await req(
     'DELETE',
-    `/api/conversations/${imageBranch.id}?expectedActiveLeafId=${imageBranch.activeLeafId}&expectedMutationRevision=${imageBranch.mutationRevision}`,
+    await branchPath(
+      imageBranch.id,
+      `/api/conversations/${imageBranch.id}`,
+      imageBranch.activeLeafId,
+    ),
   );
   assert(
     (await fetch(`${BASE}${branchedImageMessage.images[0]}`)).status === 404 &&
@@ -138,14 +246,18 @@ export async function testGallery(
   };
   assert(
     galleryRevisionCompletion.completion?.messages.map((message) => message.role).join(',') ===
-      'user,assistant,user' &&
-      galleryRevisionCompletion.completion.messages[1]?.content ===
-        `<original_image_prompt>\n${savedGallery.item.prompt}\n</original_image_prompt>` &&
-      galleryRevisionCompletion.completion.messages[2]?.content.includes(
+      'system,user' &&
+      galleryRevisionCompletion.completion.messages[1]?.content.includes(
+        `<original_image_prompt>\n${savedGallery.item.prompt}\n</original_image_prompt>`,
+      ) &&
+      galleryRevisionCompletion.completion.messages[1]?.content.includes(
         `<revision_instruction>\n${galleryRevisionInstruction}\n</revision_instruction>`,
       ) === true,
-    'gallery prompt revision reuses the alternating-safe image edit task without chat context',
+    'gallery prompt revision sends only its standalone system and user messages',
   );
+
+  await testGalleryRevisionConfig(savedGallery.item);
+
   const galleryJobId = 'e2e-gallery-job';
   const galleryProgressAbort = new AbortController();
   const galleryProgressResponse = await fetch(
@@ -173,6 +285,8 @@ export async function testGallery(
   const generatedGalleryImageUrl = galleryGenerated.image;
   assert(
     galleryGenerated.id !== savedGallery.item.id &&
+      galleryGenerated.imageWidth! > 0 &&
+      galleryGenerated.imageHeight! > 0 &&
       galleryGenerated.prompt === galleryRevisedPrompt.trim() &&
       galleryGenerated.characterName === savedGallery.item.characterName &&
       galleryGenerated.sourceConversationId === null &&

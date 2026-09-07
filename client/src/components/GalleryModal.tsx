@@ -1,424 +1,333 @@
 import {
-  faCheck,
-  faEllipsis,
-  faLayerGroup,
+  faArrowLeft,
+  faChevronDown,
+  faChevronLeft,
+  faChevronRight,
+  faCircleInfo,
   faListCheck,
+  faMagnifyingGlass,
   faSpinner,
+  faUpload,
 } from '@fortawesome/free-solid-svg-icons';
-import { faImages, faSquare, faSquareCheck, faTrashCan } from '@fortawesome/free-regular-svg-icons';
-import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { faImages, faTrashCan } from '@fortawesome/free-regular-svg-icons';
+import {
+  For,
+  Show,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
+import { createStore } from 'solid-js/store';
 import type { GalleryItem } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
-import { applyGalleryItem, setState, state, toast } from '../state/store.ts';
+import {
+  applyGalleryItem,
+  openModal,
+  selectConversation,
+  setState,
+  state,
+  toast,
+} from '../state/store.ts';
 import type { GalleryRenderState } from '../state/store.ts';
 import { confirmAction } from '../state/confirm.ts';
+import { filterGallery, galleryCharacterKey, indexGallery } from '../galleryModel.ts';
 import { errorMessage } from '../util.ts';
-import { activeImageRenderConfig } from '../plugins/imageGeneration.tsx';
-import SamplerProgress from '../plugins/SamplerProgress.tsx';
+import { activeImageRenderConfig } from '../images/imageGeneration.tsx';
+import SamplerProgress from '../images/SamplerProgress.tsx';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
-import ImageViewer from './ImageViewer.tsx';
+import FontAwesomeIcon from './FontAwesomeIcon.tsx';
+import GalleryDetail from './GalleryDetail.tsx';
+import type { GalleryDraft } from './GalleryDetail.tsx';
+import GalleryGrid from './GalleryGrid.tsx';
 import Modal from './Modal.tsx';
+import Select from './Select.tsx';
+import '../styles/gallery.css';
 
-const GROUP_KEY = 'tinytavern.galleryGroupByCharacter';
-
-function initialGrouping(): boolean {
+function readPreference(key: string): string | null {
   try {
-    return localStorage.getItem(GROUP_KEY) !== '0';
+    return localStorage.getItem(`tinytavern.gallery.${key}`);
   } catch {
-    return true;
+    return null;
+  }
+}
+function savePreference(key: string, value: string): void {
+  try {
+    localStorage.setItem(`tinytavern.gallery.${key}`, value);
+  } catch {
+    /* Optional browser preferences. */
   }
 }
 
-interface GalleryGroup {
+interface CharacterFilter {
   key: string;
-  characterId: number | null;
+  id: number | null;
   name: string;
-  items: GalleryItem[];
-  renders: GalleryRenderState[];
+  count: number;
 }
 
-function GalleryPendingCard(props: { render: GalleryRenderState }) {
-  return (
-    <article class="gallery-card gallery-pending-card" aria-label="Rendering new gallery image">
-      <Show
-        when={props.render.preview}
-        fallback={
-          <div class="gallery-pending-placeholder">
-            <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
-          </div>
-        }
-      >
-        {(preview) => <img src={preview()} alt="Gallery image rendering preview" />}
-      </Show>
-      <span class="gallery-pending-status">
-        <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
-        <SamplerProgress progress={props.render} fallback={<span>Rendering…</span>} />
-      </span>
-    </article>
-  );
-}
-
-function GalleryCard(props: {
-  item: GalleryItem;
-  onGenerate: (item: GalleryItem, prompt: string) => void;
-  selectionMode: boolean;
-  selected: boolean;
-  selectable: boolean;
-  onToggleSelection: (id: number) => void;
+function CharacterPicker(props: {
+  options: CharacterFilter[];
+  value: string;
+  total: number;
+  disabled: boolean;
+  onChange: (key: string) => void;
 }) {
-  const [mutating, setMutating] = createSignal(false);
-  const [promptOpen, setPromptOpen] = createSignal(false);
-  const [promptDraft, setPromptDraft] = createSignal(props.item.prompt);
-  const [revisionInstruction, setRevisionInstruction] = createSignal('');
-  const [revisionError, setRevisionError] = createSignal('');
-  const [revisingPrompt, setRevisingPrompt] = createSignal(false);
-  const [viewerOpen, setViewerOpen] = createSignal(false);
-  const [menuOpen, setMenuOpen] = createSignal(false);
-  let moreButton: HTMLButtonElement | undefined;
-  let revisionAbort: AbortController | undefined;
-  const renderFormId = `gallery-render-form-${props.item.id}`;
-  const revisionFormId = `gallery-revision-form-${props.item.id}`;
-  const canGenerate = () => props.item.hasImageRender || activeImageRenderConfig() != null;
-  const rendering = () =>
-    state.galleryRenders.some((render) => render.sourceItemId === props.item.id);
-  const busy = () => mutating() || rendering() || revisingPrompt();
-
-  createEffect(() => {
-    if (props.selectionMode) setMenuOpen(false);
-  });
-
-  const openPromptForm = () => {
-    if (busy()) return;
-    revisionAbort?.abort();
-    setPromptDraft(props.item.prompt);
-    setRevisionInstruction('');
-    setRevisionError('');
-    setRevisingPrompt(false);
-    setPromptOpen(true);
+  const [open, setOpen] = createSignal(false);
+  let button!: HTMLButtonElement;
+  const selected = () => props.options.find((option) => option.key === props.value);
+  const pick = (value: string) => {
+    props.onChange(value);
+    setOpen(false);
+    button.focus({ preventScroll: true });
   };
-
-  const closePromptForm = () => {
-    revisionAbort?.abort();
-    revisionAbort = undefined;
-    setRevisingPrompt(false);
-    setPromptOpen(false);
-  };
-
-  onCleanup(() => revisionAbort?.abort());
-
-  const revisePrompt = async () => {
-    const original = promptDraft().trim();
-    const instruction = revisionInstruction().trim();
-    if (!original || !instruction || busy()) return;
-    const abort = new AbortController();
-    revisionAbort = abort;
-    let streamed = '';
-    setRevisionError('');
-    setRevisingPrompt(true);
-    setPromptDraft('');
-    try {
-      const revised = await api.streamGalleryPromptRevision(
-        props.item.id,
-        original,
-        instruction,
-        (delta) => {
-          if (revisionAbort !== abort) return;
-          streamed += delta;
-          setPromptDraft(streamed);
-        },
-        abort.signal,
-      );
-      if (revisionAbort !== abort) return;
-      setPromptDraft(revised.trim());
-      setRevisionInstruction('');
-    } catch (err) {
-      if (!abort.signal.aborted && revisionAbort === abort) {
-        setPromptDraft(original);
-        setRevisionError(errorMessage(err));
-      }
-    } finally {
-      if (revisionAbort === abort) {
-        revisionAbort = undefined;
-        setRevisingPrompt(false);
-      }
-    }
-  };
-
-  const generate = () => {
-    const prompt = promptDraft().trim();
-    if (!prompt || !canGenerate() || busy()) return;
-    closePromptForm();
-    props.onGenerate(props.item, prompt);
-  };
-
-  const deleteItem = async () => {
-    if (
-      !(await confirmAction({
-        title: 'Delete saved item?',
-        message: 'This permanently deletes the saved image and prompt.',
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
-    ) {
-      return;
-    }
-    if (busy()) return;
-    setMutating(true);
-    try {
-      await api.deleteGalleryItem(props.item.id);
-      setState('gallery', (items) => items.filter((item) => item.id !== props.item.id));
-    } catch (err) {
-      toast(errorMessage(err));
-      setMutating(false);
-    }
-  };
-
-  const copyPrompt = async (prompt = props.item.prompt) => {
-    setMenuOpen(false);
-    try {
-      await navigator.clipboard.writeText(prompt);
-      toast('Prompt copied.', 'success');
-    } catch {
-      toast('Could not copy the prompt.');
-    }
-  };
-
   return (
-    <article
-      class="gallery-card"
-      classList={{
-        'gallery-card-selecting': props.selectionMode,
-        'gallery-card-selected': props.selected,
-      }}
-    >
+    <>
       <button
+        ref={button}
         type="button"
-        class="gallery-image-button"
-        disabled={props.selectionMode && !props.selectable}
-        aria-label={
-          props.selectionMode
-            ? `${props.selected ? 'Deselect' : 'Select'} saved image for ${props.item.characterName}`
-            : `View saved image for ${props.item.characterName}`
-        }
-        aria-pressed={props.selectionMode ? props.selected : undefined}
-        onClick={() =>
-          props.selectionMode ? props.onToggleSelection(props.item.id) : setViewerOpen(true)
-        }
+        class="select-btn gallery-character-picker"
+        aria-label="Filter gallery by character"
+        aria-haspopup="menu"
+        aria-expanded={open()}
+        disabled={props.disabled}
+        onClick={() => setOpen(!open())}
       >
-        <img src={props.item.image} alt={`Saved image for ${props.item.characterName}`} />
-        <Show when={props.selectionMode}>
-          <span
-            class="gallery-selection-check"
-            classList={{ selected: props.selected }}
-            aria-hidden="true"
-          >
-            {props.selected ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
-          </span>
+        <Show when={selected()} fallback={<FontAwesomeIcon icon={faImages} size={15} />}>
+          {(current) => (
+            <Avatar
+              src={state.characters.find((character) => character.id === current().id)?.avatar}
+              name={current().name}
+            />
+          )}
         </Show>
+        <span>{selected()?.name ?? 'All characters'}</span>
+        <FontAwesomeIcon icon={faChevronDown} size={10} />
       </button>
-
-      <Show when={!props.selectionMode}>
-        <span class="gallery-card-toolbar">
-          <span class="msg-more-wrap">
-            <button
-              ref={moreButton}
-              type="button"
-              class="icon-btn"
-              classList={{ 'icon-btn-active': menuOpen() }}
-              title="More"
-              aria-label="More saved image actions"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen()}
-              onClick={() => setMenuOpen(!menuOpen())}
-            >
-              <FontAwesomeIcon icon={faEllipsis} size={16} />
-            </button>
-            <DropdownSurface
-              open={menuOpen()}
-              anchor={() => moreButton}
-              onClose={() => setMenuOpen(false)}
-              class="msg-more-menu"
-              role="menu"
-              ariaLabel="Saved image actions"
-              placement="auto"
-              align="end"
-              fitContentWidth
-              keyboardNavigation
-              autoFocus
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  openPromptForm();
-                }}
-              >
-                View / edit prompt
-              </button>
-              <button type="button" role="menuitem" onClick={() => void copyPrompt()}>
-                Copy prompt
-              </button>
-              <div class="menu-separator" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy()}
-                onClick={() => {
-                  setMenuOpen(false);
-                  openPromptForm();
-                }}
-              >
-                Generate image
-              </button>
-              <div class="menu-separator" role="separator" />
-              <button
-                type="button"
-                class="danger"
-                role="menuitem"
-                disabled={busy()}
-                onClick={() => {
-                  setMenuOpen(false);
-                  void deleteItem();
-                }}
-              >
-                <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete saved image
-              </button>
-            </DropdownSurface>
-          </span>
-        </span>
-      </Show>
-
-      <Show when={viewerOpen()}>
-        <ImageViewer src={props.item.image} onClose={() => setViewerOpen(false)} />
-      </Show>
-      <Show when={promptOpen()}>
-        <Modal
-          title="Generate gallery image"
-          class="gallery-prompt-modal"
-          onClose={closePromptForm}
+      <DropdownSurface
+        open={open()}
+        anchor={() => button}
+        onClose={() => setOpen(false)}
+        class="gallery-character-menu"
+        role="menu"
+        ariaLabel="Gallery character filter"
+        matchAnchorWidth
+        minWidth={230}
+        maxHeight={360}
+        keyboardNavigation
+        autoFocus
+      >
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={props.value === 'all'}
+          onClick={() => pick('all')}
         >
-          <div class="gallery-prompt-dialog form">
-            <form
-              id={renderFormId}
-              class="form-stack gallery-prompt-render-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                generate();
-              }}
+          <FontAwesomeIcon icon={faImages} size={16} /> <span>All characters</span>
+          <span class="gallery-filter-count">{props.total}</span>
+        </button>
+        <For each={props.options}>
+          {(option) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.key === props.value}
+              onClick={() => pick(option.key)}
             >
-              <label for={`gallery-prompt-${props.item.id}`}>Prompt</label>
-              <textarea
-                id={`gallery-prompt-${props.item.id}`}
-                data-modal-initial-focus
-                rows={8}
-                value={promptDraft()}
-                readOnly={revisingPrompt()}
-                onInput={(event) => setPromptDraft(event.currentTarget.value)}
+              <Avatar
+                src={state.characters.find((character) => character.id === option.id)?.avatar}
+                name={option.name}
               />
-            </form>
-            <form
-              id={revisionFormId}
-              class="form-stack inset-card gallery-prompt-revision-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void revisePrompt();
-              }}
-            >
-              <label for={`gallery-revision-${props.item.id}`}>
-                Regenerate prompt with an edit instruction
-              </label>
-              <textarea
-                id={`gallery-revision-${props.item.id}`}
-                rows={3}
-                value={revisionInstruction()}
-                readOnly={revisingPrompt()}
-                placeholder="e.g. change the lighting to sunset; preserve everything else"
-                onInput={(event) => setRevisionInstruction(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (
-                    !event.isComposing &&
-                    event.key === 'Enter' &&
-                    (event.ctrlKey || event.metaKey)
-                  ) {
-                    event.preventDefault();
-                    void revisePrompt();
-                  }
-                }}
-              />
-              <div class="form-actions">
-                <button
-                  type="submit"
-                  disabled={!promptDraft().trim() || !revisionInstruction().trim() || busy()}
-                >
-                  <Show when={revisingPrompt()}>
-                    <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
-                  </Show>
-                  {revisingPrompt() ? 'Revising…' : 'Regenerate prompt'}
-                </button>
-              </div>
-              <Show when={revisionError()}>
-                <p class="notice notice-error" role="alert">
-                  {revisionError()}
-                </p>
-              </Show>
-            </form>
-            <p class="hint">
-              Uses the active image workflow, or this image's saved workflow when none is active.
-            </p>
-            <Show when={!canGenerate()}>
-              <p class="notice notice-error" role="alert">
-                Select an image workflow in Settings → Tools → Image Generation first.
-              </p>
-            </Show>
-            <div class="form-actions">
-              <button
-                type="submit"
-                form={renderFormId}
-                class="primary-btn"
-                disabled={!promptDraft().trim() || !canGenerate() || busy()}
-              >
-                Generate image
-              </button>
-              <button
-                type="button"
-                disabled={revisingPrompt()}
-                onClick={() => void copyPrompt(promptDraft())}
-              >
-                Copy prompt
-              </button>
-              <button type="button" onClick={closePromptForm}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </Modal>
-      </Show>
-    </article>
+              <span>{option.name}</span>
+              <span class="gallery-filter-count">{option.count}</span>
+            </button>
+          )}
+        </For>
+      </DropdownSurface>
+    </>
   );
 }
 
 export default function GalleryModal() {
-  const [grouped, setGrouped] = createSignal(initialGrouping());
+  const initialSize = Number(readPreference('size'));
+  const [imageSize, setImageSize] = createSignal(
+    initialSize >= 140 && initialSize <= 320 ? initialSize : 240,
+  );
+  const [showDetails, setShowDetails] = createSignal(readPreference('details') !== '0');
+  const [query, setQuery] = createSignal('');
+  const [search, setSearch] = createSignal('');
+  const [characterKey, setCharacterKey] = createSignal('all');
+  const [sort, setSort] = createSignal(readPreference('sort') === 'oldest' ? 'oldest' : 'newest');
   const [selectionMode, setSelectionMode] = createSignal(false);
-  const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds] = createSignal<ReadonlySet<number>>(new Set<number>());
   const [bulkDeleting, setBulkDeleting] = createSignal(false);
+  const [uploadProgress, setUploadProgress] = createSignal<{ done: number; total: number } | null>(
+    null,
+  );
+  const [dragging, setDragging] = createSignal(false);
+  const [detailId, setDetailId] = createSignal<number | null>(null);
+  const [drafts, setDrafts] = createStore<Record<number, GalleryDraft>>({});
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let backButton: HTMLButtonElement | undefined;
+  let searchInput: HTMLInputElement | undefined;
+  let lastDetailIndex = 0;
+  let focusFrame = 0;
+  let fileInput!: HTMLInputElement;
+  let dragDepth = 0;
+  let disposed = false;
 
+  const byId = createMemo(() => new Map(state.gallery.map((item) => [item.id, item])));
+  const index = createMemo(() => indexGallery(state.gallery));
+  const filtered = createMemo(() =>
+    filterGallery(index(), search(), characterKey(), sort() === 'oldest'),
+  );
+  const filteredIndex = createMemo(
+    () => new Map(filtered().map((item, index) => [item.id, index])),
+  );
+  const detailItem = () => (detailId() == null ? undefined : byId().get(detailId()!));
+  const detailIndex = () => (detailId() == null ? -1 : (filteredIndex().get(detailId()!) ?? -1));
   const renderingSourceIds = createMemo(
     () => new Set(state.galleryRenders.map((render) => render.sourceItemId)),
   );
   const selectableItems = createMemo(() =>
-    state.gallery.filter((item) => !renderingSourceIds().has(item.id)),
+    filtered().filter((item) => !renderingSourceIds().has(item.id)),
   );
-  const selectedItems = createMemo(() => {
-    const selected = selectedIds();
-    return selectableItems().filter((item) => selected.has(item.id));
+  const selectedItems = createMemo(() =>
+    selectableItems().filter((item) => selectedIds().has(item.id)),
+  );
+  const allSelected = () =>
+    selectableItems().length > 0 && selectedItems().length === selectableItems().length;
+  const characterOptions = createMemo(() => {
+    const groups = new Map<string, CharacterFilter>();
+    for (const item of state.gallery) {
+      const key = galleryCharacterKey(item);
+      const current = groups.get(key);
+      if (current) current.count++;
+      else groups.set(key, { key, id: item.characterId, name: item.characterName, count: 1 });
+    }
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
   });
-  const allSelected = createMemo(
-    () => selectableItems().length > 0 && selectedItems().length === selectableItems().length,
-  );
+
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => setSearch(value), 120);
+  };
+  const upload = async (files: File[]) => {
+    if (!files.length || uploadProgress() || bulkDeleting()) return;
+    const character = characterOptions().find((option) => option.key === characterKey());
+    setUploadProgress({ done: 0, total: files.length });
+    let cursor = 0;
+    let done = 0;
+    let saved = 0;
+    const errors: string[] = [];
+    const worker = async () => {
+      while (cursor < files.length) {
+        const file = files[cursor++]!;
+        try {
+          if (file.size > 64 * 1024 * 1024) throw new Error('maximum size is 64 MB');
+          const item = await api.uploadGalleryImage(file, character?.id ?? null, character?.name);
+          applyGalleryItem(item);
+          saved++;
+        } catch (err) {
+          errors.push(`${file.name}: ${errorMessage(err)}`);
+        }
+        setUploadProgress({ done: ++done, total: files.length });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setUploadProgress(null);
+    if (saved) toast(`Uploaded ${saved} ${saved === 1 ? 'image' : 'images'}.`, 'success');
+    if (errors.length) toast(`${errors.length} failed. ${errors.slice(0, 2).join('; ')}`);
+  };
+  const clearFilters = () => {
+    clearTimeout(searchTimer);
+    batch(() => {
+      setQuery('');
+      setSearch('');
+      setCharacterKey('all');
+    });
+  };
+  createEffect(() => {
+    void search();
+    void characterKey();
+    setSelectedIds(new Set<number>());
+  });
+  createEffect(() => {
+    if (
+      characterKey() !== 'all' &&
+      !characterOptions().some((option) => option.key === characterKey())
+    )
+      setCharacterKey('all');
+  });
+
+  const openDetail = (item: GalleryItem) => {
+    const moveFocus =
+      detailId() == null || document.activeElement?.closest('.gallery-detail-content');
+    if (!drafts[item.id]) setDrafts(item.id, { prompt: item.prompt, instruction: '' });
+    setDetailId(item.id);
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      const modal = backButton?.closest<HTMLElement>('.gallery-modal');
+      if (modal) modal.scrollTop = 0;
+    }
+    lastDetailIndex = filteredIndex().get(item.id) ?? 0;
+    cancelAnimationFrame(focusFrame);
+    if (moveFocus)
+      focusFrame = requestAnimationFrame(() => backButton?.focus({ preventScroll: true }));
+  };
+  const closeDetail = () => {
+    setDetailId(null);
+    if (!filtered().length) queueMicrotask(() => searchInput?.focus({ preventScroll: true }));
+  };
+  const navigateDetail = (direction: number) => {
+    const position = detailIndex();
+    const next = position < 0 ? undefined : filtered()[position + direction];
+    if (next) openDetail(next);
+  };
+  createEffect(() => {
+    const id = detailId();
+    if (id == null) return;
+    if (byId().has(id)) lastDetailIndex = filteredIndex().get(id) ?? lastDetailIndex;
+    else
+      untrack(() => {
+        const next = filtered()[Math.min(lastDetailIndex, filtered().length - 1)];
+        if (next) openDetail(next);
+        else closeDetail();
+      });
+  });
+
+  const onKey = (event: KeyboardEvent) => {
+    if (
+      !detailItem() ||
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    )
+      return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest('input, textarea, select, [contenteditable], [role="menu"]')
+    )
+      return;
+    const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+    if (!dialogs[dialogs.length - 1]?.classList.contains('gallery-modal')) return;
+    event.preventDefault();
+    navigateDetail(event.key === 'ArrowLeft' ? -1 : 1);
+  };
+  onMount(() => document.addEventListener('keydown', onKey));
+  onCleanup(() => {
+    disposed = true;
+    clearTimeout(searchTimer);
+    cancelAnimationFrame(focusFrame);
+    document.removeEventListener('keydown', onKey);
+  });
 
   const toggleSelection = (id: number) => {
     if (bulkDeleting() || renderingSourceIds().has(id)) return;
@@ -429,34 +338,33 @@ export default function GalleryModal() {
       return next;
     });
   };
-  const leaveSelectionMode = () => {
+  const leaveSelection = () => {
     if (bulkDeleting()) return;
-    setSelectedIds(new Set<number>());
-    setSelectionMode(false);
-  };
-  const toggleSelectAll = () => {
-    if (bulkDeleting()) return;
-    setSelectedIds(
-      allSelected() ? new Set<number>() : new Set(selectableItems().map((item) => item.id)),
-    );
+    batch(() => {
+      setSelectedIds(new Set<number>());
+      setSelectionMode(false);
+    });
   };
   const deleteSelected = async () => {
     const items = selectedItems();
-    const count = items.length;
+    if (!items.length || bulkDeleting()) return;
     if (
-      count === 0 ||
       !(await confirmAction({
-        title: `Delete ${count} selected ${count === 1 ? 'image' : 'images'}?`,
-        message: `This permanently deletes the selected saved ${count === 1 ? 'image and its prompt' : 'images and their prompts'}.`,
+        title: `Delete ${items.length} selected ${items.length === 1 ? 'image' : 'images'}?`,
+        message: 'This permanently deletes the selected saved images and their prompts.',
         confirmLabel: 'Delete',
         danger: true,
       }))
-    ) {
+    )
+      return;
+    const stillSelected = new Set(selectedItems().map((item) => item.id));
+    if (items.some((item) => !stillSelected.has(item.id))) {
+      toast('The selection changed. Review it before deleting.');
       return;
     }
     setBulkDeleting(true);
-    const ids = items.map((item) => item.id);
     try {
+      const ids = items.map((item) => item.id);
       const result = await api.deleteGalleryItems(ids);
       const removed = new Set(ids);
       batch(() => {
@@ -474,6 +382,23 @@ export default function GalleryModal() {
       setBulkDeleting(false);
     }
   };
+  const deleteItem = async (item: GalleryItem) => {
+    if (
+      !(await confirmAction({
+        title: 'Delete saved image?',
+        message: 'This permanently deletes the saved image and prompt.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await api.deleteGalleryItem(item.id);
+      setState('gallery', (items) => items.filter((candidate) => candidate.id !== item.id));
+    } catch (err) {
+      toast(errorMessage(err));
+    }
+  };
 
   const removeRender = (jobId: string) =>
     setState('galleryRenders', (renders) => renders.filter((render) => render.jobId !== jobId));
@@ -481,10 +406,10 @@ export default function GalleryModal() {
     const index = state.galleryRenders.findIndex((render) => render.jobId === jobId);
     if (index >= 0) setState('galleryRenders', index, patch);
   };
-
   const generate = (source: GalleryItem, prompt: string) => {
     if (state.galleryRenders.some((render) => render.sourceItemId === source.id)) return;
     const jobId = crypto.randomUUID();
+    const config = activeImageRenderConfig();
     const pending: GalleryRenderState = {
       jobId,
       sourceItemId: source.id,
@@ -493,214 +418,370 @@ export default function GalleryModal() {
       prompt,
     };
     setState('galleryRenders', (renders) => [pending, ...renders]);
+    // Jobs live in the shared store and finish even when the gallery closes.
     void (async () => {
-      let completed = false;
+      const progressAbort = new AbortController();
       try {
         try {
           const stream = await api.openGalleryRenderProgress(
             jobId,
             (value, max) => updateRender(jobId, { value, max }),
             (preview) => updateRender(jobId, { preview }),
+            progressAbort.signal,
           );
           void stream.done.catch(() => undefined);
         } catch (err) {
           console.warn('[gallery] progress stream unavailable:', err);
         }
-        const created = await api.renderGalleryImage(
-          source.id,
-          jobId,
-          prompt,
-          activeImageRenderConfig(),
-        );
+        const created = await api.renderGalleryImage(source.id, jobId, prompt, config);
         batch(() => {
           applyGalleryItem(created);
           removeRender(jobId);
+          if (!disposed && detailId() === source.id) openDetail(created);
         });
-        completed = true;
+        toast('Variation saved to gallery.', 'success');
       } catch (err) {
         toast(errorMessage(err));
       } finally {
-        if (!completed) removeRender(jobId);
+        progressAbort.abort();
+        removeRender(jobId);
       }
     })();
-  };
-
-  const groups = createMemo<GalleryGroup[]>(() => {
-    if (!grouped()) {
-      return [
-        {
-          key: 'all',
-          characterId: null,
-          name: '',
-          items: [...state.gallery],
-          renders: [...state.galleryRenders],
-        },
-      ];
-    }
-    const byKey = new Map<string, GalleryGroup>();
-    const ensureGroup = (characterId: number | null, characterName: string) => {
-      const key = characterId != null ? `id:${characterId}` : `name:${characterName}`;
-      let group = byKey.get(key);
-      if (!group) {
-        const currentCharacter =
-          characterId != null
-            ? state.characters.find((character) => character.id === characterId)
-            : undefined;
-        group = {
-          key,
-          characterId,
-          name: currentCharacter?.name ?? characterName,
-          items: [],
-          renders: [],
-        };
-        byKey.set(key, group);
-      }
-      return group;
-    };
-    for (const item of state.gallery) {
-      ensureGroup(item.characterId, item.characterName).items.push(item);
-    }
-    for (const render of state.galleryRenders) {
-      ensureGroup(render.characterId, render.characterName).renders.push(render);
-    }
-    return [...byKey.values()];
-  });
-  const toggleGrouping = () => {
-    const next = !grouped();
-    setGrouped(next);
-    try {
-      localStorage.setItem(GROUP_KEY, next ? '1' : '0');
-    } catch {
-      /* Storage may be unavailable in hardened/private browser contexts. */
-    }
   };
 
   return (
     <Modal
       title="Gallery"
-      class={`gallery-modal ${selectionMode() ? 'gallery-selection-mode' : ''}`}
-      backdropClass="gallery-backdrop"
+      hideCloseButton
+      fullscreen
+      class={`gallery-modal ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
+      onClose={() => {
+        if (bulkDeleting()) return;
+        if (detailId() != null) closeDetail();
+        else if (selectionMode()) leaveSelection();
+        else openModal(null);
+      }}
       headerExtra={
-        <div class="gallery-modal-head-actions">
+        <div class="page-header-actions gallery-head-actions">
           <Show
-            when={selectionMode()}
+            when={detailItem()}
             fallback={
-              <>
-                <span class="gallery-count">{state.gallery.length} saved</span>
+              <Show
+                when={selectionMode()}
+                fallback={
+                  <>
+                    <button
+                      type="button"
+                      class="page-back gallery-back"
+                      onClick={() => openModal(null)}
+                    >
+                      <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
+                    </button>
+                    <span class="gallery-count">
+                      {filtered().length} {filtered().length === 1 ? 'image' : 'images'}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={uploadProgress() != null}
+                      onClick={() => fileInput.click()}
+                    >
+                      <FontAwesomeIcon icon={faUpload} size={14} /> Upload
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!filtered().length}
+                      onClick={() => setSelectionMode(true)}
+                    >
+                      <FontAwesomeIcon icon={faListCheck} size={14} /> Select
+                    </button>
+                  </>
+                }
+              >
+                <span class="gallery-count" aria-live="polite">
+                  {selectedItems().length} selected
+                </span>
                 <button
                   type="button"
-                  class="icon-btn"
-                  title="Select gallery images"
-                  aria-label="Select gallery images"
-                  disabled={state.gallery.length === 0}
-                  onClick={() => setSelectionMode(true)}
+                  disabled={bulkDeleting() || !selectableItems().length}
+                  onClick={() =>
+                    setSelectedIds(
+                      allSelected()
+                        ? new Set<number>()
+                        : new Set(selectableItems().map((item) => item.id)),
+                    )
+                  }
                 >
-                  <FontAwesomeIcon icon={faListCheck} />
+                  {allSelected() ? 'Clear selection' : 'Select all'}
                 </button>
                 <button
-                  class="icon-btn"
-                  classList={{ 'icon-btn-active': grouped() }}
-                  title="Group by character"
-                  aria-label="Group gallery by character"
-                  aria-pressed={grouped()}
-                  onClick={toggleGrouping}
+                  type="button"
+                  class="danger"
+                  disabled={bulkDeleting() || !selectedItems().length}
+                  onClick={() => void deleteSelected()}
                 >
-                  <FontAwesomeIcon icon={faLayerGroup} />
+                  <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete
                 </button>
-              </>
+                <button type="button" disabled={bulkDeleting()} onClick={leaveSelection}>
+                  Done
+                </button>
+              </Show>
             }
           >
-            <span class="gallery-count">{selectedItems().length} selected</span>
             <button
+              ref={backButton}
               type="button"
-              class="icon-btn"
-              classList={{ 'icon-btn-active': allSelected() }}
-              title={allSelected() ? 'Clear selection' : 'Select all'}
-              aria-label={allSelected() ? 'Clear gallery selection' : 'Select all gallery images'}
-              aria-pressed={allSelected()}
-              disabled={bulkDeleting() || selectableItems().length === 0}
-              onClick={toggleSelectAll}
+              class="page-back gallery-back"
+              onClick={closeDetail}
             >
-              <FontAwesomeIcon icon={allSelected() ? faSquareCheck : faSquare} />
+              <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
             </button>
+            <span class="gallery-count">
+              {detailIndex() >= 0 ? `${detailIndex() + 1} / ${filtered().length}` : 'Saved image'}
+            </span>
+            <div class="gallery-detail-nav">
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label="Previous gallery image"
+                title="Previous image"
+                disabled={detailIndex() <= 0}
+                onClick={() => navigateDetail(-1)}
+              >
+                <FontAwesomeIcon icon={faChevronLeft} size={14} />
+              </button>
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label="Next gallery image"
+                title="Next image"
+                disabled={detailIndex() < 0 || detailIndex() >= filtered().length - 1}
+                onClick={() => navigateDetail(1)}
+              >
+                <FontAwesomeIcon icon={faChevronRight} size={14} />
+              </button>
+            </div>
             <button
               type="button"
-              class="icon-btn gallery-delete-selected"
-              title="Delete selected images"
-              aria-label="Delete selected gallery images"
-              disabled={bulkDeleting() || selectedItems().length === 0}
-              onClick={() => void deleteSelected()}
+              class="gallery-details-toggle"
+              aria-label={showDetails() ? 'Hide image details' : 'Show image details'}
+              aria-expanded={showDetails()}
+              aria-controls="gallery-detail-panel"
+              onClick={() => {
+                const next = !showDetails();
+                setShowDetails(next);
+                savePreference('details', next ? '1' : '0');
+              }}
             >
-              <FontAwesomeIcon icon={faTrashCan} size={15} />
-            </button>
-            <button
-              type="button"
-              class="icon-btn icon-btn-active"
-              title="Finish selecting"
-              aria-label="Finish selecting gallery images"
-              disabled={bulkDeleting()}
-              onClick={leaveSelectionMode}
-            >
-              <FontAwesomeIcon icon={faListCheck} />
+              <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
             </button>
           </Show>
         </div>
       }
     >
-      <Show
-        when={state.gallery.length > 0}
-        fallback={
-          <div class="gallery-empty">
-            <FontAwesomeIcon icon={faImages} />
-            <strong>No saved images yet</strong>
-            <span>Save an image swipe from its message controls to keep it here.</span>
-          </div>
-        }
+      <div
+        class="gallery-workspace"
+        onDragEnter={(event) => {
+          if (!event.dataTransfer?.types.includes('Files')) return;
+          event.preventDefault();
+          dragDepth++;
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer?.types.includes('Files')) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = uploadProgress() || bulkDeleting() ? 'none' : 'copy';
+        }}
+        onDragLeave={() => {
+          if (--dragDepth <= 0) {
+            dragDepth = 0;
+            setDragging(false);
+          }
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer?.types.includes('Files')) return;
+          event.preventDefault();
+          dragDepth = 0;
+          setDragging(false);
+          void upload([...event.dataTransfer.files]);
+        }}
       >
-        <div class="gallery-content">
-          <For each={groups()}>
-            {(group) => (
-              <section class="gallery-group">
-                <Show when={grouped()}>
-                  <div class="gallery-group-head">
-                    <Show
-                      when={
-                        group.characterId != null
-                          ? state.characters.find((character) => character.id === group.characterId)
-                          : undefined
-                      }
-                      fallback={<span class="avatar avatar-fallback">{group.name[0] ?? 'A'}</span>}
-                    >
-                      {(character) => <Avatar src={character().avatar} name={character().name} />}
-                    </Show>
-                    <span>{group.name}</span>
-                    <span class="gallery-group-count">
-                      {group.items.length + group.renders.length}
-                    </span>
-                  </div>
-                </Show>
-                <div class="gallery-grid">
-                  <For each={group.renders}>
-                    {(render) => <GalleryPendingCard render={render} />}
-                  </For>
-                  <For each={group.items}>
-                    {(item) => (
-                      <GalleryCard
-                        item={item}
-                        onGenerate={generate}
-                        selectionMode={selectionMode()}
-                        selected={selectedIds().has(item.id) && !renderingSourceIds().has(item.id)}
-                        selectable={!renderingSourceIds().has(item.id)}
-                        onToggleSelection={toggleSelection}
-                      />
-                    )}
-                  </For>
-                </div>
-              </section>
-            )}
-          </For>
+        <input
+          ref={fileInput}
+          type="file"
+          hidden
+          multiple
+          accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+          onChange={(event) => {
+            const files = [...(event.currentTarget.files ?? [])];
+            event.currentTarget.value = '';
+            void upload(files);
+          }}
+        />
+        <Show when={dragging()}>
+          <div class="gallery-drop-overlay">
+            <FontAwesomeIcon icon={faUpload} size={26} />
+            <strong>
+              {uploadProgress()
+                ? 'Upload in progress'
+                : bulkDeleting()
+                  ? 'Deletion in progress'
+                  : 'Drop images to upload'}
+            </strong>
+            <span>PNG, JPEG, WebP · Up to 64 MB each</span>
+          </div>
+        </Show>
+        <Show when={uploadProgress()}>
+          {(progress) => (
+            <div class="gallery-upload-progress" role="status">
+              <FontAwesomeIcon icon={faSpinner} size={12} class="spinner" />
+              Uploading {progress().done} / {progress().total}
+            </div>
+          )}
+        </Show>
+        <div class="gallery-toolbar" classList={{ hidden: detailItem() != null }}>
+          <div class="gallery-search">
+            <FontAwesomeIcon icon={faMagnifyingGlass} size={14} />
+            <input
+              ref={searchInput}
+              data-modal-initial-focus
+              type="search"
+              aria-label="Search gallery prompts"
+              placeholder="Search prompts…"
+              value={query()}
+              disabled={bulkDeleting()}
+              onInput={(event) => updateQuery(event.currentTarget.value)}
+            />
+          </div>
+          <CharacterPicker
+            options={characterOptions()}
+            value={characterKey()}
+            total={state.gallery.length}
+            disabled={bulkDeleting()}
+            onChange={setCharacterKey}
+          />
+          <Select
+            class="gallery-sort"
+            ariaLabel="Sort gallery"
+            value={sort()}
+            disabled={bulkDeleting()}
+            options={[
+              { value: 'newest', label: 'Newest first' },
+              { value: 'oldest', label: 'Oldest first' },
+            ]}
+            onChange={(value) => {
+              setSort(value);
+              savePreference('sort', value);
+            }}
+          />
+          <label class="gallery-size-control">
+            Image size
+            <input
+              type="range"
+              min={140}
+              max={320}
+              step={20}
+              value={imageSize()}
+              aria-label="Gallery image size"
+              onInput={(event) => {
+                const value = Number(event.currentTarget.value);
+                setImageSize(value);
+                savePreference('size', String(value));
+              }}
+            />
+          </label>
         </div>
-      </Show>
+        <Show when={state.galleryRenders.length > 0}>
+          <section
+            class="gallery-activity"
+            classList={{ hidden: detailItem() != null }}
+            aria-label="Gallery render activity"
+          >
+            <span class="gallery-activity-label">
+              <FontAwesomeIcon icon={faSpinner} size={12} class="spinner" /> Rendering{' '}
+              {state.galleryRenders.length}
+            </span>
+            <div class="gallery-activity-jobs">
+              <For each={state.galleryRenders}>
+                {(job) => (
+                  <button
+                    type="button"
+                    class="gallery-activity-job"
+                    disabled={!byId().has(job.sourceItemId)}
+                    onClick={() => {
+                      const source = byId().get(job.sourceItemId);
+                      if (source) openDetail(source);
+                    }}
+                  >
+                    <span class="gallery-activity-preview">
+                      <Show
+                        when={job.preview}
+                        fallback={<FontAwesomeIcon icon={faImages} size={22} />}
+                      >
+                        <img src={job.preview} alt="Render preview" />
+                      </Show>
+                    </span>
+                    <span class="gallery-activity-info">
+                      <strong>{job.characterName}</strong>
+                      <span class="gallery-render-status">
+                        <SamplerProgress
+                          progress={job}
+                          stepsLabel="Step"
+                          fallback={<span>Waiting for render…</span>}
+                        />
+                      </span>
+                    </span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
+        <GalleryGrid
+          items={filtered()}
+          targetHeight={imageSize()}
+          resetKey={JSON.stringify([search(), characterKey(), sort()])}
+          hidden={detailItem() != null || filtered().length === 0}
+          selecting={selectionMode()}
+          selectedIds={selectedIds()}
+          blockedIds={renderingSourceIds()}
+          onOpen={openDetail}
+          onToggle={toggleSelection}
+        />
+        <Show when={!detailItem() && filtered().length === 0}>
+          <div class="gallery-empty">
+            <FontAwesomeIcon icon={faImages} size={34} />
+            <strong>{state.gallery.length ? 'No matching images' : 'No saved images yet'}</strong>
+            <span>
+              {state.gallery.length
+                ? 'Try another prompt search or character.'
+                : 'Upload images, drop them here, or save an image from chat.'}
+            </span>
+            <Show when={state.gallery.length > 0}>
+              <button type="button" onClick={clearFilters}>
+                Clear filters
+              </button>
+            </Show>
+          </div>
+        </Show>
+        <Show when={detailItem() && detailId()} keyed>
+          {(id) => (
+            <div id="gallery-detail-content" class="gallery-detail-content">
+              <GalleryDetail
+                item={byId().get(id)!}
+                draft={drafts[id]!}
+                showDetails={showDetails()}
+                onDraft={(patch) => setDrafts(id, patch)}
+                onGenerate={generate}
+                onDelete={deleteItem}
+                onOpenSource={(conversationId) => {
+                  openModal(null);
+                  selectConversation(conversationId);
+                }}
+              />
+            </div>
+          )}
+        </Show>
+      </div>
     </Modal>
   );
 }

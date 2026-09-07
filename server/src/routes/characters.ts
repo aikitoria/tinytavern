@@ -6,7 +6,12 @@ import { invalidate } from '../events.ts';
 import { buildCharacterCard, isPng, makePlaceholderPng, parseCharacterCard } from '../pngCard.ts';
 import { route, HttpError } from '../router.ts';
 import type { Ctx } from '../router.ts';
-import { optionalBoolean, optionalString, positiveId } from '../validation.ts';
+import {
+  optionalBoolean,
+  optionalNullableString,
+  optionalString,
+  positiveId,
+} from '../validation.ts';
 import type { JsonObject } from '../validation.ts';
 import {
   copyAvatarFiles,
@@ -30,6 +35,13 @@ defineEntityRoutes<Character>({
   toPublic: publicAvatar,
   fields: [
     nameField((cur) => cur.name),
+    {
+      column: 'chat_name',
+      value: (body, current) => {
+        const value = optionalNullableString(body, 'chatName');
+        return value === undefined ? (current?.chatName ?? null) : value?.trim() || null;
+      },
+    },
     refIdField('folderId', 'folder_id', 'character_folders', (cur) => cur.folderId),
     textField('personality', 'personality', (cur) => cur.personality),
     textField('scenario', 'scenario', (cur) => cur.scenario),
@@ -82,6 +94,12 @@ defineEntityRoutes<Character>({
 
 defineAvatarRoutes('character', (row) => publicAvatar(toCharacter(row)));
 
+function cardObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 route.post(
   '/api/characters/import-card',
   ({ raw }: Ctx) => {
@@ -93,10 +111,11 @@ route.post(
       throw new HttpError(400, err instanceof Error ? err.message : 'invalid character card');
     }
     const result = stmt(
-      `INSERT INTO characters (name, personality, scenario, examples, first_message, custom_prompt, card_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO characters (name, chat_name, personality, scenario, examples, first_message, custom_prompt, card_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       card.name,
+      card.chatName,
       card.personality,
       card.scenario,
       card.examples,
@@ -128,6 +147,8 @@ route.get('/api/characters/:id/card', ({ params, res }) => {
   const original = row.card_json
     ? (JSON.parse(row.card_json as string) as { data?: Record<string, unknown> })
     : null;
+  const extensions = cardObject(original?.data?.extensions);
+  const ownExtension = cardObject(extensions.tinytavern);
   const card = {
     spec: 'chara_card_v2',
     spec_version: '2.0',
@@ -141,6 +162,10 @@ route.get('/api/characters/:id/card', ({ params, res }) => {
       first_mes: character.firstMessage,
       // Falling back to the imported blob would resurrect an explicitly cleared prompt.
       system_prompt: character.customPrompt ?? '',
+      extensions: {
+        ...extensions,
+        tinytavern: { ...ownExtension, chatName: character.chatName },
+      },
     },
   };
   let base = readAvatarFile('character', id);

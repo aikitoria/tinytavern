@@ -15,7 +15,7 @@ export async function testTools(
 ) {
   const { conv2, ws } = fixture;
 
-  console.log('== plugin tool generation (foreground, role=tool) ==');
+  console.log('== image tool generation (foreground, role=tool) ==');
   const toolSnap = await tree(conv2.id);
   const toolRes = await req<{ toolMessageId: number; activeLeafId: number }>(
     'POST',

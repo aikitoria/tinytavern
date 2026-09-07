@@ -1,3 +1,4 @@
+import SettingLabel, { createDefaultField } from '../components/SettingField.tsx';
 import {
   faCheck,
   faChevronLeft,
@@ -11,9 +12,13 @@ import {
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
-import { workflowValidationError, type Message } from '@tinytavern/shared';
-import type { Plugin, PluginMessageView, PluginTool } from './api.ts';
-import { pluginSettings } from './api.ts';
+import {
+  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  imageRevisionTemplateError,
+  workflowValidationError,
+  type Message,
+} from '@tinytavern/shared';
+import type { ComposerCommand } from '../composerCommands.ts';
 import { api, ApiError } from '../state/api.ts';
 import {
   activePath,
@@ -32,12 +37,9 @@ import MacroTextarea from '../components/MacroTextarea.tsx';
 import Markdown from '../components/Markdown.tsx';
 import Select from '../components/Select.tsx';
 import { useSettingsGuard } from '../components/SettingsGuard.tsx';
-import type { SelectHandle } from '../components/Select.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 import './imageGeneration.css';
-
-const ID = 'imageGeneration';
 
 interface ImageWorkflow {
   name: string;
@@ -61,39 +63,31 @@ interface ImagePromptPresetSet {
 type ImagePromptKind =
   'describe' | 'characterInstruction' | 'face' | 'faceInstruction' | 'instruction' | 'avatar';
 
-const IMAGE_SETTINGS_TABS = [
+const IMAGE_PROMPT_SECTIONS = [
   {
     key: 'character',
-    label: 'Character',
     title: 'Character images',
     hint: 'Prompts used by `/imagechar`, with and without an instruction.',
   },
   {
     key: 'face',
-    label: 'Face',
     title: 'Face images',
     hint: 'Prompts used by `/imageface`, with and without an instruction.',
   },
   {
     key: 'generic',
-    label: 'Generic',
     title: 'Generic images',
     hint: 'The instruction-based prompt used by `/image`.',
   },
   {
     key: 'avatar',
-    label: 'Avatar',
     title: 'Avatars',
     hint: 'Prompt, context, and rendering workflow used by Generate avatar.',
   },
-  {
-    key: 'rendering',
-    label: 'Rendering',
-  },
 ] as const;
-type ImageSettingsTab = (typeof IMAGE_SETTINGS_TABS)[number]['key'];
 
 interface ImageGenSettings extends Record<string, unknown> {
+  promptRevisionTemplate: string;
   promptPresets: Record<ImagePromptKind, ImagePromptPresetSet>;
   comfyUrl: string;
   workflows: ImageWorkflow[];
@@ -136,46 +130,45 @@ const AVATAR_MACROS: [string, string][] = [
 
 const PROMPT_EDITORS: {
   kind: ImagePromptKind;
-  tab: ImageSettingsTab;
+  section: (typeof IMAGE_PROMPT_SECTIONS)[number]['key'];
   label: string;
   legacyKey?: 'describePrompt' | 'instructionPrompt' | 'avatarPrompt';
   command?: string;
 }[] = [
   {
     kind: 'describe',
-    tab: 'character',
-    label: 'Character image prompt (sent to the model to describe the character and scene)',
+    section: 'character',
+    label: 'Without an instruction',
     legacyKey: 'describePrompt',
   },
   {
     kind: 'characterInstruction',
-    tab: 'character',
-    label: 'Character image prompt with instruction — used by /imagechar',
+    section: 'character',
+    label: 'With an instruction',
     command: '/imagechar',
   },
   {
     kind: 'face',
-    tab: 'face',
-    label: 'Face image prompt (sent to the model to describe a close-up portrait)',
+    section: 'face',
+    label: 'Without an instruction',
   },
   {
     kind: 'faceInstruction',
-    tab: 'face',
-    label: 'Face image prompt with instruction — used by /imageface',
+    section: 'face',
+    label: 'With an instruction',
     command: '/imageface',
   },
   {
     kind: 'instruction',
-    tab: 'generic',
-    label:
-      'Generic instruction prompt for /image — {{instruction}} expands to the command argument',
+    section: 'generic',
+    label: 'Prompt template',
     command: '/image',
     legacyKey: 'instructionPrompt',
   },
   {
     kind: 'avatar',
-    tab: 'avatar',
-    label: 'Avatar prompt — system instruction and context for the Generate avatar button',
+    section: 'avatar',
+    label: 'Avatar prompt',
     legacyKey: 'avatarPrompt',
   },
 ];
@@ -190,6 +183,7 @@ function promptRecord<T>(
 }
 
 const DEFAULTS: ImageGenSettings = {
+  promptRevisionTemplate: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
   promptPresets: promptRecord(() => ({ presets: [], active: '' })),
   comfyUrl: 'http://comfy:8588',
   workflows: [],
@@ -230,8 +224,8 @@ function normalizePromptPresets(
 }
 
 function settings(): ImageGenSettings {
-  const stored = (state.settings.pluginSettings[ID] ?? {}) as Record<string, unknown>;
-  const cfg = pluginSettings(ID, DEFAULTS);
+  const stored = state.settings.imageGeneration;
+  const cfg = { ...DEFAULTS, ...stored } as ImageGenSettings;
   const promptPresets = promptRecord(({ kind, legacyKey }) =>
     normalizePromptPresets(stored, kind, legacyKey),
   );
@@ -326,7 +320,7 @@ async function generate(
 }
 
 /** Preset actions override the selection for one generation only. */
-function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face'): PluginTool[] {
+function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face') {
   const presets = settings().promptPresets[kind].presets;
   const baseLabel = `Generate ${subject} Image`;
   if (presets.length === 0) {
@@ -348,7 +342,7 @@ function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face'): 
   }));
 }
 
-function imageGenerationTools(): PluginTool[] {
+export function imageGenerationTools() {
   return [...promptTools('describe', 'Character'), ...promptTools('face', 'Face')];
 }
 
@@ -358,6 +352,13 @@ function copyName(base: string, taken: (name: string) => boolean): string {
     const candidate = n === 1 ? `${base} (copy)` : `${base} (copy ${n})`;
     if (!taken(candidate)) return candidate;
   }
+}
+
+/** The same available built-in name is used when adding an item or reverting its name. */
+function numberedName(prefix: string, items: readonly { name: string }[], index = items.length) {
+  let number = index + 1;
+  while (items.some((item, i) => i !== index && item.name === `${prefix} ${number}`)) number++;
+  return `${prefix} ${number}`;
 }
 
 interface PromptPresetEditorHandle {
@@ -374,14 +375,16 @@ function PromptPresetEditor(props: {
   contextExtraKeys?: string[];
   ref?: PromptPresetEditorHandle | ((handle: PromptPresetEditorHandle) => void);
 }) {
-  let nameEl!: HTMLInputElement;
-  let promptEl!: HTMLTextAreaElement;
-  let contextEl!: HTMLTextAreaElement;
-  let pickerEl!: SelectHandle;
   const [presets, setPresets] = createSignal<ImagePromptPreset[]>([]);
   /** Index into presets(); -1 = built-in Default. */
   const [selected, setSelected] = createSignal(-1);
   const [renaming, setRenaming] = createSignal(false);
+  const nameEl = createDefaultField(() =>
+    selected() < 0 ? '' : numberedName('Preset', presets(), selected()),
+  );
+  const promptEl = createDefaultField(() => props.defaultPrompt);
+  const contextEl = createDefaultField(() => props.defaultContext ?? '');
+  const pickerEl = createDefaultField(() => '-1');
 
   const currentPresets = () => {
     const idx = selected();
@@ -404,10 +407,10 @@ function PromptPresetEditor(props: {
     const preset = presets()[idx];
     nameEl.value = preset?.name ?? '';
     promptEl.value = preset?.prompt ?? props.defaultPrompt;
-    promptEl.readOnly = idx === -1;
+    (promptEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
     if (props.defaultContext !== undefined) {
       contextEl.value = preset?.context ?? props.defaultContext;
-      contextEl.readOnly = idx === -1;
+      (contextEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
     }
   };
 
@@ -421,12 +424,10 @@ function PromptPresetEditor(props: {
     const startingContext = props.defaultContext === undefined ? undefined : contextEl.value;
     stash();
     setPresets((list) => {
-      let n = list.length + 1;
-      while (list.some((preset) => preset.name === `Preset ${n}`)) n++;
       return [
         ...list,
         {
-          name: `Preset ${n}`,
+          name: numberedName('Preset', list),
           prompt: startingPrompt,
           ...(startingContext === undefined ? {} : { context: startingContext }),
         },
@@ -458,8 +459,9 @@ function PromptPresetEditor(props: {
   const rename = () => {
     setRenaming(true);
     queueMicrotask(() => {
-      nameEl.focus({ preventScroll: true });
-      nameEl.select();
+      const input = nameEl.element() as HTMLInputElement;
+      input.focus({ preventScroll: true });
+      input.select();
     });
   };
 
@@ -482,10 +484,10 @@ function PromptPresetEditor(props: {
 
   return (
     <div class="form-stack prompt-preset-editor">
-      <label>{props.label}</label>
+      <SettingLabel field={pickerEl}>{props.label}</SettingLabel>
       <div class="key-row prompt-preset-toolbar">
         <Select
-          ref={pickerEl}
+          ref={pickerEl.ref}
           ariaLabel="Prompt preset"
           onChange={(value) => pick(Number(value))}
           options={[
@@ -508,25 +510,25 @@ function PromptPresetEditor(props: {
         </Show>
       </div>
       {/* Stays mounted so switching/default loads can keep using the imperative ref. */}
-      <div class="inset-card prompt-preset-rename" classList={{ hidden: !renaming() }}>
-        <label>Preset name</label>
+      <div class="prompt-preset-rename" classList={{ hidden: !renaming() }}>
+        <SettingLabel field={nameEl}>Preset name</SettingLabel>
         <div class="key-row">
-          <input ref={nameEl} placeholder="Preset name" />
+          <input ref={nameEl.ref} placeholder="Preset name" />
           <button onClick={finishRename}>Done</button>
         </div>
       </div>
-      <Show when={props.defaultContext !== undefined}>
-        <label>System instruction</label>
-      </Show>
+      <SettingLabel field={promptEl}>
+        {props.defaultContext !== undefined ? 'System instruction' : 'Prompt text'}
+      </SettingLabel>
       <MacroTextarea
-        ref={promptEl}
+        ref={promptEl.ref}
         extraKeys={props.extraKeys}
         classList={{ 'prompt-default': selected() === -1 }}
       />
       <Show when={props.defaultContext !== undefined}>
-        <label>{props.contextLabel ?? 'Context'}</label>
+        <SettingLabel field={contextEl}>{props.contextLabel ?? 'Context'}</SettingLabel>
         <MacroTextarea
-          ref={contextEl}
+          ref={contextEl.ref}
           extraKeys={props.contextExtraKeys}
           classList={{ 'prompt-default': selected() === -1 }}
         />
@@ -538,15 +540,9 @@ function PromptPresetEditor(props: {
   );
 }
 
-function SettingsPage() {
+export function ImageGenerationSettingsPage() {
   const editors = {} as Record<ImagePromptKind, PromptPresetEditorHandle>;
-  let comfyUrlEl!: HTMLInputElement;
-  let nameEl!: HTMLInputElement;
-  let workflowEl!: HTMLTextAreaElement;
-  let pickerEl!: SelectHandle;
-  let avatarPickerEl!: SelectHandle;
-  let settingsTabsEl!: HTMLDivElement;
-  const [settingsTab, setSettingsTab] = createSignal<ImageSettingsTab>('character');
+  let errorEl: HTMLParagraphElement | undefined;
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
   const [workflows, setWorkflows] = createSignal<ImageWorkflow[]>([]);
@@ -555,30 +551,22 @@ function SettingsPage() {
   const [workflowText, setWorkflowText] = createSignal('');
   /** Workflow name for avatar generation; '' = same as the /image selection. */
   const [avatarSel, setAvatarSel] = createSignal('');
+  const comfyUrlEl = createDefaultField(() => DEFAULTS.comfyUrl);
+  const nameEl = createDefaultField(() =>
+    selected() < 0 ? '' : numberedName('Workflow', workflows(), selected()),
+  );
+  const workflowEl = createDefaultField(() => '');
+  const pickerEl = createDefaultField(() => '-1');
+  const avatarPickerEl = createDefaultField(() => '');
+  const revisionEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE);
   let baseline = '';
   /** Save with the form's loaded revision: invalidation can update the store
    * without refreshing these fields, allowing a stale form to overwrite newer edits. */
   let baseRevision = state.settings.revision;
 
-  const switchSettingsTab = (key: ImageSettingsTab, focus = false) => {
-    setSettingsTab(key);
-    queueMicrotask(() => {
-      settingsTabsEl.parentElement?.scrollTo({ top: 0 });
-      if (focus) document.getElementById(`image-settings-tab-${key}`)?.focus();
-    });
-  };
-
-  const onSettingsTabKeyDown = (event: KeyboardEvent, index: number) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? IMAGE_SETTINGS_TABS.length - 1
-          : (index + (event.key === 'ArrowRight' ? 1 : -1) + IMAGE_SETTINGS_TABS.length) %
-            IMAGE_SETTINGS_TABS.length;
-    switchSettingsTab(IMAGE_SETTINGS_TABS[nextIndex]!.key, true);
+  const showError = (message: string) => {
+    setError(message);
+    queueMicrotask(() => errorEl?.scrollIntoView({ block: 'nearest' }));
   };
 
   const currentWorkflows = () => {
@@ -607,10 +595,7 @@ function SettingsPage() {
   const addWorkflow = () => {
     stash();
     setWorkflows((list) => {
-      // Active selections identify workflows by name.
-      let n = list.length + 1;
-      while (list.some((workflow) => workflow.name === `Workflow ${n}`)) n++;
-      return [...list, { name: `Workflow ${n}`, json: '' }];
+      return [...list, { name: numberedName('Workflow', list), json: '' }];
     });
     showWorkflow(workflows().length - 1);
   };
@@ -638,6 +623,7 @@ function SettingsPage() {
     const idx = selected();
     const current = currentWorkflows();
     return {
+      promptRevisionTemplate: revisionEl.value,
       promptPresets: promptRecord(({ kind }) => editors[kind].value),
       comfyUrl: comfyUrlEl.value.trim() || DEFAULTS.comfyUrl,
       workflows: current,
@@ -648,6 +634,7 @@ function SettingsPage() {
 
   const load = () => {
     const cfg = settings();
+    revisionEl.value = cfg.promptRevisionTemplate;
     for (const { kind } of PROMPT_EDITORS) editors[kind].value = cfg.promptPresets[kind];
     comfyUrlEl.value = cfg.comfyUrl;
     setWorkflows(cfg.workflows);
@@ -664,40 +651,40 @@ function SettingsPage() {
 
   const save = async () => {
     const values = draft();
+    const invalidRevision = imageRevisionTemplateError(values.promptRevisionTemplate);
+    if (invalidRevision) {
+      showError(invalidRevision);
+      return false;
+    }
     setWorkflows(values.workflows);
-    for (const { kind, tab } of PROMPT_EDITORS) {
+    for (const { kind } of PROMPT_EDITORS) {
       const selection = values.promptPresets[kind];
       const names = selection.presets.map((preset) => preset.name);
       if (new Set(names).size !== names.length) {
-        switchSettingsTab(tab);
-        setError(`${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`);
+        showError(`${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`);
         return false;
       }
       if (names.some((name) => name.toLowerCase() === 'default')) {
-        switchSettingsTab(tab);
-        setError('“Default” is reserved for the built-in prompt. Choose another preset name.');
+        showError('“Default” is reserved for the built-in prompt. Choose another preset name.');
         return false;
       }
     }
     const names = values.workflows.map((workflow) => workflow.name);
     if (new Set(names).size !== names.length) {
-      switchSettingsTab('rendering');
-      setError('Workflow names must be unique — the selected name identifies the /image workflow.');
+      showError(
+        'Workflow names must be unique — the selected name identifies the /image workflow.',
+      );
       return false;
     }
     for (const workflow of values.workflows) {
       const invalid = workflowError(workflow.json);
       if (invalid) {
-        switchSettingsTab('rendering');
-        setError(`Workflow "${workflow.name}" ${invalid}`);
+        showError(`Workflow "${workflow.name}" ${invalid}`);
         return false;
       }
     }
     try {
-      const next = await api.putSettings(
-        { pluginSettings: { ...state.settings.pluginSettings, [ID]: values } },
-        baseRevision,
-      );
+      const next = await api.putSettings({ imageGeneration: values }, baseRevision);
       applySettings(next);
       baseRevision = next.revision;
       baseline = JSON.stringify(values);
@@ -705,7 +692,7 @@ function SettingsPage() {
       flashSaved();
       return true;
     } catch (err) {
-      setError(
+      showError(
         err instanceof ApiError && err.status === 409
           ? 'Image generation settings changed elsewhere. Discard to load the latest version, then review your changes.'
           : errorMessage(err),
@@ -730,50 +717,96 @@ function SettingsPage() {
 
   return (
     <>
-      <div
-        ref={settingsTabsEl}
-        class="tab-strip image-settings-tabs"
-        role="tablist"
-        aria-label="Image generation settings"
-      >
-        <For each={IMAGE_SETTINGS_TABS}>
-          {(item, index) => (
-            <button
-              id={`image-settings-tab-${item.key}`}
-              class="tab image-settings-tab"
-              classList={{ active: settingsTab() === item.key }}
-              role="tab"
-              aria-selected={settingsTab() === item.key}
-              aria-controls={`image-settings-panel-${item.key}`}
-              tabIndex={settingsTab() === item.key ? 0 : -1}
-              onKeyDown={(event) => onSettingsTabKeyDown(event, index())}
-              onClick={() => switchSettingsTab(item.key)}
-            >
-              {item.label}
-            </button>
-          )}
-        </For>
-      </div>
-
       <Show when={error()}>
-        <p class="notice notice-error image-settings-notice" role="alert">
+        <p ref={errorEl} class="notice notice-error image-settings-notice" role="alert">
           {error()}
         </p>
       </Show>
 
-      {/* All panels stay mounted so loading and dirty checks can read every editor ref. */}
-      <For each={IMAGE_SETTINGS_TABS.filter((tab) => tab.key !== 'rendering')}>
-        {(tab) => (
+      <section
+        id="image-settings-panel-rendering"
+        class="settings-section image-settings-panel"
+        aria-labelledby="image-settings-title-rendering"
+      >
+        <h3 id="image-settings-title-rendering">Image rendering</h3>
+        <p class="hint">ComfyUI connection and default workflow for chat, gallery, and avatars.</p>
+        <SettingLabel field={comfyUrlEl}>ComfyUI URL</SettingLabel>
+        <input ref={comfyUrlEl.ref} placeholder={DEFAULTS.comfyUrl} />
+
+        <SettingLabel field={pickerEl}>Workflow used by /image</SettingLabel>
+        <p class="hint">Choose none to generate descriptions without rendering an image.</p>
+        <div class="key-row">
+          <Select
+            ref={pickerEl.ref}
+            ariaLabel="Image workflow"
+            onChange={(value) => pick(Number(value))}
+            options={[
+              { value: '-1', label: '— none (describe only) —' },
+              ...workflows().map((workflow, i) => ({
+                value: String(i),
+                label: workflow.name || `Workflow ${i + 1}`,
+              })),
+            ]}
+          />
+          <button onClick={addWorkflow}>
+            <FontAwesomeIcon icon={faPlus} size={12} /> Add
+          </button>
+          <Show when={selected() !== -1}>
+            <button onClick={duplicateWorkflow}>Duplicate</button>
+            <button class="danger-btn" onClick={deleteWorkflow}>
+              Delete
+            </button>
+          </Show>
+        </div>
+
+        {/* Stays mounted (hidden by class) so the imperative refs survive selection changes. */}
+        <div
+          class="form-stack field-group workflow-detail"
+          classList={{ hidden: selected() === -1 }}
+        >
+          <SettingLabel field={nameEl}>Name</SettingLabel>
+          <input ref={nameEl.ref} placeholder="Workflow name" />
+          <SettingLabel field={workflowEl}>
+            Workflow JSON — export via ComfyUI's "Save (API Format)"{' '}
+            <MacroHelp rows={WORKFLOW_MACROS} />
+          </SettingLabel>
+          <MacroTextarea
+            ref={workflowEl.ref}
+            keys={['prompt', 'seed']}
+            class="mono"
+            rows={12}
+            onText={setWorkflowText}
+            placeholder='{"3": {"class_type": "KSampler", "inputs": {"seed": {{seed}}, …}}, "6": {"inputs": {"text": "{{prompt}}", …}}, …}'
+          />
+          <Show when={workflowText().trim()}>
+            <div class="macro-checks">
+              <span classList={{ warn: !hasPrompt() }}>
+                <FontAwesomeIcon icon={hasPrompt() ? faCheck : faXmark} size={12} />{' '}
+                {hasPrompt()
+                  ? '{{prompt}} found'
+                  : '{{prompt}} missing — the generated description would not be used'}
+              </span>
+              <span classList={{ soft: !hasSeed() }}>
+                <FontAwesomeIcon icon={hasSeed() ? faCheck : faTriangleExclamation} size={12} />{' '}
+                {hasSeed()
+                  ? '{{seed}} found'
+                  : "{{seed}} missing — every render will reuse the workflow's fixed seed"}
+              </span>
+            </div>
+          </Show>
+        </div>
+      </section>
+
+      <For each={IMAGE_PROMPT_SECTIONS}>
+        {(section) => (
           <section
-            id={`image-settings-panel-${tab.key}`}
+            id={`image-settings-panel-${section.key}`}
             class="settings-section image-settings-panel"
-            classList={{ hidden: settingsTab() !== tab.key }}
-            role="tabpanel"
-            aria-labelledby={`image-settings-tab-${tab.key}`}
+            aria-labelledby={`image-settings-title-${section.key}`}
           >
-            <h3>{tab.title}</h3>
-            <p class="hint">{tab.hint}</p>
-            <For each={PROMPT_EDITORS.filter((editor) => editor.tab === tab.key)}>
+            <h3 id={`image-settings-title-${section.key}`}>{section.title}</h3>
+            <p class="hint">{section.hint}</p>
+            <For each={PROMPT_EDITORS.filter((editor) => editor.section === section.key)}>
               {(editor) => (
                 <PromptPresetEditor
                   ref={(handle) => (editors[editor.kind] = handle)}
@@ -805,11 +838,11 @@ function SettingsPage() {
                 />
               )}
             </For>
-            <Show when={tab.key === 'avatar'}>
-              <label>Avatar workflow</label>
+            <Show when={section.key === 'avatar'}>
+              <SettingLabel field={avatarPickerEl}>Avatar workflow</SettingLabel>
               <p class="hint">Defaults to the selected `/image` workflow.</p>
               <Select
-                ref={avatarPickerEl}
+                ref={avatarPickerEl.ref}
                 ariaLabel="Avatar image workflow"
                 onChange={(value) => setAvatarSel(value)}
                 options={[
@@ -826,79 +859,33 @@ function SettingsPage() {
       </For>
 
       <section
-        id="image-settings-panel-rendering"
+        id="image-settings-panel-revision"
         class="settings-section image-settings-panel"
-        classList={{ hidden: settingsTab() !== 'rendering' }}
-        role="tabpanel"
-        aria-labelledby="image-settings-tab-rendering"
+        aria-labelledby="image-settings-title-revision"
       >
-        <h3>Image rendering</h3>
-        <p class="hint">ComfyUI connection and workflow used for chat images.</p>
-        <label>ComfyUI URL</label>
-        <input ref={comfyUrlEl} placeholder={DEFAULTS.comfyUrl} />
-
-        <label>Workflow used by /image</label>
-        <p class="hint">Choose none to generate descriptions without rendering an image.</p>
-        <div class="key-row">
-          <Select
-            ref={pickerEl}
-            ariaLabel="Image workflow"
-            onChange={(value) => pick(Number(value))}
-            options={[
-              { value: '-1', label: '— none (describe only) —' },
-              ...workflows().map((workflow, i) => ({
-                value: String(i),
-                label: workflow.name || `Workflow ${i + 1}`,
-              })),
+        <h3 id="image-settings-title-revision">Chat image revision</h3>
+        <p class="hint">
+          Used when you regenerate an image prompt inside a chat. The existing conversation and its
+          system prompt remain as context; the original image prompt is supplied as the preceding
+          assistant message. This setting applies to every chat.
+        </p>
+        <SettingLabel field={revisionEl} for="image-revision-template">
+          Revision instruction{' '}
+          <MacroHelp
+            rows={[
+              ['{{instruction}}', 'The requested change'],
+              ['{{prompt}}', 'The original image prompt'],
             ]}
           />
-          <button onClick={addWorkflow}>
-            <FontAwesomeIcon icon={faPlus} size={12} /> Add
-          </button>
-          <Show when={selected() !== -1}>
-            <button onClick={duplicateWorkflow}>Duplicate</button>
-            <button class="danger-btn" onClick={deleteWorkflow}>
-              Delete
-            </button>
-          </Show>
-        </div>
-
-        {/* Stays mounted (hidden by class) so the imperative refs survive selection changes. */}
-        <div
-          class="form-stack inset-card workflow-detail"
-          classList={{ hidden: selected() === -1 }}
-        >
-          <label>Name</label>
-          <input ref={nameEl} placeholder="Workflow name" />
-          <label>
-            Workflow JSON — export via ComfyUI's "Save (API Format)"{' '}
-            <MacroHelp rows={WORKFLOW_MACROS} />
-          </label>
-          <MacroTextarea
-            ref={workflowEl}
-            keys={['prompt', 'seed']}
-            class="mono"
-            rows={12}
-            onText={setWorkflowText}
-            placeholder='{"3": {"class_type": "KSampler", "inputs": {"seed": {{seed}}, …}}, "6": {"inputs": {"text": "{{prompt}}", …}}, …}'
-          />
-          <Show when={workflowText().trim()}>
-            <div class="macro-checks">
-              <span classList={{ warn: !hasPrompt() }}>
-                <FontAwesomeIcon icon={hasPrompt() ? faCheck : faXmark} size={12} />{' '}
-                {hasPrompt()
-                  ? '{{prompt}} found'
-                  : '{{prompt}} missing — the generated description would not be used'}
-              </span>
-              <span classList={{ soft: !hasSeed() }}>
-                <FontAwesomeIcon icon={hasSeed() ? faCheck : faTriangleExclamation} size={12} />{' '}
-                {hasSeed()
-                  ? '{{seed}} found'
-                  : "{{seed}} missing — every render will reuse the workflow's fixed seed"}
-              </span>
-            </div>
-          </Show>
-        </div>
+        </SettingLabel>
+        <MacroTextarea
+          ref={(el) => {
+            revisionEl.ref(el);
+            el.id = 'image-revision-template';
+          }}
+          keys={['instruction', 'prompt']}
+          rows={10}
+        />
       </section>
 
       <div class="form-actions">
@@ -972,25 +959,26 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
   }
 }
 
-const messageView: PluginMessageView = {
-  claims: (message) =>
-    message.images.length > 0 ||
-    message.imagePending ||
-    message.hasImageRender ||
-    message.name === 'Image prompt',
+export const imageMessage = {
+  matches: (message: Message) =>
+    message.role === 'tool' &&
+    (message.images.length > 0 ||
+      message.imagePending ||
+      message.hasImageRender ||
+      message.name === 'Image prompt'),
   currentImageConfig: activeImageRenderConfig,
-  swipe: (message, dir) => {
+  swipe: (message: Message, dir: 1 | -1) => {
     void swipeImage(message, dir);
   },
-  canDeleteSwipe: (message) =>
+  canDeleteSwipe: (message: Message) =>
     message.images.length > 1 && !message.imagePending && imageOnActivePath(message),
-  deleteSwipe: (message) =>
+  deleteSwipe: (message: Message) =>
     api.deleteImage(
       message.id,
       Math.min(message.activeImage, message.images.length - 1),
       state.tree,
     ),
-  create: (message, ctx) => {
+  create: (message: () => Message, ctx: { streaming: () => boolean }) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
     const [savingToGallery, setSavingToGallery] = createSignal(false);
@@ -1051,7 +1039,11 @@ const messageView: PluginMessageView = {
         <Show when={message().imagePending && !ctx.streaming()}>
           <span class="msg-image-pending">
             <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
-            <SamplerProgress progress={renderProgress()} fallback={<span>Rendering…</span>} />
+            <SamplerProgress
+              progress={renderProgress()}
+              stepsLabel="Step"
+              fallback={<span>Rendering…</span>}
+            />
           </span>
         </Show>
         <Show when={images().length > 0}>
@@ -1153,42 +1145,34 @@ const messageView: PluginMessageView = {
   },
 };
 
-// The dev-module smoke test verifies this named registry export.
-export const imageGenerationPlugin: Plugin = {
-  id: ID,
-  name: 'Image Generation',
-  messageView,
-  tools: imageGenerationTools,
-  commands: [
-    {
-      name: 'image',
-      params: '<instruction>',
-      description:
-        'Generate an image from the generic instruction prompt; {{instruction}} expands to the command argument',
-      allowDuringGeneration: true,
-      // Returning navigateTree's result keeps the composer text on failure.
-      run: (args) => generate('instruction', args.trim()),
+export const imageGenerationCommands: ComposerCommand[] = [
+  {
+    name: 'image',
+    params: '<instruction>',
+    description:
+      'Generate an image from the generic instruction prompt; {{instruction}} expands to the command argument',
+    allowDuringGeneration: true,
+    // Returning navigateTree's result keeps the composer text on failure.
+    run: (args) => generate('instruction', args.trim()),
+  },
+  {
+    name: 'imagechar',
+    params: '[instruction]',
+    description: 'Generate a character image, optionally using the character-instruction prompt',
+    allowDuringGeneration: true,
+    run: (args) => {
+      const instruction = args.trim();
+      return generate(instruction ? 'characterInstruction' : 'describe', instruction);
     },
-    {
-      name: 'imagechar',
-      params: '[instruction]',
-      description: 'Generate a character image, optionally using the character-instruction prompt',
-      allowDuringGeneration: true,
-      run: (args) => {
-        const instruction = args.trim();
-        return generate(instruction ? 'characterInstruction' : 'describe', instruction);
-      },
+  },
+  {
+    name: 'imageface',
+    params: '[instruction]',
+    description: 'Generate a face image, optionally using the face-instruction prompt',
+    allowDuringGeneration: true,
+    run: (args) => {
+      const instruction = args.trim();
+      return generate(instruction ? 'faceInstruction' : 'face', instruction);
     },
-    {
-      name: 'imageface',
-      params: '[instruction]',
-      description: 'Generate a face image, optionally using the face-instruction prompt',
-      allowDuringGeneration: true,
-      run: (args) => {
-        const instruction = args.trim();
-        return generate(instruction ? 'faceInstruction' : 'face', instruction);
-      },
-    },
-  ],
-  settingsPage: SettingsPage,
-};
+  },
+];

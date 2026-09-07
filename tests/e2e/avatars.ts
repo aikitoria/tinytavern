@@ -23,30 +23,27 @@ export async function testAvatars(
     'Write a portrait image-generation prompt for {{name}}. Reply with only the prompt.';
   const AVATAR_CONTEXT_TEMPLATE =
     'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
-  // Build the request from plugin settings, matching the client.
+  // Build the request from image settings, matching the client.
   await putSettings({
-    pluginSettings: {
-      imageGeneration: {
-        promptPresets: {
-          avatar: {
-            presets: [
-              {
-                name: 'Detailed',
-                prompt: AVATAR_SYSTEM_TEMPLATE,
-                context: AVATAR_CONTEXT_TEMPLATE,
-              },
-            ],
-            active: 'Detailed',
-          },
+    imageGeneration: {
+      promptPresets: {
+        avatar: {
+          presets: [
+            {
+              name: 'Detailed',
+              prompt: AVATAR_SYSTEM_TEMPLATE,
+              context: AVATAR_CONTEXT_TEMPLATE,
+            },
+          ],
+          active: 'Detailed',
         },
-        comfyUrl: MOCK_CONTROL,
-        workflows: [{ name: 'Avatar', json: AVATAR_WORKFLOW }],
-        activeWorkflow: 'Avatar',
       },
+      comfyUrl: MOCK_CONTROL,
+      workflows: [{ name: 'Avatar', json: AVATAR_WORKFLOW }],
+      activeWorkflow: 'Avatar',
     },
   });
-  const imageGenCfg = ((await req<Settings>('GET', '/api/settings')).pluginSettings
-    .imageGeneration as {
+  const imageGenCfg = ((await req<Settings>('GET', '/api/settings')).imageGeneration as {
     promptPresets: {
       avatar: {
         presets: { name: string; prompt: string; context: string }[];

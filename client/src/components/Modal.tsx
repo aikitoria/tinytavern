@@ -1,14 +1,17 @@
 import { faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import { createUniqueId, onCleanup, onMount, type JSX } from 'solid-js';
+import { createUniqueId, onCleanup, onMount, Show, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { openModal } from '../state/store.ts';
+import '../styles/pages.css';
 
 export default function Modal(props: {
   title: string;
   class?: string;
   backdropClass?: string;
   headerExtra?: JSX.Element;
+  hideCloseButton?: boolean;
+  fullscreen?: boolean;
   children: JSX.Element;
   onClose?: () => void;
 }) {
@@ -80,10 +83,14 @@ export default function Modal(props: {
   return (
     <Portal>
       {/* No close-on-backdrop-click: modals hold unsaved form state. */}
-      <div class={`modal-backdrop ${props.backdropClass ?? ''}`}>
+      <div
+        class={`modal-backdrop ${props.backdropClass ?? ''}`}
+        classList={{ 'fullscreen-backdrop': props.fullscreen }}
+      >
         <div
           ref={dialog}
           class={`modal ${props.class ?? ''}`}
+          classList={{ 'fullscreen-page': props.fullscreen }}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
@@ -94,9 +101,11 @@ export default function Modal(props: {
               {props.title}
             </span>
             {props.headerExtra}
-            <button class="icon-btn" title="Close" aria-label="Close" onClick={close}>
-              <FontAwesomeIcon icon={faXmark} size={14} />
-            </button>
+            <Show when={!props.hideCloseButton}>
+              <button class="icon-btn" title="Close" aria-label="Close" onClick={close}>
+                <FontAwesomeIcon icon={faXmark} size={14} />
+              </button>
+            </Show>
           </div>
           <div class="modal-body">{props.children}</div>
         </div>

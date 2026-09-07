@@ -5,9 +5,16 @@ import type {
   Message,
   Persona,
   Role,
+  StandalonePromptTemplate,
   Template,
 } from '@tinytavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@tinytavern/shared';
+import {
+  characterChatName,
+  DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_STEER_TEMPLATE,
+  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  DEFAULT_GALLERY_REVISION_TEMPLATE,
+} from '@tinytavern/shared';
 import { stmt, toCharacter, toPersona, toPreset, toTemplate } from './db.ts';
 import { getSettings } from './settingsStore.ts';
 
@@ -148,7 +155,7 @@ export function buildChatMessages(
 
   const usesPersonas = template?.usesPersonas ?? true;
   const persona = usesPersonas ? getPersona(conversation.personaId) : null;
-  const charName = character?.name ?? 'Assistant';
+  const charName = characterChatName(character);
   const userName = persona?.name ?? 'User';
   const sub = (text: string) => substituteMacros(text.trim(), charName, userName);
 
@@ -187,7 +194,7 @@ export function buildChatMessages(
   if (prologue) appendChatMessage(messages, { role: 'user', content: prologue });
   for (const msg of history) {
     if (msg.status === 'streaming') continue;
-    if (msg.role === 'tool') continue; // plugin output is chat-visible only, never sent upstream
+    if (msg.role === 'tool') continue; // tool output is chat-visible only, never sent upstream
     const trimmedContent = msg.content.trim();
     const reasoning = msg.role === 'assistant' ? msg.reasoning?.trim() : '';
     // Preserve reasoning-only assistant turns in history.
@@ -282,6 +289,7 @@ export function appendImagePromptRevisionTask(
   original: string,
   originalReasoning: string | null,
   instruction: string,
+  template = DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
 ): void {
   const originalBlock = `<original_image_prompt>\n${original.trim()}\n</original_image_prompt>`;
   // Replay the original prompt's reasoning as an assistant turn; bridge for strict alternation.
@@ -299,24 +307,40 @@ export function appendImagePromptRevisionTask(
   });
   appendChatMessage(messages, {
     role: 'user',
-    content:
-      `[IMAGE PROMPT REVISION TASK]\n` +
-      `The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ` +
-      `Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ` +
-      `Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n` +
-      `The immediately preceding assistant message contains the original image prompt.\n\n` +
-      `<revision_instruction>\n${instruction.trim()}\n</revision_instruction>`,
+    // One pass keeps macro-looking text inside the user's input literal.
+    content: expandImageRevisionTemplate(template, original, instruction),
   });
 }
 
-/** Gallery revisions work even after the source conversation is deleted. */
-export function buildImagePromptRevisionMessages(
+function expandImageRevisionTemplate(
+  template: string,
   original: string,
   instruction: string,
-): ChatMessage[] {
+): string {
+  return template.replace(/\{\{(instruction|prompt)\}\}/gi, (_, key: string) =>
+    key.toLowerCase() === 'instruction' ? instruction.trim() : original.trim(),
+  );
+}
+
+/** Gallery revisions have no dependency on the source conversation or an implicit outer prompt. */
+export function buildGalleryRevisionPrompt(
+  original: string,
+  instruction: string,
+  template: StandalonePromptTemplate = DEFAULT_GALLERY_REVISION_TEMPLATE,
+): Pick<BuiltPrompt, 'messages' | 'reasoningPrefill' | 'messagePrefill'> {
   const messages: ChatMessage[] = [];
-  appendImagePromptRevisionTask(messages, original, null, instruction);
-  return messages;
+  const expand = (text: string) => expandImageRevisionTemplate(text, original, instruction);
+  if (template.systemPrompt.trim()) {
+    messages.push({ role: 'system', content: expand(template.systemPrompt) });
+  }
+  messages.push({ role: 'user', content: expand(template.userMessage) });
+  const reasoningPrefill = expand(template.reasoningPrefill);
+  const messagePrefill = expand(template.messagePrefill);
+  return {
+    messages,
+    reasoningPrefill: reasoningPrefill.trim() ? reasoningPrefill : null,
+    messagePrefill: messagePrefill.trim() ? messagePrefill : null,
+  };
 }
 
 /** Keep history as an unchanged prefix for cache reuse and references; delimit the revision task. */
@@ -328,7 +352,13 @@ export function buildSteeredToolPrompt(
   instruction: string,
 ): BuiltPrompt {
   const built = buildChatMessages(conversation, history);
-  appendImagePromptRevisionTask(built.messages, original, originalReasoning, instruction);
+  appendImagePromptRevisionTask(
+    built.messages,
+    original,
+    originalReasoning,
+    instruction,
+    getSettings().imageGeneration.promptRevisionTemplate || DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  );
   return {
     ...built,
     reasoningPrefill: built.reasoningPrefill,

@@ -3,6 +3,7 @@ import { chunk } from './pngChunk.ts';
 
 export interface ParsedCard {
   name: string;
+  chatName: string | null;
   personality: string;
   scenario: string;
   examples: string;
@@ -139,9 +140,15 @@ export function parseCharacterCard(png: Buffer): ParsedCard {
   const examples = optionalCardString(data, 'mes_example');
   const firstMessage = optionalCardString(data, 'first_mes');
   const systemPrompt = optionalCardString(data, 'system_prompt');
+  const extension = record(record(data.extensions)?.tinytavern);
+  const chatName = extension?.chatName;
+  if (chatName != null && typeof chatName !== 'string') {
+    throw new Error('Character card chatName must be a string or null');
+  }
   const personality = [description?.trim(), traits?.trim()].filter(Boolean).join('\n\n');
   return {
     name: name.trim(),
+    chatName: typeof chatName === 'string' ? chatName.trim() || null : null,
     personality,
     scenario: scenario?.trim() ?? '',
     // Preserve SillyTavern's <START>-separated examples.

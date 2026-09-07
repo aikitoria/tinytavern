@@ -1,3 +1,4 @@
+import { characterChatName } from '@tinytavern/shared';
 import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { streamChatCompletion } from '../generation.ts';
 import { getPersona } from '../prompt.ts';
@@ -60,7 +61,10 @@ async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
       kind === 'character'
         ? {
             name: row.name as string,
-            char: row.name as string,
+            char: characterChatName({
+              name: row.name as string,
+              chatName: row.chat_name as string | null,
+            }),
             user: getPersona(getSettings().defaultPersonaId)?.name ?? 'User',
             description: row.personality as string,
             personality: row.personality as string,
