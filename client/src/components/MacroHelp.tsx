@@ -45,7 +45,7 @@ export default function MacroHelp(props: {
     <span class="macro-help" ref={root}>
       <button
         ref={trigger}
-        class="help-btn"
+        class="icon-btn help-btn"
         title="Available macros"
         aria-label="Available macros"
         aria-haspopup="dialog"

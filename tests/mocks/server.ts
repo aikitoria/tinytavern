@@ -18,7 +18,7 @@ const MOCK_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
-const MOCK_JPEG = readFileSync(new URL('../../docs/chat.jpg', import.meta.url));
+const MOCK_JPEG = readFileSync(new URL('../fixtures/image.jpg', import.meta.url));
 const MOCK_WEBP = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
 type ComfyOutputKind = 'png' | 'jpeg' | 'webp' | 'html' | 'svg' | 'polyglot';
 const COMFY_OUTPUTS: Record<ComfyOutputKind, { filename: string; type: string; data: Buffer }> = {
@@ -49,6 +49,7 @@ let reasoningOnly = false;
 let nextTokenMs: number | null = null;
 /** Next request streams this partial output, then dies mid-stream. */
 let dieAfterContent: string | null = null;
+let nextCompletionContent: string | null = null;
 let lastComfyWorkflow: unknown = null;
 let lastComfyPreviewMethod: string | null = null;
 let lastModelAuthorization: string | null = null;
@@ -67,7 +68,7 @@ interface CompletionRecord {
 }
 let lastCompletion: CompletionRecord | null = null;
 const completionLog: CompletionRecord[] = [];
-/** Next N /prompt submissions are rejected with a 500. */
+/** Next N /prompt submissions are rejected before acceptance with a 400. */
 let comfyFailPrompts = 0;
 /** Next N accepted jobs fail during execution (error status in /history). */
 let comfyFailRenders = 0;
@@ -76,8 +77,14 @@ let comfyHistoryRequests = 0;
 let nextComfyOutput: ComfyOutputKind = 'png';
 /** Output files the server asked ComfyUI to delete after downloading them. */
 const comfyDeleted: { filename: string; subfolder: string; type: string }[] = [];
+const comfyCancelled: string[] = [];
 
 const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/control/comfy-cancelled') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ids: comfyCancelled }));
+    return;
+  }
   if (req.method === 'GET' && (req.url === '/v1/models' || req.url === '/alt/v1/models')) {
     lastModelAuthorization = req.headers.authorization ?? null;
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -112,6 +119,12 @@ const server = http.createServer((req, res) => {
     nextTokenMs = ms;
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ nextTokenMs }));
+    return;
+  }
+  if (req.method === 'POST' && req.url?.startsWith('/control/completion-next')) {
+    nextCompletionContent = new URL(req.url, 'http://mock').searchParams.get('content');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
   if (req.method === 'POST' && req.url?.startsWith('/control/die-after-content')) {
@@ -183,6 +196,7 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       let parsed: {
         prompt: unknown;
+        prompt_id?: string;
         client_id?: string;
         extra_data?: { preview_method?: string };
       };
@@ -197,12 +211,12 @@ const server = http.createServer((req, res) => {
       lastComfyPreviewMethod = parsed.extra_data?.preview_method ?? null;
       if (comfyFailPrompts > 0) {
         comfyFailPrompts--;
-        res.writeHead(500, { 'content-type': 'application/json' });
+        res.writeHead(400, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'mock comfy submission failure' }));
         return;
       }
       // UUIDs avoid collisions in promptId-derived image filenames.
-      const promptId = randomUUID();
+      const promptId = parsed.prompt_id ?? randomUUID();
       comfyJobs.set(promptId, {
         readyAt: Date.now() + 400,
         fail: comfyFailRenders > 0,
@@ -229,6 +243,24 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ prompt_id: promptId }));
     });
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/queue') {
+    const queued = [...comfyJobs].filter(([, job]) => Date.now() < job.readyAt);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }));
+    return;
+  }
+  if (req.method === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(req.url ?? '')) {
+    const id = req.url!.split('/')[3]!;
+    const job = comfyJobs.get(id);
+    const cancelled = Boolean(job && Date.now() < job.readyAt);
+    if (cancelled) {
+      comfyJobs.delete(id);
+      comfyCancelled.push(id);
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ cancelled }));
     return;
   }
   if (req.method === 'GET' && req.url?.startsWith('/history/')) {
@@ -417,9 +449,11 @@ const server = http.createServer((req, res) => {
 
       const system = parsed.messages[0]?.role === 'system' ? parsed.messages[0].content : '';
       const text =
+        nextCompletionContent ??
         `You said: **"${lastUser?.content ?? '(nothing)'}"** — reply #${Math.floor(Math.random() * 1000)}.\n\n` +
-        (system ? `> system: ${system.replaceAll('\n', ' · ')}\n\n` : '') +
-        `${LOREM}\n\n\`\`\`js\nconsole.log('hello from the mock');\n\`\`\``;
+          (system ? `> system: ${system.replaceAll('\n', ' · ')}\n\n` : '') +
+          `${LOREM}\n\n\`\`\`js\nconsole.log('hello from the mock');\n\`\`\``;
+      nextCompletionContent = null;
       const words = text.split(/(?<=\s)/);
       const reasoning =
         'Thinking about the request… composing a demo answer with markdown and code. '.split(

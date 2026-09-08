@@ -26,28 +26,28 @@ export default function TemplatesTab() {
     duplicate: api.duplicateTemplate,
     deletePrompt: 'Delete this template?',
     initialId: () => state.settings.defaultTemplateId,
+    emptySelection: 'new',
     activate: (id) => selectSettingsEntity('defaultTemplateId', id),
   });
+
+  const readOnly = () => editor.selected()?.readOnly === true;
 
   return (
     <EntityEditorPane
       editor={editor}
+      transferType="templates"
+      readOnly={readOnly()}
       items={state.templates}
       itemLabel={(template) => template.name}
       newLabel="New template"
       activeId={state.settings.defaultTemplateId}
-      defaultOption={{
-        label: 'Built-in template',
-        description:
-          'The built-in prompt template is active. Select a saved template to make it the default.',
-      }}
     >
       <section class="settings-section">
         <h3>Basics</h3>
-        <SettingLabel field={nameEl}>Name</SettingLabel>
-        <input ref={nameEl.ref} placeholder="Roleplay" />
+        <SettingLabel field={readOnly() ? undefined : nameEl}>Name</SettingLabel>
+        <input readOnly={readOnly()} ref={nameEl.ref} placeholder="Roleplay" />
       </section>
-      <TemplateFields ref={fields} />
+      <TemplateFields readOnly={readOnly()} ref={fields} />
     </EntityEditorPane>
   );
 }

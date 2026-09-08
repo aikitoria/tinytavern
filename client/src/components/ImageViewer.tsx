@@ -1,5 +1,6 @@
 import { onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { registerUiBack } from '../state/uiBack.ts';
 
 export default function ImageViewer(props: { src: string; onClose: () => void }) {
   let overlay!: HTMLDivElement;
@@ -156,6 +157,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   };
 
   onMount(() => {
+    registerUiBack(overlay, close);
     previouslyFocused = document.activeElement as HTMLElement | null;
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('fullscreenchange', onFullscreenChange);

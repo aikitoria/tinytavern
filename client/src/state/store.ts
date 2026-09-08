@@ -1,3 +1,4 @@
+import { readPageLocation, rememberPage, writePageLocation } from './pageLocation.ts';
 import { createMemo, createRoot, createSignal, batch } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
@@ -8,13 +9,15 @@ import type {
   GalleryItem,
   InvalidateEntity,
   Message,
+  MediaJob,
+  MediaAsset,
   Persona,
   Preset,
   ServerEvent,
   Settings,
   Template,
 } from '@tinytavern/shared';
-import { DEFAULT_SETTINGS } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS, mediaJobActive, mergeMediaProgress } from '@tinytavern/shared';
 import { api, ApiError } from './api.ts';
 import { refreshWs, subscribe } from './ws.ts';
 import {
@@ -25,18 +28,7 @@ import {
 import { isCurrentSettingsRevision, SuccessfulFetchSequence, upsertById } from './sync.ts';
 import { afterOperationEnd, afterTreeFrame } from './swipeSync.ts';
 
-export type ModalKind = 'settings' | 'conversation' | 'gallery' | null;
-
-export interface GalleryRenderState {
-  jobId: string;
-  sourceItemId: number;
-  characterId: number | null;
-  characterName: string;
-  prompt: string;
-  preview?: string;
-  value?: number;
-  max?: number;
-}
+export type ModalKind = 'settings' | 'conversation' | 'gallery' | 'media-tools' | null;
 
 const GROUP_BY_CHARACTER_KEY = 'tinytavern.groupByCharacter';
 
@@ -66,7 +58,7 @@ interface AppState {
   endpoints: Endpoint[];
   gallery: GalleryItem[];
   /** Client-local live cards for gallery renders; final items are server-owned. */
-  galleryRenders: GalleryRenderState[];
+  mediaJobs: Record<string, MediaJob>;
   settings: Settings;
   connected: boolean;
   booted: boolean;
@@ -92,7 +84,7 @@ export const [state, setState] = createStore<AppState>({
   personas: [],
   endpoints: [],
   gallery: [],
-  galleryRenders: [],
+  mediaJobs: {},
   settings: { ...DEFAULT_SETTINGS },
   connected: false,
   booted: false,
@@ -118,6 +110,20 @@ export function toast(text: string, kind: ToastKind = 'error'): void {
 
 /** App-lifetime root avoids Solid's warning about unowned computations; never disposed. */
 const globalMemo = <T>(fn: () => T) => createRoot(() => createMemo(fn));
+
+export const mediaJobsByMessage = globalMemo(() => {
+  const jobs = new Map<number, MediaJob>();
+  for (const job of Object.values(state.mediaJobs)) {
+    if (job.messageId === null) {
+      continue;
+    }
+    const previous = jobs.get(job.messageId);
+    if (!previous || previous.createdAt < job.createdAt) {
+      jobs.set(job.messageId, job);
+    }
+  }
+  return jobs;
+});
 
 export const selectedConversation = globalMemo(
   () => state.conversations.find((c) => c.id === state.selectedId) ?? null,
@@ -220,6 +226,19 @@ function loader<T>(
   };
 }
 
+const thumbnailUpdates = new Map<number, { thumbnail: string; revision: number }>();
+function applyThumbnails(assets: MediaAsset[] = []): void {
+  for (const asset of assets) {
+    const update = thumbnailUpdates.get(asset.id);
+    if (update && update.revision > asset.thumbnailRevision) {
+      asset.thumbnail = update.thumbnail;
+      asset.thumbnailRevision = update.revision;
+    }
+  }
+}
+
+export const [galleryRevision, setGalleryRevision] = createSignal(0);
+
 const loaders: Record<InvalidateEntity, () => Promise<void>> = {
   conversations: loader('conversations', api.conversations, (conversations) => {
     conversationsLoaded = true;
@@ -236,9 +255,11 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
       }
     }
   }),
-  gallery: loader('gallery', api.gallery, (data) =>
-    setState('gallery', reconcile(data, { key: 'id' })),
-  ),
+  gallery: loader('gallery', api.gallery, (items) => {
+    for (const item of items) if (item.media) applyThumbnails([item.media]);
+    setState('gallery', reconcile(items, { key: 'id' }));
+    setGalleryRevision((revision) => revision + 1);
+  }),
   characters: loader('characters', api.characters, (data) =>
     setState('characters', reconcile(data, { key: 'id' })),
   ),
@@ -265,19 +286,161 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
 };
 
 export async function loadAll(): Promise<void> {
-  await Promise.all(Object.values(loaders).map((load) => load().catch(console.error)));
+  const refreshes = [...Object.values(loaders), refreshMediaJobs];
+  await Promise.all(refreshes.map((load) => load().catch(console.error)));
   if (!selectionRestored && conversationsLoaded) restoreConversationSelection();
   setState('booted', true);
 }
 
+let mediaEventSequence = 0;
+const mediaJobEvents = new Map<string, number>();
+// Job IDs are never reused. Late HTTP responses must not restore a deleted job.
+const deletedMediaJobs = new Set<string>();
+const mediaFetches = new SuccessfulFetchSequence<string>();
+
+export function applyMediaJob(job: MediaJob): void {
+  if (deletedMediaJobs.has(job.id)) return;
+  applyThumbnails(job.assets);
+  applyThumbnails(job.outputs);
+  const current = state.mediaJobs[job.id];
+  if (current && current.revision > job.revision) {
+    return;
+  }
+  mediaJobEvents.set(job.id, ++mediaEventSequence);
+  let incoming = job;
+  if (current?.revision === job.revision && job.state === 'preparing') {
+    const prompt = current.prompt.length > job.prompt.length ? current.prompt : job.prompt;
+    let reasoning = job.reasoning;
+    if (prompt) {
+      reasoning = undefined;
+    } else if ((current.reasoning?.length ?? 0) > (job.reasoning?.length ?? 0)) {
+      reasoning = current.reasoning;
+    }
+    incoming = { ...job, prompt, reasoning, progress: current.progress ?? job.progress };
+  }
+  setState('mediaJobs', job.id, reconcile(incoming));
+}
+
+export async function refreshMediaJobs(): Promise<void> {
+  const sequence = mediaFetches.start('jobs');
+  const began = mediaEventSequence;
+  const [recent, active] = await Promise.all([api.mediaJobs(), api.activeMediaJobs()]);
+  if (!mediaFetches.accept('jobs', sequence)) {
+    return;
+  }
+  const jobs: Record<string, MediaJob> = {};
+  const oldest = recent.at(-1);
+  if (recent.length === 100 && oldest) {
+    // The first page cannot establish whether previously loaded older history was deleted.
+    for (const current of Object.values(state.mediaJobs)) {
+      const older =
+        current.createdAt < oldest.createdAt ||
+        (current.createdAt === oldest.createdAt && current.id < oldest.id);
+      if (older && !mediaJobActive(current.state)) {
+        jobs[current.id] = current;
+      }
+    }
+  }
+  for (const job of [...recent, ...active]) {
+    applyThumbnails(job.assets);
+    applyThumbnails(job.outputs);
+    if (!deletedMediaJobs.has(job.id)) jobs[job.id] = job;
+  }
+  for (const [id, event] of mediaJobEvents) {
+    if (event > began) {
+      const current = state.mediaJobs[id];
+      if (current) {
+        jobs[id] = current;
+      } else {
+        delete jobs[id];
+      }
+    } else {
+      mediaJobEvents.delete(id);
+    }
+  }
+  setState('mediaJobs', reconcile(jobs));
+}
+
 export function handleServerEvent(ev: ServerEvent): void {
   switch (ev.t) {
+    case 'mediaThumbnails': {
+      for (const item of ev.items) {
+        const previous = thumbnailUpdates.get(item.id);
+        if (!previous || item.revision > previous.revision) thumbnailUpdates.set(item.id, item);
+      }
+      batch(() => {
+        setState(
+          'gallery',
+          produce((items) => {
+            for (const item of items) if (item.media) applyThumbnails([item.media]);
+          }),
+        );
+        setState(
+          'mediaJobs',
+          produce((jobs) => {
+            for (const job of Object.values(jobs)) {
+              applyThumbnails(job.assets);
+              applyThumbnails(job.outputs);
+            }
+          }),
+        );
+        setState(
+          'tree',
+          'messages',
+          produce((messages) => {
+            for (const message of Object.values(messages)) applyThumbnails(message.media);
+          }),
+        );
+      });
+      break;
+    }
+    case 'mediaJob':
+      applyMediaJob(ev.job);
+      break;
+    case 'mediaJobDeleted':
+      deletedMediaJobs.add(ev.id);
+      mediaJobEvents.set(ev.id, ++mediaEventSequence);
+      setState(
+        'mediaJobs',
+        produce((jobs) => {
+          delete jobs[ev.id];
+        }),
+      );
+      break;
+    case 'mediaJobProgress': {
+      const job = state.mediaJobs[ev.id];
+      if (job && mediaJobActive(job.state)) {
+        mediaJobEvents.set(ev.id, ++mediaEventSequence);
+        batch(() => {
+          setState(
+            'mediaJobs',
+            ev.id,
+            'progress',
+            reconcile(mergeMediaProgress(job.progress, ev.progress)),
+          );
+          if (ev.reasoning !== undefined) {
+            setState('mediaJobs', ev.id, 'reasoning', ev.reasoning);
+            if (job.messageId !== null && state.tree.messages[job.messageId]) {
+              setState('tree', 'messages', job.messageId, 'reasoning', ev.reasoning || null);
+            }
+          }
+          if (ev.prompt !== undefined) {
+            setState('mediaJobs', ev.id, 'prompt', ev.prompt);
+            if (job.messageId !== null && state.tree.messages[job.messageId]) {
+              setState('tree', 'messages', job.messageId, 'content', ev.prompt);
+            }
+          }
+        });
+      }
+      break;
+    }
     case 'hello':
       break;
     case 'invalidate':
       loaders[ev.entity]().catch(console.error);
       break;
     case 'tree':
+      for (const message of ev.messages) applyThumbnails(message.media);
       if (ev.conversationId === state.selectedId) {
         resyncPendingFor = null;
         setInitialTreeLoaded(true);
@@ -299,6 +462,7 @@ export function handleServerEvent(ev: ServerEvent): void {
       }
       break;
     case 'treePatch': {
+      for (const message of ev.messages) applyThumbnails(message.media);
       // Patches only apply on top of a full snapshot for the same conversation.
       if (ev.conversationId !== state.selectedId || state.tree.conversationId !== ev.conversationId)
         break;
@@ -440,7 +604,7 @@ export function selectConversation(id: number | null): void {
   setImageProgress({});
   subscribe(id);
   persistSelectedConversation(id);
-  history.replaceState(null, '', id != null ? `#${id}` : '#');
+  writePageLocation({ ...readPageLocation(), chatId: id, viewMode: undefined });
 }
 
 export async function navigateTree(action: () => Promise<unknown>): Promise<boolean> {
@@ -604,23 +768,31 @@ export async function branchConversation(messageId: number): Promise<void> {
 export function restoreConversationSelection(): void {
   selectionRestored = true;
   const exists = (id: number) => state.conversations.some((conversation) => conversation.id === id);
-  const hashId = Number(location.hash.slice(1));
+  const page = readPageLocation();
+  const hashId = page.chatId;
   let storedId = 0;
   try {
     storedId = Number(localStorage.getItem(LAST_CONVERSATION_KEY));
   } catch {
     /* Ignore unavailable storage. */
   }
-  const id =
-    Number.isSafeInteger(hashId) && hashId > 0 && exists(hashId)
-      ? hashId
-      : Number.isSafeInteger(storedId) && storedId > 0 && exists(storedId)
-        ? storedId
-        : null;
+  let id: number | null = null;
+  if (hashId !== null && exists(hashId)) {
+    id = hashId;
+  } else if (
+    !location.hash.includes('/') &&
+    Number.isInteger(storedId) &&
+    storedId > 0 &&
+    exists(storedId)
+  ) {
+    id = storedId;
+  }
   selectConversation(id);
+  writePageLocation({ ...page, chatId: id });
 }
 
 export function openModal(modal: ModalKind): void {
+  rememberPage(modal);
   batch(() => {
     setState('settingsCharacterId', null);
     setState('modal', modal);
@@ -628,6 +800,16 @@ export function openModal(modal: ModalKind): void {
 }
 
 export function openCharacterSettings(characterId: number): void {
+  writePageLocation(
+    {
+      chatId: state.selectedId,
+      modal: 'settings',
+      settingsTab: 'characters',
+      settingsEntity: characterId,
+      settingsDetail: true,
+    },
+    true,
+  );
   batch(() => {
     setState('settingsCharacterId', characterId);
     setState('modal', 'settings');

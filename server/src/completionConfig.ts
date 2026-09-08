@@ -51,5 +51,5 @@ export function prepareStandaloneCompletion(
       parameters.add_generation_prompt = false;
     }
   }
-  return { messages, parameters, messagePrefill };
+  return { messages, parameters, messagePrefill, reasoningPrefill };
 }

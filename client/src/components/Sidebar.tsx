@@ -183,7 +183,7 @@ export default function Sidebar() {
               when={characterOf(props.conv.characterId)}
               fallback={<span class="avatar avatar-fallback">A</span>}
             >
-              {(character) => <Avatar src={character().avatar} name={character().name} />}
+              {(character) => <Avatar src={character().avatarThumbnail} name={character().name} />}
             </Show>
           </Show>
           <span class="conv-body">
@@ -334,7 +334,8 @@ export default function Sidebar() {
                   <For each={charactersInFolder(folder.id)}>
                     {(character) => (
                       <button class="new-chat-folder-child" onClick={() => create(character.id)}>
-                        <Avatar src={character.avatar} name={character.name} /> {character.name}
+                        <Avatar src={character.avatarThumbnail} name={character.name} />{' '}
+                        {character.name}
                       </button>
                     )}
                   </For>
@@ -346,7 +347,7 @@ export default function Sidebar() {
         <For each={rootCharacters()}>
           {(character) => (
             <button onClick={() => create(character.id)}>
-              <Avatar src={character.avatar} name={character.name} /> {character.name}
+              <Avatar src={character.avatarThumbnail} name={character.name} /> {character.name}
             </button>
           )}
         </For>
@@ -371,7 +372,9 @@ export default function Sidebar() {
                         when={group.character}
                         fallback={<span class="avatar avatar-fallback">A</span>}
                       >
-                        {(character) => <Avatar src={character().avatar} name={character().name} />}
+                        {(character) => (
+                          <Avatar src={character().avatarThumbnail} name={character().name} />
+                        )}
                       </Show>
                       <span class="conv-group-name">{group.character?.name ?? 'No character'}</span>
                     </div>

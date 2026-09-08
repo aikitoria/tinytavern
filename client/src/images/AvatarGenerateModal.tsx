@@ -4,6 +4,7 @@ import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { api } from '../state/api.ts';
 import { errorMessage } from '../util.ts';
 import Modal from '../components/Modal.tsx';
+import PromptGenerationStatus from '../components/PromptGenerationStatus.tsx';
 import { avatarPromptTemplates, avatarRenderConfig } from './imageGeneration.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
@@ -15,6 +16,7 @@ export default function AvatarGenerateModal(props: {
   onClose: () => void;
 }) {
   const [text, setText] = createSignal('');
+  const [reasoning, setReasoning] = createSignal('');
   const [streaming, setStreaming] = createSignal(true);
   const [rendering, setRendering] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
@@ -30,7 +32,7 @@ export default function AvatarGenerateModal(props: {
     const image = avatarRenderConfig();
     const prompt = text().trim();
     if (!image) {
-      setError('Select a workflow in Settings → Tools → Image Generation first.');
+      setError('Select a workflow in Settings → Media rendering first.');
       return;
     }
     if (!prompt) {
@@ -95,14 +97,26 @@ export default function AvatarGenerateModal(props: {
           props.id,
           templates.prompt,
           templates.context,
-          (d) => setText((t) => t + d),
+          (d) => {
+            if (disposed || promptAbort.signal.aborted) return;
+            setReasoning('');
+            setText((t) => t + d);
+          },
           promptAbort.signal,
+          (delta) => {
+            if (!disposed && !promptAbort.signal.aborted && !text()) {
+              setReasoning((value) => value + delta);
+            }
+          },
         );
         completed = true;
       } catch (err) {
         if (!promptAbort.signal.aborted && !disposed) setError(errorMessage(err));
       } finally {
-        if (!disposed) setStreaming(false);
+        if (!disposed) {
+          setStreaming(false);
+          setReasoning('');
+        }
       }
       // Failed streams may contain partial prompts that should not be rendered.
       if (completed && !promptAbort.signal.aborted && !disposed) await render();
@@ -140,12 +154,8 @@ export default function AvatarGenerateModal(props: {
   return (
     <Modal title="Generate avatar" onClose={props.onClose}>
       <div class="avatar-gen form">
-        <label>
-          Portrait prompt{' '}
-          <Show when={streaming()}>
-            <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
-          </Show>
-        </label>
+        <label>Portrait prompt</label>
+        <PromptGenerationStatus active={streaming()} content={text()} reasoning={reasoning()} />
         <textarea
           rows={5}
           value={text()}

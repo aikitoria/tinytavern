@@ -1,3 +1,4 @@
+import { imageConfig } from './imageConfig.ts';
 // Run through npm test for isolated data; this script is destructive.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ const sourceImages = [
   saveImage('transfer-source-a.png', png),
   saveImage('transfer-source-b.png', png),
 ];
+const { createImageRecipe, getMediaRecipe } = await import('../server/src/mediaRecipes.ts');
 const now = Date.now();
 const convResult = stmt(
   `INSERT INTO conversations (title, speaker_name, scenario_override, created_at, updated_at)
@@ -35,7 +37,7 @@ const insert = stmt(
   `INSERT INTO messages
      (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
       model, gen_meta_json, created_at, name, generation_kind, images_json,
-      active_image, image_pending, image_render_json)
+      active_image, image_pending, render_recipe_id)
    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
 );
 const root = Number(
@@ -90,10 +92,10 @@ const imagePrompt = Number(
     'normal',
     JSON.stringify(sourceImages),
     1,
-    JSON.stringify({
-      workflow: '{"node":{"inputs":{"text":"{{prompt}}","seed":{{seed}}}}}',
-      comfyUrl: 'http://comfy:8588',
-    }),
+    createImageRecipe(
+      imageConfig('{"node":{"inputs":{"text":"{{prompt}}","seed":{{seed}}}}}', 'http://comfy:8588'),
+      'image prompt',
+    ),
   ).lastInsertRowid,
 );
 const alternate = Number(
@@ -133,9 +135,13 @@ assert(
 );
 assert(portable.assets.length === 2, 'all image alternatives are embedded');
 assert(
-  portable.messages
-    .find((message) => message.id === imagePrompt)
-    ?.imageRender?.workflow.includes('{{prompt}}'),
+  portable.recipes
+    ?.find(
+      (recipe) =>
+        recipe.id ===
+        portable.messages.find((message) => message.id === imagePrompt)?.renderRecipeId,
+    )
+    ?.workflow.json.includes('{{prompt}}'),
   'image prompt and render configuration are exported',
 );
 
@@ -195,11 +201,13 @@ assert(
   ),
   'import writes independent, byte-identical image files',
 );
-const importedPromptRow = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(
+const importedPromptRow = stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(
   importedPrompt.id,
-) as { image_render_json: string };
+) as { render_recipe_id: string };
 assert(
-  JSON.parse(importedPromptRow.image_render_json).workflow.includes('{{seed}}'),
+  getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflow.json.includes(
+    '{{seed}}',
+  ),
   'stored render configuration still supports rerendering',
 );
 const sibling = importedRows.find((row) => row.content === 'Short red hair');
@@ -212,4 +220,55 @@ assert(
   'a reused embedded asset gets per-message files with independent deletion ownership',
 );
 
-console.log(`\n${passed} conversation-transfer assertions passed`);
+// Videos are deliberately absent on disk: exporting them must not read their bytes.
+const mixedPaths = [
+  '/images/omitted-first.webm',
+  ...importedPrompt.images,
+  '/images/omitted-last.webm',
+];
+stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
+  JSON.stringify(mixedPaths),
+  2,
+  importedPrompt.id,
+);
+const mixed = exportPortableConversation(imported.id);
+const mixedPrompt = mixed.messages.find((message) => message.id === importedPrompt.id)!;
+assert(mixedPrompt.imageAssetIds.length === 2, 'video attachments are omitted from mixed messages');
+assert(mixedPrompt.activeImage === 1, 'selected raster index accounts for omitted videos');
+assert(
+  importPortableConversation(mixed).activeLeafId !== null,
+  'mixed-media export remains importable',
+);
+
+stmt('UPDATE messages SET active_image = ? WHERE id = ?').run(3, importedPrompt.id);
+const selectedVideo = exportPortableConversation(imported.id);
+assert(
+  selectedVideo.messages.find((message) => message.id === importedPrompt.id)!.activeImage === 1,
+  'an omitted selected video falls back to the nearest preceding image',
+);
+stmt('UPDATE messages SET images_json = ?, active_image = 0 WHERE id = ?').run(
+  JSON.stringify(['/images/omitted-only.webm']),
+  importedPrompt.id,
+);
+const { mediaPromptBuffers } = await import('../server/src/mediaJobStore.ts');
+mediaPromptBuffers.set(importedPrompt.id, {
+  prompt: 'Video prompt currently streaming',
+  reasoning: '',
+});
+const onlyVideo = exportPortableConversation(imported.id);
+mediaPromptBuffers.delete(importedPrompt.id);
+const videoPrompt = onlyVideo.messages.find((message) => message.id === importedPrompt.id)!;
+assert(
+  videoPrompt.imageAssetIds.length === 0 && videoPrompt.activeImage === 0,
+  'video-only messages have an empty valid attachment selection',
+);
+assert(
+  videoPrompt.content === 'Video prompt currently streaming',
+  'export includes the latest in-memory media prompt',
+);
+const importedVideo = importPortableConversation(onlyVideo);
+assert(
+  getPathToMessage(importedVideo.activeLeafId!).length === 3,
+  'video omission preserves the entire message path',
+);
+console.log(`\n${passed} conversation-transfer assertions passed including omitted videos`);

@@ -1,7 +1,8 @@
+import { defineEntityTransfer } from './entityTransfer.ts';
 import type { InvalidateEntity } from '@tinytavern/shared';
 import { stmt } from '../db.ts';
 import { invalidate } from '../events.ts';
-import { route } from '../router.ts';
+import { route, HttpError } from '../router.ts';
 import { clearSettingReference } from '../settingsStore.ts';
 import type { SettingsReferenceKey } from '../settingsStore.ts';
 import { discardSpeculativeSwipes } from '../speculation.ts';
@@ -33,6 +34,8 @@ export interface EntityConfig<T extends { id: number }> {
   /** Applied to every DTO leaving the API (e.g. strip secrets). */
   toPublic?: (dto: T) => T;
   fields: EntityField<T>[];
+  /** Protected seed rows remain selectable and duplicable. */
+  readOnlyColumn?: string;
   /** Settings key cleared (with invalidate) when a row is deleted. */
   settingsRef?: SettingsReferenceKey;
   /** Entities that denormalize references to this one, re-fetched after a delete. */
@@ -90,6 +93,7 @@ export function refIdField<T>(
  * Patches merge fields; patch/delete discard speculative swipes because entities affect prompts.
  */
 export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T>): void {
+  defineEntityTransfer(cfg);
   const publish = (dto: T): T => (cfg.toPublic ? cfg.toPublic(dto) : dto);
   const columns = cfg.fields.map((field) => field.column);
   const insertSql = `INSERT INTO ${cfg.table} (${columns.join(', ')}, created_at)
@@ -110,7 +114,9 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
   route.post(`/api/${cfg.table}/:id/duplicate`, ({ params }) => {
     const id = positiveId(params.id);
     const row = rowById(cfg.table, id);
-    const copyColumns = Object.keys(row).filter((c) => c !== 'id' && c !== 'created_at');
+    const copyColumns = Object.keys(row).filter(
+      (c) => c !== 'id' && c !== 'created_at' && c !== cfg.readOnlyColumn,
+    );
     const values = copyColumns.map((c) =>
       c === 'name' ? `${String(row.name)} (copy)` : (row[c] as string | number | null),
     );
@@ -126,7 +132,11 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
 
   route.patch(`/api/${cfg.table}/:id`, ({ params, body }) => {
     const id = positiveId(params.id);
-    const cur = cfg.toDto(rowById(cfg.table, id));
+    const row = rowById(cfg.table, id);
+    if (cfg.readOnlyColumn && row[cfg.readOnlyColumn] === 1) {
+      throw new HttpError(403, 'This default is read-only. Duplicate it to make changes.');
+    }
+    const cur = cfg.toDto(row);
     const b = objectBody(body);
     const values = cfg.fields.map((field) => field.value(b, cur));
     stmt(updateSql).run(...values, id);
@@ -139,7 +149,10 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
 
   route.del(`/api/${cfg.table}/:id`, ({ params }) => {
     const id = positiveId(params.id);
-    rowById(cfg.table, id);
+    const row = rowById(cfg.table, id);
+    if (cfg.readOnlyColumn && row[cfg.readOnlyColumn] === 1) {
+      throw new HttpError(403, 'This default is read-only and cannot be deleted.');
+    }
     stmt(`DELETE FROM ${cfg.table} WHERE id = ?`).run(id);
     discardSpeculativeSwipes();
     bumpAllConversationRevisions();

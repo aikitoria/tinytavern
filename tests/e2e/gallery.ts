@@ -1,12 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { GalleryItem } from '@tinytavern/shared';
+import type { GalleryItem, MediaJob } from '@tinytavern/shared';
 import {
   BASE,
-  MOCK_CONTROL,
   assert,
   req,
-  collectRenderProgress,
   expectStatus,
   tree,
   branchBody,
@@ -14,7 +12,7 @@ import {
   branchPath,
   activate,
 } from './helpers.ts';
-import { testGalleryRevisionConfig } from './gallery-revision-config.ts';
+import { waitForJob } from './media-jobs.ts';
 import type { ImagesFixture } from './images.ts';
 import type { TemplatesFixture } from './templates.ts';
 import type { SetupFixture } from './setup.ts';
@@ -49,7 +47,7 @@ export async function testGallery(
     'base64',
   );
   const webp = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
-  const jpeg = readFileSync(new URL('../../docs/chat.jpg', import.meta.url));
+  const jpeg = readFileSync(new URL('../fixtures/image.jpg', import.meta.url));
   const uploaded: GalleryItem[] = [];
   for (const [bytes, ext] of [
     [png, 'png'],
@@ -67,10 +65,10 @@ export async function testGallery(
     const download = await fetch(`${BASE}${item.image}`);
     assert(
       item.characterName === 'Uploads' &&
-        item.characterId === null &&
+        item.characters.length === 0 &&
         item.sourceMessageId === null &&
         item.sourceConversationId === null &&
-        !item.hasImageRender &&
+        !item.media?.recipeId &&
         item.image.endsWith(`.${ext}`) &&
         item.imageWidth! > 0 &&
         item.imageHeight! > 0 &&
@@ -78,9 +76,112 @@ export async function testGallery(
       `uploaded ${ext} retains its original bytes and dimensions without source ownership`,
     );
   }
+  const uploadedPrompt =
+    '  An uploaded landscape\nwith **literal markdown** and {{reference1_prompt}}.  ';
+  const editedUpload = await req<GalleryItem>('PATCH', `/api/gallery/${uploaded[0]!.id}`, {
+    prompt: uploadedPrompt,
+    expectedPrompt: '',
+  });
+  assert(
+    editedUpload.prompt === uploadedPrompt && !editedUpload.media?.recipeId,
+    'uploaded image saves verbatim prompt without inventing a generation recipe',
+  );
+  await expectStatus(
+    'PATCH',
+    `/api/gallery/${editedUpload.id}`,
+    {
+      prompt: 'Stale edit',
+      expectedPrompt: '',
+    },
+    409,
+  );
+  await expectStatus('PATCH', `/api/gallery/${editedUpload.id}`, { prompt: 'Missing guard' }, 400);
+  await expectStatus(
+    'PATCH',
+    `/api/gallery/${editedUpload.id}`,
+    {
+      prompt: 123,
+      expectedPrompt: uploadedPrompt,
+    },
+    400,
+  );
+  assert(
+    (await req<GalleryItem[]>('GET', '/api/gallery')).find((item) => item.id === editedUpload.id)
+      ?.prompt === uploadedPrompt,
+    'saved prompt survives reload and rejected stale writes',
+  );
+  const clearedUpload = await req<GalleryItem>('PATCH', `/api/gallery/${editedUpload.id}`, {
+    prompt: '',
+    expectedPrompt: uploadedPrompt,
+  });
+  assert(clearedUpload.prompt === '', 'saved prompts can be cleared');
+
   const uploadCharacter = await req<{ id: number }>('POST', '/api/characters', {
     name: 'Upload owner',
   });
+  const secondCharacter = await req<{ id: number }>('POST', '/api/characters', {
+    name: 'Second owner',
+  });
+  const organized = await req<GalleryItem>('PATCH', `/api/gallery/${clearedUpload.id}`, {
+    characterIds: [uploadCharacter.id, secondCharacter.id, uploadCharacter.id],
+    expectedCharacterIds: [],
+    prompt: 'Organized prompt',
+    expectedPrompt: '',
+  });
+  assert(
+    organized.characters.length === 2 && organized.characterName === 'Second owner, Upload owner',
+    'gallery media can belong to multiple characters without duplicate associations',
+  );
+  assert(
+    organized.image === clearedUpload.image &&
+      organized.sourceMessageId === clearedUpload.sourceMessageId,
+    'organizing media preserves the original asset and provenance',
+  );
+  await expectStatus(
+    'PATCH',
+    `/api/gallery/${organized.id}`,
+    {
+      characterIds: [],
+      expectedCharacterIds: [],
+      prompt: 'Stale change',
+      expectedPrompt: 'Organized prompt',
+    },
+    409,
+  );
+  await expectStatus(
+    'PATCH',
+    `/api/gallery/${organized.id}`,
+    {
+      characterIds: [99999999],
+      expectedCharacterIds: organized.characters.map((character) => character.id),
+    },
+    404,
+  );
+  await expectStatus(
+    'PATCH',
+    `/api/gallery/${organized.id}`,
+    { characterIds: [uploadCharacter.id] },
+    400,
+  );
+  const retainedOrganization = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
+    (item) => item.id === organized.id,
+  )!;
+  assert(
+    retainedOrganization.prompt === 'Organized prompt' &&
+      retainedOrganization.characters.length === 2,
+    'rejected organization changes are atomic and associations survive reload',
+  );
+  const unassigned = await req<GalleryItem>('PATCH', `/api/gallery/${organized.id}`, {
+    characterIds: [],
+    expectedCharacterIds: organized.characters.map((character) => character.id),
+  });
+  assert(
+    unassigned.characters.length === 0 &&
+      unassigned.characterName === 'Uploads' &&
+      unassigned.prompt === 'Organized prompt',
+    'clearing associations keeps uploaded media and its prompt',
+  );
+  await req('DELETE', `/api/characters/${secondCharacter.id}`);
   const assignedResponse = await fetch(
     `${BASE}/api/gallery/upload?characterId=${uploadCharacter.id}`,
     {
@@ -91,7 +192,7 @@ export async function testGallery(
   const assigned = (await assignedResponse.json()) as GalleryItem;
   assert(
     assignedResponse.ok &&
-      assigned.characterId === uploadCharacter.id &&
+      assigned.characters.some((character) => character.id === uploadCharacter.id) &&
       assigned.characterName === 'Upload owner',
     'upload can use the selected character',
   );
@@ -100,12 +201,15 @@ export async function testGallery(
     (item) => item.id === assigned.id,
   )!;
   assert(
-    detachedUpload.characterId === null &&
+    detachedUpload.characters.length === 0 &&
       detachedUpload.characterName === 'Upload owner' &&
       (await fetch(`${BASE}${assigned.image}`)).ok,
     'character deletion preserves uploads and their saved identity',
   );
-  const beforeRejectedUploads = readdirSync(join(dataDir, 'images')).sort().join('\n');
+  const beforeRejectedUploads = readdirSync(join(dataDir, 'images'))
+    .filter((name) => !name.startsWith('thumb-'))
+    .sort()
+    .join('\n');
   for (const bytes of [
     Buffer.alloc(0),
     Buffer.from('<svg onload="alert(1)"></svg>'),
@@ -133,7 +237,10 @@ export async function testGallery(
     );
   }
   assert(
-    readdirSync(join(dataDir, 'images')).sort().join('\n') === beforeRejectedUploads,
+    readdirSync(join(dataDir, 'images'))
+      .filter((name) => !name.startsWith('thumb-'))
+      .sort()
+      .join('\n') === beforeRejectedUploads,
     'rejected uploads leave no files',
   );
   await req('POST', '/api/gallery/bulk-delete', {
@@ -200,106 +307,62 @@ export async function testGallery(
       (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200,
     'deleting the source conversation detaches links but preserves the saved image and prompt',
   );
-  const galleryRevisionInstruction = 'change only the lighting to a warm sunset';
-  await expectStatus(
-    'POST',
-    `/api/gallery/${savedGallery.item.id}/revise-prompt`,
-    { prompt: savedGallery.item.prompt, instruction: '   ' },
-    400,
+  const galleryRevisedPrompt = 'A new gallery variation through the shared media tools';
+  const editedGenerated = await req<GalleryItem>('PATCH', `/api/gallery/${savedGallery.item.id}`, {
+    prompt: galleryRevisedPrompt,
+    expectedPrompt: detachedGallery.prompt,
+  });
+  assert(
+    editedGenerated.prompt === galleryRevisedPrompt &&
+      editedGenerated.media?.recipeId === detachedGallery.media?.recipeId,
+    'generated image prompt is editable without replacing its recipe',
   );
-  const galleryRevisionResponse = await fetch(
-    `${BASE}/api/gallery/${savedGallery.item.id}/revise-prompt`,
+
+  const galleryDraft = await req<MediaJob>(
+    'POST',
+    `/api/media/assets/${savedGallery.item.media!.id}/rerun`,
     {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        prompt: savedGallery.item.prompt,
-        instruction: galleryRevisionInstruction,
-      }),
+      requestKey: 'e2e-gallery-rerun',
+      reviewBeforeSave: true,
     },
   );
   assert(
-    galleryRevisionResponse.ok &&
-      galleryRevisionResponse.headers.get('content-type')?.includes('text/event-stream') === true,
-    'gallery prompt revision responds with SSE',
+    galleryDraft.prompt === galleryRevisedPrompt,
+    'Gallery rerun starts with the edited saved prompt',
   );
-  let galleryRevisedPrompt = '';
-  let galleryRevisionDone = false;
-  let galleryRevisionError = '';
-  for (const line of (await galleryRevisionResponse.text()).split('\n')) {
-    if (!line.startsWith('data:')) continue;
-    const event = JSON.parse(line.slice(5)) as { d?: string; error?: string; done?: boolean };
-    if (event.d) galleryRevisedPrompt += event.d;
-    if (event.error) galleryRevisionError = event.error;
-    if (event.done) galleryRevisionDone = true;
-  }
+  await req('POST', `/api/media/jobs/${galleryDraft.id}/render`, {
+    expectedRevision: galleryDraft.revision,
+  });
+  const completed = await waitForJob(galleryDraft.id, 'succeeded');
   assert(
-    galleryRevisionDone && !galleryRevisionError && galleryRevisedPrompt.trim().length > 0,
-    'gallery prompt revision streams a complete replacement prompt',
+    !(await req<GalleryItem[]>('GET', '/api/gallery')).some(
+      (item) => item.media?.id === completed.outputs[0]!.id,
+    ),
+    'Gallery variations remain drafts until accepted',
   );
-  const galleryRevisionCompletion = (await (
-    await fetch(`${MOCK_CONTROL}/control/last-completion`)
-  ).json()) as {
-    completion: {
-      messages: { role: string; content: string }[];
-    } | null;
-  };
-  assert(
-    galleryRevisionCompletion.completion?.messages.map((message) => message.role).join(',') ===
-      'system,user' &&
-      galleryRevisionCompletion.completion.messages[1]?.content.includes(
-        `<original_image_prompt>\n${savedGallery.item.prompt}\n</original_image_prompt>`,
-      ) &&
-      galleryRevisionCompletion.completion.messages[1]?.content.includes(
-        `<revision_instruction>\n${galleryRevisionInstruction}\n</revision_instruction>`,
-      ) === true,
-    'gallery prompt revision sends only its standalone system and user messages',
-  );
-
-  await testGalleryRevisionConfig(savedGallery.item);
-
-  const galleryJobId = 'e2e-gallery-job';
-  const galleryProgressAbort = new AbortController();
-  const galleryProgressResponse = await fetch(
-    `${BASE}/api/gallery/render-progress/${galleryJobId}`,
-    { signal: galleryProgressAbort.signal },
-  );
-  assert(
-    galleryProgressResponse.ok && galleryProgressResponse.body != null,
-    'gallery render progress SSE opens',
-  );
-  await expectStatus(
-    'POST',
-    `/api/gallery/${savedGallery.item.id}/render-image`,
-    { prompt: '   ' },
-    400,
-  );
-  const galleryProgressSeen = collectRenderProgress(galleryProgressResponse, 'gallery progress');
-  const galleryGenerated = await req<GalleryItem>(
-    'POST',
-    `/api/gallery/${savedGallery.item.id}/render-image`,
-    { jobId: galleryJobId, prompt: galleryRevisedPrompt },
-  );
-  await galleryProgressSeen;
-  galleryProgressAbort.abort();
+  await req('POST', `/api/media/jobs/${completed.id}/accept`, {
+    expectedRevision: completed.revision,
+    expectedDraftRevision: completed.draft!.revision,
+    assetId: completed.outputs[0]!.id,
+  });
+  const galleryGenerated = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
+    (item) => item.media?.id === completed.outputs[0]!.id,
+  )!;
   const generatedGalleryImageUrl = galleryGenerated.image;
   assert(
     galleryGenerated.id !== savedGallery.item.id &&
-      galleryGenerated.imageWidth! > 0 &&
-      galleryGenerated.imageHeight! > 0 &&
-      galleryGenerated.prompt === galleryRevisedPrompt.trim() &&
-      galleryGenerated.characterName === savedGallery.item.characterName &&
-      galleryGenerated.sourceConversationId === null &&
-      galleryGenerated.sourceMessageId === null &&
-      generatedGalleryImageUrl !== savedGalleryImageUrl &&
-      (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200,
-    'gallery generation creates a separate saved image from the regenerated prompt instead of a swipe',
+      galleryGenerated.prompt === galleryRevisedPrompt,
+    'Gallery rerun uses the shared accept-one media flow',
+  );
+  assert(
+    (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200,
+    'The accepted gallery variation can be viewed',
   );
   assert(
     (await req<GalleryItem[]>('GET', '/api/gallery')).some(
       (item) => item.id === savedGallery.item.id && item.image === savedGalleryImageUrl,
     ),
-    'creating the new gallery image leaves its source gallery item unchanged',
+    'Creating a variation leaves the original gallery item unchanged',
   );
 
   const beforeImageBranchSwitch = await tree(conv2.id);
@@ -399,7 +462,10 @@ export async function testGallery(
   );
 
   await setNextComfyOutput('html');
-  const filesBeforeRejectedMessageRender = readdirSync(join(dataDir, 'images')).sort().join('\n');
+  const filesBeforeRejectedMessageRender = readdirSync(join(dataDir, 'images'))
+    .filter((name) => !name.startsWith('thumb-'))
+    .sort()
+    .join('\n');
   await req(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/render-image`,
@@ -411,11 +477,19 @@ export async function testGallery(
     'invalid raster render is rejected',
   );
   assert(
-    rejectedMessageRender?.images.length === 2 &&
-      rejectedMessageRender.genMeta?.imageError?.includes('unsupported or invalid raster image') ===
-        true &&
-      readdirSync(join(dataDir, 'images')).sort().join('\n') === filesBeforeRejectedMessageRender,
-    'rejected active content creates no image reference or local file',
+    rejectedMessageRender?.images.length === 2,
+    'rejected active content creates no image reference',
+  );
+  assert(
+    /invalid raster image|no final image/.test(rejectedMessageRender.genMeta?.imageError ?? ''),
+    `invalid raster rejection explains the error: ${rejectedMessageRender.genMeta?.imageError}`,
+  );
+  assert(
+    readdirSync(join(dataDir, 'images'))
+      .filter((name) => !name.startsWith('thumb-'))
+      .sort()
+      .join('\n') === filesBeforeRejectedMessageRender,
+    'rejected active content creates no local file',
   );
 
   return { savedGallery, savedGalleryImageUrl, galleryGenerated, generatedGalleryImageUrl };

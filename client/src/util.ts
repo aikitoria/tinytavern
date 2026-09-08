@@ -1,3 +1,4 @@
+import { readPageLocation, writePageLocation } from './state/pageLocation.ts';
 import { createEffect, createSignal, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
@@ -18,6 +19,8 @@ interface EntityEditorOptions<T extends { id: number }, D extends Record<string,
   deletePrompt: string;
   /** Select this saved item on mount when it exists. */
   initialId?: () => number | null;
+  /** Editor shown when no saved item is selected or the selected item is deleted. */
+  emptySelection?: 'new' | 'default';
   /** Selecting a saved row also selects it for use. `null` represents the
    * editor's virtual built-in/none row; new drafts activate after creation. */
   activate?: (id: number | null) => Promise<void>;
@@ -35,6 +38,9 @@ export function numberOrNull(value: string): number | null {
 export function createEntityEditor<T extends { id: number }, D extends Record<string, unknown>>(
   options: EntityEditorOptions<T, D>,
 ) {
+  const initialPage = readPageLocation();
+  const [locationReady, setLocationReady] = createSignal(false);
+  const emptySelection = options.emptySelection ?? (options.activate ? 'default' : 'new');
   const [selectedId, setSelectedId] = createSignal<EditorId>('new');
   const [saved, flashSaved] = createSavedFlash();
   const [status, setStatusValue] = createSignal('');
@@ -99,14 +105,35 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   // differ from load(undefined), especially for Select values.
   onMount(() => {
     if (selectedId() !== 'new') return;
-    const initialId = options.initialId?.();
+    const initialId =
+      typeof initialPage.settingsEntity === 'number'
+        ? initialPage.settingsEntity
+        : initialPage.settingsEntity === undefined
+          ? options.initialId?.()
+          : undefined;
     const item =
       initialId != null
         ? options.items().find((candidate) => candidate.id === initialId)
         : undefined;
     if (item) setSelectedId(item.id);
-    else if (options.activate) setSelectedId('default');
+    else
+      setSelectedId(
+        initialPage.settingsEntity === 'new' || initialPage.settingsEntity === 'default'
+          ? initialPage.settingsEntity
+          : emptySelection,
+      );
     load(item);
+    if (initialPage.settingsDetail) rawNav.openDetail();
+    setLocationReady(true);
+  });
+  createEffect(() => {
+    if (!locationReady()) return;
+    const entity = selectedId();
+    const detail = rawNav.detailOpen();
+    const page = readPageLocation();
+    if (page.modal === 'settings') {
+      writePageLocation({ ...page, settingsEntity: entity, settingsDetail: detail });
+    }
   });
 
   // Refetches reconcile DTOs in place; preserve dirty forms when their baseline changes.
@@ -125,7 +152,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
             'warning',
           );
         } else {
-          applySelection(options.activate ? 'default' : 'new', false);
+          applySelection(emptySelection, false);
           rawNav.closeDetail();
           setStatus('This item was deleted on another device.', 'warning');
         }
@@ -210,7 +237,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       return;
     try {
       await options.remove(id);
-      applySelection(options.activate ? 'default' : 'new', false);
+      applySelection(emptySelection, false);
       rawNav.closeDetail();
     } catch (err) {
       setStatus(errorMessage(err));
@@ -220,7 +247,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     const id = selectedId();
     const item = options.items().find((candidate) => candidate.id === id);
     if (typeof id === 'number' && !item) {
-      applySelection(options.activate ? 'default' : 'new', false);
+      applySelection(emptySelection, false);
       rawNav.closeDetail();
       setStatus('This item was deleted on another device.', 'warning');
     } else {
@@ -250,6 +277,13 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     remove,
     duplicate,
     flashSaved,
+    draftData: () => ({ ...selected(), ...options.data() }),
+    importData: (data: Record<string, unknown>, asNew = false) => {
+      if (asNew || selectedId() === 'default') applySelection('new', false);
+      options.load({ ...selected(), ...options.data(), ...data } as unknown as T);
+      rawNav.openDetail();
+      setStatus('Imported into this draft. Save to apply.', 'info');
+    },
   };
 }
 

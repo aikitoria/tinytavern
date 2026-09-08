@@ -1,7 +1,7 @@
-import { copyFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { copyFileSync, readdirSync, unlinkSync, writeFileSync, statSync, constants } from 'node:fs';
+import { basename, join, extname } from 'node:path';
 import { crc32 } from 'node:zlib';
-import { IMAGES_DIR, stmt } from './db.ts';
+import { IMAGES_DIR, stmt, invalidateMediaAsset, mediaAssetForPath, transaction } from './db.ts';
 import { imageFileDimensions } from './imageDimensions.ts';
 
 /**
@@ -152,7 +152,36 @@ export function savedImageDimensions(imagePath: string) {
 
 export function saveImage(name: string, data: Buffer): string {
   writeFileSync(join(IMAGES_DIR, basename(name)), data);
-  return `/images/${basename(name)}`;
+  const path = `/images/${basename(name)}`;
+  registerImage(path, data.length);
+  return path;
+}
+
+function registerImage(path: string, byteSize: number): void {
+  const size = savedImageDimensions(path);
+  const ext = extname(path).toLowerCase();
+  const kind = ext === '.webm' ? 'video' : 'image';
+  const mime =
+    ext === '.webm'
+      ? 'video/webm'
+      : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.jpg' || ext === '.jpeg'
+          ? 'image/jpeg'
+          : 'image/png';
+  stmt(`INSERT INTO media_assets(path, kind, mime, byte_size, width, height, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET
+    kind = excluded.kind, mime = excluded.mime, byte_size = excluded.byte_size,
+    width = excluded.width, height = excluded.height`).run(
+    path,
+    kind,
+    mime,
+    byteSize,
+    size?.width ?? null,
+    size?.height ?? null,
+    Date.now(),
+  );
+  invalidateMediaAsset(path);
 }
 
 /**
@@ -163,18 +192,69 @@ export function copyImage(imagePath: string, newName: string): string | null {
   const file = imageFile(imagePath);
   if (!file) return null;
   try {
-    copyFileSync(file, join(IMAGES_DIR, basename(newName)));
+    copyFileSync(file, join(IMAGES_DIR, basename(newName)), constants.COPYFILE_FICLONE);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
-  return `/images/${basename(newName)}`;
+  const path = `/images/${basename(newName)}`;
+  registerImage(path, statSync(file).size);
+  const original = mediaAssetForPath(imagePath);
+  if (original) {
+    stmt(
+      'UPDATE media_assets SET kind = ?, mime = ?, width = ?, height = ?, duration = ?, recipe_id = ? WHERE path = ?',
+    ).run(
+      original.kind,
+      original.mime,
+      original.width,
+      original.height,
+      original.duration,
+      original.recipeId,
+      path,
+    );
+    stmt(`INSERT INTO media_characters(asset_id, character_id)
+      SELECT target.id, mc.character_id FROM media_assets target, media_characters mc
+      WHERE target.path = ? AND mc.asset_id = ?`).run(path, original.id);
+    invalidateMediaAsset(path);
+  }
+  return path;
 }
 
 export function deleteImageFiles(imagePaths: string[]): void {
-  for (const imagePath of imagePaths) {
+  const pending = [...new Set(imagePaths)];
+  const seen = new Set<string>();
+  while (pending.length) {
+    const imagePath = pending.pop()!;
+    if (seen.has(imagePath)) continue;
     const file = imageFile(imagePath);
     if (!file) continue;
+    // Every legacy deletion path passes here. A job/recipe pin owns the file even
+    // after its original gallery item or message has been deleted.
+    if (
+      stmt(`SELECT 1 FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
+      WHERE a.path = ? OR a.thumbnail = ? LIMIT 1`).get(imagePath, imagePath)
+    )
+      continue;
+    seen.add(imagePath);
+    const asset = mediaAssetForPath(imagePath);
+    transaction(() => {
+      stmt('DELETE FROM media_assets WHERE path = ?').run(imagePath);
+      invalidateMediaAsset(imagePath);
+      if (asset?.thumbnail) pending.push(asset.thumbnail);
+      if (
+        asset?.recipeId &&
+        !stmt('SELECT 1 FROM media_assets WHERE recipe_id = ? LIMIT 1').get(asset.recipeId) &&
+        !stmt('SELECT 1 FROM messages WHERE render_recipe_id = ? LIMIT 1').get(asset.recipeId)
+      ) {
+        const inputs =
+          stmt(`SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
+          WHERE o.owner_type = 'recipe' AND o.owner_id = ?`).all(asset.recipeId) as {
+            path: string;
+          }[];
+        stmt('DELETE FROM media_recipes WHERE id = ?').run(asset.recipeId);
+        pending.push(...inputs.map((input) => input.path));
+      }
+    });
     try {
       unlinkSync(file);
     } catch (err) {
@@ -186,9 +266,9 @@ export function deleteImageFiles(imagePaths: string[]): void {
 }
 
 export function collectMessageImages(messageId: number): string[] {
-  const rows = stmt(
-    'SELECT j.value AS image FROM messages m, json_each(m.images_json) j WHERE m.id = ?',
-  ).all(messageId) as { image: string }[];
+  const rows = stmt('SELECT image FROM message_media_files WHERE message_id = ?').all(
+    messageId,
+  ) as { image: string }[];
   return rows.map((row) => row.image);
 }
 
@@ -200,8 +280,7 @@ export function collectSubtreeImages(messageId: number): string[] {
        UNION ALL
        SELECT m.id FROM messages m JOIN doomed d ON m.parent_id = d.id
      )
-     SELECT j.value AS image FROM messages m, json_each(m.images_json) j
-     WHERE m.id IN (SELECT id FROM doomed)`,
+     SELECT image FROM message_media_files WHERE message_id IN (SELECT id FROM doomed)`,
   ).all(messageId) as { image: string }[];
   return rows.map((row) => row.image);
 }
@@ -217,15 +296,14 @@ export function collectSiblingSubtreeImages(
        UNION ALL
        SELECT m.id FROM messages m JOIN doomed d ON m.parent_id = d.id
      )
-     SELECT j.value AS image FROM messages m, json_each(m.images_json) j
-     WHERE m.id IN (SELECT id FROM doomed)`,
+     SELECT image FROM message_media_files WHERE message_id IN (SELECT id FROM doomed)`,
   ).all(conversationId, parentId) as { image: string }[];
   return rows.map((row) => row.image);
 }
 
 export function collectConversationImages(conversationId: number): string[] {
   const rows = stmt(
-    'SELECT j.value AS image FROM messages m, json_each(m.images_json) j WHERE m.conversation_id = ?',
+    'SELECT f.image FROM message_media_files f JOIN messages m ON m.id = f.message_id WHERE m.conversation_id = ?',
   ).all(conversationId) as { image: string }[];
   return rows.map((row) => row.image);
 }
@@ -235,9 +313,10 @@ export function sweepOrphanedImages(): void {
   const referenced = new Set(
     (
       stmt(
-        `SELECT j.value AS image FROM messages m, json_each(m.images_json) j
-         UNION ALL
-         SELECT image FROM gallery_items WHERE image IS NOT NULL`,
+        `SELECT a.path AS image FROM media_assets a WHERE EXISTS
+          (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)
+         UNION ALL SELECT a.thumbnail AS image FROM media_assets a WHERE a.thumbnail IS NOT NULL
+         AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)`,
       ).all() as { image: string }[]
     )
       .map((row) => basename(row.image.slice('/images/'.length)))
@@ -247,7 +326,7 @@ export function sweepOrphanedImages(): void {
   for (const name of readdirSync(IMAGES_DIR)) {
     if (referenced.has(name)) continue;
     try {
-      unlinkSync(join(IMAGES_DIR, name));
+      deleteImageFiles([`/images/${name}`]);
       removed++;
     } catch (err) {
       console.error(`[images] failed to sweep ${name}:`, err);

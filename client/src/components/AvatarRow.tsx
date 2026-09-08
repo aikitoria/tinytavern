@@ -5,6 +5,7 @@ import { RevertButton } from './SettingField.tsx';
 
 export default function AvatarRow(props: {
   src: string | null | undefined;
+  thumbnail: string | null | undefined;
   name: string;
   upload: (file: File) => Promise<unknown>;
   remove: () => Promise<unknown>;
@@ -32,7 +33,7 @@ export default function AvatarRow(props: {
   };
   return (
     <div class="avatar-row">
-      <Avatar src={props.src} name={props.name} />
+      <Avatar src={props.thumbnail} name={props.name} />
       <button onClick={() => input.click()}>Change avatar</button>
       <RevertButton changed={Boolean(props.src)} onRevert={() => void remove()} />
       <Show when={props.generate}>

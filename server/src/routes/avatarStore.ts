@@ -52,7 +52,7 @@ export function copyAvatarFiles(kind: AvatarKind, fromId: number, toId: number):
         join(AVATAR_DIR, `${kind}-${fromId}.${ext}`),
         join(AVATAR_DIR, `${kind}-${toId}.${ext}`),
       );
-      return `/avatars/${kind}-${toId}.${ext}?v=${Date.now()}`;
+      return `/avatars/${kind}-${toId}.${ext}?v=${randomUUID()}`;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
@@ -73,7 +73,7 @@ export function readAvatarFile(kind: AvatarKind, id: number): Buffer | null {
 }
 
 export function saveAvatar(kind: AvatarKind, id: number, data: Buffer): string {
-  // Card export embeds JSON in PNG; no transcoder is available.
+  // Preserve the original PNG for character-card export.
   if (!isPng(data)) throw new HttpError(415, 'avatar must be a PNG image');
   const filename = `${kind}-${id}.png`;
   const destination = join(AVATAR_DIR, filename);
@@ -104,5 +104,5 @@ export function saveAvatar(kind: AvatarKind, id: number, data: Buffer): string {
     }
     throw err;
   }
-  return `/avatars/${filename}?v=${Date.now()}`;
+  return `/avatars/${filename}?v=${randomUUID()}`;
 }

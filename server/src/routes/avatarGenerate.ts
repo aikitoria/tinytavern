@@ -1,3 +1,5 @@
+import type { MediaImageConfig } from '@tinytavern/shared';
+import { imageRenderConfiguration } from '../mediaRecipes.ts';
 import { characterChatName } from '@tinytavern/shared';
 import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { streamChatCompletion } from '../generation.ts';
@@ -34,20 +36,13 @@ function expandAvatarMacros(template: string, vars: Record<string, string>): str
   );
 }
 
-function serializeFields(fields: [string, string][]): string {
-  return fields
-    .filter(([, value]) => value.trim())
-    .map(([label, value]) => `${label}: ${value}`)
-    .join('\n');
-}
-
 async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
   const id = positiveId(ctx.params.id);
   const b = objectBody(ctx.body);
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt) throw new HttpError(400, 'prompt is required');
-  const context = typeof b.context === 'string' ? b.context.trim() : null;
-  if (b.context !== undefined && !context) throw new HttpError(400, 'context is required');
+  const context = typeof b.context === 'string' ? b.context.trim() : '';
+  if (!context) throw new HttpError(400, 'context is required');
   const table = kind === 'character' ? 'characters' : 'personas';
   const row = rowById(table, id);
   const key = `${kind}:${id}`;
@@ -79,21 +74,7 @@ async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
             firstmessage: '',
           };
     const system = expandAvatarMacros(prompt, vars);
-    const user = context
-      ? expandAvatarMacros(context, vars)
-      : serializeFields(
-          kind === 'character'
-            ? [
-                ['Name', row.name as string],
-                ['Avatar details', row.personality as string],
-                ['Scenario', row.scenario as string],
-                ['First message', row.first_message as string],
-              ]
-            : [
-                ['Name', row.name as string],
-                ['Description', row.description as string],
-              ],
-        );
+    const user = expandAvatarMacros(context, vars);
     if (!user.trim()) throw new HttpError(400, 'context must produce non-empty text');
     // SSE from here on — failures mid-stream go out as error events, not HTTP.
     await streamResponse(ctx.res, async (send, signal) => {
@@ -106,6 +87,7 @@ async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
         AVATAR_PROMPT_MAX_TOKENS,
         (d) => send({ d }),
         signal,
+        { onReasoning: (r) => send({ r }) },
       );
     });
   } finally {
@@ -127,7 +109,7 @@ async function renderAvatar(ctx: Ctx) {
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt) throw new HttpError(400, 'prompt is required');
   const jobId = typeof b.jobId === 'string' && b.jobId.trim() ? renderJobId(b.jobId.trim()) : '';
-  let image: { workflow: string; comfyUrl: string };
+  let image: MediaImageConfig;
   try {
     image = parseImageConfig(b.image);
   } catch (err) {
@@ -139,11 +121,11 @@ async function renderAvatar(ctx: Ctx) {
   };
   ctx.res.on('close', onClose);
   if (ctx.res.destroyed) abort.abort();
-  let result: { ext: string; data: Buffer };
+  let result: Awaited<ReturnType<typeof renderToBuffer>>;
   try {
     result = await renderToBuffer({
-      comfyUrl: image.comfyUrl,
-      workflow: image.workflow,
+      configuration: imageRenderConfiguration(image),
+      inputs: [],
       prompt,
       onProgress: jobId ? (value, max) => publishRenderProgress(jobId, value, max) : undefined,
       onPreview: jobId ? (preview) => publishRenderPreview(jobId, preview) : undefined,
@@ -159,6 +141,8 @@ async function renderAvatar(ctx: Ctx) {
     ctx.res.off('close', onClose);
     if (jobId) finishRenderProgress(jobId);
   }
+  // The response owns its buffer now; discard the temporary local preview before sending it.
+  result.release();
   ctx.res.writeHead(200, {
     'content-type': IMAGE_CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
   });

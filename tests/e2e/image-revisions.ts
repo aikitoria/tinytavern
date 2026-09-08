@@ -1,3 +1,4 @@
+import { imageConfig } from '../imageConfig.ts';
 import type { GalleryItem, Settings } from '@tinytavern/shared';
 import {
   BASE,
@@ -37,7 +38,7 @@ export async function testImageRevisions(
     `/api/messages/${imgRes.toolMessageId}/regenerate`,
     await branchBody(conv2.id, {
       instruction: 'Make the scene moonlit.',
-      image: { workflow: STEER_CURRENT_WORKFLOW, comfyUrl: MOCK_CONTROL },
+      image: imageConfig(STEER_CURRENT_WORKFLOW, MOCK_CONTROL),
     }),
   );
   const steeredImageFinal = await ws.waitFor(
@@ -63,8 +64,7 @@ export async function testImageRevisions(
   );
   assert(
     imageSteerSeen.completion?.lastMessageRole === 'user' &&
-      imageSteerSeen.completion.lastMessageContent?.includes('[IMAGE PROMPT REVISION TASK]') ===
-        true &&
+      imageSteerSeen.completion.lastMessageContent?.startsWith('[System Note]\n') === true &&
       imageSteerSeen.completion.lastMessageContent.includes('reference context only') &&
       imageSteerSeen.completion.lastMessageContent.includes('Do not continue the roleplay') &&
       imageSteerSeen.completion.lastMessageContent.includes('Do not modify anything else.') &&
@@ -149,6 +149,8 @@ export async function testImageRevisions(
     imageGeneration: {
       ...previousImages,
       promptRevisionTemplate: 'CHAT REVISION {{instruction}}\nKeep source: {{prompt}}',
+      promptRevisionContext: 'CUSTOM REVISION CONTEXT',
+      promptRevisionOriginal: 'CUSTOM SOURCE {{prompt}}',
     },
   });
   const insertedRevision = await req<{ assistantMessageId: number }>(
@@ -167,8 +169,19 @@ export async function testImageRevisions(
   };
   assert(
     configuredRevision.completion.messages.at(-1)?.content ===
-      `CHAT REVISION Make the scene warmer.\nKeep source: ${regenMsg.content.trim()}`,
+      `[System Note]\nCHAT REVISION Make the scene warmer.\nKeep source: ${regenMsg.content.trim()}`,
     'chat image revision expands its global Images setting',
+  );
+  assert(
+    configuredRevision.completion.messages.at(-2)?.content ===
+      `CUSTOM SOURCE ${regenMsg.content.trim()}`,
+    'chat image revision uses its saved original-message template',
+  );
+  assert(
+    configuredRevision.completion.messages.some(
+      (message) => message.content === '[System Note]\nCUSTOM REVISION CONTEXT',
+    ),
+    'chat image revision uses its saved context message',
   );
   assert(
     JSON.stringify(

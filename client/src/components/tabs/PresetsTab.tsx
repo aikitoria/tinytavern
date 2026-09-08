@@ -23,32 +23,37 @@ export default function PresetsTab() {
     duplicate: api.duplicatePreset,
     deletePrompt: 'Delete this preset?',
     initialId: () => state.settings.defaultPresetId,
+    emptySelection: 'new',
     activate: (id) => selectSettingsEntity('defaultPresetId', id),
   });
+
+  const readOnly = () => editor.selected()?.readOnly === true;
 
   return (
     <EntityEditorPane
       editor={editor}
+      transferType="presets"
+      readOnly={readOnly()}
       items={state.presets}
       itemLabel={(preset) => preset.name}
       newLabel="New preset"
       activeId={state.settings.defaultPresetId}
-      defaultOption={{
-        label: 'No default prompt',
-        description: 'Characters without their own prompt will leave the system-prompt slot empty.',
-      }}
     >
       <section class="settings-section">
         <h3>Basics</h3>
-        <SettingLabel field={nameEl}>Name</SettingLabel>
-        <input ref={nameEl.ref} placeholder="Creative writer" />
+        <SettingLabel field={readOnly() ? undefined : nameEl}>Name</SettingLabel>
+        <input readOnly={readOnly()} ref={nameEl.ref} placeholder="Creative writer" />
       </section>
       <section class="settings-section">
         <h3>System prompt</h3>
-        <SettingLabel field={contentEl}>
+        <SettingLabel field={readOnly() ? undefined : contentEl}>
           Instructions <MacroHelp />
         </SettingLabel>
-        <MacroTextarea ref={contentEl.ref} placeholder="You are {{char}}, …" />
+        <MacroTextarea
+          readOnly={readOnly()}
+          ref={contentEl.ref}
+          placeholder="You are {{char}}, …"
+        />
       </section>
     </EntityEditorPane>
   );

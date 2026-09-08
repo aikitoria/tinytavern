@@ -8,28 +8,73 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import { faCheck, faImage } from '@fortawesome/free-solid-svg-icons';
+import { faCheck, faImage, faPlay, faFilm } from '@fortawesome/free-solid-svg-icons';
 import type { GalleryItem } from '@tinytavern/shared';
 import { galleryRowAt, layoutGallery, visibleGalleryRows } from '../galleryModel.ts';
 import type { GalleryCell, GalleryLayout } from '../galleryModel.ts';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
+
+function GalleryVideoPreview(props: { url: string }) {
+  let player!: HTMLVideoElement;
+  const [playing, setPlaying] = createSignal(false);
+
+  onMount(() => {
+    player.muted = true;
+    void player.play().catch(() => {
+      // Leave the poster visible when playback is unavailable.
+    });
+  });
+  onCleanup(() => {
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+  });
+
+  return (
+    <video
+      ref={player}
+      class="gallery-video-preview"
+      classList={{ playing: playing() }}
+      src={props.url}
+      muted
+      loop
+      playsinline
+      preload="none"
+      aria-hidden="true"
+      onPlaying={() => setPlaying(true)}
+      onError={() => setPlaying(false)}
+    />
+  );
+}
 
 function GalleryTile(props: {
   cell: GalleryCell;
   count: number;
   selected: boolean;
   selecting: boolean;
-  disabled: boolean;
   tabStop: boolean;
+  preview: boolean;
+  onPointerEnter: (event: PointerEvent) => void;
+  onPointerLeave: () => void;
   onFocus: () => void;
   onClick: () => void;
+  onInspect?: () => void;
+  selectionNumber?: number;
 }) {
   const [failed, setFailed] = createSignal(false);
+  const video = () => props.cell.item.media?.kind === 'video';
+  const kind = () => (video() ? 'video' : 'image');
+  createEffect(() => {
+    props.cell.item.media?.thumbnail;
+    setFailed(false);
+  });
   return (
     <div
       class="gallery-tile"
       classList={{ selected: props.selected, selecting: props.selecting }}
       role="listitem"
+      onPointerEnter={props.onPointerEnter}
+      onPointerLeave={props.onPointerLeave}
       style={{ left: `${props.cell.left}px`, width: `${props.cell.width}px` }}
     >
       <button
@@ -37,17 +82,19 @@ function GalleryTile(props: {
         class="gallery-image-button"
         data-gallery-id={props.cell.item.id}
         tabIndex={props.tabStop ? 0 : -1}
-        disabled={props.disabled}
-        aria-label={`${props.selecting ? (props.selected ? 'Deselect' : 'Select') : 'View'} image ${props.cell.index + 1} of ${props.count}: ${props.cell.item.characterName}`}
+        aria-label={`${props.selecting ? (props.selected ? 'Deselect' : 'Select') : 'View'} ${kind()} ${props.cell.index + 1} of ${props.count}: ${props.cell.item.characterName}`}
         aria-pressed={props.selecting ? props.selected : undefined}
         title={props.cell.item.prompt.slice(0, 240)}
         onFocus={props.onFocus}
         onClick={props.onClick}
       >
-        <Show when={!failed()} fallback={<FontAwesomeIcon icon={faImage} size={24} />}>
+        <Show
+          when={!failed() && props.cell.item.media?.thumbnail}
+          fallback={<FontAwesomeIcon icon={video() ? faFilm : faImage} size={24} />}
+        >
           <img
-            src={props.cell.item.image}
-            alt={`Saved image for ${props.cell.item.characterName}`}
+            src={props.cell.item.media?.thumbnail!}
+            alt={`${video() ? 'Video preview' : 'Saved image'} for ${props.cell.item.characterName}`}
             width={props.cell.item.imageWidth ?? undefined}
             height={props.cell.item.imageHeight ?? undefined}
             loading="lazy"
@@ -55,10 +102,23 @@ function GalleryTile(props: {
             onError={() => setFailed(true)}
           />
         </Show>
+        <Show when={props.preview && video()}>
+          <GalleryVideoPreview url={props.cell.item.media!.url} />
+        </Show>
+        <Show when={video()}>
+          <span class="gallery-video-badge" title="Video" aria-hidden="true">
+            <FontAwesomeIcon icon={faPlay} size={18} />
+          </span>
+        </Show>
         <Show when={props.selecting}>
           <span class="gallery-selection-check" aria-hidden="true">
             <Show when={props.selected}>
-              <FontAwesomeIcon icon={faCheck} size={12} />
+              <Show
+                when={props.selectionNumber}
+                fallback={<FontAwesomeIcon icon={faCheck} size={12} />}
+              >
+                {props.selectionNumber}
+              </Show>
             </Show>
           </span>
         </Show>
@@ -66,6 +126,15 @@ function GalleryTile(props: {
           {props.cell.item.characterName}
         </span>
       </button>
+      <Show when={props.onInspect}>
+        <button
+          class="gallery-inspect"
+          onClick={props.onInspect}
+          aria-label={`View ${kind()} details`}
+        >
+          Details
+        </button>
+      </Show>
     </div>
   );
 }
@@ -75,16 +144,19 @@ export default function GalleryGrid(props: {
   targetHeight: number;
   resetKey: string;
   hidden: boolean;
+  active?: boolean;
   selecting: boolean;
   selectedIds: ReadonlySet<number>;
-  blockedIds: ReadonlySet<number>;
   onOpen: (item: GalleryItem) => void;
   onToggle: (id: number) => void;
+  onInspect?: (item: GalleryItem) => void;
+  selectionOrder?: number[];
 }) {
   let viewport!: HTMLDivElement;
   let stage!: HTMLDivElement;
   let frame = 0;
   let focusFrame = 0;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
   let returnTop = 0;
   let returnId: number | null = null;
   let previous: GalleryLayout | undefined;
@@ -105,6 +177,12 @@ export default function GalleryGrid(props: {
   };
   const [width, setWidth] = createSignal(0);
   const [view, setView] = createSignal({ top: 0, height: 600 });
+  const [previewId, setPreviewId] = createSignal<number | null>(null);
+  const stopPreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
+    setPreviewId(null);
+  };
   const [focusedId, setFocusedId] = createSignal<number | null>(null);
   const layout = createMemo(() => layoutGallery(props.items, width(), props.targetHeight));
   const range = createMemo(
@@ -131,6 +209,7 @@ export default function GalleryGrid(props: {
     }
   };
   const onScroll = () => {
+    stopPreview();
     if (!frame) frame = requestAnimationFrame(updateViewport);
   };
   const focusButton = (id: number | null) => {
@@ -139,6 +218,11 @@ export default function GalleryGrid(props: {
     (button ?? viewport).focus({ preventScroll: true });
   };
   onMount(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) stopPreview();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
     const mobile = window.matchMedia('(max-width: 767px)');
     const measure = () => {
       const nextHost = mobile.matches
@@ -169,6 +253,11 @@ export default function GalleryGrid(props: {
   onCleanup(() => {
     cancelAnimationFrame(frame);
     cancelAnimationFrame(focusFrame);
+    clearTimeout(previewTimer);
+  });
+
+  createEffect(() => {
+    if (props.hidden || props.active === false) stopPreview();
   });
 
   createEffect(() => {
@@ -261,14 +350,14 @@ export default function GalleryGrid(props: {
       class="gallery-browser-scroll"
       classList={{ hidden: props.hidden }}
       tabIndex={-1}
-      aria-label="Saved images; use arrow keys to browse"
+      aria-label="Saved images and videos; use arrow keys to browse"
       onKeyDown={onKeyDown}
     >
       <div
         ref={stage}
         class="gallery-rows"
         role="list"
-        aria-label="Saved images"
+        aria-label="Saved images and videos"
         style={{ height: `${layout().height}px` }}
       >
         <For each={renderedRows()}>
@@ -281,18 +370,49 @@ export default function GalleryGrid(props: {
               <For each={row.cells}>
                 {(cell) => (
                   <GalleryTile
-                    cell={cell}
-                    count={props.items.length}
-                    selected={
-                      props.selectedIds.has(cell.item.id) && !props.blockedIds.has(cell.item.id)
+                    onInspect={
+                      props.onInspect
+                        ? () => {
+                            returnTop = scrollTop();
+                            returnId = cell.item.id;
+                            stopPreview();
+                            props.onInspect!(cell.item);
+                          }
+                        : undefined
                     }
+                    selectionNumber={
+                      props.selectionOrder?.includes(cell.item.id)
+                        ? props.selectionOrder.indexOf(cell.item.id) + 1
+                        : undefined
+                    }
+                    cell={cell}
+                    preview={previewId() === cell.item.id}
+                    onPointerEnter={(event) => {
+                      stopPreview();
+                      if (
+                        cell.item.media?.kind === 'video' &&
+                        event.pointerType !== 'touch' &&
+                        event.buttons === 0 &&
+                        !document.hidden &&
+                        !props.hidden &&
+                        props.active !== false
+                      ) {
+                        previewTimer = setTimeout(() => {
+                          previewTimer = undefined;
+                          setPreviewId(cell.item.id);
+                        }, 500);
+                      }
+                    }}
+                    onPointerLeave={stopPreview}
+                    count={props.items.length}
+                    selected={props.selectedIds.has(cell.item.id)}
                     selecting={props.selecting}
-                    disabled={props.selecting && props.blockedIds.has(cell.item.id)}
                     tabStop={
                       focusedId() === cell.item.id || (focusedId() == null && cell.index === 0)
                     }
                     onFocus={() => setFocusedId(cell.item.id)}
                     onClick={() => {
+                      stopPreview();
                       if (props.selecting) props.onToggle(cell.item.id);
                       else {
                         returnTop = scrollTop();

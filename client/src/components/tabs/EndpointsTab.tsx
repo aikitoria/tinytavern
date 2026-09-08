@@ -80,6 +80,7 @@ export default function EndpointsTab() {
     duplicate: api.duplicateEndpoint,
     deletePrompt: 'Delete this endpoint?',
     initialId: () => state.settings.activeEndpointId,
+    emptySelection: 'new',
     activate: (id) => selectSettingsEntity('activeEndpointId', id),
   });
 
@@ -101,15 +102,11 @@ export default function EndpointsTab() {
   return (
     <EntityEditorPane
       editor={editor}
+      transferType="endpoints"
       items={state.endpoints}
       itemLabel={(ep) => ep.name}
       newLabel="New endpoint"
       activeId={state.settings.activeEndpointId}
-      defaultOption={{
-        label: 'No active endpoint',
-        description: 'Select or create an endpoint before starting a generation.',
-      }}
-      extraActions={<button onClick={() => void fetchModels()}>Fetch models</button>}
     >
       <section class="settings-section">
         <h3>Connection</h3>
@@ -146,92 +143,95 @@ export default function EndpointsTab() {
           Model
         </SettingLabel>
         <p class="hint">Optional; leave blank to use the endpoint default.</p>
-        <Show
-          when={models().length > 0}
-          fallback={
-            <input
+        <div class="key-row">
+          <Show
+            when={models().length > 0}
+            fallback={
+              <input
+                value={model()}
+                onInput={(e) => setModel(e.currentTarget.value)}
+                placeholder="model id (blank uses endpoint default)"
+              />
+            }
+          >
+            <Select
               value={model()}
-              onInput={(e) => setModel(e.currentTarget.value)}
-              placeholder="model id (blank uses endpoint default)"
+              ariaLabel="Endpoint model"
+              onChange={setModel}
+              options={[
+                { value: '', label: '— endpoint default —' },
+                ...(model() && !models().includes(model())
+                  ? [{ value: model(), label: `${model()} (custom)` }]
+                  : []),
+                ...models().map((m) => ({ value: m, label: m })),
+              ]}
             />
-          }
-        >
-          <Select
-            value={model()}
-            ariaLabel="Endpoint model"
-            onChange={setModel}
-            options={[
-              { value: '', label: '— endpoint default —' },
-              ...(model() && !models().includes(model())
-                ? [{ value: model(), label: `${model()} (custom)` }]
-                : []),
-              ...models().map((m) => ({ value: m, label: m })),
-            ]}
-          />
-        </Show>
+          </Show>
+          <Show when={typeof editor.selectedId() === 'number'}>
+            <button onClick={() => void fetchModels()}>Fetch models</button>
+          </Show>
+        </div>
       </section>
 
-      <details class="settings-section settings-disclosure">
-        <summary>Advanced generation</summary>
-        <div class="settings-section-body">
-          <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
-          <div class="param-grid">
-            <div>
-              <SettingLabel field={tempEl}>Temperature</SettingLabel>
-              <input ref={tempEl.ref} type="number" step="0.05" min="0" max="2" />
-            </div>
-            <div>
-              <SettingLabel field={topPEl}>Top P</SettingLabel>
-              <input ref={topPEl.ref} type="number" step="0.05" min="0" max="1" />
-            </div>
-            <div>
-              <SettingLabel field={minPEl}>Min P</SettingLabel>
-              <input ref={minPEl.ref} type="number" step="0.01" min="0" max="1" />
-            </div>
-            <div>
-              <SettingLabel field={maxTokEl}>Max tokens</SettingLabel>
-              <input ref={maxTokEl.ref} type="number" step="1" min="1" />
-            </div>
-            <div>
-              <SettingLabel field={freqEl}>Freq. penalty</SettingLabel>
-              <input ref={freqEl.ref} type="number" step="0.05" min="-2" max="2" />
-            </div>
-            <div>
-              <SettingLabel field={presEl}>Pres. penalty</SettingLabel>
-              <input ref={presEl.ref} type="number" step="0.05" min="-2" max="2" />
-            </div>
-            <div>
-              <SettingLabel field={effortEl}>Reasoning effort</SettingLabel>
-              <Select
-                ref={effortEl.ref}
-                ariaLabel="Reasoning effort"
-                options={[
-                  { value: '', label: '— omit —' },
-                  { value: 'none', label: 'none' },
-                  { value: 'minimal', label: 'minimal' },
-                  { value: 'low', label: 'low' },
-                  { value: 'medium', label: 'medium' },
-                  { value: 'high', label: 'high' },
-                  { value: 'max', label: 'max' },
-                ]}
-              />
-            </div>
+      <section class="settings-section">
+        <h3>Advanced generation</h3>
+        <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
+        <div class="param-grid field-group" role="group" aria-label="Sampling parameters">
+          <div>
+            <SettingLabel field={tempEl}>Temperature</SettingLabel>
+            <input ref={tempEl.ref} type="number" step="0.05" min="0" max="2" />
           </div>
-
-          <SettingLabel field={prefillEl}>Prefill support</SettingLabel>
-          <p class="hint">Used by resume, speaker-name, and template prefills.</p>
-          <Select
-            ref={prefillEl.ref}
-            ariaLabel="Prefill support"
-            options={[
-              { value: 'disabled', label: 'Disabled (do not send prefills)' },
-              { value: 'none', label: 'Generic (trailing assistant message)' },
-              { value: 'vllm', label: 'vLLM (continue_final_message)' },
-              { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
-            ]}
-          />
+          <div>
+            <SettingLabel field={topPEl}>Top P</SettingLabel>
+            <input ref={topPEl.ref} type="number" step="0.05" min="0" max="1" />
+          </div>
+          <div>
+            <SettingLabel field={minPEl}>Min P</SettingLabel>
+            <input ref={minPEl.ref} type="number" step="0.01" min="0" max="1" />
+          </div>
+          <div>
+            <SettingLabel field={maxTokEl}>Max tokens</SettingLabel>
+            <input ref={maxTokEl.ref} type="number" step="1" min="1" />
+          </div>
+          <div>
+            <SettingLabel field={freqEl}>Freq. penalty</SettingLabel>
+            <input ref={freqEl.ref} type="number" step="0.05" min="-2" max="2" />
+          </div>
+          <div>
+            <SettingLabel field={presEl}>Pres. penalty</SettingLabel>
+            <input ref={presEl.ref} type="number" step="0.05" min="-2" max="2" />
+          </div>
+          <div>
+            <SettingLabel field={effortEl}>Reasoning effort</SettingLabel>
+            <Select
+              ref={effortEl.ref}
+              ariaLabel="Reasoning effort"
+              options={[
+                { value: '', label: '— omit —' },
+                { value: 'none', label: 'none' },
+                { value: 'minimal', label: 'minimal' },
+                { value: 'low', label: 'low' },
+                { value: 'medium', label: 'medium' },
+                { value: 'high', label: 'high' },
+                { value: 'max', label: 'max' },
+              ]}
+            />
+          </div>
         </div>
-      </details>
+
+        <SettingLabel field={prefillEl}>Prefill support</SettingLabel>
+        <p class="hint">Used by resume, speaker-name, and template prefills.</p>
+        <Select
+          ref={prefillEl.ref}
+          ariaLabel="Prefill support"
+          options={[
+            { value: 'disabled', label: 'Disabled (do not send prefills)' },
+            { value: 'none', label: 'Generic (trailing assistant message)' },
+            { value: 'vllm', label: 'vLLM (continue_final_message)' },
+            { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
+          ]}
+        />
+      </section>
     </EntityEditorPane>
   );
 }

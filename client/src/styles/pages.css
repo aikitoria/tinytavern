@@ -63,7 +63,45 @@
   background: transparent;
 }
 
+/* Shared editor sidebar beside a gallery or media preview. */
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: var(--detail-panel-width, 350px);
+  flex: none;
+  min-height: 0;
+  padding: var(--space-4);
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.detail-panel > * {
+  flex-shrink: 0;
+}
+
+.detail-panel textarea {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+}
+
+.detail-panel .hint,
+.detail-panel .notice {
+  margin: 0;
+  font-size: 12px;
+}
+
 @media (max-width: 767px) {
+  .detail-panel {
+    width: 100%;
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+
   /* Mobile pages scroll as a whole, including their header. */
   .modal.fullscreen-page {
     display: block;

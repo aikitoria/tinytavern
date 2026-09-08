@@ -1,9 +1,17 @@
 import { ImageGenerationSettingsPage } from '../../images/imageGeneration.tsx';
 
-export default function ImageGenerationTab() {
+export function ChatImagePromptsTab() {
   return (
     <div class="form">
-      <ImageGenerationSettingsPage />
+      <ImageGenerationSettingsPage mode="chat" />
+    </div>
+  );
+}
+
+export function AvatarPromptsTab() {
+  return (
+    <div class="form">
+      <ImageGenerationSettingsPage mode="avatar" />
     </div>
   );
 }

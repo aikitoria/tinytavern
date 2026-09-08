@@ -1,3 +1,4 @@
+import { readPageLocation, writePageLocation } from '../state/pageLocation.ts';
 import { faCheck, faChevronDown, faGear, faPen } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { For, Show, createSignal } from 'solid-js';
@@ -92,6 +93,7 @@ export default function Header() {
     setViewOpen(false);
     closeSidebar();
     setState('viewMode', mode);
+    writePageLocation({ ...readPageLocation(), viewMode: mode === 'chat' ? undefined : mode });
   };
   const activeView = () => VIEWS.find((view) => view.mode === state.viewMode) ?? VIEWS[0];
 

@@ -56,6 +56,7 @@ for (const mode of ['vllm', 'deepseek', 'none', 'disabled'] as const) {
       ...(mode === 'vllm' ? { continue_final_message: true, add_generation_prompt: false } : {}),
     },
     messagePrefill: mode === 'disabled' ? '' : 'A scene ',
+    reasoningPrefill: mode === 'disabled' ? '' : 'Consider the light',
   });
 }
 assert.deepEqual(source, original, 'Preparing continuation must not mutate snapshotted messages');
@@ -63,6 +64,7 @@ assert.deepEqual(prepareStandaloneCompletion(endpoint, source, 1024), {
   messages: source,
   parameters: { max_tokens: 1024 },
   messagePrefill: '',
+  reasoningPrefill: '',
 });
 assert.deepEqual(
   prepareStandaloneCompletion({ ...endpoint, genParams: {} }, source, 1024, {
@@ -73,6 +75,7 @@ assert.deepEqual(
     messages: [...source, { role: 'assistant', content: '', reasoning_content: 'Think' }],
     parameters: { max_tokens: 1024, continue_final_message: true, add_generation_prompt: false },
     messagePrefill: '',
+    reasoningPrefill: 'Think',
   },
 );
 console.log('Standalone completion configuration regressions passed');

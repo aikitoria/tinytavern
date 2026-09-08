@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mock } from 'node:test';
 
 type Listener = (event: { persisted?: boolean }) => void;
 const documentListeners = new Map<string, Listener[]>();
@@ -80,9 +81,12 @@ const dispatch = (listeners: Map<string, Listener[]>, type: string, event = {}) 
 };
 
 const statuses: boolean[] = [];
+let resyncs = 0;
 configureWs({
   onEvent: () => {},
-  onOpen: () => {},
+  onOpen: () => {
+    resyncs++;
+  },
   onStatus: (connected) => statuses.push(connected),
   onUnauthorized: () => {},
 });
@@ -132,4 +136,47 @@ await delay(80);
 assert.equal(FakeWebSocket.instances.length, 3);
 assert.equal(statuses.at(-1), false);
 
+mock.timers.enable({ apis: ['setTimeout'] });
+try {
+  subscribe(null);
+  startWs();
+  const initial = FakeWebSocket.instances.at(-1)!;
+  initial.open();
+  const before = resyncs;
+  dispatch(windowListeners, 'focus');
+  dispatch(documentListeners, 'resume');
+  mock.timers.tick(50);
+  const resumed = FakeWebSocket.instances.at(-1)!;
+  assert.notEqual(
+    resumed,
+    initial,
+    'Gallery/jobs resume replaces a stale socket without a chat subscription',
+  );
+  resumed.open();
+  assert.equal(resyncs, before + 1, 'Every page triggers the full data resync');
+  assert.equal(resumed.sent.length, 0);
+  fakeDocument.visibilityState = 'hidden';
+  dispatch(windowListeners, 'focus');
+  mock.timers.tick(50);
+  assert.equal(FakeWebSocket.instances.at(-1), resumed);
+  fakeDocument.visibilityState = 'visible';
+  dispatch(documentListeners, 'resume');
+  mock.timers.tick(50);
+  const stuck = FakeWebSocket.instances.at(-1)!;
+  mock.timers.tick(10_000);
+  assert.equal(
+    stuck.readyState,
+    FakeWebSocket.CLOSED,
+    'A stalled handshake does not hang indefinitely',
+  );
+  mock.timers.tick(500);
+  const replacement = FakeWebSocket.instances.at(-1)!;
+  assert.notEqual(replacement, stuck);
+  replacement.open();
+  stuck.onclose?.({ code: 1000 });
+  assert.equal(statuses.at(-1), true, 'Late close callbacks cannot disconnect the replacement');
+} finally {
+  stopWs();
+  mock.timers.reset();
+}
 console.log('WebSocket lifecycle tests passed');

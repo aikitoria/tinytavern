@@ -1,3 +1,4 @@
+import { imageConfig } from '../imageConfig.ts';
 import {
   MOCK_CONTROL,
   assert,
@@ -32,7 +33,7 @@ export async function testGenerationFailures(
       label: 'Image prompt',
       expectedActiveLeafId: failSnap.activeLeafId,
       expectedMutationRevision: failSnap.mutationRevision,
-      image: { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL },
+      image: imageConfig(COMFY_WORKFLOW, MOCK_CONTROL),
     },
   );
   await ws.waitFor(
@@ -54,7 +55,7 @@ export async function testGenerationFailures(
     failedMsg?.imagePending === false &&
       failedMsg.images.length === 0 &&
       failedMsg.status === 'done' &&
-      failedMsg.genMeta?.imageError?.includes('rejected the workflow (500)') === true,
+      failedMsg.genMeta?.imageError?.includes('rejected the workflow (400)') === true,
     'a rejected submission clears imagePending and surfaces genMeta.imageError',
   );
 
@@ -113,7 +114,7 @@ export async function testGenerationFailures(
       label: 'Image prompt',
       expectedActiveLeafId: stopSnap.activeLeafId,
       expectedMutationRevision: stopSnap.mutationRevision,
-      image: { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL },
+      image: imageConfig(COMFY_WORKFLOW, MOCK_CONTROL),
     },
   );
   await stopGeneration(conv2.id, stopRes.toolMessageId);
@@ -134,7 +135,7 @@ export async function testGenerationFailures(
   await req(
     'POST',
     `/api/messages/${renderSend.assistantMessageId}/render-image`,
-    await branchBody(conv2.id, { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL }),
+    await branchBody(conv2.id, { ...imageConfig(COMFY_WORKFLOW, MOCK_CONTROL) }),
   );
   await expectStatus(
     'POST',

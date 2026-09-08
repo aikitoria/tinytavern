@@ -1,15 +1,33 @@
-import { randomUUID } from 'node:crypto';
+import { mediaCharacters } from '../mediaCharacters.ts';
+import { getSettings } from '../settingsStore.ts';
+import { getMediaRecipe, imageRenderConfiguration } from '../mediaRecipes.ts';
 import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { GenerationKind, MessageStatus, Role } from '@tinytavern/shared';
-import { IMAGES_DIR, stmt, toConversation, toMessage, transaction } from '../db.ts';
+import {
+  IMAGES_DIR,
+  mediaAssetForPath,
+  stmt,
+  toConversation,
+  toMessage,
+  transaction,
+} from '../db.ts';
 import { invalidate } from '../events.ts';
 import { mergeLiveBuffers } from '../generation.ts';
-import { deleteImageFiles, rasterImageFormat, saveImage } from '../images.ts';
+import { deleteImageFiles, rasterImageFormat } from '../images.ts';
 import { HttpError, route } from '../router.ts';
 import { getPathToMessage } from '../tree.ts';
 import { positiveId } from '../validation.ts';
 import { parseImageConfig } from '../comfy.ts';
+import { mediaPromptBuffers } from '../mediaJobStore.ts';
+import {
+  exportImageRecipes,
+  importRecipeImages,
+  parseImageRecipes,
+  validateImageRecipeOwnership,
+  type DecodedTransferImage,
+  type TransferImageRecipe,
+} from '../conversationImageRecipes.ts';
 
 const FORMAT = 'tinytavern-conversation';
 const VERSION = 1;
@@ -40,8 +58,10 @@ interface TransferConversation {
 
 interface TransferAsset {
   id: string;
+  characters?: string[];
   mime: 'image/png' | 'image/jpeg' | 'image/webp';
   dataBase64: string;
+  recipeId?: string;
 }
 
 interface TransferMessage {
@@ -58,7 +78,7 @@ interface TransferMessage {
   generationKind: GenerationKind;
   imageAssetIds: string[];
   activeImage: number;
-  imageRender: { workflow: string; comfyUrl: string } | null;
+  renderRecipeId: string | null;
   createdAt: number;
 }
 
@@ -69,6 +89,7 @@ export interface PortableConversationV1 {
   conversation: TransferConversation;
   messages: TransferMessage[];
   assets: TransferAsset[];
+  recipes?: TransferImageRecipe[];
 }
 
 interface MessageRow {
@@ -86,7 +107,7 @@ interface MessageRow {
   generation_kind: GenerationKind;
   images_json: string;
   active_image: number;
-  image_render_json: string | null;
+  render_recipe_id: string | null;
 }
 
 function object(value: unknown, label: string): JsonObject {
@@ -180,40 +201,55 @@ export function exportPortableConversation(conversationId: number): PortableConv
   const assets: TransferAsset[] = [];
   const assetByPath = new Map<string, string>();
   let totalImageBytes = 0;
-  const messages = rows.map((row): TransferMessage => {
-    const imageAssetIds = (JSON.parse(row.images_json) as string[]).map((path) => {
-      const existing = assetByPath.get(path);
-      if (existing) return existing;
-      const image = exportImage(path);
-      if (assets.length >= MAX_ASSETS) {
-        throw new HttpError(409, `conversation has more than ${MAX_ASSETS} image assets`);
-      }
-      totalImageBytes += image.data.length;
-      if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
-        throw new HttpError(409, 'conversation image assets are too large to export');
-      }
-      const id = `image-${assets.length + 1}`;
-      assetByPath.set(path, id);
-      assets.push({ id, mime: image.mime, dataBase64: image.data.toString('base64') });
-      return id;
-    });
-    let imageRender: TransferMessage['imageRender'] = null;
-    if (row.image_render_json != null) {
-      try {
-        imageRender = parseImageConfig(JSON.parse(row.image_render_json));
-      } catch (err) {
-        throw new HttpError(
-          409,
-          `message ${row.id} has invalid image render configuration: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+  function addImage(path: string): string {
+    const existing = assetByPath.get(path);
+    if (existing) {
+      return existing;
     }
+    const image = exportImage(path);
+    if (assets.length >= MAX_ASSETS) {
+      throw new HttpError(409, `conversation has more than ${MAX_ASSETS} image assets`);
+    }
+    totalImageBytes += image.data.length;
+    if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+      throw new HttpError(409, 'conversation image assets are too large to export');
+    }
+    const id = `image-${assets.length + 1}`;
+    assetByPath.set(path, id);
+    const asset = mediaAssetForPath(path)!;
+    assets.push({
+      id,
+      mime: image.mime,
+      dataBase64: image.data.toString('base64'),
+      characters: mediaCharacters(asset.id).map((character) => character.name),
+    });
+    return id;
+  }
+  const messages = rows.map((row): TransferMessage => {
+    const paths = JSON.parse(row.images_json) as string[];
+    const imageAssetIds: string[] = [];
+    let activeImage = 0;
+    for (const [index, path] of paths.entries()) {
+      // Portable JSON carries raster images only. Keep video prompts and tree nodes.
+      if (extname(path).toLowerCase() === '.webm' || mediaAssetForPath(path)?.kind === 'video') {
+        continue;
+      }
+      if (index <= row.active_image) {
+        activeImage = imageAssetIds.length;
+      }
+      imageAssetIds.push(addImage(path));
+    }
+    const renderRecipeId =
+      row.render_recipe_id &&
+      !getMediaRecipe(row.render_recipe_id).configuration.workflow.operation.startsWith('video')
+        ? row.render_recipe_id
+        : null;
     const current = live.get(row.id);
     return {
       id: row.id,
       parentId: row.parent_id,
       role: row.role,
-      content: current?.content ?? row.content,
+      content: mediaPromptBuffers.get(row.id)?.prompt ?? current?.content ?? row.content,
       reasoning: current?.reasoning ?? row.reasoning,
       name: row.name,
       status: row.status,
@@ -222,11 +258,26 @@ export function exportPortableConversation(conversationId: number): PortableConv
       genMeta: parseJsonObject(row.gen_meta_json, `message ${row.id} genMeta`),
       generationKind: row.generation_kind,
       imageAssetIds,
-      activeImage: row.active_image,
-      imageRender,
+      activeImage,
+      renderRecipeId,
       createdAt: row.created_at,
     };
   });
+
+  const { recipes, assetRecipes, recipeIds } = exportImageRecipes(
+    assetByPath,
+    addImage,
+    messages.flatMap((message) => (message.renderRecipeId ? [message.renderRecipeId] : [])),
+  );
+  for (const message of messages) {
+    if (message.renderRecipeId) message.renderRecipeId = recipeIds.get(message.renderRecipeId)!;
+  }
+  for (const asset of assets) {
+    const recipeId = assetRecipes.get(asset.id);
+    if (recipeId) {
+      asset.recipeId = recipeId;
+    }
+  }
 
   return {
     format: FORMAT,
@@ -245,6 +296,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
     },
     messages,
     assets,
+    recipes,
   };
 }
 
@@ -272,7 +324,8 @@ function decodeBase64(value: unknown, label: string): Buffer {
 function parsePortableConversation(raw: unknown): {
   conversation: TransferConversation;
   messages: TransferMessage[];
-  assets: Map<string, { data: Buffer; ext: string }>;
+  assets: Map<string, DecodedTransferImage>;
+  recipes: Map<string, TransferImageRecipe>;
 } {
   const root = object(raw, 'import');
   if (root.format !== FORMAT) throw new HttpError(400, `format must be ${FORMAT}`);
@@ -302,7 +355,7 @@ function parsePortableConversation(raw: unknown): {
 
   if (!Array.isArray(root.assets)) throw new HttpError(400, 'assets must be an array');
   if (root.assets.length > MAX_ASSETS) throw new HttpError(400, 'too many image assets');
-  const assets = new Map<string, { data: Buffer; ext: string }>();
+  const assets = new Map<string, DecodedTransferImage>();
   let totalImageBytes = 0;
   for (let i = 0; i < root.assets.length; i++) {
     const asset = object(root.assets[i], `assets[${i}]`);
@@ -318,7 +371,17 @@ function parsePortableConversation(raw: unknown): {
     if (asset.mime !== detected.mime) {
       throw new HttpError(400, `assets[${i}].mime does not match its image bytes`);
     }
-    assets.set(id, { data, ext: detected.ext });
+    const characterNames = asset.characters ?? [];
+    if (!Array.isArray(characterNames) || characterNames.some((name) => typeof name !== 'string')) {
+      throw new HttpError(400, 'Media characters must be a list of names');
+    }
+    assets.set(id, {
+      characterNames,
+      data,
+      ext: detected.ext,
+      recipeId:
+        asset.recipeId == null ? null : string(asset.recipeId, `assets[${i}].recipeId`, 200),
+    });
   }
 
   if (!Array.isArray(root.messages)) throw new HttpError(400, 'messages must be an array');
@@ -328,6 +391,7 @@ function parsePortableConversation(raw: unknown): {
   const roles = new Set<Role>(['user', 'assistant', 'system', 'tool']);
   const statuses = new Set<MessageStatus>(['done', 'streaming', 'error', 'stopped']);
   const generationKinds = new Set<GenerationKind>(['normal', 'speculative']);
+  const recipes = parseImageRecipes(root.recipes);
   const messages = root.messages.map((rawMessage, i): TransferMessage => {
     const source = object(rawMessage, `messages[${i}]`);
     const id = positiveInteger(source.id, `messages[${i}].id`);
@@ -361,16 +425,31 @@ function parsePortableConversation(raw: unknown): {
     }
     let genMeta: JsonObject | null = null;
     if (source.genMeta != null) genMeta = object(source.genMeta, `messages[${i}].genMeta`);
-    let imageRender: TransferMessage['imageRender'] = null;
-    if (source.imageRender != null) {
-      try {
-        imageRender = parseImageConfig(source.imageRender);
-      } catch (err) {
-        throw new HttpError(
-          400,
-          `messages[${i}].imageRender is invalid: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+    let renderRecipeId = nullableString(source.renderRecipeId, `messages[${i}].renderRecipeId`);
+    if (!renderRecipeId && source.imageRender != null) {
+      const imported = object(source.imageRender, `messages[${i}].imageRender`);
+      const workflow = {
+        id: `imported-message-${id}`,
+        name: 'Imported image workflow',
+        operation: 'image' as const,
+        referenceCount: 0 as const,
+        json: string(imported.workflow, 'imageRender.workflow'),
+        galleryPromptPresetId: null,
+        chatPromptPresetId: null,
+      };
+      const configuration = imageRenderConfiguration(
+        parseImageConfig({ workflow, comfyUrl: getSettings().mediaRendering.comfyUrl }),
+      );
+      renderRecipeId = `imported-message-${id}`;
+      if (recipes.has(renderRecipeId))
+        throw new HttpError(400, 'Duplicate imported message recipe');
+      recipes.set(renderRecipeId, {
+        id: renderRecipeId,
+        prompt: string(source.content, `messages[${i}].content`),
+        instruction: '',
+        workflow: configuration.workflow,
+        inputs: [],
+      });
     }
     return {
       id,
@@ -386,12 +465,16 @@ function parsePortableConversation(raw: unknown): {
       generationKind: source.generationKind as GenerationKind,
       imageAssetIds,
       activeImage: activeImage as number,
-      imageRender,
+      renderRecipeId,
       createdAt: timestamp(source.createdAt, `messages[${i}].createdAt`),
     };
   });
-  if (usedAssets.size !== assets.size)
-    throw new HttpError(400, 'export contains unused image assets');
+  validateImageRecipeOwnership(
+    assets,
+    recipes,
+    usedAssets,
+    messages.flatMap((message) => (message.renderRecipeId ? [message.renderRecipeId] : [])),
+  );
 
   const byId = new Map(messages.map((message) => [message.id, message]));
   for (const message of messages) {
@@ -439,7 +522,7 @@ function parsePortableConversation(raw: unknown): {
       childId = parent.id;
     }
   }
-  return { conversation, messages, assets };
+  return { conversation, messages, assets, recipes };
 }
 
 function resolveReference(
@@ -462,6 +545,11 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
   const writtenImages: string[] = [];
   try {
     const newConversationId = transaction(() => {
+      const { imagePath, recipeIds } = importRecipeImages(
+        parsed.assets,
+        parsed.recipes,
+        writtenImages,
+      );
       const conv = parsed.conversation;
       const result = stmt(
         `INSERT INTO conversations
@@ -481,17 +569,12 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
       const conversationId = Number(result.lastInsertRowid);
       const idMap = new Map<number, number>();
       for (const message of parsed.messages) {
-        const images = message.imageAssetIds.map((assetId) => {
-          const asset = parsed.assets.get(assetId)!;
-          const path = saveImage(`msg-import-${randomUUID()}${asset.ext}`, asset.data);
-          writtenImages.push(path);
-          return path;
-        });
+        const images = message.imageAssetIds.map(imagePath);
         const inserted = stmt(
           `INSERT INTO messages
              (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
               model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
-              image_pending, image_render_json)
+              image_pending, render_recipe_id)
            VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
         ).run(
           conversationId,
@@ -506,7 +589,7 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
           message.generationKind,
           JSON.stringify(images),
           message.activeImage,
-          message.imageRender == null ? null : JSON.stringify(message.imageRender),
+          message.renderRecipeId ? recipeIds.get(message.renderRecipeId)! : null,
         );
         idMap.set(message.id, Number(inserted.lastInsertRowid));
       }

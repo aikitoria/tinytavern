@@ -1,5 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { registerUiBack } from '../state/uiBack.ts';
 
 const DEFAULT_GAP = 4;
 const DEFAULT_GUTTER = 8;
@@ -114,7 +115,7 @@ export default function DropdownSurface(props: {
     surface
       ? [
           ...surface.querySelectorAll<HTMLElement>(
-            '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
+            '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled])',
           ),
         ].filter((element) => element.getClientRects().length > 0)
       : [];
@@ -127,7 +128,7 @@ export default function DropdownSurface(props: {
 
   const focusInitialItem = () => {
     const selected = surface?.querySelector<HTMLElement>(
-      '[role="menuitemradio"][aria-checked="true"], [role="menuitem"][aria-current="true"]',
+      '[role="menuitemradio"][aria-checked="true"], [role="menuitemcheckbox"][aria-checked="true"], [role="menuitem"][aria-current="true"]',
     );
     if (selected && selected.getClientRects().length > 0) {
       selected.focus({ preventScroll: true });
@@ -167,12 +168,17 @@ export default function DropdownSurface(props: {
     }
   };
 
+  const closeAndFocus = () => {
+    const focusTarget = props.focusTarget?.() ?? props.anchor();
+    props.onClose();
+    focusTarget?.focus({ preventScroll: true });
+  };
+
   const onDocumentKeyDown = (event: KeyboardEvent) => {
     if (!props.open || event.key !== 'Escape') return;
     event.preventDefault();
     event.stopPropagation();
-    props.onClose();
-    (props.focusTarget?.() ?? props.anchor())?.focus({ preventScroll: true });
+    closeAndFocus();
   };
 
   const positionNewSurface = () => {
@@ -211,6 +217,7 @@ export default function DropdownSurface(props: {
         <div
           ref={(element) => {
             surface = element;
+            registerUiBack(element, closeAndFocus);
             props.ref?.(element);
             positionNewSurface();
           }}

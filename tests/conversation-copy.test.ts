@@ -1,3 +1,4 @@
+import { imageConfig } from './imageConfig.ts';
 import assert from 'node:assert/strict';
 import { basename, join } from 'node:path';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -9,6 +10,7 @@ const { IMAGES_DIR, stmt, toConversation, toMessage } = await import('../server/
 const { saveImage, deleteImageFiles } = await import('../server/src/images.ts');
 const { copyConversation, copyMessageImages, insertCopiedMessage } =
   await import('../server/src/routes/conversationCopies.ts');
+const { createImageRecipe } = await import('../server/src/mediaRecipes.ts');
 const { makePlaceholderPng } = await import('../server/src/pngCard.ts');
 
 const png = makePlaceholderPng();
@@ -27,11 +29,15 @@ const id = Number(
 );
 const messageId = Number(
   stmt(`INSERT INTO messages
-  (conversation_id, role, content, reasoning, status, model, gen_meta_json, created_at, images_json, active_image, image_pending, image_render_json)
-  VALUES (?, 'assistant', 'persisted', 'persisted reasoning', 'streaming', 'model', '{"test":true}', ?, ?, 1, 1, '{"workflow":"saved"}')`).run(
+  (conversation_id, role, content, reasoning, status, model, gen_meta_json, created_at, images_json, active_image, image_pending, render_recipe_id)
+  VALUES (?, 'assistant', 'persisted', 'persisted reasoning', 'streaming', 'model', '{"test":true}', ?, ?, 1, 1, ?)`).run(
     id,
     now,
     JSON.stringify(images),
+    createImageRecipe(
+      imageConfig('{"1":{"inputs":{"text":"{{prompt}}"}}}', 'http://comfy.invalid'),
+      'persisted',
+    ),
   ).lastInsertRowid,
 );
 const source = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(id)!);
@@ -54,7 +60,7 @@ assert.equal(copied.content, live.content);
 assert.equal(copied.reasoning, live.reasoning);
 assert.equal(copied.status, 'stopped');
 assert.equal(copied.imagePending, false);
-assert.equal(copiedRow.image_render_json, row.image_render_json);
+assert.equal(copiedRow.render_recipe_id, row.render_recipe_id);
 assert.equal(copiedRow.gen_meta_json, row.gen_meta_json);
 assert.equal(copied.images.length, 2);
 assert.equal(

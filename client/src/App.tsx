@@ -1,4 +1,6 @@
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { pageRevision } from './state/pageLocation.ts';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { installMouseBack, registerUiBack } from './state/uiBack.ts';
 import { booting, state, setState, streamingMessage } from './state/store.ts';
 import Sidebar from './components/Sidebar.tsx';
 import Header from './components/Header.tsx';
@@ -18,8 +20,11 @@ import {
 } from './state/messageSelection.ts';
 import MessageSelectionBar from './components/MessageSelectionBar.tsx';
 import GalleryModal from './components/GalleryModal.tsx';
+import MediaToolsModal from './media/MediaToolsModal.tsx';
+import { mediaToolSession } from './media/navigation.ts';
 
 export default function App() {
+  onMount(() => onCleanup(installMouseBack()));
   // Boot is one-way; wait for the fade before unmounting its cover.
   const [bootGone, setBootGone] = createSignal(false);
   createEffect(() => {
@@ -47,7 +52,11 @@ export default function App() {
         </Show>
         <Sidebar />
         <Show when={state.sidebarOpen}>
-          <div class="backdrop" onClick={() => setState('sidebarOpen', false)} />
+          <div
+            ref={(element) => registerUiBack(element, () => setState('sidebarOpen', false))}
+            class="backdrop"
+            onClick={() => setState('sidebarOpen', false)}
+          />
         </Show>
         <main class="main">
           <Header />
@@ -63,14 +72,24 @@ export default function App() {
             <MapSearch />
           </Show>
         </main>
-        <Show when={state.modal === 'settings'}>
+        <Show when={state.modal === 'settings' && pageRevision()} keyed>
           <SettingsModal />
         </Show>
-        <Show when={state.modal === 'conversation'}>
+        <Show when={state.modal === 'conversation' && pageRevision()} keyed>
           <ConversationSettings />
         </Show>
-        <Show when={state.modal === 'gallery'}>
-          <GalleryModal />
+        <Show
+          when={
+            (state.modal === 'gallery' ||
+              (state.modal === 'media-tools' && mediaToolSession()?.returnModal === 'gallery')) &&
+            pageRevision()
+          }
+          keyed
+        >
+          <GalleryModal active={state.modal === 'gallery'} />
+        </Show>
+        <Show when={state.modal === 'media-tools' && mediaToolSession()} keyed>
+          {(session) => <MediaToolsModal session={session} />}
         </Show>
         <ConfirmDialogHost />
         <div class="toasts" aria-live="polite" aria-atomic="false">

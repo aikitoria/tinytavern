@@ -7,6 +7,7 @@ import { hasForegroundGeneration, streamChatCompletion } from '../generation.ts'
 import { requireExpectedActiveLeaf } from '../concurrency.ts';
 import { objectBody, optionalNullableId, optionalNumber, positiveId } from '../validation.ts';
 import { streamResponse } from './streamResponse.ts';
+import { getSettings } from '../settingsStore.ts';
 import { getConversation } from './conversations.ts';
 
 const DRAFT_COMPLETION_MAX_TOKENS = 1024;
@@ -29,7 +30,11 @@ async function completeDraft(ctx: Ctx): Promise<void> {
 
   const conversation = getConversation(conversationId);
   const built = buildChatMessages(conversation, getActivePath(conversationId));
-  const messages = buildDraftCompletionMessages(built.messages, draft);
+  const messages = buildDraftCompletionMessages(
+    built.messages,
+    draft,
+    getSettings().draftCompletionPrompt,
+  );
   streaming.add(conversationId);
   try {
     await streamResponse(ctx.res, async (send, signal) => {
@@ -37,17 +42,18 @@ async function completeDraft(ctx: Ctx): Promise<void> {
       await streamChatCompletion(
         conversation,
         messages,
-        DRAFT_COMPLETION_MAX_TOKENS,
+        // Reserve room for the verbatim prefix as well as the continuation.
+        DRAFT_COMPLETION_MAX_TOKENS + Buffer.byteLength(draft, 'utf8'),
         (delta) => {
           const output = suffix.push(delta);
           if (output) send({ d: output });
         },
         signal,
+        { reasoningPrefill: built.reasoningPrefill },
       );
       // Reject stale snapshots so the client discards suffix text after concurrent path edits.
       requireExpectedActiveLeaf(conversationId, expectedActiveLeafId, expectedMutationRevision);
-      const tail = suffix.finish();
-      if (tail) send({ d: tail });
+      suffix.finish();
     });
   } finally {
     streaming.delete(conversationId);

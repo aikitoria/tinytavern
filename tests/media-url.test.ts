@@ -35,12 +35,30 @@ try {
   assert.equal(avatar.avatar, '/avatars/character-1.png?v=42');
   assert.equal(publicMessage(undefined), undefined);
   assert.equal(publicMessage(null), null);
-  const { toMessage, toGalleryItem } = await import('../server/src/db.ts');
+  const { toMessage, toGalleryItem, stmt } = await import('../server/src/db.ts');
+  stmt('INSERT INTO avatar_thumbnails(source, thumbnail, thumbnail_size) VALUES (?, ?, 128)').run(
+    avatar.avatar,
+    '/avatars/avatar-thumb-test.jpg',
+  );
+  assert.match(
+    publicAvatar(avatar).avatarThumbnail!,
+    /^\/avatars\/avatar-thumb-test\.jpg\?expires=.*&sig=/,
+  );
   const message = toMessage({ id: 1, images_json: '["/images/a.png"]' });
   assert.match(publicMessage(message).images[0]!, /&sig=/);
   assert.deepEqual(message.images, ['/images/a.png']);
-  const gallery = toGalleryItem({ id: 1, image: '/images/g.png', source_image: '/images/a.png' });
+  stmt(
+    "INSERT INTO media_assets(path, thumbnail) VALUES ('/images/g.png', '/images/thumbnail.jpg')",
+  ).run();
+  const gallery = toGalleryItem({
+    id: 1,
+    characters_json: '[]',
+    image: '/images/g.png',
+    source_image: '/images/a.png',
+  });
   assert.match(publicGalleryItem(gallery).image, /&sig=/);
+  assert.match(publicGalleryItem(gallery).media?.thumbnail!, /&sig=/);
+  assert.equal(gallery.media?.thumbnail, '/images/thumbnail.jpg');
   assert.equal(gallery.image, '/images/g.png');
   const previous = signMediaUrl('/images/a.png');
   Date.now = () => 1_086_400_000;

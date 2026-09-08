@@ -1,4 +1,9 @@
 export { readSseData } from './sse.ts';
+export * from './media.ts';
+export * from './imagePrompts.ts';
+export * from './settingsTransfer.ts';
+import { DEFAULT_MEDIA_RENDERING, DEFAULT_MEDIA_PROMPTS } from './media.ts';
+import type { MediaAsset, MediaRenderingSettings, MediaPromptSettings, MediaJob } from './media.ts';
 
 /** 'tool' messages are tool output shown in the chat but excluded from prompt history. */
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
@@ -42,6 +47,8 @@ export interface Message {
   generationToken: number | null;
   /** /images/ paths, swipeable within the message. */
   images: string[];
+  /** Typed image/video alternatives; images remains the file-path compatibility view. */
+  media?: MediaAsset[];
   /** Server-persisted index into images. */
   activeImage: number;
   imagePending: boolean;
@@ -53,7 +60,7 @@ export interface Message {
 /** Gallery-owned image copy; source links are metadata, so source deletion preserves it. */
 export interface GalleryItem {
   id: number;
-  characterId: number | null;
+  characters: { id: number; name: string }[];
   /** Snapshotted when saved so grouping survives character deletion. */
   characterName: string;
   sourceConversationId: number | null;
@@ -64,7 +71,7 @@ export interface GalleryItem {
   image: string;
   imageWidth: number | null;
   imageHeight: number | null;
-  hasImageRender: boolean;
+  media?: MediaAsset;
   createdAt: number;
   updatedAt: number;
 }
@@ -95,6 +102,7 @@ export interface Character {
   /** Optional one-level grouping in character pickers. */
   folderId: number | null;
   avatar: string | null;
+  avatarThumbnail?: string | null;
   personality: string;
   scenario: string;
   /** SillyTavern mes_example -> {{examples}}; users supply separators such as <START>. */
@@ -136,12 +144,15 @@ export interface CustomTemplate {
   prefixNames: boolean;
   /** When false, chats using this template ignore personas entirely ({{user}} = "User"). */
   usesPersonas: boolean;
-  /** Expands {{instruction}} for this regeneration only; empty = DEFAULT_STEER_TEMPLATE. */
+  /** Expands {{instruction}} for this regeneration only. */
   steerTemplate: string;
+  /** Speaker handoff when prefills are disabled; empty = no note. */
+  speakerHandoffTemplate: string;
 }
 
 export interface Preset {
   id: number;
+  readOnly: boolean;
   name: string;
   content: string;
   createdAt: number;
@@ -149,6 +160,7 @@ export interface Preset {
 
 export interface Template extends CustomTemplate {
   id: number;
+  readOnly: boolean;
   name: string;
   createdAt: number;
 }
@@ -157,6 +169,7 @@ export interface Persona {
   id: number;
   name: string;
   avatar: string | null;
+  avatarThumbnail?: string | null;
   description: string;
   createdAt: number;
 }
@@ -178,13 +191,11 @@ export interface Endpoint {
 }
 
 /** Saved image-generation overrides; omitted fields use the built-in defaults. */
-export interface ImageGenerationSettings extends Record<string, unknown> {
+export interface ImageGenerationSettings {
   /** One global revision instruction for image prompts inside chats. */
-  promptRevisionTemplate?: string;
-  comfyUrl?: string;
-  workflows?: { name: string; json: string }[];
-  activeWorkflow?: string;
-  avatarWorkflow?: string;
+  promptRevisionTemplate: string;
+  promptRevisionContext: string;
+  promptRevisionOriginal: string;
   promptPresets?: Record<
     string,
     {
@@ -201,10 +212,6 @@ export interface StandalonePromptTemplate {
   messagePrefill: string;
 }
 
-export interface GallerySettings {
-  promptRevision: StandalonePromptTemplate;
-}
-
 export interface Settings {
   /** Monotonic server revision used to reject stale cross-device writes. */
   revision: number;
@@ -214,6 +221,10 @@ export interface Settings {
   defaultTemplateId: number | null;
   /** Auto-expand the thinking block while a model reasons with no answer text yet. */
   autoExpandThinking: boolean;
+  /** Maximum thumbnail dimension in pixels; saving a change rebuilds gallery thumbnails. */
+  galleryThumbnailSize: number;
+  titlePrompt: string;
+  draftCompletionPrompt: string;
   /** Keep one unread assistant sibling prepared ahead of the active reply. */
   backgroundSwipeGeneration: boolean;
   /** Allow the one unread swipe to generate concurrently with the active reply. */
@@ -221,10 +232,16 @@ export interface Settings {
   /** Whether the server has an access password. The password itself is never returned. */
   hasPassword: boolean;
   imageGeneration: ImageGenerationSettings;
-  gallery: GallerySettings;
+  mediaRendering: MediaRenderingSettings;
+  galleryImagePrompts: MediaPromptSettings;
+  galleryVideoPrompts: MediaPromptSettings;
+  chatVideoPrompts: MediaPromptSettings;
 }
 
 /** {{system}} resolves the preset/custom prompt; empty slots omit their {{#if}} blocks. */
+export const DEFAULT_SYSTEM_PROMPT =
+  'You are {{char}}, a helpful assistant. Answer accurately and concisely.';
+
 export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 
 {{#if personality}}{{char}}'s personality:
@@ -239,18 +256,71 @@ export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 {{#if examples}}Example conversations:
 {{examples}}{{/if}}`;
 
+/** Mark an interjected instruction without changing its text or duplicating the marker. */
+export function systemNote(prompt: string): string {
+  if (!prompt.trim()) return prompt;
+  const body = prompt.replace(
+    /^(?:\s*\[(?:System Note|(?:IMAGE|VIDEO) PROMPT(?: REVISION)? (?:TASK|CONTEXT))\]\s*)+/i,
+    '',
+  );
+  return `[System Note]\n${body}`;
+}
+
+export const DEFAULT_TITLE_PROMPT = `[System Note]
+Pause the conversation and summarize it as a short sidebar title.
+Use the conversation above as context; do not answer its dialogue or continue the roleplay.
+
+Write a concise title of 3–6 words that captures the main topic or situation.
+Return only the title, without quotation marks, labels, or commentary.`;
+
+export const DEFAULT_DRAFT_COMPLETION_PROMPT = `[System Note]
+The conversation above is context for a writing-assistance task.
+Complete the unfinished user message below instead of answering it.
+
+Return the full user message in two parts, without a separator:
+1. Repeat the existing draft exactly, character for character.
+2. Continue directly from its end, writing as the user in the same voice and style.
+
+Preserve all spaces, tabs, line breaks, punctuation, and Markdown, including leading and trailing whitespace.
+Do not correct or reformat the existing text.
+
+Output only the complete message, without explanations, speaker labels, or delimiter tags.
+Do not wrap it in quotation marks or additional code fences.
+
+<unfinished_user_input>
+{{draft}}
+</unfinished_user_input>`;
+
+export const DEFAULT_SPEAKER_HANDOFF_TEMPLATE = '[System Note]\n<Note: Reply as {{speaker}}>';
+
+export const DEFAULT_AVATAR_CONTEXT =
+  'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
+
+export const DEFAULT_CHAT_IMAGE_REVISION_CONTEXT =
+  '[System Note]\nThe next assistant message is the original image-generation prompt to revise.';
+
+export const DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL =
+  '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>';
+
+/** Substitute supplied values once, leaving macro-like text inside user content untouched. */
+export function expandPromptSlots(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{([a-z]+)\}\}/gi, (match, key: string) =>
+    Object.hasOwn(values, key.toLowerCase()) ? values[key.toLowerCase()]! : match,
+  );
+}
+
 export const DEFAULT_STEER_TEMPLATE =
-  '[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]';
+  '[System Note]\n[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]';
 
 export const DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE =
-  '[IMAGE PROMPT REVISION TASK]\n' +
+  '[System Note]\n' +
   'The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ' +
   'Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ' +
   'Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n' +
   'The immediately preceding assistant message contains the original image prompt.\n\n' +
   '<revision_instruction>\n{{instruction}}\n</revision_instruction>';
 
-export const DEFAULT_GALLERY_REVISION_TEMPLATE: StandalonePromptTemplate = {
+export const DEFAULT_IMAGE_PROMPT_REVISION: StandalonePromptTemplate = {
   systemPrompt:
     'Revise the supplied image-generation prompt and return only the complete revised prompt, ' +
     'with no analysis, commentary, tags, or quotation marks. Preserve every detail that the ' +
@@ -268,17 +338,6 @@ export function imageRevisionTemplateError(template: string): string | null {
   return null;
 }
 
-export function galleryRevisionTemplateError(template: StandalonePromptTemplate): string | null {
-  if (!template.userMessage.trim()) return 'Enter a user message.';
-  const instructions = `${template.systemPrompt}\n${template.userMessage}`;
-  const invalid = imageRevisionTemplateError(instructions);
-  if (invalid) return invalid;
-  if (!/\{\{prompt\}\}/i.test(instructions)) {
-    return 'Include {{prompt}} in the system prompt or user message.';
-  }
-  return null;
-}
-
 export const DEFAULT_SETTINGS: Settings = {
   revision: 0,
   defaultPresetId: null,
@@ -286,11 +345,31 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultPersonaId: null,
   defaultTemplateId: null,
   autoExpandThinking: false,
+  galleryThumbnailSize: 512,
+  titlePrompt: DEFAULT_TITLE_PROMPT,
+  draftCompletionPrompt: DEFAULT_DRAFT_COMPLETION_PROMPT,
   backgroundSwipeGeneration: false,
   parallelBackgroundSwipeGeneration: false,
   hasPassword: false,
-  imageGeneration: {},
-  gallery: { promptRevision: DEFAULT_GALLERY_REVISION_TEMPLATE },
+  imageGeneration: {
+    promptRevisionTemplate: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+    promptRevisionContext: DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
+    promptRevisionOriginal: DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
+  },
+  mediaRendering: DEFAULT_MEDIA_RENDERING,
+  galleryImagePrompts: {
+    defaults: {},
+    presets: [
+      {
+        id: 'image-prompt-revision',
+        name: 'Revise image prompt',
+        operation: 'image',
+        ...DEFAULT_IMAGE_PROMPT_REVISION,
+      },
+    ],
+  },
+  galleryVideoPrompts: DEFAULT_MEDIA_PROMPTS,
+  chatVideoPrompts: DEFAULT_MEDIA_PROMPTS,
 };
 
 function workflowMacroPlacementError(workflow: string): string | null {
@@ -386,6 +465,16 @@ export interface TreeNode {
 }
 
 export type ServerEvent =
+  | { t: 'mediaThumbnails'; items: { id: number; thumbnail: string; revision: number }[] }
+  | { t: 'mediaJob'; job: MediaJob }
+  | { t: 'mediaJobDeleted'; id: string }
+  | {
+      t: 'mediaJobProgress';
+      id: string;
+      progress: NonNullable<MediaJob['progress']>;
+      prompt?: string;
+      reasoning?: string;
+    }
   | { t: 'hello' }
   | { t: 'invalidate'; entity: InvalidateEntity }
   /** Subscribe/resync snapshot. */

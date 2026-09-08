@@ -11,8 +11,10 @@ import type { ComposerCommand } from '../composerCommands.ts';
 import { imageGenerationCommands, imageGenerationTools } from '../images/imageGeneration.tsx';
 import {
   activePath,
+  applyMediaJob,
   deleteConversation,
   navigateTree,
+  mediaJobsByMessage,
   selectedConversation,
   setEditRequestId,
   state,
@@ -21,6 +23,7 @@ import {
 } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import DropdownSurface from './DropdownSurface.tsx';
+import { CHAT_MEDIA_TOOL_LINKS, openMediaTool } from '../media/navigation.ts';
 import MobileSidebarButton from './MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
@@ -169,6 +172,14 @@ export default function Composer() {
       return;
     }
     const msg = streamingMessage();
+    const job = msg ? mediaJobsByMessage().get(msg.id) : undefined;
+    if (job) {
+      void api
+        .mediaJobAction(job, 'cancel')
+        .then(applyMediaJob)
+        .catch((err: unknown) => toast(errorMessage(err)));
+      return;
+    }
     if (msg?.generationToken != null)
       void api.stopGeneration(msg.id, msg.generationToken).catch(() => {});
   };
@@ -318,6 +329,21 @@ export default function Composer() {
             keyboardNavigation
             autoFocus
           >
+            <For each={CHAT_MEDIA_TOOL_LINKS}>
+              {(tool) => (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={state.selectedId === null}
+                  onClick={() => {
+                    setToolsOpen(false);
+                    openMediaTool(tool.operation, { conversationId: state.selectedId });
+                  }}
+                >
+                  {tool.label}
+                </button>
+              )}
+            </For>
             <For each={imageGenerationTools()}>
               {(tool) => (
                 <button

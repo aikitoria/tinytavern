@@ -267,7 +267,7 @@ export function startGeneration(
 const IDLE_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RETRIES = 2;
 
-function resolveEndpoint(conversation: Conversation | null): Endpoint {
+export function resolveEndpoint(conversation: Conversation | null): Endpoint {
   const endpointId = conversation?.endpointId ?? getSettings().activeEndpointId;
   const endpointRow = endpointId
     ? (stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId) as
@@ -315,13 +315,15 @@ export async function chatCompletionOnce(
   conversation: Conversation | null,
   messages: ChatMessage[],
   maxTokens: number,
+  options?: Pick<CompletionOptions, 'reasoningPrefill'>,
 ): Promise<string> {
   const endpoint = resolveEndpoint(conversation);
+  const prepared = prepareStandaloneCompletion(endpoint, messages, maxTokens, options);
   const res = await completionRequest(
     endpoint,
-    messages,
+    prepared.messages,
     false,
-    { max_tokens: maxTokens },
+    prepared.parameters,
     AbortSignal.timeout(30_000),
   );
   if (!res.ok) {
@@ -345,70 +347,148 @@ export async function chatCompletionOnce(
   throw new Error('The model returned an empty reply');
 }
 
-/**
- * Side-task streaming completion: emits content deltas and returns the full text.
- * Reasoning is skipped; refusal and empty replies are errors.
- */
+interface StreamingCompletionOptions extends CompletionOptions {
+  requireComplete?: boolean;
+  onReasoning?: (text: string) => void;
+}
+
+/** Side-task completion keeps transient reasoning separate from the returned prompt. */
 export async function streamChatCompletion(
   conversation: Conversation | null,
   messages: ChatMessage[],
   maxTokens: number,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
-  options?: CompletionOptions,
+  options?: StreamingCompletionOptions,
 ): Promise<string> {
   const endpoint = resolveEndpoint(conversation);
+  return streamEndpointCompletion(endpoint, messages, maxTokens, onDelta, signal, options);
+}
+
+/** Execute a captured endpoint configuration; durable jobs require a complete reply. */
+export async function streamEndpointCompletion(
+  endpoint: Endpoint,
+  messages: ChatMessage[],
+  maxTokens: number,
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+  options?: StreamingCompletionOptions,
+): Promise<string> {
   const prepared = prepareStandaloneCompletion(endpoint, messages, maxTokens, options);
-  const res = await completionRequest(
-    endpoint,
-    prepared.messages,
-    true,
-    prepared.parameters,
-    signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
-  );
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
-  }
-  if (!res.body) throw new Error('Upstream returned no response body');
-  let content = prepared.messagePrefill;
-  let emittedPrefill = false;
-  let receivedVisibleContent = false;
-  let refusal = '';
-  let sawReasoning = false;
-  await readSseData(res.body, (data) => {
-    if (!data || data === '[DONE]') return;
-    let json: {
-      choices?: { delta?: { content?: unknown; refusal?: unknown; reasoning_content?: unknown } }[];
-    };
-    try {
-      json = JSON.parse(data);
-    } catch {
-      return; // Ignore malformed upstream frames.
+  const idleAbort = new AbortController();
+  let lastActivity = Date.now();
+  const onIdle = () => {
+    const remaining = IDLE_TIMEOUT_MS - (Date.now() - lastActivity);
+    if (remaining > 0) {
+      idleTimer = setTimeout(onIdle, remaining);
+      return;
     }
-    const delta = json?.choices?.[0]?.delta;
-    if (typeof delta?.content === 'string' && delta.content) {
-      if (!emittedPrefill && prepared.messagePrefill) {
-        emittedPrefill = true;
-        onDelta(prepared.messagePrefill);
-      }
-      if (delta.content.trim()) receivedVisibleContent = true;
-      content += delta.content;
-      onDelta(delta.content);
-    }
-    if (typeof delta?.refusal === 'string') refusal += delta.refusal;
-    if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
-      sawReasoning = true;
-    }
-  });
-  if (receivedVisibleContent) return content;
-  if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
-  if (sawReasoning) {
-    throw new Error(
-      'The model returned only reasoning and no message content (reasoning models may need a larger token budget)',
+    idleAbort.abort(
+      new Error(`Upstream idle timeout — no data received for ${IDLE_TIMEOUT_MS / 1000}s`),
     );
+  };
+  let idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
+  const resetIdle = () => {
+    lastActivity = Date.now();
+  };
+  const requestSignal = signal ? AbortSignal.any([signal, idleAbort.signal]) : idleAbort.signal;
+  try {
+    requestSignal.throwIfAborted();
+    if (prepared.reasoningPrefill) options?.onReasoning?.(prepared.reasoningPrefill);
+    const res = await completionRequest(
+      endpoint,
+      prepared.messages,
+      true,
+      prepared.parameters,
+      requestSignal,
+    );
+    resetIdle();
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
+    }
+    if (!res.body) throw new Error('Upstream returned no response body');
+    let content = prepared.messagePrefill;
+    let emittedPrefill = false;
+    let emittedContent = false;
+    let receivedVisibleContent = false;
+    let refusal = '';
+    let sawReasoning = false;
+    let completed = false;
+    let finishReason: string | null = null;
+    await readSseData(
+      res.body,
+      (data) => {
+        if (data === '[DONE]') {
+          completed = true;
+          return;
+        }
+        if (!data) {
+          return;
+        }
+        let json: {
+          choices?: {
+            finish_reason?: string | null;
+            delta?: {
+              content?: unknown;
+              refusal?: unknown;
+              reasoning_content?: unknown;
+              reasoning?: unknown;
+            };
+          }[];
+        };
+        try {
+          json = JSON.parse(data);
+        } catch {
+          return; // Ignore malformed upstream frames.
+        }
+        const choice = json?.choices?.[0];
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+        const delta = choice?.delta;
+        if (typeof delta?.content === 'string' && delta.content) {
+          emittedContent = true;
+          if (!emittedPrefill && prepared.messagePrefill) {
+            emittedPrefill = true;
+            onDelta(prepared.messagePrefill);
+          }
+          if (delta.content.trim()) receivedVisibleContent = true;
+          content += delta.content;
+          onDelta(delta.content);
+        }
+        if (typeof delta?.refusal === 'string') refusal += delta.refusal;
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+        if (typeof reasoning === 'string' && reasoning) {
+          sawReasoning = true;
+          if (!emittedContent) options?.onReasoning?.(reasoning);
+        }
+      },
+      resetIdle,
+    );
+    if (options?.requireComplete && receivedVisibleContent) {
+      if (finishReason === 'length') {
+        throw new Error(
+          'Prompt was truncated by the token limit; review the partial text or prepare again',
+        );
+      }
+      const missingCompletion = !completed && !finishReason;
+      const interruptedCompletion = finishReason && finishReason !== 'stop';
+      if (missingCompletion || interruptedCompletion) {
+        throw new Error('Prompt completion ended before a complete reply; review or prepare again');
+      }
+    }
+    if (receivedVisibleContent) return content;
+    if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
+    if (sawReasoning) {
+      throw new Error(
+        'The model returned only reasoning and no message content (reasoning models may need a larger token budget)',
+      );
+    }
+    throw new Error('The model returned an empty reply');
+  } finally {
+    clearTimeout(idleTimer);
   }
-  throw new Error('The model returned an empty reply');
 }
 
 function isTransientFailure(err: unknown, gen: ActiveGen): boolean {

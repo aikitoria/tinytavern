@@ -1,3 +1,8 @@
+import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
+import { GENERAL_TRANSFER_FIELDS, transferObject } from '@tinytavern/shared';
+import MacroTextarea from '../MacroTextarea.tsx';
+import MacroHelp from '../MacroHelp.tsx';
+import SettingsActions from '../SettingsActions.tsx';
 import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import SettingLabel from '../SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
@@ -11,7 +16,12 @@ import { useSettingsGuard } from '../SettingsGuard.tsx';
 import { confirmAction } from '../../state/confirm.ts';
 
 type SettingKey =
-  'autoExpandThinking' | 'backgroundSwipeGeneration' | 'parallelBackgroundSwipeGeneration';
+  | 'autoExpandThinking'
+  | 'galleryThumbnailSize'
+  | 'backgroundSwipeGeneration'
+  | 'parallelBackgroundSwipeGeneration'
+  | 'titlePrompt'
+  | 'draftCompletionPrompt';
 
 export default function GeneralTab() {
   const [overrides, setOverrides] = createSignal<Partial<Pick<Settings, SettingKey>>>({});
@@ -24,8 +34,9 @@ export default function GeneralTab() {
 
   const passwordDirty = () => password() !== '' || removePassword();
   const isDirty = () => Object.keys(overrides()).length > 0 || passwordDirty();
-  const value = (key: SettingKey) => overrides()[key] ?? state.settings[key];
-  const change = (key: SettingKey, value: boolean) =>
+  const value = <K extends SettingKey>(key: K): Settings[K] =>
+    (overrides()[key] ?? state.settings[key]) as Settings[K];
+  const change = <K extends SettingKey>(key: K, value: Settings[K]) =>
     setOverrides((current) => {
       const next = { ...current };
       if (value === state.settings[key]) delete next[key];
@@ -150,48 +161,116 @@ export default function GeneralTab() {
           Auto-expand thinking while the model reasons (collapses once the reply starts)
         </SettingLabel>
 
-        <SettingLabel
-          check
-          changed={
-            value('backgroundSwipeGeneration') !== DEFAULT_SETTINGS.backgroundSwipeGeneration
-          }
-          onRevert={() =>
-            change('backgroundSwipeGeneration', DEFAULT_SETTINGS.backgroundSwipeGeneration)
-          }
-        >
-          <input
-            type="checkbox"
-            checked={value('backgroundSwipeGeneration')}
-            onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
-          />
-          Background Swipe Generation (keep one unread assistant swipe prepared ahead)
-        </SettingLabel>
+        <div class="form-stack field-group" role="group" aria-label="Background swipe generation">
+          <SettingLabel
+            check
+            changed={
+              value('backgroundSwipeGeneration') !== DEFAULT_SETTINGS.backgroundSwipeGeneration
+            }
+            onRevert={() =>
+              change('backgroundSwipeGeneration', DEFAULT_SETTINGS.backgroundSwipeGeneration)
+            }
+          >
+            <input
+              type="checkbox"
+              checked={value('backgroundSwipeGeneration')}
+              onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
+            />
+            Background Swipe Generation (keep one unread assistant swipe prepared ahead)
+          </SettingLabel>
 
+          <SettingLabel
+            check
+            changed={
+              value('parallelBackgroundSwipeGeneration') !==
+              DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration
+            }
+            onRevert={() =>
+              change(
+                'parallelBackgroundSwipeGeneration',
+                DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration,
+              )
+            }
+          >
+            <input
+              type="checkbox"
+              checked={value('parallelBackgroundSwipeGeneration')}
+              disabled={!value('backgroundSwipeGeneration')}
+              onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
+            />
+            Generate the background swipe alongside the primary reply
+          </SettingLabel>
+          <p class="hint">
+            Allows two responses to generate at once. When off, the background swipe waits for the
+            primary reply to finish.
+          </p>
+        </div>
+      </section>
+      <section class="settings-section">
+        <h3>Thumbnails</h3>
         <SettingLabel
-          check
-          changed={
-            value('parallelBackgroundSwipeGeneration') !==
-            DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration
-          }
-          onRevert={() =>
-            change(
-              'parallelBackgroundSwipeGeneration',
-              DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration,
-            )
-          }
+          for="gallery-thumbnail-size"
+          changed={value('galleryThumbnailSize') !== DEFAULT_SETTINGS.galleryThumbnailSize}
+          onRevert={() => change('galleryThumbnailSize', DEFAULT_SETTINGS.galleryThumbnailSize)}
         >
-          <input
-            type="checkbox"
-            checked={value('parallelBackgroundSwipeGeneration')}
-            disabled={!value('backgroundSwipeGeneration')}
-            onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
-          />
-          Generate the background swipe alongside the primary reply
+          Thumbnail size
         </SettingLabel>
+        <input
+          id="gallery-thumbnail-size"
+          type="number"
+          min="64"
+          max="2048"
+          step="1"
+          value={value('galleryThumbnailSize')}
+          onInput={(event) => change('galleryThumbnailSize', event.currentTarget.valueAsNumber)}
+        />
         <p class="hint">
-          Allows two responses to generate at once. When off, the background swipe waits for the
-          primary reply to finish.
+          Maximum width or height in pixels for image and video thumbnails in gallery, chat and
+          media tools. Saving a new size regenerates media thumbnails in the background. Avatar
+          thumbnails are 128 pixels. Originals stay unchanged.
         </p>
+      </section>
+      <section class="settings-section">
+        <h3>Chat assistance prompts</h3>
+        <div class="form-stack field-group" role="group" aria-label="Automatic chat titles">
+          <SettingLabel
+            changed={value('titlePrompt') !== DEFAULT_SETTINGS.titlePrompt}
+            onRevert={() => change('titlePrompt', DEFAULT_SETTINGS.titlePrompt)}
+          >
+            Automatic chat title
+            <MacroHelp />
+          </SettingLabel>
+          <MacroTextarea
+            value={value('titlePrompt')}
+            onText={(text) => change('titlePrompt', text)}
+            rows={5}
+          />
+          <p class="hint">
+            Appended after the full chat context once the assistant answers your first message,
+            including in character chats with greetings. Uses the chat template’s reasoning prefill
+            when prefills are enabled on the endpoint.
+          </p>
+        </div>
+        <div class="form-stack field-group" role="group" aria-label="Draft completion">
+          <SettingLabel
+            changed={value('draftCompletionPrompt') !== DEFAULT_SETTINGS.draftCompletionPrompt}
+            onRevert={() => change('draftCompletionPrompt', DEFAULT_SETTINGS.draftCompletionPrompt)}
+          >
+            Draft completion
+            <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
+          </SettingLabel>
+          <MacroTextarea
+            value={value('draftCompletionPrompt')}
+            onText={(text) => change('draftCompletionPrompt', text)}
+            keys={['draft']}
+            rows={7}
+          />
+          <p class="hint">
+            Appended to the current chat context for “Continue writing this message”. Include{' '}
+            {'{{draft}}'} and ask for the full message, starting with an exact copy of the draft.
+            Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint.
+          </p>
+        </div>
       </section>
       <Show when={error()}>
         <p class="notice notice-error" role="alert">
@@ -199,14 +278,12 @@ export default function GeneralTab() {
         </p>
       </Show>
 
-      <section class="danger-zone">
-        <div>
-          <span class="danger-zone-title">Chat history</span>
-          <p class="hint">
-            Permanently delete every conversation and its generated images. Characters and settings
-            are kept.
-          </p>
-        </div>
+      <section class="settings-section">
+        <h3>Chat history</h3>
+        <p class="hint">
+          Permanently delete every conversation and its generated images. Characters and settings
+          are kept.
+        </p>
         <button
           class="danger-btn"
           disabled={deletingChats() || state.conversations.length === 0}
@@ -216,17 +293,34 @@ export default function GeneralTab() {
         </button>
       </section>
 
-      <div class="form-actions">
+      <SettingsActions>
         <button class="primary-btn" onClick={() => void save()}>
           Save
         </button>
+        <SettingsTransferButtons
+          type="page:general"
+          onError={setError}
+          exportData={() =>
+            Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, value(key)]))
+          }
+          importData={(data) => {
+            const source = transferObject(data);
+            for (const key of GENERAL_TRANSFER_FIELDS) {
+              if (Object.hasOwn(source, key) && typeof source[key] !== typeof DEFAULT_SETTINGS[key])
+                throw new Error(`Invalid ${key}`);
+            }
+            for (const key of GENERAL_TRANSFER_FIELDS) {
+              if (Object.hasOwn(source, key)) change(key, source[key] as Settings[SettingKey]);
+            }
+          }}
+        />
         <button onClick={discard}>Discard</button>
         <Show when={saved()}>
           <span class="saved-flash">
             <FontAwesomeIcon icon={faCheck} size={12} /> Saved
           </span>
         </Show>
-      </div>
+      </SettingsActions>
     </div>
   );
 }

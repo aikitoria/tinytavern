@@ -1,3 +1,12 @@
+import SettingsTransferButtons from '../components/SettingsTransferButtons.tsx';
+import { importImagePromptSet, transferObject, transferString } from '@tinytavern/shared';
+import {
+  DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
+  DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
+  DEFAULT_AVATAR_CONTEXT,
+} from '@tinytavern/shared';
+import SettingsActions from '../components/SettingsActions.tsx';
+import type { MediaImageConfig } from '@tinytavern/shared';
 import SettingLabel, { createDefaultField } from '../components/SettingField.tsx';
 import {
   faCheck,
@@ -5,17 +14,18 @@ import {
   faChevronRight,
   faImages as faImagesSolid,
   faPlus,
+  faRotateRight,
   faSpinner,
   faXmark,
-  faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  DEFAULT_IMAGE_CHAT_PROMPTS,
+  type ImageChatPromptKind,
   imageRevisionTemplateError,
-  workflowValidationError,
   type Message,
 } from '@tinytavern/shared';
 import type { ComposerCommand } from '../composerCommands.ts';
@@ -23,8 +33,10 @@ import { api, ApiError } from '../state/api.ts';
 import {
   activePath,
   applyGalleryItem,
+  applyMediaJob,
   applySettings,
   imageProgress,
+  mediaJobsByMessage,
   navigateTree,
   openModal,
   state,
@@ -32,6 +44,9 @@ import {
 } from '../state/store.ts';
 import { createSavedFlash, errorMessage } from '../util.ts';
 import ImageViewer from '../components/ImageViewer.tsx';
+import MediaPlayer from '../media/MediaPlayer.tsx';
+import MediaActions from '../media/MediaActions.tsx';
+import { openMediaTool, openMediaRerun } from '../media/navigation.ts';
 import MacroHelp from '../components/MacroHelp.tsx';
 import MacroTextarea from '../components/MacroTextarea.tsx';
 import Markdown from '../components/Markdown.tsx';
@@ -40,12 +55,6 @@ import { useSettingsGuard } from '../components/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 import './imageGeneration.css';
-
-interface ImageWorkflow {
-  name: string;
-  /** ComfyUI workflow (API format JSON) with {{prompt}}/{{seed}} slots. */
-  json: string;
-}
 
 interface ImagePromptPreset {
   name: string;
@@ -60,8 +69,7 @@ interface ImagePromptPresetSet {
   active: string;
 }
 
-type ImagePromptKind =
-  'describe' | 'characterInstruction' | 'face' | 'faceInstruction' | 'instruction' | 'avatar';
+type ImagePromptKind = ImageChatPromptKind | 'avatar';
 
 const IMAGE_PROMPT_SECTIONS = [
   {
@@ -82,41 +90,22 @@ const IMAGE_PROMPT_SECTIONS = [
   {
     key: 'avatar',
     title: 'Avatars',
-    hint: 'Prompt, context, and rendering workflow used by Generate avatar.',
+    hint: 'Prompt and context used by Generate avatar.',
   },
 ] as const;
 
-interface ImageGenSettings extends Record<string, unknown> {
+interface ImageGenSettings {
   promptRevisionTemplate: string;
+  promptRevisionContext: string;
+  promptRevisionOriginal: string;
   promptPresets: Record<ImagePromptKind, ImagePromptPresetSet>;
-  comfyUrl: string;
-  workflows: ImageWorkflow[];
-  /** Name of the workflow /image renders with; '' = describe only, no image. */
-  activeWorkflow: string;
-  /** Name of the workflow avatars render with; '' = same as activeWorkflow. */
-  avatarWorkflow: string;
 }
 
 const DEFAULT_PROMPTS: Record<ImagePromptKind, string> = {
-  describe:
-    "Describe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Reply with only the prompt.",
-  characterInstruction:
-    "Describe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Apply this instruction: {{instruction}}. Reply with only the prompt.",
-  face: "Describe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting. Reply with only the prompt.",
-  faceInstruction:
-    "Describe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting, and apply this instruction: {{instruction}}. Reply with only the prompt.",
-  instruction: '{{instruction}}',
+  ...DEFAULT_IMAGE_CHAT_PROMPTS,
   avatar:
     'Write an image-generation prompt for a portrait avatar. Head and shoulders, facing forward. Reply with only the prompt.',
 };
-
-const DEFAULT_AVATAR_CONTEXT =
-  'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
-
-const WORKFLOW_MACROS: [string, string][] = [
-  ['{{prompt}}', 'The generated image description (JSON-string-escaped into the workflow)'],
-  ['{{seed}}', 'A random integer seed, fresh per render'],
-];
 
 const AVATAR_MACROS: [string, string][] = [
   ['{{name}}', 'Character or persona name'],
@@ -132,14 +121,12 @@ const PROMPT_EDITORS: {
   kind: ImagePromptKind;
   section: (typeof IMAGE_PROMPT_SECTIONS)[number]['key'];
   label: string;
-  legacyKey?: 'describePrompt' | 'instructionPrompt' | 'avatarPrompt';
   command?: string;
 }[] = [
   {
     kind: 'describe',
     section: 'character',
     label: 'Without an instruction',
-    legacyKey: 'describePrompt',
   },
   {
     kind: 'characterInstruction',
@@ -163,13 +150,11 @@ const PROMPT_EDITORS: {
     section: 'generic',
     label: 'Prompt template',
     command: '/image',
-    legacyKey: 'instructionPrompt',
   },
   {
     kind: 'avatar',
     section: 'avatar',
     label: 'Avatar prompt',
-    legacyKey: 'avatarPrompt',
   },
 ];
 const AVATAR_EXTRA_KEYS = ['name', 'description', 'personality', 'scenario', 'firstMessage'];
@@ -182,19 +167,9 @@ function promptRecord<T>(
   return values;
 }
 
-const DEFAULTS: ImageGenSettings = {
-  promptRevisionTemplate: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
-  promptPresets: promptRecord(() => ({ presets: [], active: '' })),
-  comfyUrl: 'http://comfy:8588',
-  workflows: [],
-  activeWorkflow: '',
-  avatarWorkflow: '',
-};
-
 function normalizePromptPresets(
-  cfg: Record<string, unknown>,
+  cfg: { promptPresets?: Record<string, ImagePromptPresetSet> },
   kind: ImagePromptKind,
-  legacyKey?: 'describePrompt' | 'instructionPrompt' | 'avatarPrompt',
 ): ImagePromptPresetSet {
   const allPresets = cfg.promptPresets;
   const raw =
@@ -215,31 +190,17 @@ function normalizePromptPresets(
     return { presets, active };
   }
 
-  // Preserve legacy customizations as presets; keep built-in defaults unsaved.
-  const legacy = legacyKey ? cfg[legacyKey] : undefined;
-  if (typeof legacy === 'string' && legacy !== DEFAULT_PROMPTS[kind]) {
-    return { presets: [{ name: 'Custom', prompt: legacy }], active: 'Custom' };
-  }
   return { presets: [], active: '' };
 }
 
 function settings(): ImageGenSettings {
   const stored = state.settings.imageGeneration;
-  const cfg = { ...DEFAULTS, ...stored } as ImageGenSettings;
-  const promptPresets = promptRecord(({ kind, legacyKey }) =>
-    normalizePromptPresets(stored, kind, legacyKey),
-  );
-  // Migrate the pre-multi-workflow shape (single workflowJson string).
-  const legacy = (cfg as Record<string, unknown>).workflowJson;
-  if (cfg.workflows.length === 0 && typeof legacy === 'string' && legacy.trim()) {
-    return {
-      ...cfg,
-      promptPresets,
-      workflows: [{ name: 'Default', json: legacy }],
-      activeWorkflow: 'Default',
-    };
-  }
-  return { ...cfg, promptPresets };
+  return {
+    promptRevisionTemplate: stored.promptRevisionTemplate,
+    promptRevisionContext: stored.promptRevisionContext,
+    promptRevisionOriginal: stored.promptRevisionOriginal,
+    promptPresets: promptRecord(({ kind }) => normalizePromptPresets(stored, kind)),
+  };
 }
 
 function selectedPrompt(
@@ -253,11 +214,6 @@ function selectedPrompt(
   return selection.presets.find((preset) => preset.name === name)?.prompt ?? DEFAULT_PROMPTS[kind];
 }
 
-/** Validate at save time with the server's rules; allow empty placeholders. */
-function workflowError(workflow: string): string | null {
-  return workflow.trim() ? workflowValidationError(workflow) : null;
-}
-
 /** {{char}}/{{user}} expand server-side using the conversation context. */
 function composePrompt(
   kind: Exclude<ImagePromptKind, 'avatar'>,
@@ -269,18 +225,18 @@ function composePrompt(
   return template.replaceAll(/\{\{instruction\}\}/gi, () => instruction);
 }
 
-export function activeImageRenderConfig(): { workflow: string; comfyUrl: string } | undefined {
-  const cfg = settings();
-  const active = cfg.workflows.find((workflow) => workflow.name === cfg.activeWorkflow);
-  return active?.json.trim() ? { workflow: active.json, comfyUrl: cfg.comfyUrl } : undefined;
+export function activeImageRenderConfig(): MediaImageConfig | undefined {
+  const cfg = state.settings.mediaRendering;
+  const active = cfg.workflows.find((workflow) => workflow.id === cfg.defaults['image:0']);
+  return active?.json.trim() ? { workflow: active, comfyUrl: cfg.comfyUrl } : undefined;
 }
 
 /** Fall back to the /image workflow when no avatar workflow resolves. */
-export function avatarRenderConfig(): { workflow: string; comfyUrl: string } | undefined {
-  const cfg = settings();
-  const avatar = cfg.workflows.find((workflow) => workflow.name === cfg.avatarWorkflow);
+export function avatarRenderConfig(): MediaImageConfig | undefined {
+  const cfg = state.settings.mediaRendering;
+  const avatar = cfg.workflows.find((workflow) => workflow.id === cfg.avatarWorkflowId);
   return avatar?.json.trim()
-    ? { workflow: avatar.json, comfyUrl: cfg.comfyUrl }
+    ? { workflow: avatar, comfyUrl: cfg.comfyUrl }
     : activeImageRenderConfig();
 }
 
@@ -291,11 +247,14 @@ export function avatarGenerationAvailable(): boolean {
 /** Both templates expand server-side using authoritative entity fields. */
 export function avatarPromptTemplates(): { prompt: string; context: string } {
   const selection = settings().promptPresets.avatar;
+  if (selection.active === '') {
+    return { prompt: DEFAULT_PROMPTS.avatar, context: DEFAULT_AVATAR_CONTEXT };
+  }
   const preset = selection.presets.find((candidate) => candidate.name === selection.active);
-  return {
-    prompt: preset?.prompt ?? DEFAULT_PROMPTS.avatar,
-    context: preset?.context ?? DEFAULT_AVATAR_CONTEXT,
-  };
+  if (!preset || !preset.context?.trim()) {
+    throw new Error('Select an avatar preset with a context template in Avatar prompts settings.');
+  }
+  return { prompt: preset.prompt, context: preset.context };
 }
 
 /** Stream a tool prompt, then render it if a workflow is selected. */
@@ -368,7 +327,10 @@ interface PromptPresetEditorHandle {
 /** Never serialize Default, so updated defaults remain available alongside saved prompts. */
 function PromptPresetEditor(props: {
   label: JSX.Element;
+  transferKey: string;
+  onError: (error: string) => void;
   defaultPrompt: string;
+  promptLabel?: JSX.Element;
   extraKeys?: string[];
   defaultContext?: string;
   contextLabel?: JSX.Element;
@@ -384,7 +346,6 @@ function PromptPresetEditor(props: {
   );
   const promptEl = createDefaultField(() => props.defaultPrompt);
   const contextEl = createDefaultField(() => props.defaultContext ?? '');
-  const pickerEl = createDefaultField(() => '-1');
 
   const currentPresets = () => {
     const idx = selected();
@@ -403,13 +364,12 @@ function PromptPresetEditor(props: {
   const showPreset = (idx: number) => {
     setSelected(idx);
     setRenaming(false);
-    pickerEl.value = String(idx);
     const preset = presets()[idx];
     nameEl.value = preset?.name ?? '';
     promptEl.value = preset?.prompt ?? props.defaultPrompt;
     (promptEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
     if (props.defaultContext !== undefined) {
-      contextEl.value = preset?.context ?? props.defaultContext;
+      contextEl.value = idx === -1 ? props.defaultContext : preset!.context!;
       (contextEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
     }
   };
@@ -483,11 +443,11 @@ function PromptPresetEditor(props: {
   if (typeof props.ref === 'function') props.ref(handle);
 
   return (
-    <div class="form-stack prompt-preset-editor">
-      <SettingLabel field={pickerEl}>{props.label}</SettingLabel>
+    <div class="form-stack field-group prompt-preset-editor">
+      <SettingLabel>{props.label}</SettingLabel>
       <div class="key-row prompt-preset-toolbar">
         <Select
-          ref={pickerEl.ref}
+          value={String(selected())}
           ariaLabel="Prompt preset"
           onChange={(value) => pick(Number(value))}
           options={[
@@ -508,6 +468,32 @@ function PromptPresetEditor(props: {
             Delete
           </button>
         </Show>
+        <SettingsTransferButtons
+          type={`image-prompt:${props.transferKey}`}
+          onError={props.onError}
+          exportData={() => ({
+            name: selected() === -1 ? 'Default (imported)' : currentPresets()[selected()]!.name,
+            prompt: promptEl.value,
+            ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
+          })}
+          importData={(data) => {
+            const source = transferObject(data);
+            const parsed = importImagePromptSet(
+              { presets: [source], active: source.name },
+              { presets: [], active: '' },
+              props.defaultContext !== undefined,
+            );
+            const imported = parsed.presets[0]!;
+            const index = selected();
+            const list = currentPresets();
+            if (list.some((item, i) => i !== index && item.name === imported.name))
+              throw new Error('A preset with this name already exists');
+            if (index === -1) list.push(imported);
+            else list[index] = imported;
+            setPresets(list);
+            showPreset(index === -1 ? list.length - 1 : index);
+          }}
+        />
       </div>
       {/* Stays mounted so switching/default loads can keep using the imperative ref. */}
       <div class="prompt-preset-rename" classList={{ hidden: !renaming() }}>
@@ -518,7 +504,8 @@ function PromptPresetEditor(props: {
         </div>
       </div>
       <SettingLabel field={promptEl}>
-        {props.defaultContext !== undefined ? 'System instruction' : 'Prompt text'}
+        {props.promptLabel ??
+          (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')}
       </SettingLabel>
       <MacroTextarea
         ref={promptEl.ref}
@@ -540,24 +527,20 @@ function PromptPresetEditor(props: {
   );
 }
 
-export function ImageGenerationSettingsPage() {
+export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) {
+  const sections = IMAGE_PROMPT_SECTIONS.filter((section) =>
+    props.mode === 'avatar' ? section.key === 'avatar' : section.key !== 'avatar',
+  );
+  const promptEditors = PROMPT_EDITORS.filter((editor) =>
+    props.mode === 'avatar' ? editor.kind === 'avatar' : editor.kind !== 'avatar',
+  );
+  let baseSettings = settings();
   const editors = {} as Record<ImagePromptKind, PromptPresetEditorHandle>;
   let errorEl: HTMLParagraphElement | undefined;
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
-  const [workflows, setWorkflows] = createSignal<ImageWorkflow[]>([]);
-  /** Index into workflows(); -1 = none (describe only). Selected = active for /image. */
-  const [selected, setSelected] = createSignal(-1);
-  const [workflowText, setWorkflowText] = createSignal('');
-  /** Workflow name for avatar generation; '' = same as the /image selection. */
-  const [avatarSel, setAvatarSel] = createSignal('');
-  const comfyUrlEl = createDefaultField(() => DEFAULTS.comfyUrl);
-  const nameEl = createDefaultField(() =>
-    selected() < 0 ? '' : numberedName('Workflow', workflows(), selected()),
-  );
-  const workflowEl = createDefaultField(() => '');
-  const pickerEl = createDefaultField(() => '-1');
-  const avatarPickerEl = createDefaultField(() => '');
+  const revisionContextEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_CONTEXT);
+  const revisionOriginalEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL);
   const revisionEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE);
   let baseline = '';
   /** Save with the form's loaded revision: invalidation can update the store
@@ -569,81 +552,29 @@ export function ImageGenerationSettingsPage() {
     queueMicrotask(() => errorEl?.scrollIntoView({ block: 'nearest' }));
   };
 
-  const currentWorkflows = () => {
-    const idx = selected();
-    return workflows().map((workflow, i) =>
-      i === idx ? { name: nameEl.value.trim() || workflow.name, json: workflowEl.value } : workflow,
-    );
-  };
-  const stash = () => {
-    if (selected() !== -1) setWorkflows(currentWorkflows());
-  };
-
-  const showWorkflow = (idx: number) => {
-    setSelected(idx);
-    pickerEl.value = String(idx);
-    const workflow = workflows()[idx];
-    nameEl.value = workflow?.name ?? '';
-    workflowEl.value = workflow?.json ?? '';
-  };
-
-  const pick = (idx: number) => {
-    stash();
-    showWorkflow(idx);
-  };
-
-  const addWorkflow = () => {
-    stash();
-    setWorkflows((list) => {
-      return [...list, { name: numberedName('Workflow', list), json: '' }];
-    });
-    showWorkflow(workflows().length - 1);
-  };
-
-  const duplicateWorkflow = () => {
-    const idx = selected();
-    if (idx === -1) return;
-    stash();
-    const source = workflows()[idx]!;
-    const name = copyName(source.name, (candidate) =>
-      workflows().some((workflow) => workflow.name === candidate),
-    );
-    setWorkflows((list) => [...list, { name, json: source.json }]);
-    showWorkflow(workflows().length - 1);
-  };
-
-  const deleteWorkflow = () => {
-    const idx = selected();
-    if (idx === -1) return;
-    setWorkflows((list) => list.filter((_, i) => i !== idx));
-    showWorkflow(-1);
-  };
-
-  const draft = (): ImageGenSettings => {
-    const idx = selected();
-    const current = currentWorkflows();
-    return {
-      promptRevisionTemplate: revisionEl.value,
-      promptPresets: promptRecord(({ kind }) => editors[kind].value),
-      comfyUrl: comfyUrlEl.value.trim() || DEFAULTS.comfyUrl,
-      workflows: current,
-      activeWorkflow: current[idx]?.name ?? '',
-      avatarWorkflow: current.some((workflow) => workflow.name === avatarSel()) ? avatarSel() : '',
-    };
-  };
+  const draft = () => ({
+    imageGeneration: {
+      promptRevisionContext:
+        props.mode === 'chat' ? revisionContextEl.value : baseSettings.promptRevisionContext,
+      promptRevisionOriginal:
+        props.mode === 'chat' ? revisionOriginalEl.value : baseSettings.promptRevisionOriginal,
+      promptRevisionTemplate:
+        props.mode === 'chat' ? revisionEl.value : baseSettings.promptRevisionTemplate,
+      promptPresets: {
+        ...baseSettings.promptPresets,
+        ...Object.fromEntries(promptEditors.map(({ kind }) => [kind, editors[kind].value])),
+      },
+    },
+  });
 
   const load = () => {
-    const cfg = settings();
-    revisionEl.value = cfg.promptRevisionTemplate;
-    for (const { kind } of PROMPT_EDITORS) editors[kind].value = cfg.promptPresets[kind];
-    comfyUrlEl.value = cfg.comfyUrl;
-    setWorkflows(cfg.workflows);
-    showWorkflow(cfg.workflows.findIndex((workflow) => workflow.name === cfg.activeWorkflow));
-    const avatarName = cfg.workflows.some((workflow) => workflow.name === cfg.avatarWorkflow)
-      ? cfg.avatarWorkflow
-      : '';
-    setAvatarSel(avatarName);
-    avatarPickerEl.value = avatarName;
+    baseSettings = settings();
+    if (props.mode === 'chat') {
+      revisionEl.value = baseSettings.promptRevisionTemplate;
+      revisionContextEl.value = baseSettings.promptRevisionContext;
+      revisionOriginalEl.value = baseSettings.promptRevisionOriginal;
+    }
+    for (const { kind } of promptEditors) editors[kind].value = baseSettings.promptPresets[kind];
     baseline = JSON.stringify(draft());
     baseRevision = state.settings.revision;
   };
@@ -651,14 +582,15 @@ export function ImageGenerationSettingsPage() {
 
   const save = async () => {
     const values = draft();
-    const invalidRevision = imageRevisionTemplateError(values.promptRevisionTemplate);
+    const invalidRevision = imageRevisionTemplateError(
+      values.imageGeneration.promptRevisionTemplate,
+    );
     if (invalidRevision) {
       showError(invalidRevision);
       return false;
     }
-    setWorkflows(values.workflows);
-    for (const { kind } of PROMPT_EDITORS) {
-      const selection = values.promptPresets[kind];
+    for (const { kind } of promptEditors) {
+      const selection = values.imageGeneration.promptPresets[kind];
       const names = selection.presets.map((preset) => preset.name);
       if (new Set(names).size !== names.length) {
         showError(`${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`);
@@ -669,22 +601,8 @@ export function ImageGenerationSettingsPage() {
         return false;
       }
     }
-    const names = values.workflows.map((workflow) => workflow.name);
-    if (new Set(names).size !== names.length) {
-      showError(
-        'Workflow names must be unique — the selected name identifies the /image workflow.',
-      );
-      return false;
-    }
-    for (const workflow of values.workflows) {
-      const invalid = workflowError(workflow.json);
-      if (invalid) {
-        showError(`Workflow "${workflow.name}" ${invalid}`);
-        return false;
-      }
-    }
     try {
-      const next = await api.putSettings({ imageGeneration: values }, baseRevision);
+      const next = await api.putSettings(values, baseRevision);
       applySettings(next);
       baseRevision = next.revision;
       baseline = JSON.stringify(values);
@@ -712,9 +630,6 @@ export function ImageGenerationSettingsPage() {
     discard,
   });
 
-  const hasPrompt = () => /\{\{prompt\}\}/i.test(workflowText());
-  const hasSeed = () => /\{\{seed\}\}/i.test(workflowText());
-
   return (
     <>
       <Show when={error()}>
@@ -723,81 +638,7 @@ export function ImageGenerationSettingsPage() {
         </p>
       </Show>
 
-      <section
-        id="image-settings-panel-rendering"
-        class="settings-section image-settings-panel"
-        aria-labelledby="image-settings-title-rendering"
-      >
-        <h3 id="image-settings-title-rendering">Image rendering</h3>
-        <p class="hint">ComfyUI connection and default workflow for chat, gallery, and avatars.</p>
-        <SettingLabel field={comfyUrlEl}>ComfyUI URL</SettingLabel>
-        <input ref={comfyUrlEl.ref} placeholder={DEFAULTS.comfyUrl} />
-
-        <SettingLabel field={pickerEl}>Workflow used by /image</SettingLabel>
-        <p class="hint">Choose none to generate descriptions without rendering an image.</p>
-        <div class="key-row">
-          <Select
-            ref={pickerEl.ref}
-            ariaLabel="Image workflow"
-            onChange={(value) => pick(Number(value))}
-            options={[
-              { value: '-1', label: '— none (describe only) —' },
-              ...workflows().map((workflow, i) => ({
-                value: String(i),
-                label: workflow.name || `Workflow ${i + 1}`,
-              })),
-            ]}
-          />
-          <button onClick={addWorkflow}>
-            <FontAwesomeIcon icon={faPlus} size={12} /> Add
-          </button>
-          <Show when={selected() !== -1}>
-            <button onClick={duplicateWorkflow}>Duplicate</button>
-            <button class="danger-btn" onClick={deleteWorkflow}>
-              Delete
-            </button>
-          </Show>
-        </div>
-
-        {/* Stays mounted (hidden by class) so the imperative refs survive selection changes. */}
-        <div
-          class="form-stack field-group workflow-detail"
-          classList={{ hidden: selected() === -1 }}
-        >
-          <SettingLabel field={nameEl}>Name</SettingLabel>
-          <input ref={nameEl.ref} placeholder="Workflow name" />
-          <SettingLabel field={workflowEl}>
-            Workflow JSON — export via ComfyUI's "Save (API Format)"{' '}
-            <MacroHelp rows={WORKFLOW_MACROS} />
-          </SettingLabel>
-          <MacroTextarea
-            ref={workflowEl.ref}
-            keys={['prompt', 'seed']}
-            class="mono"
-            rows={12}
-            onText={setWorkflowText}
-            placeholder='{"3": {"class_type": "KSampler", "inputs": {"seed": {{seed}}, …}}, "6": {"inputs": {"text": "{{prompt}}", …}}, …}'
-          />
-          <Show when={workflowText().trim()}>
-            <div class="macro-checks">
-              <span classList={{ warn: !hasPrompt() }}>
-                <FontAwesomeIcon icon={hasPrompt() ? faCheck : faXmark} size={12} />{' '}
-                {hasPrompt()
-                  ? '{{prompt}} found'
-                  : '{{prompt}} missing — the generated description would not be used'}
-              </span>
-              <span classList={{ soft: !hasSeed() }}>
-                <FontAwesomeIcon icon={hasSeed() ? faCheck : faTriangleExclamation} size={12} />{' '}
-                {hasSeed()
-                  ? '{{seed}} found'
-                  : "{{seed}} missing — every render will reuse the workflow's fixed seed"}
-              </span>
-            </div>
-          </Show>
-        </div>
-      </section>
-
-      <For each={IMAGE_PROMPT_SECTIONS}>
+      <For each={sections}>
         {(section) => (
           <section
             id={`image-settings-panel-${section.key}`}
@@ -810,6 +651,8 @@ export function ImageGenerationSettingsPage() {
               {(editor) => (
                 <PromptPresetEditor
                   ref={(handle) => (editors[editor.kind] = handle)}
+                  transferKey={editor.kind}
+                  onError={showError}
                   defaultPrompt={DEFAULT_PROMPTS[editor.kind]}
                   extraKeys={
                     editor.kind === 'avatar'
@@ -820,85 +663,132 @@ export function ImageGenerationSettingsPage() {
                   }
                   defaultContext={editor.kind === 'avatar' ? DEFAULT_AVATAR_CONTEXT : undefined}
                   contextExtraKeys={AVATAR_EXTRA_KEYS}
-                  contextLabel="Character context"
+                  promptLabel={
+                    editor.kind === 'avatar' ? (
+                      <>
+                        System instruction <MacroHelp rows={AVATAR_MACROS} />
+                      </>
+                    ) : undefined
+                  }
+                  contextLabel={
+                    <>
+                      Character context <MacroHelp rows={AVATAR_MACROS} />
+                    </>
+                  }
                   label={
                     <>
                       {editor.label}{' '}
-                      <MacroHelp
-                        extra={
-                          editor.kind === 'avatar'
-                            ? AVATAR_MACROS
-                            : editor.command
+                      <Show when={editor.kind !== 'avatar'}>
+                        <MacroHelp
+                          extra={
+                            editor.command
                               ? [['{{instruction}}', `The ${editor.command} command argument`]]
                               : undefined
-                        }
-                      />
+                          }
+                        />
+                      </Show>
                     </>
                   }
                 />
               )}
             </For>
-            <Show when={section.key === 'avatar'}>
-              <SettingLabel field={avatarPickerEl}>Avatar workflow</SettingLabel>
-              <p class="hint">Defaults to the selected `/image` workflow.</p>
-              <Select
-                ref={avatarPickerEl.ref}
-                ariaLabel="Avatar image workflow"
-                onChange={(value) => setAvatarSel(value)}
-                options={[
-                  { value: '', label: '— same as /image workflow —' },
-                  ...workflows().map((workflow) => ({
-                    value: workflow.name,
-                    label: workflow.name,
-                  })),
-                ]}
-              />
-            </Show>
           </section>
         )}
       </For>
 
-      <section
-        id="image-settings-panel-revision"
-        class="settings-section image-settings-panel"
-        aria-labelledby="image-settings-title-revision"
-      >
-        <h3 id="image-settings-title-revision">Chat image revision</h3>
-        <p class="hint">
-          Used when you regenerate an image prompt inside a chat. The existing conversation and its
-          system prompt remain as context; the original image prompt is supplied as the preceding
-          assistant message. This setting applies to every chat.
-        </p>
-        <SettingLabel field={revisionEl} for="image-revision-template">
-          Revision instruction{' '}
-          <MacroHelp
-            rows={[
-              ['{{instruction}}', 'The requested change'],
-              ['{{prompt}}', 'The original image prompt'],
-            ]}
-          />
-        </SettingLabel>
-        <MacroTextarea
-          ref={(el) => {
-            revisionEl.ref(el);
-            el.id = 'image-revision-template';
-          }}
-          keys={['instruction', 'prompt']}
-          rows={10}
-        />
-      </section>
+      <Show when={props.mode === 'chat'}>
+        <section
+          id="image-settings-panel-revision"
+          class="settings-section image-settings-panel"
+          aria-labelledby="image-settings-title-revision"
+        >
+          <h3 id="image-settings-title-revision">Chat image revision</h3>
+          <p class="hint">
+            Used when you regenerate an image prompt inside a chat. The existing conversation and
+            its system prompt remain as context; the original image prompt is supplied as the
+            preceding assistant message. This setting applies to every chat.
+          </p>
+          <div class="form-stack field-group" role="group" aria-label="Image revision messages">
+            <SettingLabel field={revisionContextEl}>Context message</SettingLabel>
+            <MacroTextarea ref={revisionContextEl.ref} keys={['instruction', 'prompt']} rows={3} />
+            <p class="hint">
+              Inserted before the original prompt when the chat does not end with a user turn. Leave
+              empty to omit it.
+            </p>
+            <SettingLabel field={revisionOriginalEl}>Original prompt message</SettingLabel>
+            <MacroTextarea ref={revisionOriginalEl.ref} keys={['instruction', 'prompt']} rows={4} />
+            <p class="hint">Sent as the assistant turn being revised. Include {'{{prompt}}'}.</p>
+            <SettingLabel field={revisionEl} for="image-revision-template">
+              Revision instruction{' '}
+              <MacroHelp
+                rows={[
+                  ['{{instruction}}', 'The requested change'],
+                  ['{{prompt}}', 'The original image prompt'],
+                ]}
+              />
+            </SettingLabel>
+            <MacroTextarea
+              ref={(el) => {
+                revisionEl.ref(el);
+                el.id = 'image-revision-template';
+              }}
+              keys={['instruction', 'prompt']}
+              rows={10}
+            />
+          </div>
+        </section>
+      </Show>
 
-      <div class="form-actions">
+      <SettingsActions>
         <button class="primary-btn" onClick={() => void save()}>
           Save
         </button>
+        <SettingsTransferButtons
+          type={`page:${props.mode === 'chat' ? 'chatImagePrompts' : 'avatarPrompts'}`}
+          onError={showError}
+          exportData={() => ({
+            presets: Object.fromEntries(
+              promptEditors.map(({ kind }) => [kind, editors[kind].value]),
+            ),
+            ...(props.mode === 'chat'
+              ? {
+                  promptRevisionContext: revisionContextEl.value,
+                  promptRevisionOriginal: revisionOriginalEl.value,
+                  promptRevisionTemplate: revisionEl.value,
+                }
+              : {}),
+          })}
+          importData={(data) => {
+            const source = transferObject(data);
+            const presets = transferObject(source.presets);
+            const incoming = promptEditors
+              .filter(({ kind }) => Object.hasOwn(presets, kind))
+              .map(({ kind }) => ({
+                kind,
+                value: importImagePromptSet(presets[kind], editors[kind].value, kind === 'avatar'),
+              }));
+            const revisionKeys = [
+              'promptRevisionContext',
+              'promptRevisionOriginal',
+              'promptRevisionTemplate',
+            ] as const;
+            if (props.mode === 'chat')
+              for (const key of revisionKeys) transferString(source[key], key);
+            for (const item of incoming) editors[item.kind].value = item.value;
+            if (props.mode === 'chat') {
+              revisionContextEl.value = source.promptRevisionContext as string;
+              revisionOriginalEl.value = source.promptRevisionOriginal as string;
+              revisionEl.value = source.promptRevisionTemplate as string;
+            }
+          }}
+        />
         <button onClick={discard}>Discard</button>
         <Show when={saved()}>
           <span class="saved-flash">
             <FontAwesomeIcon icon={faCheck} size={12} /> Saved
           </span>
         </Show>
-      </div>
+      </SettingsActions>
     </>
   );
 }
@@ -908,14 +798,34 @@ const imageSwipeBusy = new Set<number>();
 const imageOnActivePath = (message: Message) =>
   activePath().some((active) => active.id === message.id);
 
+const selectedImageAsset = (message: Message) => {
+  const path = message.images[Math.min(message.activeImage, message.images.length - 1)];
+  return message.media?.find((asset) => asset.url === path);
+};
+
 const canRenderImage = (message: Message) =>
   !state.treeNavigationPending &&
   imageOnActivePath(message) &&
   !message.imagePending &&
-  (message.hasImageRender || activeImageRenderConfig() != null);
+  !message.media?.some((asset) => asset.kind === 'video') &&
+  (message.hasImageRender ||
+    selectedImageAsset(message)?.recipeId != null ||
+    (!message.media?.some((asset) => asset.recipeId !== null) &&
+      activeImageRenderConfig() != null));
 
 /** Shared by header buttons and ChatView's Left/Right shortcut. */
 async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
+  const job = mediaJobsByMessage().get(message.id);
+  if (message.status === 'streaming' && job) {
+    if (dir === 1) {
+      try {
+        applyMediaJob(await api.mediaJobAction(job, 'cancel'));
+      } catch (err) {
+        toast(errorMessage(err));
+      }
+    }
+    return;
+  }
   // Swiping forward skips this prompt; stopping clears imagePending to prevent a partial render.
   if (message.status === 'streaming') {
     if (
@@ -946,8 +856,9 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
         api.renderImage(
           message.id,
           state.tree,
-          // Use the current workflow; the server falls back to the snapshot if none is selected.
-          activeImageRenderConfig(),
+          message.hasImageRender || selectedImageAsset(message)?.recipeId
+            ? undefined
+            : activeImageRenderConfig(),
         ),
       );
     } else {
@@ -965,8 +876,12 @@ export const imageMessage = {
     (message.images.length > 0 ||
       message.imagePending ||
       message.hasImageRender ||
-      message.name === 'Image prompt'),
-  currentImageConfig: activeImageRenderConfig,
+      message.name === 'Image prompt' ||
+      message.name === 'Media prompt'),
+  currentImageConfig: (message: Message) =>
+    message.hasImageRender || selectedImageAsset(message)?.recipeId
+      ? undefined
+      : activeImageRenderConfig(),
   swipe: (message: Message, dir: 1 | -1) => {
     void swipeImage(message, dir);
   },
@@ -978,16 +893,20 @@ export const imageMessage = {
       Math.min(message.activeImage, message.images.length - 1),
       state.tree,
     ),
-  create: (message: () => Message, ctx: { streaming: () => boolean }) => {
+  create: (message: () => Message, ctx: { streaming: () => boolean; inMap?: () => boolean }) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
     const [savingToGallery, setSavingToGallery] = createSignal(false);
     const images = () => message().images;
     const activeImage = () => Math.min(message().activeImage, images().length - 1);
     const currentImage = () => images()[activeImage()];
-    const renderProgress = () => imageProgress()[message().id];
+    const currentAsset = () => message().media?.find((asset) => asset.url === currentImage());
+    const currentVideo = () => (currentAsset()?.kind === 'video' ? currentAsset() : undefined);
+    const mediaJob = () => mediaJobsByMessage().get(message().id);
+    const renderProgress = () => mediaJob()?.progress ?? imageProgress()[message().id];
     const livePreview = () => (message().imagePending ? renderProgress()?.preview : undefined);
-    const displayedImage = () => livePreview() ?? currentImage();
+    const displayedImage = () =>
+      livePreview() ?? (currentVideo() ? currentVideo()?.thumbnail : currentImage());
     // Collapse the prompt on the first preview to keep the render in focus.
     const promptCollapsed = () => images().length > 0 || livePreview() != null;
     const onActivePath = () => activePath().some((active) => active.id === message().id);
@@ -1036,6 +955,37 @@ export const imageMessage = {
 
     const HeaderTools = () => (
       <>
+        <Show when={mediaJob()}>
+          {(job) => (
+            <button
+              class="icon-btn"
+              title="Open media job"
+              aria-label="Open media job"
+              onClick={() =>
+                openMediaTool(job().operation, {
+                  jobId: job().id,
+                  conversationId: job().contextConversationId,
+                })
+              }
+            >
+              <FontAwesomeIcon icon={faSpinner} size={12} />
+            </button>
+          )}
+        </Show>
+        <Show when={currentVideo()?.recipeId}>
+          <button
+            class="icon-btn"
+            title="Rerun media"
+            aria-label="Rerun media"
+            onClick={() => {
+              void openMediaRerun(currentAsset()!, message().conversationId).catch((err: unknown) =>
+                toast(errorMessage(err)),
+              );
+            }}
+          >
+            <FontAwesomeIcon icon={faRotateRight} size={12} />
+          </button>
+        </Show>
         <Show when={message().imagePending && !ctx.streaming()}>
           <span class="msg-image-pending">
             <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
@@ -1048,6 +998,11 @@ export const imageMessage = {
         </Show>
         <Show when={images().length > 0}>
           <span class="msg-actions">
+            <Show when={currentAsset()}>
+              {(asset) => (
+                <MediaActions compact asset={asset()} conversationId={message().conversationId} />
+              )}
+            </Show>
             <button
               class="icon-btn gallery-save-btn"
               classList={{ 'icon-btn-active': savedItem() != null }}
@@ -1105,23 +1060,38 @@ export const imageMessage = {
       <>
         <Show when={!promptCollapsed() || showPrompt()}>
           <div class="msg-content">
-            <Markdown content={message().content} streaming={ctx.streaming()} />
+            <Markdown
+              content={message().content}
+              streaming={ctx.streaming()}
+              conversationId={message().conversationId}
+            />
           </div>
         </Show>
-        <Show when={displayedImage()}>
-          <CrossfadeImage
-            class="msg-image"
-            classList={{ 'msg-image-live': livePreview() != null }}
-            src={displayedImage()}
-            alt={livePreview() ? 'Image rendering preview' : 'Generated image'}
-            wrapperClass="msg-image-crossfade"
-            onClick={() => {
-              if (!livePreview()) setViewerOpen(true);
-            }}
-          />
-          <Show when={viewerOpen() && !livePreview()}>
-            <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
-          </Show>
+        <Show
+          when={!ctx.inMap?.() && !livePreview() && currentVideo()}
+          fallback={
+            <Show when={displayedImage()}>
+              <CrossfadeImage
+                class="msg-image"
+                classList={{ 'msg-image-live': livePreview() != null }}
+                src={displayedImage()!}
+                alt={livePreview() ? 'Image rendering preview' : 'Generated image'}
+                wrapperClass="msg-image-crossfade"
+                onClick={() => {
+                  if (!livePreview() && !currentVideo() && !ctx.inMap?.()) {
+                    setViewerOpen(true);
+                  }
+                }}
+              />
+              <Show when={viewerOpen() && !livePreview()}>
+                <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
+              </Show>
+            </Show>
+          }
+        >
+          {(asset) => (
+            <MediaPlayer asset={asset()} class="msg-image" active={state.modal === null} />
+          )}
         </Show>
         <Show when={message().genMeta?.imageError && !message().imagePending}>
           <div class="msg-error">
@@ -1140,7 +1110,7 @@ export const imageMessage = {
       HeaderTools,
       Body,
       hideName: true,
-      fullBleed: () => displayedImage() != null,
+      fullBleed: () => displayedImage() != null || currentVideo() != null,
     };
   },
 };

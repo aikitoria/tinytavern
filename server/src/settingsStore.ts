@@ -27,11 +27,17 @@ export type SettingsReferenceKey = Exclude<
   keyof Settings,
   | 'revision'
   | 'autoExpandThinking'
+  | 'galleryThumbnailSize'
+  | 'titlePrompt'
+  | 'draftCompletionPrompt'
   | 'backgroundSwipeGeneration'
   | 'parallelBackgroundSwipeGeneration'
   | 'hasPassword'
   | 'imageGeneration'
-  | 'gallery'
+  | 'mediaRendering'
+  | 'galleryImagePrompts'
+  | 'galleryVideoPrompts'
+  | 'chatVideoPrompts'
 >;
 
 export function clearSettingReference(key: SettingsReferenceKey, id: number): boolean {

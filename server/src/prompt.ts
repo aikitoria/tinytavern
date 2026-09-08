@@ -5,18 +5,17 @@ import type {
   Message,
   Persona,
   Role,
-  StandalonePromptTemplate,
   Template,
 } from '@tinytavern/shared';
 import {
   characterChatName,
-  DEFAULT_PROMPT_TEMPLATE,
-  DEFAULT_STEER_TEMPLATE,
-  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
-  DEFAULT_GALLERY_REVISION_TEMPLATE,
+  systemNote,
+  expandPromptSlots,
+  type ImageGenerationSettings,
 } from '@tinytavern/shared';
 import { stmt, toCharacter, toPersona, toPreset, toTemplate } from './db.ts';
 import { getSettings } from './settingsStore.ts';
+import { HttpError } from './router.ts';
 
 export interface ChatMessage {
   /** Upstream chat roles only — 'tool' messages never leave the server. */
@@ -87,7 +86,7 @@ function getTemplate(id: number | null): Template | null {
   return row ? toTemplate(row) : null;
 }
 
-/** Inline templates replace referenced templates entirely; field defaults apply at use sites. */
+/** Inline templates replace referenced templates entirely. */
 function resolveTemplate(character: Character | null): CustomTemplate | null {
   return (
     character?.customTemplate ??
@@ -96,10 +95,15 @@ function resolveTemplate(character: Character | null): CustomTemplate | null {
   );
 }
 
-/** Old inline templates may lack steerTemplate; empty values also use the built-in default. */
+/** Resolve the configured revision instruction without substituting another prompt. */
 export function resolveSteerTemplate(conversation: Conversation): string {
   const raw = resolveTemplate(getCharacter(conversation.characterId))?.steerTemplate ?? '';
-  return raw.trim() || DEFAULT_STEER_TEMPLATE;
+  if (!raw.trim())
+    throw new HttpError(
+      400,
+      'Configure a steer template in the selected prompt template before regenerating with an instruction.',
+    );
+  return raw;
 }
 
 export function substituteMacros(text: string, charName: string, userName: string): string {
@@ -110,6 +114,13 @@ export function substituteMacros(text: string, charName: string, userName: strin
 
 /** Render {{#if key}} blocks and {{key}} slots, then collapse excess blank lines. */
 export function renderTemplate(template: string, vars: Record<string, string>): string {
+  return expandTemplate(template, vars)
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Expand conditions before values, preserving whitespace and literal macros inside values. */
+export function expandTemplate(template: string, vars: Record<string, string>): string {
   // Resolve nested blocks innermost-first; exclude Object.prototype members from slots.
   const lookup = (key: string): string | undefined =>
     Object.hasOwn(vars, key) ? vars[key] : undefined;
@@ -117,15 +128,15 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
   for (let prev; prev !== out;) {
     prev = out;
     out = out.replaceAll(
-      /\{\{#if ([a-z]+)\}\}((?:(?!\{\{#if )[\s\S])*?)\{\{\/if\}\}/gi,
+      /\{\{#if ([a-z][a-z0-9_]*)\}\}((?:(?!\{\{#if )[\s\S])*?)\{\{\/if\}\}/gi,
       (_, key: string, body: string) => (lookup(key.toLowerCase())?.trim() ? body : ''),
     );
   }
   out = out.replaceAll(
-    /\{\{([a-z]+)\}\}/gi,
+    /\{\{([a-z][a-z0-9_]*)\}\}/gi,
     (match, key: string) => lookup(key.toLowerCase()) ?? match,
   );
-  return out.replaceAll(/\n{3,}/g, '\n\n').trim();
+  return out;
 }
 
 export interface BuiltPrompt {
@@ -136,7 +147,7 @@ export interface BuiltPrompt {
   messagePrefill: string | null;
   /** "Name:" when the template prefixes speaker names. */
   namePrefill: string | null;
-  /** Hidden fallback appended to the final user turn when prefills are disabled. */
+  /** Configured speaker handoff appended to the final user turn when prefills are disabled. */
   disabledPrefillSpeakerNote: string | null;
   /** {{char}}/{{user}} as this prompt resolved them (persona honors usesPersonas). */
   charName: string;
@@ -173,7 +184,7 @@ export function buildChatMessages(
     char: charName,
     user: userName,
   };
-  const systemContent = renderTemplate(template?.content.trim() || DEFAULT_PROMPT_TEMPLATE, vars);
+  const systemContent = renderTemplate(template?.content ?? '', vars);
   const prologueSource = template?.userPrologue ?? '';
   const prologue = prologueSource.trim() ? renderTemplate(prologueSource, vars) : '';
   const reasoningPrefillSource = template?.reasoningPrefill ?? '';
@@ -227,7 +238,7 @@ export function buildChatMessages(
     messagePrefill: messagePrefill || null,
     namePrefill: prefixNames ? `${currentSpeaker}:` : null,
     disabledPrefillSpeakerNote: needsDisabledPrefillSpeakerNote
-      ? `<Note: Reply as ${currentSpeaker}>`
+      ? expandPromptSlots(template?.speakerHandoffTemplate ?? '', { speaker: currentSpeaker })
       : null,
     charName,
     userName,
@@ -237,7 +248,7 @@ export function buildChatMessages(
 /** Copies a prompt and appends its upstream-only speaker handoff to the final user turn. */
 export function withDisabledPrefillSpeakerNote(built: BuiltPrompt): ChatMessage[] {
   const messages = built.messages.map((message) => ({ ...message }));
-  const note = built.disabledPrefillSpeakerNote;
+  const note = systemNote(built.disabledPrefillSpeakerNote ?? '');
   if (!note) return messages;
   const userIndex = messages.findLastIndex((message) => message.role === 'user');
   if (userIndex !== -1) {
@@ -259,7 +270,7 @@ export function buildToolPrompt(
   const built = buildChatMessages(conversation, history);
   appendChatMessage(built.messages, {
     role: 'user',
-    content: substituteMacros(prompt.trim(), built.charName, built.userName),
+    content: substituteMacros(systemNote(prompt.trim()), built.charName, built.userName),
   });
   return {
     ...built,
@@ -279,7 +290,7 @@ export function buildSteeredPrompt(
   speakerName: string | null,
 ): BuiltPrompt {
   const built = buildChatMessages(conversation, history, speakerName);
-  appendChatMessage(built.messages, { role: 'user', content: steer });
+  appendChatMessage(built.messages, { role: 'user', content: systemNote(steer) });
   return built;
 }
 
@@ -289,15 +300,25 @@ export function appendImagePromptRevisionTask(
   original: string,
   originalReasoning: string | null,
   instruction: string,
-  template = DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  settings: Pick<
+    ImageGenerationSettings,
+    'promptRevisionTemplate' | 'promptRevisionContext' | 'promptRevisionOriginal'
+  >,
 ): void {
-  const originalBlock = `<original_image_prompt>\n${original.trim()}\n</original_image_prompt>`;
+  const originalBlock = expandImageRevisionTemplate(
+    settings.promptRevisionOriginal,
+    original,
+    instruction,
+  );
   // Replay the original prompt's reasoning as an assistant turn; bridge for strict alternation.
-  if (messages.at(-1)?.role !== 'user') {
+  if (messages.at(-1)?.role !== 'user' && settings.promptRevisionContext.trim()) {
     appendChatMessage(messages, {
       role: 'user',
-      content:
-        '[IMAGE PROMPT REVISION CONTEXT]\nThe next assistant message is the original image-generation prompt to revise.',
+      content: expandImageRevisionTemplate(
+        systemNote(settings.promptRevisionContext),
+        original,
+        instruction,
+      ),
     });
   }
   appendChatMessage(messages, {
@@ -308,7 +329,11 @@ export function appendImagePromptRevisionTask(
   appendChatMessage(messages, {
     role: 'user',
     // One pass keeps macro-looking text inside the user's input literal.
-    content: expandImageRevisionTemplate(template, original, instruction),
+    content: expandImageRevisionTemplate(
+      systemNote(settings.promptRevisionTemplate),
+      original,
+      instruction,
+    ),
   });
 }
 
@@ -320,27 +345,6 @@ function expandImageRevisionTemplate(
   return template.replace(/\{\{(instruction|prompt)\}\}/gi, (_, key: string) =>
     key.toLowerCase() === 'instruction' ? instruction.trim() : original.trim(),
   );
-}
-
-/** Gallery revisions have no dependency on the source conversation or an implicit outer prompt. */
-export function buildGalleryRevisionPrompt(
-  original: string,
-  instruction: string,
-  template: StandalonePromptTemplate = DEFAULT_GALLERY_REVISION_TEMPLATE,
-): Pick<BuiltPrompt, 'messages' | 'reasoningPrefill' | 'messagePrefill'> {
-  const messages: ChatMessage[] = [];
-  const expand = (text: string) => expandImageRevisionTemplate(text, original, instruction);
-  if (template.systemPrompt.trim()) {
-    messages.push({ role: 'system', content: expand(template.systemPrompt) });
-  }
-  messages.push({ role: 'user', content: expand(template.userMessage) });
-  const reasoningPrefill = expand(template.reasoningPrefill);
-  const messagePrefill = expand(template.messagePrefill);
-  return {
-    messages,
-    reasoningPrefill: reasoningPrefill.trim() ? reasoningPrefill : null,
-    messagePrefill: messagePrefill.trim() ? messagePrefill : null,
-  };
 }
 
 /** Keep history as an unchanged prefix for cache reuse and references; delimit the revision task. */
@@ -357,7 +361,7 @@ export function buildSteeredToolPrompt(
     original,
     originalReasoning,
     instruction,
-    getSettings().imageGeneration.promptRevisionTemplate || DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+    getSettings().imageGeneration,
   );
   return {
     ...built,

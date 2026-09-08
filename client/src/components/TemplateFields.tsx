@@ -1,7 +1,11 @@
 import { Show } from 'solid-js';
 import SettingLabel, { createDefaultField } from './SettingField.tsx';
 import type { CustomTemplate } from '@tinytavern/shared';
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE } from '@tinytavern/shared';
+import {
+  DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_STEER_TEMPLATE,
+  DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
+} from '@tinytavern/shared';
 import MacroHelp from './MacroHelp.tsx';
 import MacroTextarea from './MacroTextarea.tsx';
 
@@ -14,6 +18,7 @@ export interface TemplateFieldsHandle {
 export default function TemplateFields(props: {
   ref: TemplateFieldsHandle | ((handle: TemplateFieldsHandle) => void);
   inline?: boolean;
+  readOnly?: boolean;
 }) {
   const contentEl = createDefaultField(() => (props.inline ? '' : DEFAULT_PROMPT_TEMPLATE));
   const prologueEl = createDefaultField(() => '');
@@ -21,6 +26,7 @@ export default function TemplateFields(props: {
   const messagePrefillEl = createDefaultField(() => '');
   const prefixEl = createDefaultField(() => false);
   const usesPersonasEl = createDefaultField(() => true);
+  const speakerEl = createDefaultField(() => DEFAULT_SPEAKER_HANDOFF_TEMPLATE);
   const steerEl = createDefaultField(() => DEFAULT_STEER_TEMPLATE);
   const handle: TemplateFieldsHandle = {
     get value() {
@@ -32,6 +38,7 @@ export default function TemplateFields(props: {
         prefixNames: prefixEl.value,
         usesPersonas: usesPersonasEl.value,
         steerTemplate: steerEl.value,
+        speakerHandoffTemplate: speakerEl.value,
       };
     },
     set value(template) {
@@ -42,6 +49,7 @@ export default function TemplateFields(props: {
       prefixEl.value = template?.prefixNames ?? false;
       usesPersonasEl.value = template?.usesPersonas ?? true;
       steerEl.value = template?.steerTemplate ?? DEFAULT_STEER_TEMPLATE;
+      speakerEl.value = template?.speakerHandoffTemplate ?? DEFAULT_SPEAKER_HANDOFF_TEMPLATE;
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);
@@ -51,16 +59,17 @@ export default function TemplateFields(props: {
         <Show when={!props.inline}>
           <h3>Prompt assembly</h3>
         </Show>
-        <SettingLabel field={contentEl}>
+        <SettingLabel field={props.readOnly ? undefined : contentEl}>
           {props.inline ? 'Custom template — system prompt' : 'System prompt template'}{' '}
           <MacroHelp template />
         </SettingLabel>
-        <MacroTextarea ref={contentEl.ref} template class="mono" />
-        <SettingLabel field={prologueEl}>
+        <MacroTextarea readOnly={props.readOnly} ref={contentEl.ref} template class="mono" />
+        <SettingLabel field={props.readOnly ? undefined : prologueEl}>
           First user message (optional — sent as a fake user turn before the history){' '}
           <MacroHelp template />
         </SettingLabel>
         <MacroTextarea
+          readOnly={props.readOnly}
           ref={prologueEl.ref}
           template
           class="mono"
@@ -71,23 +80,25 @@ export default function TemplateFields(props: {
         <Show when={!props.inline}>
           <h3>Prefills</h3>
         </Show>
-        <SettingLabel field={reasoningPrefillEl}>
+        <SettingLabel field={props.readOnly ? undefined : reasoningPrefillEl}>
           {props.inline ? 'Custom template — reasoning prefill' : 'Reasoning prefill'} (optional){' '}
           <MacroHelp template />
         </SettingLabel>
         <MacroTextarea
+          readOnly={props.readOnly}
           ref={reasoningPrefillEl.ref}
           template
           class="mono"
           placeholder="Leave empty to let the model start reasoning"
         />
-        <SettingLabel field={messagePrefillEl}>
+        <SettingLabel field={props.readOnly ? undefined : messagePrefillEl}>
           {props.inline
             ? 'Custom template — assistant message prefill'
             : 'Assistant message prefill'}{' '}
           (optional) <MacroHelp template />
         </SettingLabel>
         <MacroTextarea
+          readOnly={props.readOnly}
           ref={messagePrefillEl.ref}
           template
           class="mono"
@@ -102,25 +113,45 @@ export default function TemplateFields(props: {
         <Show when={!props.inline}>
           <h3>Advanced</h3>
         </Show>
-        <SettingLabel field={prefixEl} check>
-          <input ref={prefixEl.ref} type="checkbox" />
+        <SettingLabel field={props.readOnly ? undefined : prefixEl} check>
+          <input disabled={props.readOnly} ref={prefixEl.ref} type="checkbox" />
           Prefix speaker names into messages ("{'{{user}}'}: …", "{'{{char}}'}: …") and prefill the
           reply with the current speaker name (see /char)
         </SettingLabel>
-        <SettingLabel field={usesPersonasEl} check>
-          <input ref={usesPersonasEl.ref} type="checkbox" />
+        <div class="form-stack field-group" role="group" aria-label="Speaker handoff">
+          <SettingLabel field={props.readOnly ? undefined : speakerEl}>
+            Speaker handoff instruction
+          </SettingLabel>
+          <MacroTextarea
+            readOnly={props.readOnly}
+            ref={speakerEl.ref}
+            keys={['speaker']}
+            rows={2}
+          />
+          <p class="hint">
+            Used when speaker names are enabled and the endpoint has prefills disabled.
+            {' {{speaker}}'} is the requested speaker. Leave empty to send no handoff instruction.
+          </p>
+        </div>
+        <SettingLabel field={props.readOnly ? undefined : usesPersonasEl} check>
+          <input disabled={props.readOnly} ref={usesPersonasEl.ref} type="checkbox" />
           Uses personas — when off, chats with this {props.inline ? 'character' : 'template'} ignore
           the persona entirely ("
           {'{{user}}'}" becomes "User", the persona description is not sent)
         </SettingLabel>
-        <SettingLabel field={steerEl}>
+        <SettingLabel field={props.readOnly ? undefined : steerEl}>
           {props.inline ? 'Custom template — steer template' : 'Steer template'} (regenerate with
           instruction)
         </SettingLabel>
-        <MacroTextarea ref={steerEl.ref} keys={['instruction']} rows={2} />
+        <MacroTextarea
+          readOnly={props.readOnly}
+          ref={steerEl.ref}
+          keys={['instruction']}
+          rows={2}
+        />
         <p class="hint">
           {'{{instruction}}'} is replaced with your instruction and injected into that
-          regeneration's prompt only. Leave empty to use the built-in default.
+          regeneration's prompt only. An empty template disables regeneration with an instruction.
         </p>
       </section>
     </>

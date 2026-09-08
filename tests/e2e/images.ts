@@ -1,3 +1,4 @@
+import { imageConfig } from '../imageConfig.ts';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Conversation, Message } from '@tinytavern/shared';
@@ -48,7 +49,7 @@ export async function testImages(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         prompt: `Render ${kind}`,
-        image: { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL },
+        image: imageConfig(COMFY_WORKFLOW, MOCK_CONTROL),
       }),
     });
     assert(
@@ -57,7 +58,10 @@ export async function testImages(
     );
     await response.arrayBuffer();
   }
-  const filesBeforeActiveContent = readdirSync(join(dataDir, 'images')).sort().join('\n');
+  const filesBeforeActiveContent = readdirSync(join(dataDir, 'images'))
+    .filter((name) => !name.startsWith('thumb-'))
+    .sort()
+    .join('\n');
   for (const kind of ['html', 'svg', 'polyglot']) {
     await setNextComfyOutput(kind);
     const response = await fetch(`${BASE}/api/avatar/render`, {
@@ -65,13 +69,16 @@ export async function testImages(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         prompt: `Reject ${kind}`,
-        image: { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL },
+        image: imageConfig(COMFY_WORKFLOW, MOCK_CONTROL),
       }),
     });
     assert(response.status === 502, `${kind} Comfy output is rejected`);
   }
   assert(
-    readdirSync(join(dataDir, 'images')).sort().join('\n') === filesBeforeActiveContent,
+    readdirSync(join(dataDir, 'images'))
+      .filter((name) => !name.startsWith('thumb-'))
+      .sort()
+      .join('\n') === filesBeforeActiveContent,
     'rejected active-content renders create no generated files',
   );
   const deletesBeforeRender = (await comfyDeleteCount()).length;
@@ -84,7 +91,7 @@ export async function testImages(
       label: 'Image prompt',
       expectedActiveLeafId: imgSnap.activeLeafId,
       expectedMutationRevision: imgSnap.mutationRevision,
-      image: { workflow: COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL },
+      image: imageConfig(COMFY_WORKFLOW, MOCK_CONTROL),
     },
   );
   const pendingSnap = await tree(conv2.id);
@@ -171,7 +178,7 @@ export async function testImages(
   await req(
     'POST',
     `/api/messages/${imgRes.toolMessageId}/render-image`,
-    await branchBody(conv2.id, { workflow: CURRENT_COMFY_WORKFLOW, comfyUrl: MOCK_CONTROL }),
+    await branchBody(conv2.id, { ...imageConfig(CURRENT_COMFY_WORKFLOW, MOCK_CONTROL) }),
   );
   const pendingRerender = await tree(conv2.id);
   assert(

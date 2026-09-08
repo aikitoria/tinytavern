@@ -1315,6 +1315,28 @@
   background: var(--thinking-surface);
 }
 
+.prompt-generation-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.prompt-generation-status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.prompt-generation-reasoning {
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
 /* Waiting for the first token from the API; sits in the name row. */
 .spinner-wait {
   display: inline-block;
@@ -1372,7 +1394,7 @@
 
 .md .code-block-wrap pre {
   margin: 0;
-  padding-right: 42px;
+  padding-right: 72px;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -1392,11 +1414,16 @@
   white-space: inherit;
 }
 
-.md .code-copy-btn {
+.md .code-actions {
   position: absolute;
   z-index: 1;
   top: 6px;
   right: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.md .code-actions .icon-btn {
   width: 24px;
   min-width: 24px;
   min-height: 0;
@@ -1867,7 +1894,7 @@
   margin-top: var(--space-2);
 }
 
-.settings-section > h3 {
+.settings-section > :is(h3, summary) {
   margin: 0;
   color: var(--text);
   font-size: 15px;
@@ -1876,28 +1903,6 @@
 
 .settings-section > h3 + :is(.setting-label, label) {
   margin-top: 0;
-}
-
-.settings-disclosure {
-  display: block;
-}
-
-.settings-disclosure > summary {
-  color: var(--text);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 650;
-  list-style-position: inside;
-}
-
-.settings-disclosure > summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 2px;
-}
-
-.settings-section-body {
-  padding-top: var(--space-3);
 }
 
 .form-actions {
@@ -1944,42 +1949,6 @@
   text-underline-offset: 3px;
 }
 
-.danger-zone {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
-  padding: var(--space-4) 0 0;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.danger-zone > div {
-  min-width: 0;
-}
-
-.danger-zone-title {
-  color: var(--text);
-  font-size: 13.5px;
-  font-weight: 550;
-}
-
-.danger-zone .hint {
-  margin: var(--space-1) 0 0;
-}
-
-.danger-zone > button {
-  flex-shrink: 0;
-}
-
-.master-detail > .form > .form-actions {
-  order: 2;
-}
-
-.master-detail > .form > .notice {
-  order: 1;
-}
-
 .saved-flash {
   color: var(--success);
   font-size: 13px;
@@ -1989,24 +1958,9 @@
 
 .macro-help {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  vertical-align: text-bottom;
   margin-left: var(--space-2);
-}
-
-.help-btn {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--text-dim);
-}
-
-.help-btn:hover:where(:not(:disabled)) {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
 }
 
 .help-card {
@@ -2051,11 +2005,6 @@
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-}
-
-.form label.check-row {
-  color: var(--text);
-  font-size: 13.5px;
 }
 
 .check-row input {
@@ -2107,7 +2056,15 @@
   min-height: 0;
 }
 
-.master-detail > .form {
+.entity-detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.entity-detail > .form {
+  flex: 1;
   overflow-y: auto;
   min-height: 0;
   padding: var(--space-4);
@@ -2118,18 +2075,29 @@
   display: none;
 }
 
+.entity-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-chrome);
+  overflow: hidden;
+}
+
 .entity-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 3px;
-  border-right: 1px solid var(--border-subtle);
   padding: var(--space-2);
   background: var(--bg-chrome);
   overflow-y: auto;
   min-height: 0;
 }
 
-.entity-list button {
+.entity-list > button:where(:not(.entity-new-btn)),
+.entity-list :where(.character-folder) button {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -2185,15 +2153,14 @@
     height: 20px;
   }
 
-  .help-btn {
-    width: 36px;
-    height: 36px;
-  }
-
-  .md .code-copy-btn {
+  .md .code-actions .icon-btn {
     width: 36px;
     min-width: 36px;
     height: 36px;
+  }
+
+  .md .code-block-wrap pre {
+    padding-right: 96px;
   }
 }
 
@@ -2209,10 +2176,14 @@
 .entity-list-actions {
   display: flex;
   gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .entity-list-actions button {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   justify-content: center;
   white-space: nowrap;
 }
@@ -2240,11 +2211,14 @@
 }
 
 .entity-list .entity-new-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   justify-content: center;
+}
+
+.entity-list > .entity-new-btn {
   margin-bottom: var(--space-2);
-  color: var(--text);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
 }
 
 .entity-list-search {
@@ -2255,9 +2229,7 @@
   min-height: var(--control-height);
 }
 
-.entity-list .entity-new-btn:hover:where(:not(:disabled)),
 .entity-list .entity-new-btn.active {
-  background: var(--bg-raised);
   border-color: var(--accent);
   box-shadow: none;
 }
@@ -2361,11 +2333,6 @@
   select,
   textarea {
     touch-action: manipulation;
-  }
-
-  .danger-zone {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .sidebar {
@@ -2480,19 +2447,19 @@
   }
 
   /* Entity editors page between the list and detail form on mobile. */
-  .entity-list {
+  .entity-sidebar {
     border-right: none;
   }
 
-  .master-detail .form {
+  .master-detail > .entity-detail {
     display: none;
   }
 
-  .master-detail.detail-open .form {
+  .master-detail.detail-open > .entity-detail {
     display: flex;
   }
 
-  .master-detail.detail-open .entity-list {
+  .master-detail.detail-open .entity-sidebar {
     display: none;
   }
 

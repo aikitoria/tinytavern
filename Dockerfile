@@ -1,5 +1,8 @@
-FROM node:26-alpine
+FROM node:26-alpine AS server-base
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
+
+FROM server-base AS server-prod
 ENV NODE_ENV=production \
     DATA_DIR=/data \
     PORT=5487

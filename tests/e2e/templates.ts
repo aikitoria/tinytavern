@@ -13,6 +13,7 @@ import {
   makeNextMockResponseDieAfterContent,
   putSettings,
 } from './helpers.ts';
+import { DEFAULT_SYSTEM_PROMPT } from '@tinytavern/shared';
 import type { ChatFixture } from './chat.ts';
 import type { SetupFixture } from './setup.ts';
 
@@ -20,6 +21,42 @@ export async function testTemplates(
   fixture: Pick<ChatFixture, 'ws'> & Pick<SetupFixture, 'endpoint'>,
 ) {
   const { ws, endpoint } = fixture;
+
+  console.log('== read-only defaults and editable copies ==');
+  for (const table of ['presets', 'templates']) {
+    const entities = await req<{ id: number; readOnly: boolean; content: string }[]>(
+      'GET',
+      `/api/${table}`,
+    );
+    const original = entities.find((entity) => entity.readOnly)!;
+    assert(Boolean(original), `${table} has a protected default`);
+    if (table === 'presets') {
+      assert(
+        original.content === DEFAULT_SYSTEM_PROMPT,
+        'Default system prompt matches the requested text',
+      );
+    }
+    await expectStatus(
+      'PATCH',
+      `/api/${table}/${original.id}`,
+      { content: 'Cannot overwrite' },
+      403,
+    );
+    await expectStatus('DELETE', `/api/${table}/${original.id}`, undefined, 403);
+    const copy = await req<{ id: number; readOnly: boolean; content: string }>(
+      'POST',
+      `/api/${table}/${original.id}/duplicate`,
+    );
+    assert(
+      !copy.readOnly && copy.content === original.content,
+      `${table} default duplicates into an editable copy`,
+    );
+    const edited = await req<{ content: string }>('PATCH', `/api/${table}/${copy.id}`, {
+      content: 'Custom copy',
+    });
+    assert(edited.content === 'Custom copy', `${table} duplicate can be edited`);
+    await req('DELETE', `/api/${table}/${copy.id}`);
+  }
 
   console.log('== templates: prologue, name prefixing, /char, resume ==');
   const tpl = await req<{ id: number }>('POST', '/api/templates', {
@@ -278,6 +315,28 @@ export async function testTemplates(
       ?.content.endsWith('<Note: Reply as Bob>') === true,
     'disabled prefill adds an explicit note for a non-default speaker',
   );
+  await req('PATCH', `/api/templates/${tpl.id}`, {
+    speakerHandoffTemplate: 'CUSTOM SPEAKER {{speaker}}',
+  });
+  const customSpeakerTrace = await fetchTrace(conv2.id);
+  assert(
+    customSpeakerTrace.messages
+      .findLast((message) => message.role === 'user')
+      ?.content.endsWith('CUSTOM SPEAKER Bob') === true,
+    'speaker handoff uses the selected template',
+  );
+  await req('PATCH', `/api/templates/${tpl.id}`, { speakerHandoffTemplate: '' });
+  const emptySpeakerTrace = await fetchTrace(conv2.id);
+  assert(
+    !emptySpeakerTrace.messages.some(
+      (message) =>
+        message.content.includes('<Note: Reply as') || message.content.includes('CUSTOM SPEAKER'),
+    ),
+    'empty speaker handoff introduces no default instruction',
+  );
+  await req('PATCH', `/api/templates/${tpl.id}`, {
+    speakerHandoffTemplate: '<Note: Reply as {{speaker}}>',
+  });
   const noPrefillSend = await sendMessage(conv2.id, 'no prefill, please');
   await ws.waitFor(
     (e) => e.t === 'final' && e.message.id === noPrefillSend.assistantMessageId,
@@ -341,7 +400,7 @@ export async function testTemplates(
   const clearedTemplates = await putSettings({ defaultTemplateId: null });
   assert(
     clearedTemplates.defaultTemplateId === null,
-    'defaultTemplateId can be cleared to the built-in default',
+    'defaultTemplateId can be cleared without selecting a hidden template',
   );
   await putSettings({ defaultTemplateId: prevSettings.defaultTemplateId });
 

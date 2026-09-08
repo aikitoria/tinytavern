@@ -11,11 +11,23 @@ import {
 import { mergeLiveBuffers } from './generation.ts';
 import { broadcastConv, sendTo } from './events.ts';
 import { getConversationRevision } from './conversationRevision.ts';
+import { mediaPromptBuffers } from './mediaJobStore.ts';
+
+function publicLiveMessages(messages: Message[]): Message[] {
+  return mergeLiveBuffers(messages).map((message) => {
+    const prompt = mediaPromptBuffers.get(message.id);
+    const current =
+      prompt === undefined
+        ? message
+        : { ...message, content: prompt.prompt, reasoning: prompt.reasoning || null };
+    return publicMessage(current);
+  });
+}
 
 export function treeSnapshot(conversationId: number): TreeSnapshot {
   return {
     conversationId,
-    messages: mergeLiveBuffers(getTreeMessages(conversationId)).map(publicMessage),
+    messages: publicLiveMessages(getTreeMessages(conversationId)),
     activeLeafId: getActiveLeafId(conversationId),
     mutationRevision: getConversationRevision(conversationId),
   };
@@ -41,7 +53,7 @@ export function broadcastTree(conversationId: number): void {
       activeLeafId: getActiveLeafId(conversationId),
       mutationRevision: getConversationRevision(conversationId),
       nodes: getTreeNodes(conversationId),
-      messages: mergeLiveBuffers(bodies).map(publicMessage),
+      messages: publicLiveMessages(bodies),
     });
   });
 }

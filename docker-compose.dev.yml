@@ -11,7 +11,11 @@ x-dev-volumes: &dev-volumes
 
 services:
   server:
-    image: node:26-alpine
+    image: tinytavern-server-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: server-base
     working_dir: /app
     user: "1000:1000"
     # --watch-path is more reliable than module-graph watching on bind mounts
@@ -23,7 +27,7 @@ services:
       CADDY_PROXY_KEY_FILE: /app/.secrets/dev/proxy.key
       SESSION_COOKIE_NAME: tinytavern_dev_session
     <<: *dev-volumes
-    # Reach ComfyUI at http://comfy:8588 on its existing network.
+    # Separate network for ComfyUI; optionally reuse an external network via .env.
     networks:
       - default
       - comfy
@@ -82,5 +86,5 @@ services:
 
 networks:
   comfy:
-    external: true
-    name: my-bridge-network
+    name: ${TINYTAVERN_COMFY_NETWORK:-${COMPOSE_PROJECT_NAME}_comfy}
+    external: ${TINYTAVERN_COMFY_NETWORK_EXTERNAL:-false}

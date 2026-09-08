@@ -9,7 +9,7 @@ import {
 
 const items: GalleryItem[] = Array.from({ length: 5000 }, (_, index) => ({
   id: index + 1,
-  characterId: index % 2 ? 7 : null,
+  characters: index % 2 ? [{ id: 7, name: 'Ashina' }] : [],
   characterName: index % 2 ? 'Ashina' : 'Uploads',
   sourceMessageId: null,
   sourceConversationId: null,
@@ -18,7 +18,6 @@ const items: GalleryItem[] = Array.from({ length: 5000 }, (_, index) => ({
   image: `/images/${index}.png`,
   imageWidth: [600, 1200, 1000, 2000][index % 4]!,
   imageHeight: 1000,
-  hasImageRender: false,
   createdAt: index,
   updatedAt: index,
 }));
@@ -71,10 +70,29 @@ assert.equal(
 );
 const index = indexGallery(items);
 const filtered = filterGallery(index, 'NIGHT blue', 'id:7', true);
-assert(filtered.every((item) => item.characterId === 7 && item.prompt === 'Blue forest at night'));
+assert(
+  filtered.every(
+    (item) =>
+      item.characters.some((character) => character.id === 7) &&
+      item.prompt === 'Blue forest at night',
+  ),
+);
 assert(filtered[0]!.id < filtered[1]!.id);
 assert.equal(filterGallery(index, 'absent', 'all', false).length, 0);
 assert.equal(filterGallery(index, '', 'name:Uploads', false).length, 2500);
 console.log(
   'Gallery layout regressions passed: geometry, aspect ratios, culling, search, filters and ordering.',
 );
+
+const combined = {
+  ...items[1]!,
+  characters: [
+    { id: 7, name: 'Ashina' },
+    { id: 8, name: 'Haeun' },
+  ],
+  characterName: 'Ashina, Haeun',
+};
+const combinedIndex = indexGallery([combined]);
+assert.equal(filterGallery(combinedIndex, '', 'id:7', false).length, 1);
+assert.equal(filterGallery(combinedIndex, '', 'id:8', false).length, 1);
+assert.equal(filterGallery(combinedIndex, '', 'id:9', false).length, 0);

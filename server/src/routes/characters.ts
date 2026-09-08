@@ -1,6 +1,12 @@
 import { publicAvatar } from '../mediaUrls.ts';
 import { defineAvatarRoutes } from './avatarRoutes.ts';
-import type { Character, CustomTemplate } from '@tinytavern/shared';
+import {
+  namedItem,
+  DEFAULT_STEER_TEMPLATE,
+  DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
+  type Character,
+  type CustomTemplate,
+} from '@tinytavern/shared';
 import { stmt, toCharacter } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { buildCharacterCard, isPng, makePlaceholderPng, parseCharacterCard } from '../pngCard.ts';
@@ -28,6 +34,26 @@ import {
   textField,
 } from './entityRoutes.ts';
 import { rowById } from './entityUtils.ts';
+
+function parseCustomTemplate(raw: unknown): string | null {
+  if (raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new HttpError(400, 'customTemplate must be an object or null');
+  }
+  const t = raw as JsonObject;
+  const custom: CustomTemplate = {
+    content: optionalString(t, 'content') ?? '',
+    userPrologue: optionalString(t, 'userPrologue') ?? '',
+    reasoningPrefill: optionalString(t, 'reasoningPrefill') ?? '',
+    messagePrefill: optionalString(t, 'messagePrefill') ?? '',
+    prefixNames: optionalBoolean(t, 'prefixNames') ?? false,
+    usesPersonas: optionalBoolean(t, 'usesPersonas') ?? true,
+    steerTemplate: optionalString(t, 'steerTemplate') ?? DEFAULT_STEER_TEMPLATE,
+    speakerHandoffTemplate:
+      optionalString(t, 'speakerHandoffTemplate') ?? DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
+  };
+  return JSON.stringify(custom);
+}
 
 defineEntityRoutes<Character>({
   table: 'characters',
@@ -65,21 +91,7 @@ defineEntityRoutes<Character>({
         const raw = b.customTemplate;
         if (raw === undefined)
           return cur?.customTemplate ? JSON.stringify(cur.customTemplate) : null;
-        if (raw === null) return null;
-        if (typeof raw !== 'object' || Array.isArray(raw)) {
-          throw new HttpError(400, 'customTemplate must be an object or null');
-        }
-        const t = raw as JsonObject;
-        const custom: CustomTemplate = {
-          content: optionalString(t, 'content') ?? '',
-          userPrologue: optionalString(t, 'userPrologue') ?? '',
-          reasoningPrefill: optionalString(t, 'reasoningPrefill') ?? '',
-          messagePrefill: optionalString(t, 'messagePrefill') ?? '',
-          prefixNames: optionalBoolean(t, 'prefixNames') ?? false,
-          usesPersonas: optionalBoolean(t, 'usesPersonas') ?? true,
-          steerTemplate: optionalString(t, 'steerTemplate') ?? '',
-        };
-        return JSON.stringify(custom);
+        return parseCustomTemplate(raw);
       },
     },
   ],
@@ -110,9 +122,22 @@ route.post(
     } catch (err) {
       throw new HttpError(400, err instanceof Error ? err.message : 'invalid character card');
     }
+    const data = cardObject(cardObject(card.raw).data);
+    const extension = cardObject(cardObject(data.extensions).tinytavern);
+    const reference = (table: 'presets' | 'templates' | 'character_folders', name: unknown) =>
+      namedItem(
+        stmt(`SELECT id, name FROM ${table}`)
+          .all()
+          .map((row) => ({ id: Number(row.id), name: String(row.name) })),
+        name,
+      )?.id ?? null;
+    const customTemplate =
+      extension.customTemplate === undefined ? null : parseCustomTemplate(extension.customTemplate);
+    const disableBackground =
+      optionalBoolean(extension, 'disableBackgroundSwipeGeneration') ?? false;
     const result = stmt(
-      `INSERT INTO characters (name, chat_name, personality, scenario, examples, first_message, custom_prompt, card_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO characters (name, chat_name, personality, scenario, examples, first_message, custom_prompt, card_json, created_at, preset_id, template_id, folder_id, custom_template, disable_background_swipe_generation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       card.name,
       card.chatName,
@@ -123,6 +148,11 @@ route.post(
       card.systemPrompt,
       JSON.stringify(card.raw),
       Date.now(),
+      reference('presets', extension.presetName),
+      reference('templates', extension.templateName),
+      reference('character_folders', extension.folderName),
+      customTemplate,
+      Number(disableBackground),
     );
     const id = Number(result.lastInsertRowid);
     let avatar: string;
@@ -164,7 +194,27 @@ route.get('/api/characters/:id/card', ({ params, res }) => {
       system_prompt: character.customPrompt ?? '',
       extensions: {
         ...extensions,
-        tinytavern: { ...ownExtension, chatName: character.chatName },
+        tinytavern: {
+          ...ownExtension,
+          chatName: character.chatName,
+          presetName:
+            character.presetId === null
+              ? null
+              : (stmt('SELECT name FROM presets WHERE id = ?').get(character.presetId)?.name ??
+                null),
+          templateName:
+            character.templateId === null
+              ? null
+              : (stmt('SELECT name FROM templates WHERE id = ?').get(character.templateId)?.name ??
+                null),
+          folderName:
+            character.folderId === null
+              ? null
+              : (stmt('SELECT name FROM character_folders WHERE id = ?').get(character.folderId)
+                  ?.name ?? null),
+          customTemplate: character.customTemplate,
+          disableBackgroundSwipeGeneration: character.disableBackgroundSwipeGeneration,
+        },
       },
     },
   };

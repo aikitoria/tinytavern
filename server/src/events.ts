@@ -109,6 +109,16 @@ export function broadcast(ev: ServerEvent): void {
   }
 }
 
+/** Skip congested viewers; reconnect snapshots include the current indexed preview cache. */
+export function broadcastMediaProgress(ev: Extract<ServerEvent, { t: 'mediaJobProgress' }>): void {
+  const payload = JSON.stringify(ev);
+  for (const ws of clients.keys()) {
+    if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 1024 * 1024) {
+      ws.send(payload);
+    }
+  }
+}
+
 export function broadcastConv(conversationId: number, ev: ServerEvent): void {
   const payload = JSON.stringify(ev);
   for (const [ws, state] of clients) {
@@ -122,6 +132,17 @@ export function subscribedConversationIds(): number[] {
   ];
 }
 
+const invalidationObservers = new Set<(entity: InvalidateEntity) => void>();
+
+/** Local background work can react to the same committed changes sent to clients. */
+export function observeInvalidation(observer: (entity: InvalidateEntity) => void): () => void {
+  invalidationObservers.add(observer);
+  return () => {
+    invalidationObservers.delete(observer);
+  };
+}
+
 export function invalidate(entity: InvalidateEntity): void {
   broadcast({ t: 'invalidate', entity });
+  for (const observer of invalidationObservers) observer(entity);
 }

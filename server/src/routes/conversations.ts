@@ -1,8 +1,9 @@
+import type { MediaImageConfig } from '@tinytavern/shared';
 // Keep route handlers synchronous between check and act: an `await` lets other
 // handlers or generation callbacks invalidate generation and active-leaf guards.
 import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
 import type { MessageRow } from './conversationCopies.ts';
-import { characterChatName, type Conversation } from '@tinytavern/shared';
+import { characterChatName, type Conversation, type Message } from '@tinytavern/shared';
 import { stmt, toConversation, toMessage, transaction } from '../db.ts';
 import { route, HttpError } from '../router.ts';
 import {
@@ -53,6 +54,7 @@ import {
   deleteImageFiles,
 } from '../images.ts';
 import { parseImageConfig, startImageRender } from '../comfy.ts';
+import { createImageRecipe } from '../mediaRecipes.ts';
 import { bumpConversationRevision } from '../conversationRevision.ts';
 import {
   objectBody,
@@ -193,25 +195,15 @@ function derivedTitle(content: string): string {
   return content.length > 60 ? `${content.slice(0, 57)}…` : content;
 }
 
-const TITLE_INSTRUCTION =
-  'Summarize this conversation in 3-6 words for a sidebar title. Reply with only the title, no quotes.';
-
-async function requestTitle(
-  conv: Conversation,
-  userText: string,
-  assistantText: string,
-): Promise<string | null> {
-  const clip = (s: string) => (s.length > 1000 ? `${s.slice(0, 1000)}…` : s);
+async function requestTitle(conv: Conversation, history: Message[]): Promise<string | null> {
   try {
+    const built = buildToolPrompt(conv, history, getSettings().titlePrompt);
     const raw = await chatCompletionOnce(
       conv,
-      [
-        {
-          role: 'user',
-          content: `${TITLE_INSTRUCTION}\n\nUser: ${clip(userText)}\n\nAssistant: ${clip(assistantText)}`,
-        },
-      ],
-      30,
+      built.messages,
+      // Leave room for reasoning before the short visible title.
+      1024,
+      { reasoningPrefill: built.reasoningPrefill },
     );
     const title = raw
       .replace(/\s+/g, ' ')
@@ -229,25 +221,30 @@ async function requestTitle(
   }
 }
 
-/** Auto-title the first exchange even without subscribers; failures retain the existing title. */
+const activeTitles = new Set<number>();
+
+/** Name the chat after its first user turn and completed reply, including character greetings. */
 function maybeAutoTitle(conversationId: number, assistantMessageId: number): void {
+  if (activeTitles.has(conversationId)) return;
+  const pending = stmt('SELECT auto_title_pending FROM conversations WHERE id = ?').get(
+    conversationId,
+  );
+  if (!pending?.auto_title_pending) return;
+  const history = getPathToMessage(assistantMessageId);
+  if (history.filter((message) => message.role === 'user').length !== 1) return;
   const conv = getConversation(conversationId);
-  const history = getPathToMessage(getMessage(assistantMessageId)?.parentId ?? null);
-  const first = history.length === 1 && history[0]!.role === 'user' ? history[0]! : null;
-  if (!first) return;
-  // Preserve titles chosen by the user or an earlier auto-title run.
-  const fallback = derivedTitle(first.content);
-  if (conv.title !== 'New chat' && conv.title !== fallback) return;
-  const reply = getMessage(assistantMessageId)?.content ?? '';
-  void requestTitle(conv, first.content, reply).then((title) => {
-    if (!title) return;
-    // The call is async: re-check that nobody renamed (or deleted) meanwhile.
-    const latest = stmt('SELECT title FROM conversations WHERE id = ?').get(conversationId) as
-      { title: string } | undefined;
-    if (!latest || (latest.title !== 'New chat' && latest.title !== fallback)) return;
-    // Title changes must not reorder the sidebar.
-    stmt('UPDATE conversations SET title = ? WHERE id = ?').run(title, conversationId);
-    invalidate('conversations');
+  activeTitles.add(conversationId);
+  void requestTitle(conv, history).then((title) => {
+    activeTitles.delete(conversationId);
+    // A manual rename clears pending, including a rename to the same placeholder text.
+    if (title) {
+      const result = stmt(
+        'UPDATE conversations SET title = ?, auto_title_pending = 0 WHERE id = ? AND auto_title_pending = 1',
+      ).run(title, conversationId);
+      if (result.changes) invalidate('conversations');
+    } else {
+      stmt('UPDATE conversations SET auto_title_pending = 0 WHERE id = ?').run(conversationId);
+    }
   });
 }
 
@@ -301,10 +298,10 @@ route.post('/api/conversations', ({ body }) => {
   const now = Date.now();
   const id = transaction(() => {
     const result = stmt(
-      `INSERT INTO conversations (title, character_id, persona_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO conversations (title, character_id, persona_id, created_at, updated_at, auto_title_pending)
+         VALUES (?, ?, ?, ?, ?, 1)`,
     ).run(
-      // The placeholder enables auto-titling for greeting-less chats.
+      // Keep a useful initial label until the first user exchange is summarized.
       character?.firstMessage.trim() ? character.name : 'New chat',
       character?.id ?? null,
       persona?.id ?? null,
@@ -359,7 +356,7 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
   // Metadata edits must not reorder the sidebar.
   stmt(
     `UPDATE conversations SET title = ?, character_id = ?, persona_id = ?, endpoint_id = ?, speaker_name = ?,
-      scenario_override = ?
+      scenario_override = ?, auto_title_pending = CASE WHEN ? THEN 0 ELSE auto_title_pending END
      WHERE id = ?`,
   ).run(
     title !== undefined ? title.trim() : conv.title,
@@ -368,6 +365,7 @@ route.patch('/api/conversations/:id', ({ params, body }) => {
     endpointId !== undefined ? endpointId : conv.endpointId,
     speakerName !== undefined ? speakerName?.trim() || null : conv.speakerName,
     scenarioOverride !== undefined ? scenarioOverride : conv.scenarioOverride,
+    title !== undefined ? 1 : 0,
     id,
   );
   bumpConversationRevision(id);
@@ -485,7 +483,7 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   const b = objectBody(body);
   const prompt = requiredString(b, 'prompt');
   const label = optionalNullableString(b, 'label');
-  let image: { workflow: string; comfyUrl: string } | null = null;
+  let image: MediaImageConfig | null = null;
   if (b.image != null) {
     try {
       image = parseImageConfig(b.image);
@@ -514,8 +512,8 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   );
   // Retain config for later alternatives; finalize() clears pending on non-done completion.
   if (image) {
-    stmt('UPDATE messages SET image_pending = 1, image_render_json = ? WHERE id = ?').run(
-      JSON.stringify(image),
+    stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
+      createImageRecipe(image, ''),
       msg.id,
     );
   }
@@ -523,16 +521,7 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   const renderImage = image;
   startGeneration(getConversation(id), msg.id, undefined, {
     prompt: built,
-    onDone: renderImage
-      ? () =>
-          startImageRender({
-            conversationId: id,
-            mid: msg.id,
-            comfyUrl: renderImage.comfyUrl,
-            workflow: renderImage.workflow,
-            description: getMessage(msg.id)?.content ?? '',
-          })
-      : undefined,
+    onDone: renderImage ? () => startImageRender(msg.id) : undefined,
   });
   broadcastTree(id);
   invalidate('conversations');
@@ -624,7 +613,10 @@ route.post('/api/conversations/:id/messages', ({ params, body }) => {
 
   const userMsg = appendMessage(id, 'user', content, conv.activeLeafId);
   if (conv.title === 'New chat') {
-    stmt('UPDATE conversations SET title = ? WHERE id = ?').run(derivedTitle(content), id);
+    stmt('UPDATE conversations SET title = ? WHERE id = ? AND auto_title_pending = 1').run(
+      derivedTitle(content),
+      id,
+    );
   }
   const mid = spawnAssistantReply(conv, userMsg.id);
   invalidate('conversations');

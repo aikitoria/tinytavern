@@ -1,3 +1,4 @@
+import { readPageLocation, writePageLocation } from '../state/pageLocation.ts';
 import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import {
@@ -341,7 +342,10 @@ export default function TreeMap() {
   const onCardDblClick = (message: Message) => {
     if (panMoved) return;
     void activate(message).then((ok) => {
-      if (ok) setState('viewMode', 'chat');
+      if (ok) {
+        setState('viewMode', 'chat');
+        writePageLocation({ ...readPageLocation(), viewMode: undefined });
+      }
     });
   };
 

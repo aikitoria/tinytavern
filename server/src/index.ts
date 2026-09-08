@@ -2,8 +2,8 @@ import { caddyEnabled } from './mediaUrls.ts';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { existsSync, readFileSync, watch } from 'node:fs';
-import { stat, readFile } from 'node:fs/promises';
+import { createReadStream, existsSync, readFileSync, watch } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AVATAR_DIR, IMAGES_DIR, db } from './db.ts';
@@ -26,8 +26,11 @@ import {
 import { isRequestAuthenticated } from './auth.ts';
 import { setSpeculativeRefillHandler } from './speculation.ts';
 import { sweepOrphanedImages } from './images.ts';
+import { initMediaWorker, stopMediaWorker } from './mediaWorker.ts';
+import { initMediaThumbnails, stopMediaThumbnails } from './mediaThumbnails.ts';
 import './routes/messages.ts';
 import './routes/gallery.ts';
+import './routes/mediaJobs.ts';
 import './routes/presets.ts';
 import './routes/templates.ts';
 import './routes/personas.ts';
@@ -44,7 +47,9 @@ const PORT = Number(process.env.PORT ?? 5487);
 const CLIENT_DIST = process.env.CLIENT_DIST ?? '';
 
 // Backstop for image-file deletion guarantees (crash windows, late renders).
+initMediaWorker();
 sweepOrphanedImages();
+initMediaThumbnails();
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -57,6 +62,7 @@ const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.webm': 'video/webm',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
 };
@@ -66,18 +72,51 @@ async function serveFile(
   path: string,
   immutable: boolean,
   extraHeaders: Record<string, string> = {},
+  range?: string,
 ): Promise<boolean> {
   try {
     const info = await stat(path);
     if (!info.isFile()) return false;
-    const data = await readFile(path);
-    res.writeHead(200, {
+    let start = 0;
+    let end = info.size - 1;
+    let partial = false;
+    const requestedRange = range?.match(/^bytes=(\d*)-(\d*)$/);
+    if (requestedRange && (requestedRange[1] || requestedRange[2])) {
+      if (requestedRange[1]) {
+        start = Number(requestedRange[1]);
+        if (requestedRange[2]) {
+          end = Math.min(end, Number(requestedRange[2]));
+        }
+      } else {
+        start = Math.max(0, info.size - Number(requestedRange[2]));
+      }
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start > end ||
+        start >= info.size
+      ) {
+        res.writeHead(416, { 'content-range': `bytes */${info.size}`, ...extraHeaders }).end();
+        return true;
+      }
+      partial = true;
+    }
+    res.writeHead(partial ? 206 : 200, {
       'content-type': MIME[extname(path)] ?? 'application/octet-stream',
-      'content-length': data.length,
+      'content-length': Math.max(0, end - start + 1),
+      'accept-ranges': 'bytes',
       'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+      ...(partial ? { 'content-range': `bytes ${start}-${end}/${info.size}` } : {}),
       ...extraHeaders,
     });
-    res.end(data);
+    if (info.size === 0) {
+      res.end();
+      return true;
+    }
+    const stream = createReadStream(path, { start, end });
+    stream.on('error', () => res.destroy());
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
     return true;
   } catch {
     return false;
@@ -152,7 +191,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     const imageExt = extname(pathname).toLowerCase();
-    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(imageExt)) {
+    if (!['.png', '.jpg', '.jpeg', '.webp', '.webm'].includes(imageExt)) {
       res.writeHead(404).end();
       return;
     }
@@ -160,11 +199,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const path = safeJoin(IMAGES_DIR, pathname.slice('/images/'.length));
     if (
       path &&
-      (await serveFile(res, path, true, {
-        'x-content-type-options': 'nosniff',
-        'content-security-policy': "default-src 'none'; sandbox",
-        'cache-control': 'no-store',
-      }))
+      (await serveFile(
+        res,
+        path,
+        true,
+        {
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'no-store',
+        },
+        req.headers.range,
+      ))
     )
       return;
     res.writeHead(404).end();
@@ -288,9 +333,11 @@ listener.listen(PORT, () => {
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
+  process.once(signal, async () => {
     try {
+      stopMediaWorker();
       stopAllGenerations();
+      await stopMediaThumbnails();
       db.close();
       process.exit(0);
     } catch (err) {

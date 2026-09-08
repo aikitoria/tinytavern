@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync, unlinkSync } from 'node:fs';
@@ -282,11 +283,15 @@ export async function testSetup() {
     400,
   );
   const withImageSettings = await putSettings({
-    imageGeneration: { describePrompt: 'test prompt' },
+    imageGeneration: {
+      ...DEFAULT_SETTINGS.imageGeneration,
+      promptPresets: {
+        describe: { presets: [{ name: 'Test', prompt: 'test prompt' }], active: 'Test' },
+      },
+    },
   });
   assert(
-    (withImageSettings.imageGeneration as { describePrompt?: string }).describePrompt ===
-      'test prompt',
+    withImageSettings.imageGeneration.promptPresets?.describe?.presets[0]?.prompt === 'test prompt',
     'image settings round-trip through PUT /api/settings',
   );
   await expectStatus(

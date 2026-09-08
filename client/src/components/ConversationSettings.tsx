@@ -1,3 +1,4 @@
+import { guardPageNavigation } from '../state/pageLocation.ts';
 import SettingLabel, { createDefaultField } from './SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
@@ -151,7 +152,7 @@ function Editor(props: {
 
       <label>Character</label>
       <div class="conversation-character-value">
-        <Avatar src={character()?.avatar} name={character()?.name ?? 'Assistant'} />
+        <Avatar src={character()?.avatarThumbnail} name={character()?.name ?? 'Assistant'} />
         <span class="conversation-character-name">{character()?.name ?? 'Assistant'}</span>
         <Show when={character()}>
           {(current) => (
@@ -248,7 +249,10 @@ function Editor(props: {
         </button>
         <button onClick={discard}>Discard</button>
         <button onClick={duplicateChat}>Duplicate chat</button>
-        <button onClick={() => download(`/api/conversations/${props.conv.id}/export`)}>
+        <button
+          title="Export messages and images; videos are omitted"
+          onClick={() => download(`/api/conversations/${props.conv.id}/export`)}
+        >
           Export JSON
         </button>
         <Show when={saved()}>
@@ -263,6 +267,7 @@ function Editor(props: {
 
 export default function ConversationSettings() {
   const navigation = createSettingsNavigation();
+  onCleanup(guardPageNavigation(navigation.navigate));
 
   return (
     <>

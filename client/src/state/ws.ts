@@ -6,6 +6,7 @@ let retryDelay = 500;
 let started = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+let connectTimer: ReturnType<typeof setTimeout> | null = null;
 let lifecycleListenersInstalled = false;
 
 // Set lazily to break the import cycle with store.ts.
@@ -40,11 +41,21 @@ function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   sock = ws;
+  connectTimer = setTimeout(() => {
+    if (sock !== ws) return;
+    connectTimer = null;
+    sock = null;
+    ws.close();
+    onStatus?.(false);
+    scheduleReconnect();
+  }, 10_000);
   ws.onopen = () => {
     if (sock !== ws || !started) {
       ws.close();
       return;
     }
+    if (connectTimer) clearTimeout(connectTimer);
+    connectTimer = null;
     retryDelay = 500;
     onStatus?.(true);
     // Resync: state may have changed while disconnected.
@@ -62,6 +73,8 @@ function connect(): void {
   ws.onclose = (event) => {
     // A replaced socket may close late; do not disturb its successor.
     if (sock !== ws) return;
+    if (connectTimer) clearTimeout(connectTimer);
+    connectTimer = null;
     onStatus?.(false);
     sock = null;
     if (event.code === 4001) onUnauthorized?.();
@@ -76,6 +89,8 @@ export function refreshWs(): void {
   if (!started) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  if (connectTimer) clearTimeout(connectTimer);
+  connectTimer = null;
   retryDelay = 500;
   const previous = sock;
   sock = null;
@@ -85,7 +100,7 @@ export function refreshWs(): void {
 }
 
 function queueResumeRefresh(): void {
-  if (!started || resumeTimer != null) return;
+  if (!started || document.visibilityState !== 'visible' || resumeTimer != null) return;
   // Coalesce visibility/online/pageshow bursts to avoid replacing the new socket again.
   resumeTimer = setTimeout(() => {
     resumeTimer = null;
@@ -100,6 +115,8 @@ function installLifecycleListeners(): void {
     if (document.visibilityState === 'visible') queueResumeRefresh();
   });
   window.addEventListener('online', queueResumeRefresh);
+  window.addEventListener('focus', queueResumeRefresh);
+  document.addEventListener('resume', queueResumeRefresh);
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) queueResumeRefresh();
   });
@@ -118,6 +135,8 @@ export function stopWs(): void {
   reconnectTimer = null;
   if (resumeTimer) clearTimeout(resumeTimer);
   resumeTimer = null;
+  if (connectTimer) clearTimeout(connectTimer);
+  connectTimer = null;
   const current = sock;
   sock = null;
   current?.close();

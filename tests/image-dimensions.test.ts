@@ -8,7 +8,7 @@ const png = Buffer.from(
   'base64',
 );
 const webp = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
-const jpeg = readFileSync(new URL('../docs/chat.jpg', import.meta.url));
+const jpeg = readFileSync(new URL('./fixtures/image.jpg', import.meta.url));
 for (const [index, data] of [png, webp, jpeg].entries()) {
   const size = imageDimensions(data);
   assert(size && size.width > 0 && size.height > 0);

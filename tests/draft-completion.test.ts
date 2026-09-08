@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { DEFAULT_DRAFT_COMPLETION_PROMPT } from '@tinytavern/shared';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
@@ -13,6 +14,7 @@ const alternating = buildDraftCompletionMessages(
     { role: 'assistant', content: '', reasoning_content: 'thought' },
   ],
   'I was halfway through',
+  DEFAULT_DRAFT_COMPLETION_PROMPT,
 );
 assert.deepEqual(
   alternating.map((message) => message.role),
@@ -23,18 +25,52 @@ assert.equal(alternating[2]?.content, '(No visible response)');
 assert.equal(alternating[2]?.reasoning_content, 'thought');
 assert.match(alternating.at(-1)?.content ?? '', /I was halfway through/);
 
-const trailingUser = buildDraftCompletionMessages([{ role: 'user', content: 'History' }], 'Draft');
+const trailingUser = buildDraftCompletionMessages(
+  [{ role: 'user', content: 'History' }],
+  'Draft',
+  DEFAULT_DRAFT_COMPLETION_PROMPT,
+);
 assert.equal(trailingUser.length, 1);
 assert.match(trailingUser[0]?.content ?? '', /^History/);
 assert.match(trailingUser[0]?.content ?? '', /Draft/);
 
-const echoed = new DraftSuffixFilter('Draft');
-assert.equal(echoed.push('Dra'), '');
-assert.equal(echoed.push('ft plus'), ' plus');
-assert.equal(echoed.finish(), '');
+const draft = "  - **Markdown**\n\t```ts\nconst x = '🦊';  ";
+const continuation = ' // note\n\t```\n';
+for (let split = 0; split <= draft.length + continuation.length; split++) {
+  const filter = new DraftSuffixFilter(draft);
+  const response = draft + continuation;
+  assert.equal(
+    filter.push(response.slice(0, split)) + filter.push(response.slice(split)),
+    continuation,
+  );
+  filter.finish();
+}
+const filter = new DraftSuffixFilter(draft);
+let suffix = '';
+for (const character of draft + continuation) suffix += filter.push(character);
+assert.equal(suffix, continuation);
+filter.finish();
+const changed = new DraftSuffixFilter(draft);
+assert.throws(() => changed.push(draft.trimStart()), /changed the existing draft/);
+const partial = new DraftSuffixFilter(draft);
+assert.equal(partial.push(draft.slice(0, -1)), '');
+assert.throws(() => partial.finish(), /stopped before repeating/);
+const exact = new DraftSuffixFilter(draft);
+assert.equal(exact.push(draft), '');
+exact.finish();
+assert.equal(exact.push('  '), '  ');
+console.log(
+  'Draft completion preserves whitespace and Markdown across every chunk boundary and rejects changed or incomplete prefixes.',
+);
 
-const genuine = new DraftSuffixFilter('Draft');
-assert.equal(genuine.push('Drifting onward'), 'Drifting onward');
-assert.equal(genuine.finish(), '');
-
-console.log('draft completion prompt: 13 assertions passed');
+assert.deepEqual(
+  buildDraftCompletionMessages(
+    [{ role: 'assistant', content: 'Chat prefix' }],
+    'A {{draft}} $&',
+    'Continue: {{DRAFT}}',
+  ),
+  [
+    { role: 'assistant', content: 'Chat prefix' },
+    { role: 'user', content: '[System Note]\nContinue: A {{draft}} $&' },
+  ],
+);

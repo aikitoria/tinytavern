@@ -1,3 +1,4 @@
+import { testAssistancePrompts } from './assistance-prompts.ts';
 // Run only against isolated throwaway servers; see AGENTS.md.
 import { passed } from './helpers.ts';
 import { testSetup } from './setup.ts';
@@ -22,8 +23,10 @@ import { testParallelSpeculation } from './parallel-speculation.ts';
 import { testSearch } from './search.ts';
 import { testCleanup } from './cleanup.ts';
 import { testAuth } from './auth.ts';
+import { testMediaJobs } from './media-jobs.ts';
 
 const setup = await testSetup();
+await testAssistancePrompts();
 const chat = await testChat();
 const streaming = await testStreaming(chat);
 await testTreeMutations({ ...chat, ...streaming });
@@ -44,6 +47,7 @@ const speculationLifecycle = await testSpeculationLifecycle(chat);
 await testParallelSpeculation({ ...chat, ...speculationLifecycle });
 await testSearch({ ...templates, ...setup });
 await testCleanup({ ...images, ...gallery, ...imageRevisions, ...chat });
+await testMediaJobs();
 await testAuth({ ...setup, ...images, ...characters });
 
 console.log(`\nALL ${passed} ASSERTIONS PASSED`);

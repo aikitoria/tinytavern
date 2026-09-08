@@ -39,6 +39,8 @@ import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import Markdown from './Markdown.tsx';
 import Modal from './Modal.tsx';
+import PromptGenerationStatus from './PromptGenerationStatus.tsx';
+import MediaPromptMenuItems from '../media/MediaPromptMenuItems.tsx';
 
 // On touch layouts, only the last-tapped message shows actions.
 const [touchedId, setTouchedId] = createSignal<number | null>(null);
@@ -62,7 +64,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
       : isTool()
         ? (props.message.name ?? 'Tool')
         : (props.message.name ?? characterChatName(selectedCharacter()));
-  const avatarSrc = () => (isUser() ? persona()?.avatar : selectedCharacter()?.avatar);
+  const avatarSrc = () =>
+    isUser() ? persona()?.avatarThumbnail : selectedCharacter()?.avatarThumbnail;
   const streaming = () => props.message.status === 'streaming';
 
   const siblings = () => siblingsOf(props.message);
@@ -280,7 +283,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         props.message.id,
         instruction,
         state.tree,
-        imageBehavior()?.currentImageConfig?.(),
+        imageBehavior()?.currentImageConfig?.(props.message),
       ),
     );
     if (ok) setSteerOpen(false);
@@ -290,7 +293,12 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   const imageBehavior = createMemo(() =>
     imageMessage.matches(props.message) ? imageMessage : undefined,
   );
-  const imageView = createMemo(() => imageBehavior()?.create(() => props.message, { streaming }));
+  const imageView = createMemo(() =>
+    imageBehavior()?.create(() => props.message, {
+      streaming,
+      inMap: () => props.inMap === true,
+    }),
+  );
 
   // Do not reopen a stale menu when this message remounts.
   onCleanup(() => {
@@ -393,11 +401,13 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
           <Show when={props.message.status === 'stopped'}>
             <span class="msg-chip">stopped</span>
           </Show>
-          <Show when={streaming() && !props.message.content && !props.message.reasoning}>
+          <Show
+            when={streaming() && !isTool() && !props.message.content && !props.message.reasoning}
+          >
             <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
           </Show>
           <span class="msg-tools-left msg-overlay-toolbar">
-            <Show when={props.message.reasoning}>
+            <Show when={props.message.reasoning && !(isTool() && streaming())}>
               <button
                 class="reasoning-chip icon-btn"
                 classList={{ 'icon-btn-active': reasoningOpen() }}
@@ -494,6 +504,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       autoFocus
                     >
                       <MenuItem action={copy}>Copy</MenuItem>
+                      <MediaPromptMenuItems
+                        text={props.message.content}
+                        conversationId={props.message.conversationId}
+                        onClose={closeMenu}
+                      />
                       <MenuItem disabled={props.message.imagePending} action={startEdit}>
                         Edit
                       </MenuItem>
@@ -552,7 +567,12 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             transition: dragging() ? 'none' : 'transform 0.18s ease-out, opacity 0.18s ease-out',
           }}
         >
-          <Show when={props.message.reasoning && reasoningOpen()}>
+          <PromptGenerationStatus
+            active={isTool() && streaming()}
+            content={props.message.content}
+            reasoning={props.message.reasoning}
+          />
+          <Show when={props.message.reasoning && reasoningOpen() && !(isTool() && streaming())}>
             <div class="reasoning-text">{props.message.reasoning}</div>
           </Show>
 
@@ -603,7 +623,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               imageView()!.Body()
             ) : (
               <div class="msg-content">
-                <Markdown content={props.message.content} streaming={streaming()} />
+                <Markdown
+                  content={props.message.content}
+                  streaming={streaming()}
+                  conversationId={props.message.conversationId}
+                />
               </div>
             )}
           </Show>

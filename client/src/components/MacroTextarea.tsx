@@ -16,12 +16,12 @@ type MacroKind = 'valid' | 'invalid' | 'cond';
 
 function classify(token: string, keys: Set<string>, template: boolean): MacroKind {
   const lower = token.toLowerCase();
-  const slot = /^\{\{([a-z]+)\}\}$/.exec(lower);
+  const slot = /^\{\{([a-z][a-z0-9_]*)\}\}$/.exec(lower);
   if (slot) return keys.has(slot[1]!) ? 'valid' : 'invalid';
   if (template) {
     if (lower === '{{/if}}') return 'cond';
-    const cond = /^\{\{#if ([a-z]+)\}\}$/.exec(lower);
-    if (cond) return TEMPLATE_KEYS.has(cond[1]!) ? 'cond' : 'invalid';
+    const cond = /^\{\{#if ([a-z][a-z0-9_]*)\}\}$/.exec(lower);
+    if (cond) return keys.has(cond[1]!) ? 'cond' : 'invalid';
   }
   return 'invalid';
 }
@@ -56,6 +56,9 @@ export default function MacroTextarea(props: {
   class?: string;
   classList?: { [key: string]: boolean | undefined };
   placeholder?: string;
+  /** Optional controlled draft; existing imperative editors can continue using ref. */
+  value?: string;
+  readOnly?: boolean;
   /** Notified on every text change, including programmatic .value loads. */
   onText?: (text: string) => void;
 }) {
@@ -67,6 +70,10 @@ export default function MacroTextarea(props: {
   let overlay!: HTMLDivElement;
   let area: HTMLTextAreaElement | undefined;
   let observer: ResizeObserver | undefined;
+  createEffect(() => {
+    const value = props.value;
+    if (area && value !== undefined && area.value !== value) area.value = value;
+  });
 
   // Match the textarea's scrollbar inset and scroll position to keep highlights aligned.
   const sync = () => {
@@ -118,6 +125,7 @@ export default function MacroTextarea(props: {
       </div>
       <textarea
         ref={attach}
+        readOnly={props.readOnly}
         rows={props.rows ?? 8}
         class={props.class}
         placeholder={props.placeholder}

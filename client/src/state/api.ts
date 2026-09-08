@@ -1,10 +1,20 @@
+import {
+  transferDocument,
+  type TransferEntity,
+  type SettingsTransferDocument,
+} from '@tinytavern/shared';
+import type { MediaImageConfig } from '@tinytavern/shared';
 import type {
   Character,
   CharacterFolder,
   Conversation,
   Endpoint,
   GalleryItem,
+  ImageDescriptionProgress,
   Message,
+  MediaAssetInput,
+  MediaJob,
+  MediaJobDraft,
   Persona,
   Preset,
   Settings,
@@ -14,7 +24,7 @@ import { readSseData } from '@tinytavern/shared';
 import { prepareEndpointPatch } from './endpointSync.ts';
 
 interface RequestOptions {
-  rawBody?: BodyInit;
+  rawBody?: RequestInit['body'];
   contentType?: string;
 }
 
@@ -89,13 +99,14 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message);
 }
 
-/** Streams {d}/{error}/{done} SSE events and returns the assembled text. */
+/** Streams prompt content and optional transient reasoning separately. */
 export async function streamTextCompletion(
   url: string,
   body: Record<string, unknown>,
   onDelta: (delta: string, text: string) => void,
   streamLabel: string,
   signal?: AbortSignal,
+  onReasoning?: (delta: string) => void,
 ): Promise<string> {
   const res = await fetch(url, {
     method: 'POST',
@@ -107,9 +118,15 @@ export async function streamTextCompletion(
   let text = '';
   let completed = false;
   await readSseData(res.body, (data) => {
-    const payload = JSON.parse(data) as { d?: unknown; error?: unknown; done?: unknown };
+    const payload = JSON.parse(data) as {
+      d?: unknown;
+      r?: unknown;
+      error?: unknown;
+      done?: unknown;
+    };
     if (typeof payload.error === 'string' && payload.error) throw new ApiError(502, payload.error);
     if (payload.done === true) completed = true;
+    if (!text && typeof payload.r === 'string' && payload.r) onReasoning?.(payload.r);
     if (typeof payload.d === 'string' && payload.d) {
       text += payload.d;
       onDelta(payload.d, text);
@@ -126,6 +143,7 @@ const streamAvatarPrompt = (
   context: string,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  onReasoning?: (delta: string) => void,
 ) =>
   streamTextCompletion(
     `/api/${kind === 'character' ? 'characters' : 'personas'}/${id}/avatar/prompt`,
@@ -133,27 +151,13 @@ const streamAvatarPrompt = (
     onDelta,
     'avatar prompt',
     signal,
-  );
-
-const streamGalleryPromptRevision = (
-  id: number,
-  prompt: string,
-  instruction: string,
-  onDelta: (text: string) => void,
-  signal?: AbortSignal,
-) =>
-  streamTextCompletion(
-    `/api/gallery/${id}/revise-prompt`,
-    { prompt, instruction },
-    onDelta,
-    'gallery prompt revision',
-    signal,
+    onReasoning,
   );
 
 async function renderAvatar(
   body: {
     prompt: string;
-    image: { workflow: string; comfyUrl: string };
+    image: MediaImageConfig;
     jobId?: string;
   },
   signal?: AbortSignal,
@@ -205,14 +209,91 @@ const openAvatarRenderProgress = (
   signal?: AbortSignal,
 ) => openRenderProgress('/api/avatar/render-progress', jobId, onProgress, onPreview, signal);
 
-const openGalleryRenderProgress = (
-  jobId: string,
-  onProgress: (value: number, max: number) => void,
-  onPreview: (dataUrl: string) => void,
-  signal?: AbortSignal,
-) => openRenderProgress('/api/gallery/render-progress', jobId, onProgress, onPreview, signal);
-
 export const api = {
+  exportEntityPage: (type: TransferEntity) =>
+    request<{ document: SettingsTransferDocument; snapshot: string }>(
+      'GET',
+      `/api/${type}/settings-export`,
+    ),
+  exportEntityRecord: (type: TransferEntity, id: number) =>
+    request<Record<string, unknown>>('GET', `/api/${type}/${id}/settings-export`),
+  importEntityPage: (type: TransferEntity, data: unknown, expectedSnapshot: string) =>
+    request<unknown[]>('POST', `/api/${type}/settings-import`, {
+      document: transferDocument(`page:${type}`, data),
+      expectedSnapshot,
+    }),
+  importPersona: async (data: unknown, targetId: number | null) =>
+    (
+      await request<Persona[]>('POST', '/api/personas/settings-import', {
+        document: transferDocument('entity:personas', data),
+        targetId,
+      })
+    )[0]!,
+  mediaJobs: (before?: Pick<MediaJob, 'createdAt' | 'id'>) => {
+    const query = before ? `?before=${encodeURIComponent(`${before.createdAt}:${before.id}`)}` : '';
+    return request<MediaJob[]>('GET', `/api/media/jobs${query}`);
+  },
+  activeMediaJobs: () => request<MediaJob[]>('GET', '/api/media/jobs/active'),
+  mediaJob: (id: string) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
+  createMediaJob: (draft: MediaJobDraft, requestKey: string) =>
+    request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
+  mediaAssetInputs: (assetId: number) =>
+    request<MediaAssetInput[]>('GET', `/api/media/assets/${assetId}/inputs`),
+  rerunMediaAsset: (assetId: number, requestKey: string, options: Partial<MediaJobDraft> = {}) =>
+    request<MediaJob>('POST', `/api/media/assets/${assetId}/rerun`, { ...options, requestKey }),
+  editMediaJob: (job: MediaJob, draft: Partial<MediaJobDraft>) =>
+    request<MediaJob>('PATCH', `/api/media/jobs/${job.id}`, {
+      ...draft,
+      expectedRevision: job.revision,
+    }),
+  mediaJobAction: (
+    job: MediaJob,
+    action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval',
+    options: {
+      autoRender?: boolean;
+      expectedActiveLeafId?: number | null;
+      expectedMutationRevision?: number;
+    } = {},
+  ) =>
+    request<MediaJob>('POST', `/api/media/jobs/${job.id}/${action}`, {
+      ...options,
+      expectedRevision: job.revision,
+    }),
+  mediaVariations: (jobId: string) =>
+    request<MediaJob[]>('GET', `/api/media/jobs/${jobId}/variations`),
+  selectMediaVariation: (job: MediaJob, assetId: number, expectedDraftRevision: number) =>
+    request<MediaJob>('POST', `/api/media/jobs/${job.id}/select`, {
+      assetId,
+      expectedDraftRevision,
+      expectedRevision: job.revision,
+    }),
+  acceptMediaVariation: (
+    job: MediaJob,
+    assetId: number,
+    expectedDraftRevision: number,
+    tree: MutationState,
+  ) =>
+    request<MediaJob>('POST', `/api/media/jobs/${job.id}/accept`, {
+      assetId,
+      expectedDraftRevision,
+      expectedRevision: job.revision,
+      expectedActiveLeafId: tree.activeLeafId,
+      expectedMutationRevision: tree.mutationRevision,
+    }),
+  discardMediaDraft: (job: MediaJob, expectedDraftRevision: number, onlyUnstarted = false) =>
+    request('POST', `/api/media/jobs/${job.id}/discard`, {
+      expectedDraftRevision,
+      expectedRevision: job.revision,
+      onlyUnstarted,
+    }),
+  rerunMediaJob: (job: MediaJob, requestKey: string, options: Partial<MediaJobDraft> = {}) =>
+    request<MediaJob>('POST', `/api/media/jobs/${job.id}/rerun`, {
+      ...options,
+      expectedRevision: job.revision,
+      requestKey,
+    }),
+  deleteMediaJob: (job: MediaJob) =>
+    request('DELETE', `/api/media/jobs/${job.id}?expectedRevision=${job.revision}`),
   authStatus: () =>
     request<{ required: boolean; authenticated: boolean }>('GET', '/api/auth/status'),
   login: (password: string) =>
@@ -235,19 +316,47 @@ export const api = {
       messageId,
       index,
     }),
-  streamGalleryPromptRevision,
-  renderGalleryImage: (
+  generateGalleryPrompt: async (
     id: number,
-    jobId: string,
-    prompt: string,
-    currentConfig?: { workflow: string; comfyUrl: string },
+    workflowId: string,
+    signal: AbortSignal,
+    onProgress: (progress: ImageDescriptionProgress) => void,
+  ): Promise<string> => {
+    const res = await fetch(`/api/gallery/${id}/describe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workflowId }),
+      signal,
+    });
+    if (!res.ok || !res.body) throw await errorFromResponse(res);
+    let prompt = '';
+    let completed = false;
+    await readSseData(res.body, (data) => {
+      const payload = JSON.parse(data) as {
+        progress?: ImageDescriptionProgress;
+        d?: string;
+        done?: boolean;
+        error?: string;
+      };
+      if (payload.error) throw new ApiError(502, payload.error);
+      if (payload.progress) onProgress(payload.progress);
+      if (payload.d !== undefined) prompt += payload.d;
+      if (payload.done) completed = true;
+    });
+    if (!completed || !prompt.trim())
+      throw new ApiError(502, 'Prompt generation ended without a result');
+    return prompt;
+  },
+  updateGalleryItem: (
+    id: number,
+    value: { prompt: string; characterIds: number[] },
+    expected: { prompt: string; characterIds: number[] },
   ) =>
-    request<GalleryItem>('POST', `/api/gallery/${id}/render-image`, {
-      ...currentConfig,
-      jobId,
-      prompt,
+    request<GalleryItem>('PATCH', `/api/gallery/${id}`, {
+      ...value,
+      expectedPrompt: expected.prompt,
+      expectedCharacterIds: expected.characterIds,
     }),
-  openGalleryRenderProgress,
   deleteGalleryItem: (id: number) => request<void>('DELETE', `/api/gallery/${id}`),
   deleteGalleryItems: (ids: number[]) =>
     request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
@@ -295,7 +404,7 @@ export const api = {
     prompt: string,
     label: string,
     expected: MutationState,
-    image?: { workflow: string; comfyUrl: string },
+    image?: MediaImageConfig,
   ) =>
     mutationRequest<{ toolMessageId: number; activeLeafId: number }>(
       'POST',
@@ -348,11 +457,7 @@ export const api = {
       `/api/messages/${messageId}/duplicate`,
       expected,
     ),
-  renderImage: (
-    messageId: number,
-    expected: MutationState,
-    currentConfig?: { workflow: string; comfyUrl: string },
-  ) =>
+  renderImage: (messageId: number, expected: MutationState, currentConfig?: MediaImageConfig) =>
     mutationRequest<{ rendering: boolean }>(
       'POST',
       `/api/messages/${messageId}/render-image`,
@@ -399,7 +504,7 @@ export const api = {
     messageId: number,
     instruction: string,
     expected: MutationState,
-    image?: { workflow: string; comfyUrl: string },
+    image?: MediaImageConfig,
   ) =>
     mutationRequest<{ activeLeafId: number; assistantMessageId: number }>(
       'POST',

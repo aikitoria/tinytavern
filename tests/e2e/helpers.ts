@@ -40,7 +40,6 @@ export async function assertClientDevModules(): Promise<void> {
       '/src/index.tsx',
       '/src/App.tsx',
       '/src/components/SettingsModal.tsx',
-      '/src/components/tabs/GalleryTab.tsx',
       '/src/images/imageGeneration.tsx',
     ];
     const transformed = new Map<string, string>();

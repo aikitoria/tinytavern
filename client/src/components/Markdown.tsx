@@ -1,12 +1,15 @@
-import { createEffect, createSignal, onCleanup } from 'solid-js';
+import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
 import {
   faCheck,
+  faEllipsis,
   faTriangleExclamation,
   type IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 import { faCopy } from '@fortawesome/free-regular-svg-icons';
+import DropdownSurface from './DropdownSurface.tsx';
+import MediaPromptMenuItems from '../media/MediaPromptMenuItems.tsx';
 
 let hljsPromise: Promise<typeof import('highlight.js')> | null = null;
 
@@ -45,8 +48,11 @@ function escapeHtml(text: string): string {
   });
 }
 
-const COPY_CODE_BUTTON =
-  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button>';
+const CODE_ACTIONS =
+  '<div class="code-actions">' +
+  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button>' +
+  '<button type="button" class="icon-btn code-more-btn" title="More code actions" aria-label="More code actions" aria-haspopup="menu" aria-expanded="false"></button>' +
+  '</div>';
 const copyIconTemplates = new Map<IconDefinition, SVGSVGElement>();
 
 // Only trusted package data becomes SVG, after sanitizing the message HTML.
@@ -79,7 +85,7 @@ let hasCodeBlocks = false;
 // to avoid reparenting DOM each frame.
 markdownRenderer.code = (token) => {
   hasCodeBlocks = true;
-  return `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${COPY_CODE_BUTTON}</div>\n`;
+  return `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${CODE_ACTIONS}</div>\n`;
 };
 markdownRenderer.html = (token) => {
   // Multiline HTML survives instruction filtering; decorate after sanitizing its nesting.
@@ -178,10 +184,20 @@ function markQuotes(src: string): string {
     .join('');
 }
 
-export default function Markdown(props: { content: string; streaming: boolean }) {
+export default function Markdown(props: {
+  content: string;
+  streaming: boolean;
+  conversationId?: number;
+}) {
   const [html, setHtml] = createSignal('');
+  const [menuAnchor, setMenuAnchor] = createSignal<HTMLButtonElement>();
+  const [menuText, setMenuText] = createSignal('');
   let container: HTMLDivElement | undefined;
   let raf = 0;
+  const closeMenu = () => {
+    untrack(menuAnchor)?.setAttribute('aria-expanded', 'false');
+    setMenuAnchor(undefined);
+  };
 
   const decorateCodeBlocks = () => {
     container?.querySelectorAll('pre').forEach((pre) => {
@@ -192,14 +208,21 @@ export default function Markdown(props: { content: string; streaming: boolean })
         wrap.className = 'code-block-wrap';
         pre.replaceWith(wrap);
         wrap.append(pre);
-        wrap.insertAdjacentHTML('beforeend', COPY_CODE_BUTTON);
+        wrap.insertAdjacentHTML('beforeend', CODE_ACTIONS);
       }
-      const button = wrap.querySelector<HTMLButtonElement>(':scope > .code-copy-btn:empty');
+      const button = wrap.querySelector<HTMLButtonElement>(
+        ':scope > .code-actions > .code-copy-btn:empty',
+      );
       if (button) setCopyIcon(button, faCopy);
+      const more = wrap.querySelector<HTMLButtonElement>(
+        ':scope > .code-actions > .code-more-btn:empty',
+      );
+      if (more) setCopyIcon(more, faEllipsis);
     });
   };
 
   const render = () => {
+    closeMenu();
     const src = hideAngleInstructions(props.streaming ? autoclose(props.content) : props.content);
     hasCodeBlocks = false;
     const parsed = marked.parse(markQuotes(src), { async: false, renderer: markdownRenderer });
@@ -253,6 +276,24 @@ export default function Markdown(props: { content: string; streaming: boolean })
     }, 1200);
   };
 
+  const codeAction = (event: MouseEvent) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLButtonElement>('.code-more-btn');
+    if (!button || !container?.contains(button)) {
+      void copyCode(event);
+      return;
+    }
+    const code = button.closest('.code-block-wrap')?.querySelector('code');
+    if (!code) return;
+    const wasOpen = menuAnchor() === button;
+    closeMenu();
+    if (!wasOpen) {
+      setMenuText((code.textContent ?? '').replace(/\n$/, ''));
+      button.setAttribute('aria-expanded', 'true');
+      setMenuAnchor(button);
+    }
+  };
+
   createEffect(() => {
     void props.content; // track
     if (props.streaming) {
@@ -275,5 +316,27 @@ export default function Markdown(props: { content: string; streaming: boolean })
 
   onCleanup(() => cancelAnimationFrame(raf));
 
-  return <div class="md" ref={container} innerHTML={html()} onClick={(e) => void copyCode(e)} />;
+  return (
+    <>
+      <div class="md" ref={container} innerHTML={html()} onClick={codeAction} />
+      <DropdownSurface
+        open={menuAnchor() !== undefined}
+        anchor={menuAnchor}
+        onClose={closeMenu}
+        role="menu"
+        ariaLabel="Code block actions"
+        align="end"
+        fitContentWidth
+        minWidth={220}
+        keyboardNavigation
+        autoFocus
+      >
+        <MediaPromptMenuItems
+          text={menuText()}
+          conversationId={props.conversationId}
+          onClose={closeMenu}
+        />
+      </DropdownSurface>
+    </>
+  );
 }

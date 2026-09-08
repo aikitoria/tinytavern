@@ -2,7 +2,10 @@ name: tinytavern
 
 services:
   tinytavern:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: server-prod
     container_name: tinytavern
     user: "1000:1000"
     volumes:
@@ -14,7 +17,7 @@ services:
       SESSION_COOKIE_NAME: tinytavern_prod_session
       TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
     restart: unless-stopped
-    # Also joined to ComfyUI's network so the server can reach http://comfy:8588.
+    # Separate network for ComfyUI; optionally reuse an external network via .env.
     networks:
       - default
       - comfy
@@ -46,5 +49,5 @@ services:
 
 networks:
   comfy:
-    external: true
-    name: my-bridge-network
+    name: ${TINYTAVERN_COMFY_NETWORK:-${COMPOSE_PROJECT_NAME}_comfy}
+    external: ${TINYTAVERN_COMFY_NETWORK_EXTERNAL:-false}

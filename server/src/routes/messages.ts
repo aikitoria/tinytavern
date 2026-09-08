@@ -46,6 +46,8 @@ import { parseImageConfig, startImageRender } from '../comfy.ts';
 import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../prompt.ts';
 import { bumpConversationRevision } from '../conversationRevision.ts';
 import { deleteImageFiles } from '../images.ts';
+import { startMessageImageRender } from '../mediaImageAdapter.ts';
+import { createImageRecipe, messageRecipeId } from '../mediaRecipes.ts';
 
 function requireMessage(id: number) {
   const msg = getMessage(id);
@@ -229,15 +231,10 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
   if (msg.role === 'tool') {
     if (!msg.content.trim()) throw new HttpError(400, 'tool message has no output to revise');
     if (msg.imagePending) throw new HttpError(409, 'an image render is running for this message');
-    const row = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
-      image_render_json: string | null;
-    };
-    let image = row.image_render_json
-      ? (JSON.parse(row.image_render_json) as { workflow: string; comfyUrl: string })
-      : null;
+    let recipeId = messageRecipeId(msg);
     if (b.image !== undefined) {
       try {
-        image = parseImageConfig(b.image);
+        recipeId = createImageRecipe(parseImageConfig(b.image), msg.content);
       } catch (err) {
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
@@ -258,26 +255,17 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
       null,
       msg.name,
     );
-    if (image) {
-      stmt('UPDATE messages SET image_pending = 1, image_render_json = ? WHERE id = ?').run(
-        JSON.stringify(image),
+    if (recipeId) {
+      stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
+        recipeId,
         next.id,
       );
     }
     touchConversation(msg.conversationId);
-    const renderImage = image;
+    const renderImage = recipeId;
     startGeneration(getConversation(msg.conversationId), next.id, undefined, {
       prompt,
-      onDone: renderImage
-        ? () =>
-            startImageRender({
-              conversationId: msg.conversationId,
-              mid: next.id,
-              comfyUrl: renderImage.comfyUrl,
-              workflow: renderImage.workflow,
-              description: getMessage(next.id)?.content ?? '',
-            })
-        : undefined,
+      onDone: renderImage ? () => startImageRender(next.id) : undefined,
     });
     broadcastTree(msg.conversationId);
     invalidate('conversations');
@@ -530,16 +518,16 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
         msg.model,
         msg.name,
       );
-      const renderRow = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
-        image_render_json: string | null;
+      const renderRow = stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(msg.id) as {
+        render_recipe_id: string | null;
       };
       stmt(
         `UPDATE messages
-         SET reasoning = ?, image_render_json = ?, images_json = ?, active_image = ?
+         SET reasoning = ?, render_recipe_id = ?, images_json = ?, active_image = ?
          WHERE id = ?`,
       ).run(
         msg.reasoning,
-        renderRow.image_render_json,
+        renderRow.render_recipe_id,
         JSON.stringify(images),
         activeImage,
         inserted.id,
@@ -556,7 +544,7 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
   }
 });
 
-/** Render a fresh image alternative; a supplied workflow replaces the saved config. */
+/** Render a fresh alternative through the shared recipe and background job pipeline. */
 route.post('/api/messages/:id/render-image', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = body == null ? {} : objectBody(body);
@@ -564,43 +552,21 @@ route.post('/api/messages/:id/render-image', ({ params, body }) => {
   if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
     throw new HttpError(400, 'message is not on the active branch');
   }
-  const row = stmt('SELECT image_render_json FROM messages WHERE id = ?').get(msg.id) as {
-    image_render_json: string | null;
-  };
   if (msg.imagePending) {
     throw new HttpError(409, 'an image render is already running for this message');
   }
   if (msg.status === 'streaming') throw new HttpError(409, 'message is still streaming');
   if (!msg.content.trim()) throw new HttpError(400, 'message has no description to render');
-  let config: { workflow: string; comfyUrl: string };
-  const suppliedConfig = 'workflow' in b || 'comfyUrl' in b;
-  if (suppliedConfig) {
+  let recipeId = messageRecipeId(msg);
+  if ('workflow' in b || 'comfyUrl' in b) {
     try {
-      config = parseImageConfig(b);
+      recipeId = createImageRecipe(parseImageConfig(b), msg.content);
     } catch (err) {
       throw new HttpError(400, err instanceof Error ? err.message : String(err));
     }
-    stmt('UPDATE messages SET image_render_json = ? WHERE id = ?').run(
-      JSON.stringify(config),
-      msg.id,
-    );
-  } else if (row.image_render_json) {
-    config = JSON.parse(row.image_render_json) as { workflow: string; comfyUrl: string };
-  } else {
-    throw new HttpError(400, 'message has no image render configuration');
   }
-  stmt('UPDATE messages SET image_pending = 1 WHERE id = ?').run(msg.id);
-  bumpConversationRevision(msg.conversationId);
-  markMessageDirty(msg.conversationId, msg.id);
-  broadcastTree(msg.conversationId);
-  startImageRender({
-    conversationId: msg.conversationId,
-    mid: msg.id,
-    comfyUrl: config.comfyUrl,
-    workflow: config.workflow,
-    description: msg.content,
-  });
-  return { rendering: true };
+  const job = startMessageImageRender(msg, recipeId);
+  return { rendering: true, jobId: job.id };
 });
 
 route.post('/api/messages/:id/active-image', ({ params, body }) => {

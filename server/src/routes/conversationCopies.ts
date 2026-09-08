@@ -19,7 +19,7 @@ export interface MessageRow {
   created_at: number;
   name: string | null;
   generation_kind: GenerationKind;
-  image_render_json: string | null;
+  render_recipe_id: string | null;
 }
 
 /** Track files before SQL commit so any partial failure can remove every copy. */
@@ -57,7 +57,7 @@ export function insertCopiedMessage(
       `INSERT INTO messages
        (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
         model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
-        image_pending, image_render_json)
+        image_pending, render_recipe_id)
      VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
     ).run(
       conversationId,
@@ -73,7 +73,7 @@ export function insertCopiedMessage(
       generationKind,
       JSON.stringify(images),
       activeImage,
-      row.image_render_json,
+      row.render_recipe_id,
     ).lastInsertRowid,
   );
 }

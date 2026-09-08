@@ -1,11 +1,17 @@
+import { imageConfig } from './imageConfig.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
+process.env.COMFY_POLL_MS = '10';
 const { stmt } = await import('../server/src/db.ts');
 const { startImageRender } = await import('../server/src/comfy.ts');
+const { createImageRecipe } = await import('../server/src/mediaRecipes.ts');
+const { startMessageImageRender } = await import('../server/src/mediaImageAdapter.ts');
+const { cancelMediaJob } = await import('../server/src/mediaJobs.ts');
 const { getMessage } = await import('../server/src/tree.ts');
+const { initMediaWorker, stopMediaWorker } = await import('../server/src/mediaWorker.ts');
 
 let passed = 0;
 function assert(value: unknown, label: string): asserts value {
@@ -21,20 +27,26 @@ const png = Buffer.from(
 let failSubmission = false;
 const mock = createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/prompt') {
-    if (failSubmission) {
-      res.writeHead(500, { 'content-type': 'application/json' });
-      res.end('{"error":"intentional failure"}');
-    } else {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{"prompt_id":"recency-test-job"}');
-    }
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      if (failSubmission) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end('{"error":"intentional failure"}');
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ prompt_id: JSON.parse(body).prompt_id }));
+      }
+    });
     return;
   }
-  if (req.method === 'GET' && req.url === '/history/recency-test-job') {
+  if (req.method === 'GET' && req.url?.startsWith('/history/')) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(
       JSON.stringify({
-        'recency-test-job': {
+        [req.url.slice('/history/'.length)]: {
           status: { completed: true },
           outputs: {
             output: { images: [{ filename: 'result.png', subfolder: '', type: 'output' }] },
@@ -80,9 +92,13 @@ function createPendingMessage(conversationId: number): number {
     stmt(
       `INSERT INTO messages
          (conversation_id, parent_id, role, content, status, created_at, generation_kind,
-          images_json, active_image, image_pending, image_render_json)
+          images_json, active_image, image_pending, render_recipe_id)
        VALUES (?, NULL, 'tool', 'a tiny test image', 'done', ?, 'normal', '[]', 0, 1, ?)`,
-    ).run(conversationId, Date.now(), JSON.stringify({ workflow, comfyUrl })).lastInsertRowid,
+    ).run(
+      conversationId,
+      Date.now(),
+      createImageRecipe(imageConfig(workflow, comfyUrl), 'a tiny test image'),
+    ).lastInsertRowid,
   );
 }
 
@@ -95,16 +111,11 @@ async function waitUntilFinished(mid: number): Promise<void> {
 }
 
 try {
+  initMediaWorker();
   const oldTimestamp = Date.now() - 60_000;
   const successConversation = createConversation(oldTimestamp);
   const successMessage = createPendingMessage(successConversation);
-  startImageRender({
-    conversationId: successConversation,
-    mid: successMessage,
-    comfyUrl,
-    workflow,
-    description: 'a tiny test image',
-  });
+  startImageRender(successMessage);
   await waitUntilFinished(successMessage);
   const successUpdatedAt = (
     stmt('SELECT updated_at FROM conversations WHERE id = ?').get(successConversation) as {
@@ -118,13 +129,7 @@ try {
   const failedTimestamp = Date.now() - 30_000;
   const failedConversation = createConversation(failedTimestamp);
   const failedMessage = createPendingMessage(failedConversation);
-  startImageRender({
-    conversationId: failedConversation,
-    mid: failedMessage,
-    comfyUrl,
-    workflow,
-    description: 'an intentionally failed image',
-  });
+  startImageRender(failedMessage);
   await waitUntilFinished(failedMessage);
   const failureUpdatedAt = (
     stmt('SELECT updated_at FROM conversations WHERE id = ?').get(failedConversation) as {
@@ -143,16 +148,8 @@ try {
   const cancelledTimestamp = Date.now() - 15_000;
   const cancelledConversation = createConversation(cancelledTimestamp);
   const cancelledMessage = createPendingMessage(cancelledConversation);
-  const abort = new AbortController();
-  abort.abort(new Error('intentional cancellation'));
-  startImageRender({
-    conversationId: cancelledConversation,
-    mid: cancelledMessage,
-    comfyUrl,
-    workflow,
-    description: 'a cancelled image',
-    signal: abort.signal,
-  });
+  const cancelledJob = startMessageImageRender(getMessage(cancelledMessage)!);
+  cancelMediaJob(cancelledJob);
   await waitUntilFinished(cancelledMessage);
   const cancellationUpdatedAt = (
     stmt('SELECT updated_at FROM conversations WHERE id = ?').get(cancelledConversation) as {
@@ -166,5 +163,6 @@ try {
 
   console.log(`\n${passed} image-recency assertions passed`);
 } finally {
+  stopMediaWorker();
   mock.close();
 }

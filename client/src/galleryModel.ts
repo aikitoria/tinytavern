@@ -1,13 +1,15 @@
 import type { GalleryItem } from '@tinytavern/shared';
 
-export const galleryCharacterKey = (item: Pick<GalleryItem, 'characterId' | 'characterName'>) =>
-  item.characterId == null ? `name:${item.characterName}` : `id:${item.characterId}`;
+export const galleryCharacterKeys = (item: Pick<GalleryItem, 'characters' | 'characterName'>) =>
+  item.characters.length
+    ? item.characters.map((character) => `id:${character.id}`)
+    : [`name:${item.characterName}`];
 
 export function indexGallery(items: readonly GalleryItem[]) {
   return items
     .map((item) => ({
       item,
-      characterKey: galleryCharacterKey(item),
+      characterKeys: galleryCharacterKeys(item),
       search: item.prompt.toLowerCase(),
     }))
     .sort((a, b) => b.item.createdAt - a.item.createdAt || b.item.id - a.item.id);
@@ -23,7 +25,7 @@ export function filterGallery(
   const result = index
     .filter(
       (entry) =>
-        (characterKey === 'all' || entry.characterKey === characterKey) &&
+        (characterKey === 'all' || entry.characterKeys.includes(characterKey)) &&
         terms.every((term) => entry.search.includes(term)),
     )
     .map((entry) => entry.item);

@@ -1,3 +1,4 @@
+import { guardPageNavigation, readPageLocation, writePageLocation } from '../state/pageLocation.ts';
 import { For, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
@@ -6,6 +7,7 @@ import { openModal, state } from '../state/store.ts';
 import Modal from './Modal.tsx';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import Select from './Select.tsx';
+import { SettingsActionsContext } from './SettingsActions.tsx';
 import type { SelectHandle } from './Select.tsx';
 import '../styles/settings.css';
 import {
@@ -19,18 +21,35 @@ import PresetsTab from './tabs/PresetsTab.tsx';
 import TemplatesTab from './tabs/TemplatesTab.tsx';
 import CharactersTab from './tabs/CharactersTab.tsx';
 import PersonasTab from './tabs/PersonasTab.tsx';
-import ImageGenerationTab from './tabs/ImageGenerationTab.tsx';
-import GalleryTab from './tabs/GalleryTab.tsx';
+import { ChatImagePromptsTab, AvatarPromptsTab } from './tabs/ImageGenerationTab.tsx';
+import MediaRenderingTab from './tabs/MediaRenderingTab.tsx';
+import {
+  GalleryImagePromptsTab,
+  ChatVideoPromptsTab,
+  GalleryVideoPromptsTab,
+} from './tabs/MediaPromptsTab.tsx';
 
 const TABS: { key: string; label: string; component: Component }[] = [
   { key: 'general', label: 'General', component: GeneralTab },
   { key: 'endpoints', label: 'Endpoints', component: EndpointsTab },
-  { key: 'presets', label: 'Prompts', component: PresetsTab },
-  { key: 'templates', label: 'Templates', component: TemplatesTab },
+  { key: 'presets', label: 'System prompts', component: PresetsTab },
+  { key: 'templates', label: 'Prompt templates', component: TemplatesTab },
   { key: 'characters', label: 'Characters', component: CharactersTab },
   { key: 'personas', label: 'Personas', component: PersonasTab },
-  { key: 'image-generation', label: 'Images', component: ImageGenerationTab },
-  { key: 'gallery', label: 'Gallery', component: GalleryTab },
+  { key: 'media-rendering', label: 'Media rendering', component: MediaRenderingTab },
+  { key: 'avatar-prompts', label: 'Avatar prompts', component: AvatarPromptsTab },
+  { key: 'chat-image-prompts', label: 'Chat image prompts', component: ChatImagePromptsTab },
+  { key: 'chat-video-prompts', label: 'Chat video prompts', component: ChatVideoPromptsTab },
+  {
+    key: 'gallery-image-prompts',
+    label: 'Gallery image prompts',
+    component: GalleryImagePromptsTab,
+  },
+  {
+    key: 'gallery-video-prompts',
+    label: 'Gallery video prompts',
+    component: GalleryVideoPromptsTab,
+  },
 ];
 
 const canScroll = (element: HTMLElement, deltaY: number) =>
@@ -55,8 +74,14 @@ function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
 }
 
 export default function SettingsModal() {
-  const [tab, setTab] = createSignal(state.settingsCharacterId != null ? 'characters' : 'general');
+  const [actionsTarget, setActionsTarget] = createSignal<HTMLElement>();
+  const page = readPageLocation();
+  const initialTab = state.settingsCharacterId != null ? 'characters' : page.settingsTab;
+  const [tab, setTab] = createSignal(
+    TABS.some((item) => item.key === initialTab) ? initialTab! : 'general',
+  );
   const navigation = createSettingsNavigation();
+  onCleanup(guardPageNavigation(navigation.navigate));
   const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS[0]!;
   let sectionPicker!: SelectHandle;
   let contentEl!: HTMLDivElement;
@@ -85,6 +110,15 @@ export default function SettingsModal() {
   const chooseTab = (key: string, after?: () => void) => {
     if (key !== tab())
       navigation.navigate(() => {
+        writePageLocation(
+          {
+            chatId: state.selectedId,
+            viewMode: readPageLocation().viewMode,
+            modal: 'settings',
+            settingsTab: key,
+          },
+          true,
+        );
         setTab(key);
         contentEl.scrollTop = 0;
         const page = contentEl.closest<HTMLElement>('.settings-modal');
@@ -143,40 +177,48 @@ export default function SettingsModal() {
           </div>
         }
       >
-        <div class="settings-workspace">
-          <nav class="settings-nav" aria-label="Settings">
-            <div role="tablist" aria-label="Settings sections" aria-orientation="vertical">
-              <For each={TABS}>
-                {(t, index) => (
-                  <button
-                    class="settings-nav-item"
-                    classList={{ active: tab() === t.key }}
-                    id={`settings-tab-${t.key}`}
-                    role="tab"
-                    aria-selected={tab() === t.key}
-                    aria-controls="settings-tab-panel"
-                    tabIndex={tab() === t.key ? 0 : -1}
-                    onKeyDown={(event) => onTabKeyDown(event, index())}
-                    onClick={() => chooseTab(t.key)}
-                  >
-                    {t.label}
-                  </button>
-                )}
-              </For>
+        <SettingsActionsContext.Provider value={actionsTarget}>
+          <div class="settings-workspace">
+            <nav class="settings-nav" aria-label="Settings">
+              <div role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+                <For each={TABS}>
+                  {(t, index) => (
+                    <button
+                      class="settings-nav-item"
+                      classList={{ active: tab() === t.key }}
+                      id={`settings-tab-${t.key}`}
+                      role="tab"
+                      aria-selected={tab() === t.key}
+                      aria-controls="settings-tab-panel"
+                      tabIndex={tab() === t.key ? 0 : -1}
+                      onKeyDown={(event) => onTabKeyDown(event, index())}
+                      onClick={() => chooseTab(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </nav>
+            <div class="settings-editor">
+              <div
+                ref={contentEl}
+                class="settings-content"
+                id="settings-tab-panel"
+                role="tabpanel"
+                aria-label={activeTab().label}
+              >
+                <SettingsGuardProvider
+                  register={navigation.register}
+                  navigate={navigation.navigate}
+                >
+                  <Dynamic component={activeTab().component} />
+                </SettingsGuardProvider>
+              </div>
+              <div ref={setActionsTarget} class="settings-actions" aria-label="Settings actions" />
             </div>
-          </nav>
-          <div
-            ref={contentEl}
-            class="settings-content"
-            id="settings-tab-panel"
-            role="tabpanel"
-            aria-label={activeTab().label}
-          >
-            <SettingsGuardProvider register={navigation.register} navigate={navigation.navigate}>
-              <Dynamic component={activeTab().component} />
-            </SettingsGuardProvider>
           </div>
-        </div>
+        </SettingsActionsContext.Provider>
       </Modal>
       <SettingsNavigationPrompt navigation={navigation}>
         You have unsaved changes. Save them before leaving this settings page?

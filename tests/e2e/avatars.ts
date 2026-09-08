@@ -1,4 +1,6 @@
-import type { Settings } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS } from '@tinytavern/shared';
+import { imageConfig } from '../imageConfig.ts';
+import type { Settings, MediaJob } from '@tinytavern/shared';
 import {
   BASE,
   MOCK_CONTROL,
@@ -23,9 +25,12 @@ export async function testAvatars(
     'Write a portrait image-generation prompt for {{name}}. Reply with only the prompt.';
   const AVATAR_CONTEXT_TEMPLATE =
     'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
-  // Build the request from image settings, matching the client.
+  // Build the request from separate prompt and rendering settings, matching the client.
+  const before = await req<Settings>('GET', '/api/settings');
+  const workflow = imageConfig(AVATAR_WORKFLOW, MOCK_CONTROL).workflow;
   await putSettings({
     imageGeneration: {
+      ...DEFAULT_SETTINGS.imageGeneration,
       promptPresets: {
         avatar: {
           presets: [
@@ -38,28 +43,27 @@ export async function testAvatars(
           active: 'Detailed',
         },
       },
+    },
+    mediaRendering: {
+      ...before.mediaRendering,
       comfyUrl: MOCK_CONTROL,
-      workflows: [{ name: 'Avatar', json: AVATAR_WORKFLOW }],
-      activeWorkflow: 'Avatar',
+      workflows: [
+        ...before.mediaRendering.workflows.filter((item) => item.id !== workflow.id),
+        workflow,
+      ],
+      avatarWorkflowId: workflow.id,
     },
   });
-  const imageGenCfg = ((await req<Settings>('GET', '/api/settings')).imageGeneration as {
-    promptPresets: {
-      avatar: {
-        presets: { name: string; prompt: string; context: string }[];
-        active: string;
-      };
-    };
-    comfyUrl: string;
-    workflows: { name: string; json: string }[];
-    activeWorkflow: string;
-  })!;
-  const avatarPreset = imageGenCfg.promptPresets.avatar.presets.find(
-    (preset) => preset.name === imageGenCfg.promptPresets.avatar.active,
+  const saved = await req<Settings>('GET', '/api/settings');
+  const avatarPresets = saved.imageGeneration.promptPresets!.avatar!;
+  const avatarPreset = avatarPresets.presets.find(
+    (preset) => preset.name === avatarPresets.active,
   )!;
   const avatarImage = {
-    workflow: imageGenCfg.workflows.find((w) => w.name === imageGenCfg.activeWorkflow)!.json,
-    comfyUrl: imageGenCfg.comfyUrl,
+    workflow: saved.mediaRendering.workflows.find(
+      (item) => item.id === saved.mediaRendering.avatarWorkflowId,
+    )!,
+    comfyUrl: saved.mediaRendering.comfyUrl,
   };
   const avatarChar = await req<{ id: number }>('POST', '/api/characters', {
     name: 'Avatar Hero',
@@ -84,15 +88,26 @@ export async function testAvatars(
     );
     const body = await res.text();
     let text = '';
+    let reasoning = '';
     let sawDone = false;
     let sawError = false;
     for (const line of body.split('\n')) {
       if (!line.startsWith('data:')) continue;
-      const payload = JSON.parse(line.slice(5)) as { d?: string; error?: string; done?: boolean };
+      const payload = JSON.parse(line.slice(5)) as {
+        d?: string;
+        r?: string;
+        error?: string;
+        done?: boolean;
+      };
       if (payload.error !== undefined) sawError = true;
+      if (payload.r) {
+        assert(!text, 'Avatar reasoning arrives before prompt text');
+        reasoning += payload.r;
+      }
       if (payload.d) text += payload.d;
       if (payload.done) sawDone = true;
     }
+    assert(reasoning.includes('Thinking about'), 'Avatar prompt exposes the reasoning stream');
     assert(!sawError, `prompt stream at ${path} carries no error event`);
     assert(sawDone, `prompt stream at ${path} terminates with a done event`);
     return text;
@@ -101,7 +116,7 @@ export async function testAvatars(
   const firstStream = streamAvatarPrompt(
     `/api/characters/${avatarChar.id}/avatar/prompt`,
     avatarPreset.prompt,
-    avatarPreset.context,
+    avatarPreset.context!,
   );
   // Let the first request reach the server and claim the per-entity slot.
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -141,7 +156,7 @@ export async function testAvatars(
   const reopenedPrompt = await streamAvatarPrompt(
     `/api/characters/${avatarChar.id}/avatar/prompt`,
     avatarPreset.prompt,
-    avatarPreset.context,
+    avatarPreset.context!,
   );
   assert(reopenedPrompt.length > 0, 'aborting an avatar prompt releases its entity lock');
 
@@ -223,7 +238,7 @@ export async function testAvatars(
   assert(unrelatedResult === 'quiet', 'avatar progress never leaks to an unrelated job stream');
   unrelatedAbort.abort();
 
-  // Closing the modal must stop Comfy polling along with the binary response.
+  // Cancellation must stop the recorded Comfy job before observation and cleanup finish.
   const historyCount = async () =>
     (
       (await (await fetch(`${MOCK_CONTROL}/control/comfy-history-count`)).json()) as {
@@ -242,9 +257,28 @@ export async function testAvatars(
     signal: cancelledRender.signal,
   }).catch(() => null);
   await new Promise((resolve) => setTimeout(resolve, 150));
+  const avatarJob = (await req<MediaJob[]>('GET', '/api/media/jobs/active')).find(
+    (job) => job.prompt === 'cancel this avatar render',
+  );
+  assert(avatarJob?.comfyPromptId, 'the avatar render has a recorded Comfy job');
   cancelledRender.abort();
   await cancelledRenderRequest;
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  const cancellationDeadline = Date.now() + 3000;
+  while (
+    (await req<MediaJob[]>('GET', '/api/media/jobs/active')).some((job) => job.id === avatarJob.id)
+  ) {
+    if (Date.now() > cancellationDeadline) {
+      throw new Error('Avatar cancellation did not finish');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  const cancelledJobs = (await (await fetch(`${MOCK_CONTROL}/control/comfy-cancelled`)).json()) as {
+    ids: string[];
+  };
+  assert(
+    cancelledJobs.ids.includes(avatarJob.comfyPromptId),
+    'avatar cancellation targets its recorded Comfy job',
+  );
   const countAfterAbort = await historyCount();
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert(
@@ -271,19 +305,41 @@ export async function testAvatars(
     { prompt: '  ' },
     400,
   );
-  await expectStatus('POST', '/api/characters/999999999/avatar/prompt', { prompt: 'x' }, 404);
-  await expectStatus('POST', '/api/personas/999999999/avatar/prompt', { prompt: 'x' }, 404);
+  await expectStatus(
+    'POST',
+    `/api/characters/${avatarChar.id}/avatar/prompt`,
+    { prompt: 'Portrait' },
+    400,
+  );
+  await expectStatus(
+    'POST',
+    `/api/characters/${avatarChar.id}/avatar/prompt`,
+    { prompt: 'Portrait', context: '' },
+    400,
+  );
+  await expectStatus(
+    'POST',
+    '/api/characters/999999999/avatar/prompt',
+    { prompt: 'x', context: '{{name}}' },
+    404,
+  );
+  await expectStatus(
+    'POST',
+    '/api/personas/999999999/avatar/prompt',
+    { prompt: 'x', context: '{{name}}' },
+    404,
+  );
   await expectStatus('POST', '/api/avatar/render', { prompt: '  ', image: avatarImage }, 400);
   await expectStatus(
     'POST',
     '/api/avatar/render',
-    { prompt: 'x', image: { workflow: '', comfyUrl: MOCK_CONTROL } },
+    { prompt: 'x', image: imageConfig('', MOCK_CONTROL) },
     400,
   );
   await expectStatus(
     'POST',
     '/api/avatar/render',
-    { prompt: 'x', image: { workflow: '{not json', comfyUrl: MOCK_CONTROL } },
+    { prompt: 'x', image: imageConfig('{not json', MOCK_CONTROL) },
     400,
   );
 }

@@ -5,6 +5,7 @@ import { defineEntityRoutes, nameField, textField } from './entityRoutes.ts';
 defineEntityRoutes<Preset>({
   table: 'presets',
   toDto: toPreset,
+  readOnlyColumn: 'builtin',
   fields: [nameField((cur) => cur.name), textField('content', 'content', (cur) => cur.content)],
   settingsRef: 'defaultPresetId',
   invalidateOnDelete: ['characters'],

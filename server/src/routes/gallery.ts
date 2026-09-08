@@ -1,41 +1,36 @@
+import { mediaCharacterIds, mediaCharacterNames, setMediaCharacters } from '../mediaCharacters.ts';
 import { publicGalleryItem } from '../mediaUrls.ts';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import type { GalleryItem } from '@tinytavern/shared';
-import { stmt, toGalleryItem as canonicalGalleryItem, transaction } from '../db.ts';
-import { parseImageConfig, renderToBuffer } from '../comfy.ts';
-import { invalidate } from '../events.ts';
-import { streamChatCompletion } from '../generation.ts';
 import {
-  copyImage,
-  deleteImageFiles,
-  rasterImageFormat,
-  saveImage,
-  savedImageDimensions,
-} from '../images.ts';
+  mediaAssetForPath,
+  stmt,
+  toGalleryItem as canonicalGalleryItem,
+  transaction,
+} from '../db.ts';
+import { invalidate, observeInvalidation } from '../events.ts';
+import { copyImage, deleteImageFiles, rasterImageFormat, saveImage } from '../images.ts';
 import { imageDimensions } from '../imageDimensions.ts';
-import { buildGalleryRevisionPrompt } from '../prompt.ts';
-import { getSettings } from '../settingsStore.ts';
 import { HttpError, route } from '../router.ts';
-import type { Ctx } from '../router.ts';
-import {
-  finishRenderProgress,
-  publishRenderPreview,
-  publishRenderProgress,
-  renderJobId,
-  streamRenderProgress,
-} from '../renderProgress.ts';
+import { objectBody, optionalString, positiveId } from '../validation.ts';
+import { describeImage, descriptionWorkflow } from '../mediaDescription.ts';
 import { streamResponse } from './streamResponse.ts';
-import { objectBody, positiveId, requiredString } from '../validation.ts';
 
-const GALLERY_SELECT = `
-  SELECT g.*, c.name AS current_character_name
-  FROM gallery_items g
-  LEFT JOIN characters c ON c.id = g.character_id`;
+observeInvalidation((entity) => {
+  if (entity === 'characters') invalidate('gallery');
+});
+
+const GALLERY_SELECT = `SELECT g.*,
+  (SELECT json_group_array(json_object('id', id, 'name', name)) FROM (
+    SELECT c.id, c.name FROM media_assets a
+    JOIN media_characters mc ON mc.asset_id = a.id
+    JOIN characters c ON c.id = mc.character_id
+    WHERE a.path = g.image ORDER BY c.name COLLATE NOCASE, c.id
+  )) AS characters_json FROM gallery_items g`;
 
 type GalleryRow = Record<string, unknown> & {
   image: string;
-  image_render_json: string | null;
 };
 
 function galleryRow(id: number): GalleryRow | undefined {
@@ -86,16 +81,9 @@ route.post(
     try {
       const now = Date.now();
       const result = stmt(`INSERT INTO gallery_items
-      (character_id, character_name, prompt, image, image_width, image_height, created_at, updated_at)
-      VALUES (?, ?, '', ?, ?, ?, ?, ?)`).run(
-        characterId,
-        characterName,
-        saved,
-        size.width,
-        size.height,
-        now,
-        now,
-      );
+      (character_name, prompt, image, image_width, image_height, created_at, updated_at)
+      VALUES (?, '', ?, ?, ?, ?, ?)`).run(characterName, saved, size.width, size.height, now, now);
+      if (characterId !== null) setMediaCharacters(mediaAssetForPath(saved)!.id, [characterId]);
       const item = galleryItem(Number(result.lastInsertRowid));
       invalidate('gallery');
       return item;
@@ -115,7 +103,7 @@ route.post('/api/gallery', ({ body }) => {
   }
   const source = stmt(
     `SELECT m.id, m.conversation_id, m.content, m.images_json, m.active_image,
-            m.image_render_json, conv.character_id,
+            conv.character_id,
             COALESCE(c.name, 'Assistant') AS character_name
      FROM messages m
      JOIN conversations conv ON conv.id = m.conversation_id
@@ -128,7 +116,6 @@ route.post('/api/gallery', ({ body }) => {
         content: string;
         images_json: string;
         active_image: number;
-        image_render_json: string | null;
         character_id: number | null;
         character_name: string;
       }
@@ -146,23 +133,21 @@ route.post('/api/gallery', ({ body }) => {
   const copied = copyImage(sourceImage, `gallery-${randomUUID()}${ext}`);
   if (!copied) throw new HttpError(409, 'the source image file no longer exists');
   try {
-    const size = savedImageDimensions(copied);
+    const size = mediaAssetForPath(copied);
     const now = Date.now();
     const result = stmt(
       `INSERT INTO gallery_items
-         (character_id, character_name, source_conversation_id, source_message_id,
-          source_image, prompt, image, image_render_json, created_at, updated_at,
+         (character_name, source_conversation_id, source_message_id,
+          source_image, prompt, image, created_at, updated_at,
           image_width, image_height)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      source.character_id,
-      source.character_name,
+      mediaCharacterNames(size!.id) || source.character_name,
       source.conversation_id,
       source.id,
       sourceImage,
       source.content,
       copied,
-      source.image_render_json,
       now,
       now,
       size?.width ?? null,
@@ -176,12 +161,6 @@ route.post('/api/gallery', ({ body }) => {
     throw err;
   }
 });
-
-const activeRenders = new Set<number>();
-const activePromptRevisions = new Set<number>();
-const PROMPT_REVISION_MAX_TOKENS = 2048;
-
-route.get('/api/gallery/render-progress/:id', (ctx) => streamRenderProgress(ctx));
 
 function deleteGalleryRows(ids: number[]): number {
   const encodedIds = JSON.stringify(ids);
@@ -211,131 +190,90 @@ route.post('/api/gallery/bulk-delete', ({ body }) => {
     throw new HttpError(400, 'ids must contain positive integers');
   }
   const ids = [...new Set(rawIds as number[])];
-  if (ids.some((id) => activeRenders.has(id) || activePromptRevisions.has(id))) {
-    throw new HttpError(409, 'generation is still running for a selected item');
-  }
   return { deleted: deleteGalleryRows(ids) };
 });
 
-async function reviseGalleryPrompt(ctx: Ctx): Promise<void> {
-  const id = positiveId(ctx.params.id);
-  requireGalleryItem(id);
-  const body = objectBody(ctx.body);
-  const prompt = requiredString(body, 'prompt');
-  const instruction = requiredString(body, 'instruction');
-  if (activePromptRevisions.has(id)) {
-    throw new HttpError(409, 'a prompt revision is already running for this gallery item');
-  }
-  activePromptRevisions.add(id);
-  try {
-    const built = buildGalleryRevisionPrompt(
-      prompt,
-      instruction,
-      getSettings().gallery.promptRevision,
+const describing = new Set<number>();
+route.post('/api/gallery/:id/describe', ({ params, body, res }) => {
+  const id = positiveId(params.id);
+  const item = galleryItem(id);
+  if (!item.media || item.media.kind !== 'image')
+    throw new HttpError(400, 'Choose an image to describe');
+  if (describing.has(id))
+    throw new HttpError(409, 'A prompt is already being generated for this image');
+  const configuration = descriptionWorkflow(optionalString(objectBody(body), 'workflowId'));
+  const assetId = item.media.id;
+  describing.add(id);
+  return streamResponse(res, async (send, signal) => {
+    const prompt = await describeImage(assetId, configuration, signal, (update) =>
+      send({ progress: update }),
     );
-    await streamResponse(ctx.res, async (send, signal) => {
-      await streamChatCompletion(
-        null,
-        built.messages,
-        PROMPT_REVISION_MAX_TOKENS,
-        (d) => send({ d }),
-        signal,
-        {
-          useEndpointParameters: true,
-          reasoningPrefill: built.reasoningPrefill,
-          messagePrefill: built.messagePrefill,
-        },
-      );
-    });
-  } finally {
-    activePromptRevisions.delete(id);
-  }
-}
+    send({ d: prompt });
+  }).finally(() => describing.delete(id));
+});
 
-route.post('/api/gallery/:id/revise-prompt', reviseGalleryPrompt);
-
-/** Render into a new gallery item, preserving the source item. */
-route.post('/api/gallery/:id/render-image', async ({ params, body }) => {
+route.patch('/api/gallery/:id', ({ params, body }) => {
   const id = positiveId(params.id);
   const row = requireGalleryItem(id);
-  if (activeRenders.has(id)) throw new HttpError(409, 'an image render is already running');
-  const b = objectBody(body);
-  let config: { workflow: string; comfyUrl: string };
-  try {
-    if ('workflow' in b || 'comfyUrl' in b) config = parseImageConfig(b);
-    else if (row.image_render_json) config = parseImageConfig(JSON.parse(row.image_render_json));
-    else throw new HttpError(400, 'gallery item has no image render configuration');
-  } catch (err) {
-    if (err instanceof HttpError) throw err;
-    throw new HttpError(400, err instanceof Error ? err.message : String(err));
+  const data = objectBody(body);
+  const hasPrompt = Object.hasOwn(data, 'prompt');
+  const hasCharacters = Object.hasOwn(data, 'characterIds');
+  if (!hasPrompt && !hasCharacters)
+    throw new HttpError(400, 'Provide a prompt or characters to update');
+  const prompt = hasPrompt ? data.prompt : row.prompt;
+  if (typeof prompt !== 'string' || prompt.length > 200_000) {
+    throw new HttpError(400, 'Prompt must be text of at most 200000 characters');
   }
-  const prompt = 'prompt' in b ? requiredString(b, 'prompt') : (row.prompt as string);
-  if (!prompt.trim()) throw new HttpError(400, 'gallery item has no prompt to render');
-  const jobId = typeof b.jobId === 'string' && b.jobId.trim() ? renderJobId(b.jobId.trim()) : '';
-
-  activeRenders.add(id);
-  let saved: string | null = null;
-  let committed = false;
-  try {
-    let result: Awaited<ReturnType<typeof renderToBuffer>>;
-    try {
-      result = await renderToBuffer({
-        comfyUrl: config.comfyUrl,
-        workflow: config.workflow,
-        prompt,
-        onProgress: jobId ? (value, max) => publishRenderProgress(jobId, value, max) : undefined,
-        onPreview: jobId ? (preview) => publishRenderPreview(jobId, preview) : undefined,
-      });
-    } catch (err) {
-      throw new HttpError(502, err instanceof Error ? err.message : String(err));
+  if (hasPrompt) {
+    if (typeof data.expectedPrompt !== 'string')
+      throw new HttpError(400, 'expectedPrompt is required');
+    if (row.prompt !== data.expectedPrompt) {
+      throw new HttpError(409, 'The saved prompt changed elsewhere. Reopen the media to load it.');
     }
-    saved = saveImage(
-      `gallery-${randomUUID()}-${result.promptId.slice(0, 8)}${result.ext}`,
-      result.data,
-    );
-    const created = transaction(() => {
-      const size = imageDimensions(result.data);
-      const characterId =
-        row.character_id != null &&
-        stmt('SELECT 1 FROM characters WHERE id = ?').get(row.character_id as number)
-          ? (row.character_id as number)
-          : null;
-      const now = Date.now();
-      const inserted = stmt(
-        `INSERT INTO gallery_items
-           (character_id, character_name, source_conversation_id, source_message_id,
-            source_image, prompt, image, image_render_json, created_at, updated_at,
-            image_width, image_height)
-         VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        characterId,
-        (row.current_character_name as string | null) ?? (row.character_name as string),
-        prompt,
-        saved!,
-        JSON.stringify(config),
-        now,
-        now,
-        size?.width ?? null,
-        size?.height ?? null,
-      );
-      return galleryItem(Number(inserted.lastInsertRowid));
-    });
-    committed = true;
-    invalidate('gallery');
-    return created;
-  } finally {
-    activeRenders.delete(id);
-    if (jobId) finishRenderProgress(jobId);
-    if (saved && !committed) deleteImageFiles([saved]);
   }
+  const asset = mediaAssetForPath(row.image)!;
+  const previousIds = mediaCharacterIds(asset.id);
+  let characterIds = previousIds;
+  if (hasCharacters) {
+    const parseIds = (value: unknown): number[] => {
+      if (!Array.isArray(value) || value.some((id) => !Number.isInteger(id) || id <= 0)) {
+        throw new HttpError(400, 'Character selections must be arrays of character IDs');
+      }
+      return [...new Set(value as number[])].sort((a, b) => a - b);
+    };
+    characterIds = parseIds(data.characterIds);
+    if (JSON.stringify(parseIds(data.expectedCharacterIds)) !== JSON.stringify(previousIds)) {
+      throw new HttpError(409, 'The characters changed elsewhere. Reopen the media to load them.');
+    }
+    for (const characterId of characterIds) {
+      if (!stmt('SELECT id FROM characters WHERE id = ?').get(characterId)) {
+        throw new HttpError(404, 'Character not found');
+      }
+    }
+  }
+  const charactersChanged = JSON.stringify(characterIds) !== JSON.stringify(previousIds);
+  if (prompt !== row.prompt || charactersChanged) {
+    transaction(() => {
+      if (charactersChanged) setMediaCharacters(asset.id, characterIds);
+      const characterName = charactersChanged
+        ? mediaCharacterNames(asset.id) || (asset.recipeId ? 'Media tools' : 'Uploads')
+        : String(row.character_name);
+      stmt(`UPDATE gallery_items SET prompt = ?, character_name = ?,
+        updated_at = MAX(updated_at + 1, ?) WHERE id = ?`).run(
+        prompt,
+        characterName,
+        Date.now(),
+        id,
+      );
+    });
+    invalidate('gallery');
+  }
+  return galleryItem(id);
 });
 
 route.del('/api/gallery/:id', ({ params }) => {
   const id = positiveId(params.id);
   requireGalleryItem(id);
-  if (activeRenders.has(id) || activePromptRevisions.has(id)) {
-    throw new HttpError(409, 'generation is still running for this gallery item');
-  }
   deleteGalleryRows([id]);
 });
 

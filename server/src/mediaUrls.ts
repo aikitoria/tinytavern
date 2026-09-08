@@ -1,6 +1,7 @@
+import { stmt } from './db.ts';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { GalleryItem, Message } from '@tinytavern/shared';
+import type { GalleryItem, Message, MediaAsset, MediaJob } from '@tinytavern/shared';
 
 const keyFile = process.env.MEDIA_SIGNING_KEY_FILE;
 const keyText = keyFile ? readFileSync(keyFile, 'utf8').trim() : null;
@@ -25,12 +26,25 @@ export function signMediaUrl(path: string): string {
   cache.set(path, { url, expires: expiry });
   return url;
 }
-export function publicAvatar<T extends { avatar: string | null }>(entity: T): T {
-  return key && entity.avatar ? { ...entity, avatar: signMediaUrl(entity.avatar) } : entity;
+export function publicAvatar<T extends { avatar: string | null }>(
+  entity: T,
+): T & { avatarThumbnail: string | null } {
+  const thumbnail = entity.avatar
+    ? stmt('SELECT thumbnail FROM avatar_thumbnails WHERE source = ?').get(entity.avatar)?.thumbnail
+    : null;
+  return {
+    ...entity,
+    avatar: entity.avatar ? signMediaUrl(entity.avatar) : null,
+    avatarThumbnail: typeof thumbnail === 'string' ? signMediaUrl(thumbnail) : null,
+  };
 }
 export function publicMessage<T extends Message | null | undefined>(message: T): T {
   return key && message?.images.length
-    ? { ...message, images: message.images.map(signMediaUrl) }
+    ? {
+        ...message,
+        images: message.images.map(signMediaUrl),
+        media: message.media?.map(publicMediaAsset),
+      }
     : message;
 }
 export function publicGalleryItem(item: GalleryItem): GalleryItem {
@@ -38,7 +52,26 @@ export function publicGalleryItem(item: GalleryItem): GalleryItem {
     ? {
         ...item,
         image: signMediaUrl(item.image),
+        media: item.media ? publicMediaAsset(item.media) : undefined,
         sourceImage: item.sourceImage ? signMediaUrl(item.sourceImage) : null,
       }
     : item;
+}
+
+export function publicMediaAsset(asset: MediaAsset): MediaAsset {
+  return key
+    ? {
+        ...asset,
+        url: signMediaUrl(asset.url),
+        thumbnail: asset.thumbnail ? signMediaUrl(asset.thumbnail) : null,
+      }
+    : asset;
+}
+
+export function publicMediaJob(job: MediaJob): MediaJob {
+  return {
+    ...job,
+    assets: job.assets.map(publicMediaAsset),
+    outputs: job.outputs.map(publicMediaAsset),
+  };
 }

@@ -291,8 +291,8 @@ input[type='number']::-webkit-inner-spin-button {
 
 .password-card label,
 .form label {
-  font-size: 13px;
-  color: var(--text-dim);
+  font-size: 13.5px;
+  color: var(--text);
   margin-top: var(--space-2);
 }
 
@@ -309,7 +309,8 @@ input[type='number']::-webkit-inner-spin-button {
   min-width: 0;
 }
 
-.setting-revert.icon-btn {
+.setting-revert.icon-btn,
+.help-btn.icon-btn {
   width: 24px;
   min-width: 24px;
   height: 24px;
@@ -318,8 +319,16 @@ input[type='number']::-webkit-inner-spin-button {
   color: var(--text-muted);
 }
 
-.setting-revert.icon-btn:hover {
+.setting-revert.icon-btn:hover,
+.help-btn.icon-btn:hover {
   color: var(--text);
+}
+
+.help-btn.icon-btn {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  font-size: inherit;
 }
 
 .tab {
@@ -358,7 +367,7 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 /* Layout primitives add no descendant form semantics. */
-:where(.form, .form-stack, .settings-section, .settings-section-body) {
+:where(.form, .form-stack, .settings-section) {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);

@@ -3,6 +3,7 @@ import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import { createUniqueId, onCleanup, onMount, Show, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { openModal } from '../state/store.ts';
+import { registerUiBack } from '../state/uiBack.ts';
 import '../styles/pages.css';
 
 export default function Modal(props: {
@@ -64,6 +65,7 @@ export default function Modal(props: {
   };
 
   onMount(() => {
+    registerUiBack(dialog, close);
     previouslyFocused = document.activeElement as HTMLElement | null;
     document.addEventListener('keydown', onKeyDown, true);
     queueMicrotask(() => {

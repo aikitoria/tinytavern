@@ -155,7 +155,8 @@ export default function CharactersTab() {
       }}
       onClick={() => editor.select(props.character.id)}
     >
-      <Avatar src={props.character.avatar} name={props.character.name} /> {props.character.name}
+      <Avatar src={props.character.avatarThumbnail} name={props.character.name} />{' '}
+      {props.character.name}
     </button>
   );
 
@@ -197,7 +198,7 @@ export default function CharactersTab() {
         items={state.characters}
         itemLabel={(character) => (
           <>
-            <Avatar src={character.avatar} name={character.name} /> {character.name}
+            <Avatar src={character.avatarThumbnail} name={character.name} /> {character.name}
           </>
         )}
         newLabel="New"
@@ -309,6 +310,7 @@ export default function CharactersTab() {
           <Show when={editor.selectedId() !== 'new'}>
             <AvatarRow
               src={editor.selected()?.avatar}
+              thumbnail={editor.selected()?.avatarThumbnail}
               name={editor.selected()?.name ?? '?'}
               upload={(file) => api.uploadCharacterAvatar(editor.selectedId() as number, file)}
               remove={() => api.deleteCharacterAvatar(editor.selectedId() as number)}
@@ -375,47 +377,53 @@ export default function CharactersTab() {
 
         <section class="settings-section">
           <h3>Prompting</h3>
-          <SettingLabel field={presetEl}>System prompt</SettingLabel>
-          <Select
-            ref={presetEl.ref}
-            ariaLabel="Character system prompt"
-            onChange={(value) => setCustomPrompt(value === 'custom')}
-            options={[
-              { value: '', label: 'Global default' },
-              ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
-              { value: 'custom', label: 'Custom prompt…' },
-            ]}
-          />
-          <Show when={customPrompt()}>
-            <SettingLabel field={customEl}>
-              Custom prompt text <MacroHelp />
-            </SettingLabel>
-          </Show>
-          <MacroTextarea
-            ref={customEl.ref}
-            classList={{ hidden: !customPrompt() }}
-            placeholder="Custom system prompt for this character"
-          />
-
-          <SettingLabel field={templateEl}>Prompt template</SettingLabel>
-          <Select
-            ref={templateEl.ref}
-            ariaLabel="Character prompt template"
-            onChange={(value) => {
-              const custom = value === 'custom';
-              setCustomTemplate(custom);
-              if (custom && !templateFields.value.content)
-                templateFields.value = {
-                  ...templateFields.value,
-                  content: DEFAULT_PROMPT_TEMPLATE,
-                };
-            }}
-            options={[
-              { value: '', label: 'Global default' },
-              ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
-              { value: 'custom', label: 'Custom template…' },
-            ]}
-          />
+          <div class="form-stack field-group" role="group" aria-label="System prompt settings">
+            <SettingLabel field={presetEl}>System prompt</SettingLabel>
+            <Select
+              ref={presetEl.ref}
+              ariaLabel="Character system prompt"
+              onChange={(value) => setCustomPrompt(value === 'custom')}
+              options={[
+                { value: '', label: 'Global default' },
+                ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
+                { value: 'custom', label: 'Custom prompt…' },
+              ]}
+            />
+            <Show when={customPrompt()}>
+              <SettingLabel field={customEl}>
+                Custom prompt text <MacroHelp />
+              </SettingLabel>
+            </Show>
+            <MacroTextarea
+              ref={customEl.ref}
+              classList={{ hidden: !customPrompt() }}
+              placeholder="Custom system prompt for this character"
+            />
+          </div>
+          <div class="form-stack field-group" role="group" aria-label="Prompt template settings">
+            <SettingLabel field={templateEl}>Prompt template</SettingLabel>
+            <Select
+              ref={templateEl.ref}
+              ariaLabel="Character prompt template"
+              onChange={(value) => {
+                const custom = value === 'custom';
+                setCustomTemplate(custom);
+                if (custom && !templateFields.value.content)
+                  templateFields.value = {
+                    ...templateFields.value,
+                    content: DEFAULT_PROMPT_TEMPLATE,
+                  };
+              }}
+              options={[
+                { value: '', label: 'Global default' },
+                ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
+                { value: 'custom', label: 'Custom template…' },
+              ]}
+            />
+            <div class="form-stack" classList={{ hidden: !customTemplate() }}>
+              <TemplateFields ref={templateFields} inline />
+            </div>
+          </div>
         </section>
 
         <section class="settings-section">
@@ -425,11 +433,6 @@ export default function CharactersTab() {
             Disable background swipe generation
           </SettingLabel>
           <p class="hint">Overrides the global setting for all chats with this character.</p>
-        </section>
-
-        <section class="settings-section" classList={{ hidden: !customTemplate() }}>
-          <h3>Advanced template overrides</h3>
-          <TemplateFields ref={templateFields} inline />
         </section>
       </EntityEditorPane>
       <Show when={folderDialog()}>

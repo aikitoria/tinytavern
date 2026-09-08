@@ -1,5 +1,5 @@
-import type { ImageGenerationSettings, StandalonePromptTemplate } from '@tinytavern/shared';
-import { galleryRevisionTemplateError, imageRevisionTemplateError } from '@tinytavern/shared';
+import type { ImageGenerationSettings } from '@tinytavern/shared';
+import { imageRevisionTemplateError } from '@tinytavern/shared';
 import { HttpError } from './router.ts';
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
@@ -15,17 +15,6 @@ function requireString(value: unknown, label: string): void {
   }
 }
 
-function validateWorkflows(value: unknown): void {
-  if (!Array.isArray(value)) {
-    throw new HttpError(400, 'workflows must be an array');
-  }
-  for (const entry of value) {
-    const workflow = requireObject(entry, 'workflow');
-    requireString(workflow.name, 'workflow name');
-    requireString(workflow.json, 'workflow JSON');
-  }
-}
-
 function validatePromptPreset(value: unknown): void {
   const preset = requireObject(value, 'prompt preset');
   requireString(preset.name, 'preset name');
@@ -37,7 +26,7 @@ function validatePromptPreset(value: unknown): void {
 
 function validatePromptPresets(value: unknown): void {
   const sets = requireObject(value, 'promptPresets');
-  for (const entry of Object.values(sets)) {
+  for (const [kind, entry] of Object.entries(sets)) {
     const set = requireObject(entry, 'prompt preset set');
     requireString(set.active, 'active preset');
     if (!Array.isArray(set.presets)) {
@@ -45,20 +34,32 @@ function validatePromptPresets(value: unknown): void {
     }
     for (const preset of set.presets) {
       validatePromptPreset(preset);
+      if (kind === 'avatar') {
+        const context = (preset as Record<string, unknown>).context;
+        if (typeof context !== 'string' || !context.trim()) {
+          throw new HttpError(400, 'Avatar presets require a context template.');
+        }
+      }
     }
   }
 }
 
-export function parseImageGenerationSettings(value: unknown): ImageGenerationSettings | undefined {
+export function parseImageGenerationSettings(
+  value: unknown,
+): Partial<ImageGenerationSettings> | undefined {
   if (value === undefined) return undefined;
   const settings = requireObject(value, 'imageGeneration');
-  for (const key of ['comfyUrl', 'activeWorkflow', 'avatarWorkflow']) {
-    if (settings[key] !== undefined) {
-      requireString(settings[key], key);
+  for (const key of Object.keys(settings)) {
+    if (
+      ![
+        'promptPresets',
+        'promptRevisionTemplate',
+        'promptRevisionContext',
+        'promptRevisionOriginal',
+      ].includes(key)
+    ) {
+      throw new HttpError(400, `Unknown image prompt setting: ${key}`);
     }
-  }
-  if (settings.workflows !== undefined) {
-    validateWorkflows(settings.workflows);
   }
   if (settings.promptPresets !== undefined) {
     validatePromptPresets(settings.promptPresets);
@@ -68,21 +69,14 @@ export function parseImageGenerationSettings(value: unknown): ImageGenerationSet
     const invalid = imageRevisionTemplateError(settings.promptRevisionTemplate as string);
     if (invalid) throw new HttpError(400, invalid);
   }
-  return settings as ImageGenerationSettings;
-}
-
-export function parseGalleryRevisionTemplate(value: unknown): StandalonePromptTemplate {
-  const template = requireObject(value, 'gallery revision template');
-  for (const key of ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill']) {
-    requireString(template[key], key);
+  if (settings.promptRevisionContext !== undefined) {
+    requireString(settings.promptRevisionContext, 'image revision context');
   }
-  const parsed: StandalonePromptTemplate = {
-    systemPrompt: template.systemPrompt as string,
-    userMessage: template.userMessage as string,
-    reasoningPrefill: template.reasoningPrefill as string,
-    messagePrefill: template.messagePrefill as string,
-  };
-  const invalid = galleryRevisionTemplateError(parsed);
-  if (invalid) throw new HttpError(400, invalid);
-  return parsed;
+  if (settings.promptRevisionOriginal !== undefined) {
+    requireString(settings.promptRevisionOriginal, 'original image prompt template');
+    if (!(settings.promptRevisionOriginal as string).toLowerCase().includes('{{prompt}}')) {
+      throw new HttpError(400, 'Include {{prompt}} in the original image prompt template.');
+    }
+  }
+  return settings as Partial<ImageGenerationSettings>;
 }
