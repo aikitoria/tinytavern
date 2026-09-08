@@ -35,6 +35,7 @@ export function recordMediaResult(
     saveMediaRecipe(configuration, JSON.parse(job.inputs_json), job.prompt, {
       id: job.id,
       instruction: job.instruction,
+      seed: job.seed,
     });
     const result = stmt(`
       INSERT INTO media_assets (

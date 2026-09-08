@@ -1,20 +1,21 @@
+import { restoreMediaInputs } from './restoreInputs.ts';
 import {
   applyPageLocation,
-  parsePageLocation as readPageLocationFromHash,
+  navigatePageWithGuards,
   readPageLocation,
-  rememberMediaPage,
-  writePageLocation,
+  returnToPageLocation,
   type PageLocation,
 } from '../state/pageLocation.ts';
-import { createSignal } from 'solid-js';
+import { batch } from 'solid-js';
+import { dialogStack } from '../state/dialogStack.ts';
 import type { MediaAsset, MediaJobInput, MediaOperation } from '@tinytavern/shared';
 import {
   applyMediaJob,
   openModal,
+  openDialog,
   selectConversation,
   setState,
   state,
-  type ModalKind,
 } from '../state/store.ts';
 import { api } from '../state/api.ts';
 
@@ -25,14 +26,10 @@ export interface MediaToolSession {
   contextConversationId: number | null;
   destination: 'gallery' | 'chat';
   prompt: string;
-  returnModal: ModalKind;
-  returnHash?: string;
   inputs: MediaJobInput[];
   assets: MediaAsset[];
   showJobs: boolean;
 }
-
-export const [mediaToolSession, setMediaToolSession] = createSignal<MediaToolSession | null>(null);
 
 export function openMediaTool(
   operation: MediaOperation,
@@ -44,39 +41,43 @@ export function openMediaTool(
     showJobs?: boolean;
   } = {},
 ): void {
-  const previous = mediaToolSession();
-  const returnModal = state.modal === 'media-tools' ? (previous?.returnModal ?? null) : state.modal;
-  const returnHash = state.modal === 'media-tools' ? previous?.returnHash : location.hash;
+  const existing =
+    options.jobId && !options.showJobs
+      ? dialogStack.findJob(options.jobId, state.mediaJobs)
+      : undefined;
+  if (existing) {
+    if (existing !== dialogStack.top()) {
+      const target = existing.page;
+      navigatePageWithGuards(target, () => returnToPageLocation(target, () => restorePage(target)));
+    }
+    return;
+  }
   const input = options.input;
   const conversationId = options.conversationId ?? null;
-  setMediaToolSession({
+  const session: MediaToolSession = {
     id: crypto.randomUUID(),
     operation,
     jobId: options.jobId ?? null,
     contextConversationId: conversationId,
     destination: conversationId === null ? 'gallery' : 'chat',
     prompt: options.prompt ?? '',
-    returnModal,
-    returnHash,
     inputs: input ? [{ slot: input.slot, assetId: input.asset.id }] : [],
     assets: input ? [input.asset] : [],
     showJobs: options.showJobs ?? false,
-  });
-  openModal('media-tools');
-  rememberMediaPage(mediaToolSession()!);
+  };
+  const current = readPageLocation();
+  openDialog(
+    { chatId: current.chatId, viewMode: current.viewMode, modal: 'media-tools', media: session },
+    session,
+  );
+}
+
+export function openMediaJobs(): void {
+  openMediaTool('image', { showJobs: true });
 }
 
 export function leaveMediaTool(): void {
-  const session = mediaToolSession();
-  if (session?.returnHash) {
-    const page = readPageLocationFromHash(session.returnHash);
-    if (page.chatId === state.selectedId && page.modal === session.returnModal) {
-      openModal(page.modal);
-      writePageLocation(page);
-    } else {
-      restorePage(page);
-    }
-  } else openModal(session?.returnModal ?? null);
+  openModal(null);
 }
 
 export async function openMediaRerun(
@@ -105,24 +106,17 @@ export const CHAT_MEDIA_TOOL_LINKS = [
 
 export function restorePage(page: PageLocation): void {
   const chatId = state.conversations.some((chat) => chat.id === page.chatId) ? page.chatId : null;
-  applyPageLocation({ ...page, chatId }, () => {
-    selectConversation(chatId);
-    setState('viewMode', page.viewMode ?? 'chat');
-    if (page.modal === 'media-tools' && page.media) {
-      const media = page.media;
-      setMediaToolSession({
-        id: crypto.randomUUID(),
-        ...media,
-        destination: media.contextConversationId === null ? 'gallery' : 'chat',
-        prompt: '',
-        inputs: [],
-        assets: [],
-      });
-      openModal('media-tools');
-    } else {
-      openModal(page.modal);
-    }
-  });
+  const restored = { ...page, chatId, stack: page.stack?.map((pane) => ({ ...pane, chatId })) };
+  batch(() =>
+    applyPageLocation(restored, () => {
+      selectConversation(chatId);
+      setState('viewMode', page.viewMode ?? 'chat');
+      dialogStack.restore(restored, (pane) =>
+        restoreMediaInputs(pane, state.gallery, state.mediaJobs),
+      );
+      setState('modal', page.modal);
+    }),
+  );
 }
 
 let pageRestored = false;

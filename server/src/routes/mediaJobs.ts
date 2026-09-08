@@ -18,7 +18,7 @@ import {
   selectMediaVariation,
 } from '../mediaDrafts.ts';
 import { tickMediaWorker } from '../mediaWorker.ts';
-import { getMediaAssetInputs } from '../mediaRecipes.ts';
+import { getMediaAssetInputs, getMediaAssetResultDetails } from '../mediaRecipes.ts';
 import { publicMediaAsset } from '../mediaUrls.ts';
 
 function jobForMutation(id: string, body: Record<string, unknown>) {
@@ -72,6 +72,10 @@ route.get('/api/media/assets/:id/inputs', ({ params }) =>
 
 route.post('/api/media/assets/:id/rerun', ({ params, body }) =>
   createMediaJobFromAsset(positiveId(params.id, 'asset ID'), objectBody(body)),
+);
+
+route.get('/api/media/assets/:id/details', ({ params }) =>
+  getMediaAssetResultDetails(positiveId(params.id, 'asset ID')),
 );
 
 route.patch('/api/media/jobs/:id', ({ params, body }) => {

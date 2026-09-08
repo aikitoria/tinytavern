@@ -1,4 +1,9 @@
-import { guardPageNavigation, rememberMediaPage } from '../state/pageLocation.ts';
+import MediaResultDetails from './MediaResultDetails.tsx';
+import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
+import { createStreamScroll } from '../streamScroll.ts';
+import { prepareTextareaResize } from '../textareaResize.ts';
+import { useDialogActive, useDialogNavigationGuard } from '../state/dialogContext.ts';
+import { rememberMediaPage } from '../state/pageLocation.ts';
 import {
   For,
   Show,
@@ -17,6 +22,7 @@ import {
   faArrowDown,
   faImage,
   faDownload,
+  faCircleInfo,
   faChevronLeft,
   faChevronRight,
   faRotateRight,
@@ -51,37 +57,25 @@ import SamplerProgress from '../images/SamplerProgress.tsx';
 import { api } from '../state/api.ts';
 import { applyMediaJob, handleServerEvent, state, toast } from '../state/store.ts';
 import { download, errorMessage } from '../util.ts';
-import { leaveMediaTool, openMediaTool, type MediaToolSession } from './navigation.ts';
+import {
+  leaveMediaTool,
+  openMediaJobs,
+  openMediaTool,
+  type MediaToolSession,
+} from './navigation.ts';
 import MediaPlayer from './MediaPlayer.tsx';
 import VideoFullscreenButton from './VideoFullscreenButton.tsx';
 import VideoPreview from './VideoPreview.tsx';
 import MediaActions from './MediaActions.tsx';
 import WorkflowInputs from './WorkflowInputs.tsx';
-import { imageWorkflowDefaults } from './workflowDefaults.ts';
+import { imageWorkflowDefaults, mediaWorkflowView } from './workflowDefaults.ts';
+import MediaJobList from './MediaJobList.tsx';
+import {
+  groupMediaJobs,
+  MEDIA_JOB_STATUS as STATUS_LABELS,
+  MEDIA_INPUT_LABELS as INPUT_LABELS,
+} from './jobCards.ts';
 import './media.css';
-
-const STATUS_LABELS: Record<MediaJob['state'], string> = {
-  draft: 'Draft',
-  preparing: 'Preparing prompt',
-  ready: 'Prompt ready',
-  submitting: 'Submitting',
-  reconciling: 'Checking submission',
-  queued: 'Queued',
-  rendering: 'Rendering',
-  downloading: 'Saving result',
-  cancelling: 'Cancelling',
-  succeeded: 'Complete',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
-
-const INPUT_LABELS: Record<MediaJobInput['slot'], string> = {
-  source: 'Source image',
-  first_frame: 'First frame',
-  reference1: 'Reference 1',
-  reference2: 'Reference 2',
-  reference3: 'Reference 3',
-};
 
 interface ToolDraft extends MediaJobDraft {
   workflowValues: MediaWorkflowValues;
@@ -107,11 +101,13 @@ function draftFromJob(job: MediaJob): ToolDraft {
 
 export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let videoPlayer: HTMLVideoElement | undefined;
+  let promptArea: HTMLTextAreaElement | undefined;
   const session = props.session;
   const [jobId, setJobId] = createSignal(session.jobId);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
-  const [showJobs, setShowJobs] = createSignal(session.showJobs);
+  const paneActive = useDialogActive();
+  const showJobs = () => session.showJobs;
   const [historyCursor, setHistoryCursor] = createSignal<MediaJob | undefined>();
   const [moreHistory, setMoreHistory] = createSignal(true);
   const [loadingHistory, setLoadingHistory] = createSignal(false);
@@ -138,13 +134,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let baseline = JSON.stringify(draft);
   let variationRequestKey = crypto.randomUUID();
   createEffect(() => {
-    if (state.modal !== 'media-tools') return;
+    if (!paneActive()) return;
     rememberMediaPage({
       operation: draft.operation,
       jobId: jobId(),
       contextConversationId: draft.contextConversationId ?? null,
-      returnModal: session.returnModal,
-      returnHash: session.returnHash,
       showJobs: showJobs(),
     });
   });
@@ -179,7 +173,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const reviewing = () => review()?.state === 'open';
   const runningJob = () => variations().find((item) => mediaJobActive(item.state));
   const active = () => runningJob() !== undefined;
-  const frozen = () => active() || (job()?.submitted === true && !reviewing());
+  const loadingJob = () => jobId() !== null && !job();
+  const frozen = () => loadingJob() || active() || (job()?.submitted === true && !reviewing());
   const [showLivePreview, setShowLivePreview] = createSignal(true);
   const preview = () => (showLivePreview() ? runningJob()?.progress?.preview : undefined);
   const videoPreview = () => {
@@ -191,6 +186,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       item.state === 'succeeded' ? item.outputs.map((asset) => ({ asset, job: item })) : [],
     ),
   );
+  const [resultDetails, setResultDetails] = createSignal<{
+    instruction: string;
+    prompt: string;
+    variation: number;
+    workflow: ReturnType<typeof resultWorkflowDetails>;
+  } | null>(null);
   const [viewedAssetId, setViewedAssetId] = createSignal<number | null>(null);
   const selectedIndex = () => {
     const assetId = reviewing()
@@ -210,51 +211,55 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     return input ? assets[input.assetId] : undefined;
   };
   const title = () =>
-    draft.operation.startsWith('video')
-      ? usesChatContext()
-        ? 'Create video from chat'
-        : 'Create video'
-      : draft.operation === 'image'
+    loadingJob()
+      ? 'Loading media job…'
+      : draft.operation.startsWith('video')
         ? usesChatContext()
-          ? 'Create image from chat'
-          : 'Create image'
-        : 'Edit image';
+          ? 'Create video from chat'
+          : 'Create video'
+        : draft.operation === 'image'
+          ? usesChatContext()
+            ? 'Create image from chat'
+            : 'Create image'
+          : 'Edit image';
   const operationChoices = () =>
     MEDIA_OPERATIONS.filter((operation) => {
-      if (session.operation.startsWith('video')) {
+      const operationFamily = job()?.operation ?? session.operation;
+      if (operationFamily.startsWith('video')) {
         return operation.kind === 'video';
       }
-      return session.operation === 'image'
-        ? operation.id === 'image'
-        : operation.id === 'image-edit';
+      return operationFamily === 'image' ? operation.id === 'image' : operation.id === 'image-edit';
     });
   const workflows = createMemo(() => {
+    const locked = frozen() ? (runningJob() ?? job()) : undefined;
+    const operation = locked?.operation ?? draft.operation;
+    const count = locked?.workflowSnapshot?.referenceCount ?? referenceCount();
     const compatible = state.settings.mediaRendering.workflows.filter(
-      (workflow) =>
-        workflow.operation === draft.operation && workflow.referenceCount === referenceCount(),
+      (workflow) => workflow.operation === operation && workflow.referenceCount === count,
     );
-    const snapshot = job()?.workflowSnapshot;
-    if (
-      snapshot &&
-      snapshot.operation === draft.operation &&
-      snapshot.referenceCount === referenceCount() &&
-      !compatible.some((workflow) => workflow.id === snapshot.id)
-    ) {
-      return [...compatible, { ...snapshot, name: `${snapshot.name} (saved with result)` }];
+    const snapshot = (locked ?? job())?.workflowSnapshot;
+    if (snapshot && snapshot.operation === operation && snapshot.referenceCount === count) {
+      return [...compatible.filter((workflow) => workflow.id !== snapshot.id), snapshot];
     }
     return compatible;
   });
   const slots = () => mediaInputSlots(draft.operation, referenceCount());
-  const selectedWorkflow = () =>
-    draft.workflowId ??
-    state.settings.mediaRendering.defaults[mediaWorkflowKey(draft.operation, referenceCount())] ??
-    '';
+  const workflowView = createMemo(() =>
+    mediaWorkflowView(
+      runningJob() ?? job(),
+      draft.workflowId ??
+        state.settings.mediaRendering.defaults[
+          mediaWorkflowKey(draft.operation, referenceCount())
+        ] ??
+        '',
+      workflows(),
+      draft.workflowValues,
+      frozen(),
+    ),
+  );
+  const selectedWorkflow = () => workflowView().id;
   const workflowControls = createMemo(() => {
-    const snapshot = job()?.workflowSnapshot;
-    const workflow =
-      snapshot?.id === selectedWorkflow()
-        ? snapshot
-        : workflows().find((item) => item.id === selectedWorkflow());
+    const workflow = workflowView().workflow;
     try {
       return {
         controls: workflow?.json ? compileMediaWorkflow(workflow.json).controls : [],
@@ -267,7 +272,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const workflowError = createMemo(() => {
     if (workflowControls().error) return workflowControls().error;
     for (const control of workflowControls().controls) {
-      const error = workflowInputError(control, draft.workflowValues[control.key] ?? control.value);
+      const error = workflowInputError(
+        control,
+        workflowView().values[control.key] ?? control.value,
+      );
       if (error) return error;
     }
     return '';
@@ -343,33 +351,47 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const preparingPrompt = () => showLivePreview() && runningJob()?.state === 'preparing';
   const currentPrompt = () => (preparingPrompt() ? (runningJob()?.prompt ?? '') : draft.prompt);
   const thinking = () => preparingPrompt() && !currentPrompt();
+  const promptScroll = createStreamScroll(
+    () => promptArea,
+    requestAnimationFrame,
+    cancelAnimationFrame,
+  );
+  createEffect(() => {
+    currentPrompt();
+    promptScroll.update(
+      preparingPrompt() ? runningJob()!.id : null,
+      paneActive() && picker() === null && !thinking(),
+    );
+  });
+  onCleanup(promptScroll.dispose);
   const dirty = () => JSON.stringify(draft) !== baseline;
   const inputForSlot = (slot: MediaJobInput['slot']) =>
     draft.inputs.find((input) => input.slot === slot);
 
-  const loadJob = (incoming: MediaJob) => {
-    const next = draftFromJob(incoming);
-    setDraft(next);
-    setDraft('workflowValues', reconcile(next.workflowValues));
-    const workflow =
-      incoming.workflowSnapshot ??
-      state.settings.mediaRendering.workflows.find(
-        (item) => item.id === incoming.workflowId && item.operation === incoming.operation,
+  const loadJob = (incoming: MediaJob) =>
+    batch(() => {
+      const next = draftFromJob(incoming);
+      setDraft(next);
+      setDraft('workflowValues', reconcile(next.workflowValues));
+      const workflow =
+        incoming.workflowSnapshot ??
+        state.settings.mediaRendering.workflows.find(
+          (item) => item.id === incoming.workflowId && item.operation === incoming.operation,
+        );
+      setReferenceCount(
+        operationHasReferences(incoming.operation)
+          ? Math.max(
+              1,
+              workflow?.referenceCount ?? 0,
+              incoming.inputs.filter((input) => input.slot.startsWith('reference')).length,
+            )
+          : 0,
       );
-    setReferenceCount(
-      operationHasReferences(incoming.operation)
-        ? Math.max(
-            1,
-            workflow?.referenceCount ?? 0,
-            incoming.inputs.filter((input) => input.slot.startsWith('reference')).length,
-          )
-        : 0,
-    );
-    for (const asset of incoming.assets) {
-      setAssets(asset.id, asset);
-    }
-    baseline = JSON.stringify(next);
-  };
+      for (const asset of incoming.assets) {
+        setAssets(asset.id, asset);
+      }
+      baseline = JSON.stringify(next);
+    });
   const refreshVariations = async () => {
     if (!jobId()) {
       return;
@@ -415,19 +437,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         const incoming = job();
         if (incoming && !dirty() && !busy()) {
           loadJob(incoming);
-        }
-      },
-    ),
-  );
-
-  createEffect(
-    on(
-      () => [selected()?.asset.id, active()],
-      () => {
-        const candidate = selected();
-        if (candidate && !active() && !dirty() && jobId() !== candidate.job.id) {
-          setJobId(candidate.job.id);
-          loadJob(candidate.job);
         }
       },
     ),
@@ -503,7 +512,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   };
 
   const saveOnLeave = async () => {
-    if (!jobId()) return;
+    if (showJobs() || !jobId()) return;
     const current = job();
     if (!current) return;
     if (current.startedAt === null && current.state === 'draft') {
@@ -524,14 +533,15 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     if (dirty() && !frozen()) await saveDraft();
   };
 
-  onCleanup(
-    guardPageNavigation((action) => {
-      if (busy()) return;
-      void saveOnLeave()
-        .then(action)
-        .catch((err) => setError(errorMessage(err)));
-    }),
-  );
+  useDialogNavigationGuard((action) => {
+    if (busy()) return;
+    void saveOnLeave()
+      .then(action)
+      .catch((err) => {
+        setError(errorMessage(err));
+        if (!paneActive()) toast(errorMessage(err));
+      });
+  });
 
   const back = async () => {
     if (busy()) return;
@@ -548,17 +558,20 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   };
 
   const chooseOperation = (value: string) => {
-    resetWorkflowValues();
     const operation = value as MediaOperation;
     const count = operationHasReferences(operation) ? Math.max(1, referenceCount()) : 0;
     const allowed = mediaInputSlots(operation, count);
-    setDraft({
-      operation,
-      workflowId: null,
-      presetId: null,
-      inputs: draft.inputs.filter((input) => allowed.includes(input.slot)),
+    // Slot validation must see the new operation and reference count together.
+    batch(() => {
+      resetWorkflowValues();
+      setDraft({
+        operation,
+        workflowId: null,
+        presetId: null,
+        inputs: draft.inputs.filter((input) => allowed.includes(input.slot)),
+      });
+      setReferenceCount(count);
     });
-    setReferenceCount(count);
   };
   const chooseReferenceCount = (value: string) => {
     resetWorkflowValues();
@@ -611,21 +624,13 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       }),
     );
   };
-  const reopenJob = async (selected: MediaJob) => {
+  const reopenJob = (selected: MediaJob) => {
     if (busy()) return;
-    setBusy(true);
     setError('');
-    try {
-      if (selected.id !== jobId()) await saveOnLeave();
-      openMediaTool(selected.operation, {
-        jobId: selected.id,
-        conversationId: selected.contextConversationId,
-      });
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    openMediaTool(selected.operation, {
+      jobId: selected.id,
+      conversationId: selected.contextConversationId,
+    });
   };
 
   const rerun = async () => {
@@ -656,18 +661,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       toast(errorMessage(err));
     }
   };
-  const jobs = createMemo(() => {
-    const seen = new Set<string>();
-    return Object.values(state.mediaJobs)
-      .filter((item) => item.operation !== 'image-describe')
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .filter((item) => {
-        const id = item.draft?.id ?? item.id;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-  });
+  const jobGroups = createMemo(() => groupMediaJobs(Object.values(state.mediaJobs)));
   const chooseCandidate = async (index: number) => {
     const candidate = candidates()[index];
     if (!candidate || busy()) {
@@ -675,8 +669,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
     if (!reviewing()) {
       setViewedAssetId(candidate.asset.id);
-      setJobId(candidate.job.id);
-      loadJob(candidate.job);
       setShowLivePreview(false);
       return;
     }
@@ -684,8 +676,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     setError('');
     try {
       applyMediaJob(await api.selectMediaVariation(job()!, candidate.asset.id, review()!.revision));
-      setJobId(candidate.job.id);
-      loadJob(state.mediaJobs[candidate.job.id]!);
       setShowLivePreview(false);
     } catch (err) {
       setError(errorMessage(err));
@@ -694,8 +684,17 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       setBusy(false);
     }
   };
+  const savedAssetIds = () => review()?.savedAssetIds ?? [];
+  const selectedSaved = () => Boolean(selected() && savedAssetIds().includes(selected()!.asset.id));
+  const copyResultText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      toast(errorMessage(err));
+    }
+  };
   const accept = async () => {
-    if (!selected() || !reviewing() || busy() || active()) {
+    if (!selected() || selectedSaved() || !reviewing() || busy() || active()) {
       return;
     }
     setBusy(true);
@@ -708,13 +707,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       if (job()!.destination === 'chat' && !conversation) {
         throw new Error('The destination conversation is unavailable.');
       }
-      await api.acceptMediaVariation(
-        job()!,
-        selected()!.asset.id,
-        review()!.revision,
-        conversation ?? state.tree,
+      applyMediaJob(
+        await api.acceptMediaVariation(
+          job()!,
+          selected()!.asset.id,
+          review()!.revision,
+          conversation ?? state.tree,
+        ),
       );
-      leaveMediaTool();
     } catch (err) {
       setError(errorMessage(err));
       await refreshVariations().catch(() => {});
@@ -738,7 +738,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
   };
 
-  const runningCount = () => jobs().filter((item) => mediaJobActive(item.state)).length;
+  const runningCount = () => jobGroups().filter((group) => mediaJobActive(group.job.state)).length;
 
   const loadHistory = async () => {
     if (loadingHistory()) {
@@ -780,9 +780,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
             <button class="page-back" onClick={() => void back()} disabled={busy()}>
               <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
             </button>
-            <button onClick={() => setShowJobs(!showJobs())}>
-              {showJobs() ? 'Tool' : `Jobs${runningCount() ? ` (${runningCount()})` : ''}`}
-            </button>
+            <Show when={!showJobs()}>
+              <button onClick={openMediaJobs} disabled={busy()}>
+                Jobs{runningCount() ? ` (${runningCount()})` : ''}
+              </button>
+            </Show>
           </div>
         }
       >
@@ -795,7 +797,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           <Show
             when={showJobs()}
             fallback={
-              <div class="gallery-detail gallery-detail-with-panel media-tool-layout">
+              <div class="gallery-detail media-tool-layout">
                 <section class="gallery-detail-stage media-results" aria-label="Media preview">
                   <div class="media-preview-content">
                     <Show
@@ -849,7 +851,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                                   }}
                                   asset={candidate.asset}
                                   class="media-result"
-                                  active={picker() === null}
+                                  active={paneActive() && picker() === null}
                                   autoPlay
                                   loop
                                 />
@@ -864,7 +866,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             <img class="media-result" src={preview()} alt="Generation preview" />
                           }
                         >
-                          {(video) => <VideoPreview preview={video()} active={picker() === null} />}
+                          {(video) => (
+                            <VideoPreview
+                              preview={video()}
+                              active={paneActive() && picker() === null}
+                            />
+                          )}
                         </Show>
                       </Show>
                     </Show>
@@ -900,6 +907,19 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       <Show when={!videoPreview() && !preview() && selected()}>
                         {(candidate) => (
                           <div class="media-preview-actions">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setResultDetails({
+                                  instruction: candidate().job.instruction,
+                                  prompt: candidate().job.prompt,
+                                  variation: selectedIndex() + 1,
+                                  workflow: resultWorkflowDetails(candidate().job),
+                                })
+                              }
+                            >
+                              <FontAwesomeIcon icon={faCircleInfo} size={14} /> Result details
+                            </button>
                             <button type="button" onClick={() => download(candidate().asset.url)}>
                               <FontAwesomeIcon icon={faDownload} size={14} /> Download
                             </button>
@@ -920,383 +940,411 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </Show>
                 </section>
                 <aside class="detail-panel media-tool-form" aria-label="Media controls">
-                  <dl class="media-tool-context" aria-label="Context and destination">
-                    <dt>Context</dt>
-                    <dd>{usesChatContext() ? `Chat: ${chatTitle()}` : 'Standalone'}</dd>
-                    <dt>Destination</dt>
-                    <dd>
-                      {draft.destination === 'chat'
-                        ? 'This chat, after acceptance'
-                        : 'Gallery, after acceptance'}
-                    </dd>
-                  </dl>
-                  <Show when={operationChoices().length > 1}>
+                  <div class="media-tool-fields">
+                    <dl class="media-tool-context" aria-label="Context and destination">
+                      <dt>Context</dt>
+                      <dd>{usesChatContext() ? `Chat: ${chatTitle()}` : 'Standalone'}</dd>
+                      <dt>Destination</dt>
+                      <dd>{draft.destination === 'chat' ? 'This chat' : 'Gallery'}</dd>
+                    </dl>
+                    <Show when={operationChoices().length > 1}>
+                      <div class="media-tool-field">
+                        <label>Operation</label>
+                        <Select
+                          ariaLabel="Media operation"
+                          value={draft.operation}
+                          disabled={busy() || frozen()}
+                          options={operationChoices().map((operation) => ({
+                            value: operation.id,
+                            label: operation.label,
+                          }))}
+                          onChange={chooseOperation}
+                        />
+                      </div>
+                    </Show>
+                    <Show when={operationHasReferences(draft.operation)}>
+                      <div class="media-tool-field">
+                        <label>Reference images</label>
+                        <div class="key-row">
+                          <Select
+                            ariaLabel="Reference count"
+                            value={String(referenceCount())}
+                            disabled={busy() || frozen()}
+                            options={[1, 2, 3].map((count) => ({
+                              value: String(count),
+                              label: String(count),
+                            }))}
+                            onChange={chooseReferenceCount}
+                          />
+                          <button
+                            disabled={busy() || frozen()}
+                            onClick={() => setPicker('references')}
+                          >
+                            Choose references
+                          </button>
+                        </div>
+                      </div>
+                    </Show>
+                    <For each={slots()}>
+                      {(slot) => (
+                        <div
+                          class="media-reference-row field-group"
+                          role="group"
+                          aria-labelledby={`media-input-${slot}`}
+                        >
+                          <div class="media-reference-thumbnail">
+                            <Show
+                              when={inputForSlot(slot)}
+                              fallback={<FontAwesomeIcon icon={faImage} size={24} />}
+                            >
+                              {(input) => (
+                                <img
+                                  src={assets[input().assetId]?.url}
+                                  alt={INPUT_LABELS[slot]}
+                                  decoding="async"
+                                />
+                              )}
+                            </Show>
+                          </div>
+                          <div class="form-stack media-reference-controls">
+                            <span class="media-reference-label" id={`media-input-${slot}`}>
+                              {INPUT_LABELS[slot]}
+                            </span>
+                            <div class="key-row">
+                              <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>
+                                {inputForSlot(slot) ? 'Replace' : 'Choose image'}
+                              </button>
+                              <Show when={inputForSlot(slot)}>
+                                <button
+                                  disabled={busy() || frozen()}
+                                  onClick={() =>
+                                    setDraft(
+                                      'inputs',
+                                      draft.inputs.filter((input) => input.slot !== slot),
+                                    )
+                                  }
+                                >
+                                  Remove
+                                </button>
+                                <Show when={slot.startsWith('reference')}>
+                                  <button
+                                    class="icon-btn"
+                                    title={`Move ${INPUT_LABELS[slot].toLowerCase()} up`}
+                                    aria-label={`Move ${INPUT_LABELS[slot].toLowerCase()} up`}
+                                    disabled={busy() || frozen() || slot === 'reference1'}
+                                    onClick={() => moveReference(slot, -1)}
+                                  >
+                                    <FontAwesomeIcon icon={faArrowUp} size={14} />
+                                  </button>
+                                  <button
+                                    class="icon-btn"
+                                    title={`Move ${INPUT_LABELS[slot].toLowerCase()} down`}
+                                    aria-label={`Move ${INPUT_LABELS[slot].toLowerCase()} down`}
+                                    disabled={
+                                      busy() ||
+                                      frozen() ||
+                                      Number(slot.slice(9)) >= referenceCount()
+                                    }
+                                    onClick={() => moveReference(slot, 1)}
+                                  >
+                                    <FontAwesomeIcon icon={faArrowDown} size={14} />
+                                  </button>
+                                </Show>
+                              </Show>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </For>
                     <div class="media-tool-field">
-                      <label>Operation</label>
+                      <label>Workflow</label>
                       <Select
-                        ariaLabel="Media operation"
-                        value={draft.operation}
-                        disabled={busy() || frozen()}
-                        options={operationChoices().map((operation) => ({
-                          value: operation.id,
-                          label: operation.label,
+                        ariaLabel="Saved media workflow"
+                        value={selectedWorkflow()}
+                        buttonLabel={selectedWorkflow() ? undefined : 'Choose a workflow'}
+                        disabled={busy() || frozen() || workflows().length === 0}
+                        options={workflows().map((workflow) => ({
+                          value: workflow.id,
+                          label: workflow.name,
                         }))}
-                        onChange={chooseOperation}
+                        onChange={(value) => {
+                          resetWorkflowValues();
+                          setDraft('workflowId', value || null);
+                        }}
                       />
                     </div>
-                  </Show>
-                  <Show when={operationHasReferences(draft.operation)}>
-                    <div class="media-tool-field">
-                      <label>Reference images</label>
-                      <div class="key-row">
-                        <Select
-                          ariaLabel="Reference count"
-                          value={String(referenceCount())}
+                    <Show when={workflowControls().controls.length > 0}>
+                      <div
+                        class="workflow-inputs field-group"
+                        role="group"
+                        aria-label="Workflow inputs"
+                      >
+                        <WorkflowInputs
+                          controls={workflowControls().controls}
+                          values={workflowView().values}
                           disabled={busy() || frozen()}
-                          options={[1, 2, 3].map((count) => ({
-                            value: String(count),
-                            label: String(count),
-                          }))}
-                          onChange={chooseReferenceCount}
+                          onChange={(key, value) => setDraft('workflowValues', key, value)}
                         />
+                      </div>
+                    </Show>
+                    <Show when={workflowError()}>
+                      <p class="notice notice-error" role="alert">
+                        {workflowError()}
+                      </p>
+                    </Show>
+                    <Show when={workflows().length === 0}>
+                      <p class="hint">
+                        Add a workflow for this operation in Settings → Media rendering.
+                      </p>
+                    </Show>
+                    <div class="media-tool-field">
+                      <label>Prompt preset</label>
+                      <Select
+                        ariaLabel="Media prompt preset"
+                        value={selectedPromptId()}
+                        buttonLabel={
+                          createsChatImage() || draft.presetId
+                            ? undefined
+                            : `Default: ${defaultPromptLabel()}`
+                        }
+                        disabled={busy() || frozen()}
+                        options={promptOptions()}
+                        onChange={(value) => setDraft('presetId', value || null)}
+                      />
+                    </div>
+                    <div class="media-instruction-heading">
+                      <label for="media-instruction">Instruction</label>
+                      <div class="key-row">
                         <button
-                          disabled={busy() || frozen()}
-                          onClick={() => setPicker('references')}
+                          disabled={
+                            busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                          }
+                          title={
+                            usesChatContext()
+                              ? 'Prepare a prompt from this chat’s active branch and your instruction'
+                              : 'Prepare a prompt from your instruction'
+                          }
+                          onClick={() => void run('prepare')}
                         >
-                          Choose references
+                          Prepare prompt
+                        </button>
+                        <button
+                          disabled={
+                            busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                          }
+                          title="Prepare a new prompt from your instruction, then render it"
+                          onClick={() => void run('prepare', true)}
+                        >
+                          Prepare and render
                         </button>
                       </div>
                     </div>
-                  </Show>
-                  <For each={slots()}>
-                    {(slot) => (
-                      <div
-                        class="media-reference-row field-group"
-                        role="group"
-                        aria-labelledby={`media-input-${slot}`}
-                      >
-                        <div class="media-reference-thumbnail">
-                          <Show
-                            when={inputForSlot(slot)}
-                            fallback={<FontAwesomeIcon icon={faImage} size={24} />}
-                          >
-                            {(input) => (
-                              <img
-                                src={assets[input().assetId]?.url}
-                                alt={INPUT_LABELS[slot]}
-                                decoding="async"
-                              />
-                            )}
-                          </Show>
-                        </div>
-                        <div class="form-stack media-reference-controls">
-                          <span class="media-reference-label" id={`media-input-${slot}`}>
-                            {INPUT_LABELS[slot]}
-                          </span>
-                          <div class="key-row">
-                            <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>
-                              {inputForSlot(slot) ? 'Replace' : 'Choose image'}
-                            </button>
-                            <Show when={inputForSlot(slot)}>
-                              <button
-                                disabled={busy() || frozen()}
-                                onClick={() =>
-                                  setDraft(
-                                    'inputs',
-                                    draft.inputs.filter((input) => input.slot !== slot),
-                                  )
-                                }
-                              >
-                                Remove
-                              </button>
-                              <Show when={slot.startsWith('reference')}>
-                                <button
-                                  class="icon-btn"
-                                  title={`Move ${INPUT_LABELS[slot].toLowerCase()} up`}
-                                  aria-label={`Move ${INPUT_LABELS[slot].toLowerCase()} up`}
-                                  disabled={busy() || frozen() || slot === 'reference1'}
-                                  onClick={() => moveReference(slot, -1)}
-                                >
-                                  <FontAwesomeIcon icon={faArrowUp} size={14} />
-                                </button>
-                                <button
-                                  class="icon-btn"
-                                  title={`Move ${INPUT_LABELS[slot].toLowerCase()} down`}
-                                  aria-label={`Move ${INPUT_LABELS[slot].toLowerCase()} down`}
-                                  disabled={
-                                    busy() || frozen() || Number(slot.slice(9)) >= referenceCount()
+                    <textarea
+                      id="media-instruction"
+                      rows={3}
+                      value={draft.instruction}
+                      readOnly={busy() || frozen()}
+                      onInput={(event) => updateInstruction(event.currentTarget.value)}
+                    />
+                    <div class="media-prompt-heading">
+                      <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
+                      <Show when={preparingPrompt()}>
+                        <PromptGenerationStatus active={paneActive()} content={currentPrompt()} />
+                      </Show>
+                    </div>
+                    <Show
+                      when={thinking()}
+                      fallback={
+                        <textarea
+                          id="media-prompt"
+                          onPointerDown={prepareTextareaResize}
+                          ref={promptArea}
+                          onScroll={promptScroll.onScroll}
+                          rows={8}
+                          value={currentPrompt()}
+                          readOnly={busy() || frozen()}
+                          onInput={(event) => setDraft('prompt', event.currentTarget.value)}
+                        />
+                      }
+                    >
+                      <div class="media-prompt-thinking">
+                        <PromptGenerationStatus
+                          active={paneActive()}
+                          content=""
+                          showStatus={false}
+                          reasoning={runningJob()?.reasoning}
+                        />
+                      </div>
+                    </Show>
+                  </div>
+                  <div class="media-tool-footer">
+                    <Show when={runningJob() ?? job()}>
+                      {(current) => (
+                        <Show
+                          when={
+                            current().state !== 'draft' || current().error || savedAssetIds().length
+                          }
+                        >
+                          <div class="form-stack media-rendering">
+                            <Show when={current().state !== 'draft' || savedAssetIds().length}>
+                              <div class="media-render-heading">
+                                <p class="media-render-status" role="status">
+                                  <Show when={current().state !== 'draft'}>
+                                    {STATUS_LABELS[current().state]}
+                                  </Show>
+                                  <Show when={savedAssetIds().length}>
+                                    <span class="media-saved-count">
+                                      {current().state !== 'draft' ? ' · ' : ''}
+                                      {savedAssetIds().length} saved
+                                    </span>
+                                  </Show>
+                                </p>
+                                <Show
+                                  when={
+                                    active() &&
+                                    current().state !== 'preparing' &&
+                                    current().progress?.node
                                   }
-                                  onClick={() => moveReference(slot, 1)}
                                 >
-                                  <FontAwesomeIcon icon={faArrowDown} size={14} />
-                                </button>
-                              </Show>
+                                  {(node) => (
+                                    <span class="media-current-node" title={node().name}>
+                                      {node().name}
+                                    </span>
+                                  )}
+                                </Show>
+                              </div>
+                            </Show>
+                            <Show
+                              when={
+                                current().state === 'succeeded' && current().outputs.length === 0
+                              }
+                            >
+                              <p class="hint">
+                                The saved results have been removed. You can still rerun this job.
+                              </p>
+                            </Show>
+                            <Show when={current().error}>
+                              <p class="notice notice-error">{current().error}</p>
+                            </Show>
+                            <Show when={active() && current().state !== 'preparing'}>
+                              <div class="media-render-progress">
+                                <div class="media-progress-row media-graph-progress">
+                                  <SamplerProgress
+                                    progress={current().progress?.graph}
+                                    stepsLabel="Nodes"
+                                    stepsClass="media-progress-count"
+                                  />
+                                </div>
+                                <div class="media-progress-row">
+                                  <SamplerProgress
+                                    progress={current().progress}
+                                    stepsLabel="Steps"
+                                    stepsClass="media-progress-count"
+                                  />
+                                </div>
+                              </div>
                             </Show>
                           </div>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                  <div class="media-tool-field">
-                    <label>Saved workflow</label>
-                    <Select
-                      ariaLabel="Saved media workflow"
-                      value={selectedWorkflow()}
-                      buttonLabel={selectedWorkflow() ? undefined : 'Choose a workflow'}
-                      disabled={busy() || frozen() || workflows().length === 0}
-                      options={workflows().map((workflow) => ({
-                        value: workflow.id,
-                        label: workflow.name,
-                      }))}
-                      onChange={(value) => {
-                        resetWorkflowValues();
-                        setDraft('workflowId', value || null);
-                      }}
-                    />
-                  </div>
-                  <Show when={workflowControls().controls.length > 0}>
-                    <div
-                      class="workflow-inputs field-group"
-                      role="group"
-                      aria-label="Workflow inputs"
-                    >
-                      <WorkflowInputs
-                        controls={workflowControls().controls}
-                        values={draft.workflowValues}
-                        disabled={busy() || frozen()}
-                        onChange={(key, value) => setDraft('workflowValues', key, value)}
-                      />
-                    </div>
-                  </Show>
-                  <Show when={workflowError()}>
-                    <p class="notice notice-error" role="alert">
-                      {workflowError()}
-                    </p>
-                  </Show>
-                  <Show when={workflows().length === 0}>
-                    <p class="hint">
-                      Add a workflow for this operation in Settings → Media rendering.
-                    </p>
-                  </Show>
-                  <div class="media-tool-field">
-                    <label>
-                      {usesChatContext() ? 'Chat prompt preset' : 'Standalone prompt preset'}
-                    </label>
-                    <Select
-                      ariaLabel="Media prompt preset"
-                      value={selectedPromptId()}
-                      buttonLabel={
-                        createsChatImage() || draft.presetId
-                          ? undefined
-                          : `Default: ${defaultPromptLabel()}`
-                      }
-                      disabled={busy() || frozen()}
-                      options={promptOptions()}
-                      onChange={(value) => setDraft('presetId', value || null)}
-                    />
-                  </div>
-                  <label for="media-instruction">Instruction</label>
-                  <textarea
-                    id="media-instruction"
-                    rows={4}
-                    value={draft.instruction}
-                    readOnly={busy() || frozen()}
-                    onInput={(event) => updateInstruction(event.currentTarget.value)}
-                  />
-                  <div class="key-row">
-                    <button
-                      disabled={
-                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                      }
-                      onClick={() => void run('prepare')}
-                    >
-                      Prepare prompt
-                    </button>
-                    <button
-                      disabled={
-                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                      }
-                      onClick={() => void run('prepare', true)}
-                    >
-                      Prepare and render
-                    </button>
-                  </div>
-                  <p class="hint">
-                    {usesChatContext()
-                      ? 'Prepare prompt uses this chat’s active branch and your instruction.'
-                      : 'Prepare prompt uses your instruction. Reference images are sent to ComfyUI when rendering.'}
-                  </p>
-                  <div class="media-prompt-heading">
-                    <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
-                    <Show when={preparingPrompt()}>
-                      <PromptGenerationStatus active content={currentPrompt()} />
+                        </Show>
+                      )}
                     </Show>
-                  </div>
-                  <Show
-                    when={thinking()}
-                    fallback={
-                      <textarea
-                        id="media-prompt"
-                        rows={12}
-                        value={currentPrompt()}
-                        readOnly={busy() || frozen()}
-                        onInput={(event) => setDraft('prompt', event.currentTarget.value)}
-                      />
-                    }
-                  >
-                    <div class="media-prompt-thinking">
-                      <PromptGenerationStatus
-                        active
-                        content=""
-                        showStatus={false}
-                        reasoning={runningJob()?.reasoning}
-                      />
-                    </div>
-                  </Show>
-                  <Show when={runningJob() ?? job()}>
-                    {(current) => (
-                      <div class="form-stack media-rendering">
-                        <div class="media-render-heading">
-                          <p class="media-render-status" role="status">
-                            {STATUS_LABELS[current().state]}
-                          </p>
-                          <Show
-                            when={
-                              active() &&
-                              current().state !== 'preparing' &&
-                              current().progress?.node
-                            }
-                          >
-                            {(node) => (
-                              <span class="media-current-node" title={node().name}>
-                                {node().name}
-                              </span>
-                            )}
-                          </Show>
-                        </div>
-                        <Show
-                          when={current().state === 'succeeded' && current().outputs.length === 0}
+                    <div class="form-actions">
+                      <Show when={!frozen()}>
+                        <button
+                          class="primary-btn"
+                          title="Render the final prompt shown above"
+                          disabled={
+                            busy() ||
+                            !draft.prompt.trim() ||
+                            !selectedWorkflow() ||
+                            Boolean(workflowError())
+                          }
+                          onClick={() => void run('render')}
                         >
-                          <p class="hint">
-                            The saved results have been removed. You can still rerun this job.
-                          </p>
-                        </Show>
-                        <Show when={current().error}>
-                          <p class="notice notice-error">{current().error}</p>
-                        </Show>
-                        <Show when={active() && current().state !== 'preparing'}>
-                          <div class="media-progress-row media-graph-progress">
-                            <SamplerProgress
-                              progress={current().progress?.graph}
-                              stepsLabel="Nodes"
-                              stepsClass="media-progress-count"
-                            />
-                          </div>
-                          <div class="media-progress-row">
-                            <SamplerProgress
-                              progress={current().progress}
-                              stepsLabel="Steps"
-                              stepsClass="media-progress-count"
-                            />
-                          </div>
-                          <p class="hint">Generation continues after you leave this page.</p>
-                        </Show>
-                      </div>
-                    )}
-                  </Show>
-                  <div class="form-actions">
-                    <Show when={!frozen()}>
-                      <button
-                        class="primary-btn"
-                        disabled={
-                          busy() ||
-                          !draft.prompt.trim() ||
-                          !selectedWorkflow() ||
-                          Boolean(workflowError())
-                        }
-                        onClick={() => void run('render')}
-                      >
-                        {reviewing() && candidates().length > 0 ? 'Generate another' : 'Render'}
-                      </button>
-                    </Show>
-                    <Show when={active()}>
-                      <button
-                        disabled={busy() || runningJob()?.state === 'cancelling'}
-                        onClick={() => void run('cancel')}
-                      >
-                        Cancel generation
-                      </button>
-                    </Show>
-                    <Show when={job()?.retrievalAvailable}>
-                      <button disabled={busy()} onClick={() => void run('retry-retrieval')}>
-                        Retry download
-                      </button>
-                    </Show>
-                    <Show when={reviewing()}>
-                      <button
-                        class="primary-btn"
-                        disabled={busy() || active() || !selected()}
-                        onClick={() => void accept()}
-                      >
-                        <FontAwesomeIcon icon={faCheck} size={14} />{' '}
-                        {draft.destination === 'chat' ? 'Use in chat' : 'Save to gallery'}
-                      </button>
-                      <button disabled={busy()} onClick={() => void discard()}>
-                        <FontAwesomeIcon icon={faTrashCan} size={14} /> Discard draft
-                      </button>
-                    </Show>
-                    <Show when={job()?.submitted && !active() && !reviewing()}>
-                      <button disabled={busy()} onClick={() => void rerun()}>
-                        <FontAwesomeIcon icon={faRotateRight} size={14} /> Rerun
-                      </button>
-                    </Show>
+                          {reviewing() && candidates().length > 0 ? 'Generate another' : 'Render'}
+                        </button>
+                      </Show>
+                      <Show when={active()}>
+                        <button
+                          disabled={busy() || runningJob()?.state === 'cancelling'}
+                          onClick={() => void run('cancel')}
+                        >
+                          Cancel generation
+                        </button>
+                      </Show>
+                      <Show when={job()?.retrievalAvailable}>
+                        <button disabled={busy()} onClick={() => void run('retry-retrieval')}>
+                          Retry download
+                        </button>
+                      </Show>
+                      <Show when={reviewing()}>
+                        <button
+                          class="primary-btn"
+                          disabled={busy() || active() || !selected() || selectedSaved()}
+                          onClick={() => void accept()}
+                        >
+                          <FontAwesomeIcon icon={faCheck} size={14} />{' '}
+                          {selectedSaved()
+                            ? draft.destination === 'chat'
+                              ? 'Added to chat'
+                              : 'Saved to gallery'
+                            : draft.destination === 'chat'
+                              ? 'Add to chat'
+                              : 'Save to gallery'}
+                        </button>
+                        <button disabled={busy()} onClick={() => void discard()}>
+                          <FontAwesomeIcon
+                            icon={savedAssetIds().length ? faCheck : faTrashCan}
+                            size={14}
+                          />{' '}
+                          {savedAssetIds().length ? 'Finish' : 'Discard draft'}
+                        </button>
+                      </Show>
+                      <Show when={job()?.submitted && !active() && !reviewing()}>
+                        <button disabled={busy()} onClick={() => void rerun()}>
+                          <FontAwesomeIcon icon={faRotateRight} size={14} /> Rerun
+                        </button>
+                      </Show>
+                    </div>
                   </div>
                 </aside>
               </div>
             }
           >
-            <div class="media-job-list">
-              <Show when={jobs().length === 0}>
-                <p class="hint">No media jobs yet.</p>
-              </Show>
-              <For each={jobs()}>
-                {(item) => (
-                  <div class="media-job-row">
-                    <button
-                      class="media-job-open"
-                      disabled={
-                        !MEDIA_OPERATIONS.some((operation) => operation.id === item.operation)
-                      }
-                      onClick={() => void reopenJob(item)}
-                    >
-                      <strong>
-                        {MEDIA_OPERATIONS.find((operation) => operation.id === item.operation)
-                          ?.label ?? 'Unavailable operation'}
-                      </strong>
-                      <span>
-                        {item.draft?.state === 'open' && item.state === 'succeeded'
-                          ? 'Choose a variation'
-                          : STATUS_LABELS[item.state]}
-                      </span>
-                      <span>{item.instruction || item.prompt || 'Untitled draft'}</span>
-                    </button>
-                    <Show when={!mediaJobActive(item.state)}>
-                      <button onClick={() => void removeHistory(item)}>
-                        {item.draft?.state === 'open' ? 'Discard draft' : 'Remove history'}
-                      </button>
-                    </Show>
-                  </div>
-                )}
-              </For>
-              <Show when={moreHistory()}>
-                <button disabled={loadingHistory()} onClick={() => void loadHistory()}>
-                  {loadingHistory() ? 'Loading…' : 'Load more'}
-                </button>
-              </Show>
-            </div>
+            <MediaJobList
+              active={paneActive()}
+              groups={jobGroups()}
+              busy={busy()}
+              more={moreHistory()}
+              loading={loadingHistory()}
+              onOpen={(item) => void reopenJob(item)}
+              onRemove={(item) => void removeHistory(item)}
+              onLoadMore={() => void loadHistory()}
+            />
           </Show>
         </div>
       </Modal>
+      <Show when={resultDetails()}>
+        {(details) => (
+          <MediaResultDetails
+            instruction={details().instruction}
+            prompt={details().prompt}
+            variation={details().variation}
+            workflow={details().workflow}
+            disabled={busy() || frozen()}
+            onCopy={(text) => void copyResultText(text)}
+            onUseInstruction={() => {
+              updateInstruction(details().instruction);
+              setResultDetails(null);
+            }}
+            onUsePrompt={() => {
+              setDraft('prompt', details().prompt);
+              setResultDetails(null);
+            }}
+            onClose={() => setResultDetails(null)}
+          />
+        )}
+      </Show>
       <Show when={picker()}>
         {(slot) => (
           <GalleryModal

@@ -15,6 +15,7 @@ import { broadcast } from './events.ts';
 import { publicMediaJob } from './mediaUrls.ts';
 import { HttpError } from './router.ts';
 import type { ChatMessage } from './prompt.ts';
+import { captureMediaCharacters } from './mediaCharacters.ts';
 
 export interface MediaJobConfiguration {
   characterIds?: number[];
@@ -133,6 +134,15 @@ export function mediaDraft(id: string): MediaDraft {
     revision: Number(row.revision),
     state: row.state as MediaDraft['state'],
     selectedAssetId: row.selected_asset_id === null ? null : Number(row.selected_asset_id),
+    savedAssetIds: stmt(`SELECT DISTINCT output.asset_id FROM media_jobs j
+      JOIN media_owners output ON output.owner_type = 'job' AND output.owner_id = j.id
+        AND output.slot LIKE 'output:%'
+      WHERE j.draft_id = ? AND EXISTS (
+        SELECT 1 FROM media_owners saved WHERE saved.asset_id = output.asset_id
+          AND saved.owner_type IN ('message', 'gallery'))
+      ORDER BY output.asset_id`)
+      .all(id)
+      .map((entry) => Number(entry.asset_id)),
   };
 }
 
@@ -182,6 +192,7 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     : null;
 
   return publicMediaJob({
+    characterIds: configuration?.characterIds ?? captureMediaCharacters(row, configuration ?? {}),
     workflowValues: configuration?.workflowValues ?? {},
     id: row.id,
     draft: row.draft_id === null ? null : mediaDraft(row.draft_id),

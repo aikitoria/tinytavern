@@ -1,4 +1,11 @@
-import { readPageLocation, rememberPage, writePageLocation } from './pageLocation.ts';
+import { dialogStack } from './dialogStack.ts';
+import {
+  pageStack,
+  paneLocation,
+  readPageLocation,
+  returnToPageLocation,
+  writePageLocation,
+} from './pageLocation.ts';
 import { createMemo, createRoot, createSignal, batch } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
@@ -714,7 +721,14 @@ async function openCreatedConversation(conv: Conversation): Promise<void> {
     console.error(err);
   }
   if (!verified || state.conversations.some((conversation) => conversation.id === conv.id)) {
-    selectConversation(conv.id);
+    // A newly created/duplicated chat becomes the root page, not a child of its editor.
+    batch(() => {
+      const page = { chatId: conv.id, modal: null };
+      dialogStack.restore(page);
+      setState('modal', null);
+      selectConversation(conv.id);
+      writePageLocation(page);
+    });
   }
 }
 
@@ -791,28 +805,42 @@ export function restoreConversationSelection(): void {
   writePageLocation({ ...page, chatId: id });
 }
 
-export function openModal(modal: ModalKind): void {
-  rememberPage(modal);
+export function openDialog(
+  page: import('./pageLocation.ts').PageLocation,
+  session?: import('../media/navigation.ts').MediaToolSession,
+): void {
+  const from = readPageLocation();
+  const next = { ...page, stack: pageStack(from).map(paneLocation) };
   batch(() => {
+    dialogStack.push(next, from, session);
     setState('settingsCharacterId', null);
-    setState('modal', modal);
+    setState('modal', page.modal);
+    writePageLocation(next, true);
   });
 }
 
+export function openModal(modal: ModalKind): void {
+  if (modal === null) {
+    returnToPageLocation(dialogStack.parent(), () =>
+      batch(() => {
+        const page = dialogStack.pop();
+        setState('modal', page.modal);
+        writePageLocation(page);
+      }),
+    );
+  } else {
+    const current = readPageLocation();
+    openDialog({ chatId: current.chatId, viewMode: current.viewMode, modal });
+  }
+}
+
 export function openCharacterSettings(characterId: number): void {
-  writePageLocation(
-    {
-      chatId: state.selectedId,
-      modal: 'settings',
-      settingsTab: 'characters',
-      settingsEntity: characterId,
-      settingsDetail: true,
-    },
-    true,
-  );
-  batch(() => {
-    setState('settingsCharacterId', characterId);
-    setState('modal', 'settings');
+  openDialog({
+    chatId: state.selectedId,
+    modal: 'settings',
+    settingsTab: 'characters',
+    settingsEntity: characterId,
+    settingsDetail: true,
   });
 }
 

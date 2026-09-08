@@ -19,7 +19,7 @@ export function setMediaCharacters(assetId: number, characterIds: readonly numbe
 /** Capture the union before rendering, so deleting a reference cannot change the result. */
 export function captureMediaCharacters(
   job: MediaJobRow,
-  configuration: MediaJobConfiguration,
+  configuration: Pick<MediaJobConfiguration, 'sourceCharacterIds'>,
 ): number[] {
   const ids = new Set(configuration.sourceCharacterIds);
   const rows = stmt(`SELECT mc.character_id FROM json_each(?) input

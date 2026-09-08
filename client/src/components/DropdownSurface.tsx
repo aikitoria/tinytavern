@@ -1,3 +1,4 @@
+import { useDialogActive } from '../state/dialogContext.ts';
 import { Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { registerUiBack } from '../state/uiBack.ts';
@@ -43,6 +44,10 @@ export default function DropdownSurface(props: {
   autoFocus?: boolean;
   ref?: (element: HTMLDivElement) => void;
 }) {
+  const paneActive = useDialogActive();
+  createEffect(() => {
+    if (props.open && !paneActive()) props.onClose();
+  });
   const [position, setPosition] = createSignal<Position>({
     left: DEFAULT_GUTTER,
     top: DEFAULT_GUTTER,

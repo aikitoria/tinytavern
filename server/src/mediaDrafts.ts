@@ -6,18 +6,11 @@ import { positiveId } from './validation.ts';
 import { requireExpectedActiveLeaf } from './concurrency.ts';
 import { appendMessage, markMessageDirty } from './tree.ts';
 import { broadcastTree } from './sync.ts';
-import { broadcast, invalidate } from './events.ts';
+import { invalidate } from './events.ts';
 import { discardSpeculativeSwipes } from './speculation.ts';
-import { deleteImageFiles } from './images.ts';
-import {
-  cancelMediaJob,
-  deleteMediaJob,
-  deleteMediaJobRecord,
-  touchMediaConversation,
-} from './mediaJobs.ts';
+import { cancelMediaJob, deleteMediaJob, touchMediaConversation } from './mediaJobs.ts';
 import {
   mediaDraft,
-  mediaLive,
   mediaJobDto,
   publishMediaJob,
   requireMediaJob,
@@ -70,10 +63,11 @@ export function selectMediaVariation(row: MediaJobRow, body: Record<string, unkn
   return mediaJobDto(requireMediaJob(row.id));
 }
 
-/** Only the chosen result receives a durable destination owner. */
+/** Save one result without closing the draft or releasing its other variations. */
 export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
   const { source, asset } = candidate(row, body.assetId);
+  if (draft.savedAssetIds.includes(asset.id)) return mediaJobDto(source);
   const jobs = mediaDraftJobs(row);
   if (jobs.some((job) => mediaJobActive(job.state))) {
     throw new HttpError(409, 'Finish or cancel the running variation before accepting a result');
@@ -92,11 +86,7 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       body.expectedMutationRevision as number | undefined,
     );
   }
-  const paths = stmt(`SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
-    WHERE o.owner_type = 'job' AND o.owner_id IN (SELECT id FROM media_jobs WHERE draft_id = ?)`)
-    .all(draft.id)
-    .map((entry) => String(entry.path));
-  const accepted = transaction(() => {
+  transaction(() => {
     if (source.destination === 'chat') {
       const chat = toConversation(conversation!);
       discardSpeculativeSwipes(chat.id);
@@ -138,23 +128,12 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       );
       invalidate('gallery');
     }
-    stmt(`UPDATE media_drafts SET state = 'accepted', selected_asset_id = ?, revision = revision + 1
+    stmt(`UPDATE media_drafts SET selected_asset_id = ?, revision = revision + 1
       WHERE id = ?`).run(asset.id, draft.id);
-    stmt(`DELETE FROM media_owners WHERE owner_type = 'job' AND owner_id = ?
-      AND slot LIKE 'output:%'`).run(source.id);
-    updateMediaJob(source.id, { outputs_json: JSON.stringify([asset.id]) });
-    const result = mediaJobDto(requireMediaJob(source.id));
-    for (const job of jobs) {
-      deleteMediaJobRecord(job.id);
-    }
-    return result;
   });
-  for (const job of jobs) {
-    mediaLive.delete(job.id);
-    broadcast({ t: 'mediaJobDeleted', id: job.id });
-  }
-  deleteImageFiles(paths);
-  return accepted;
+  publishMediaJob(source.id);
+  if (row.id !== source.id) publishMediaJob(row.id);
+  return mediaJobDto(requireMediaJob(source.id));
 }
 
 export function discardMediaDraft(row: MediaJobRow, body: Record<string, unknown>): void {

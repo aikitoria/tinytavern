@@ -1,6 +1,7 @@
-import { pageRevision } from './state/pageLocation.ts';
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import { installMouseBack, registerUiBack } from './state/uiBack.ts';
+import { dialogStack } from './state/dialogStack.ts';
+import { DialogContext } from './state/dialogContext.ts';
+import { For, Show, Switch, Match, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { installUiBack, registerUiBack } from './state/uiBack.ts';
 import { booting, state, setState, streamingMessage } from './state/store.ts';
 import Sidebar from './components/Sidebar.tsx';
 import Header from './components/Header.tsx';
@@ -21,10 +22,18 @@ import {
 import MessageSelectionBar from './components/MessageSelectionBar.tsx';
 import GalleryModal from './components/GalleryModal.tsx';
 import MediaToolsModal from './media/MediaToolsModal.tsx';
-import { mediaToolSession } from './media/navigation.ts';
 
 export default function App() {
-  onMount(() => onCleanup(installMouseBack()));
+  const workspaceCovered = () =>
+    dialogStack
+      .frames()
+      .some(
+        (frame) =>
+          frame.page.modal === 'gallery' ||
+          frame.page.modal === 'media-tools' ||
+          frame.page.modal === 'settings',
+      );
+  onMount(() => onCleanup(installUiBack()));
   // Boot is one-way; wait for the fade before unmounting its cover.
   const [bootGone, setBootGone] = createSignal(false);
   createEffect(() => {
@@ -38,7 +47,10 @@ export default function App() {
   });
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
-      <div class="app" classList={{ 'sidebar-open': state.sidebarOpen }}>
+      <div
+        class="app"
+        classList={{ 'sidebar-open': state.sidebarOpen, 'workspace-covered': workspaceCovered() }}
+      >
         <Show when={!bootGone()}>
           <div class="boot-screen" classList={{ 'boot-done': !booting() }}>
             <img src="/icon.svg" alt="" width="72" height="72" />
@@ -60,7 +72,7 @@ export default function App() {
         </Show>
         <main class="main">
           <Header />
-          <ChatView />
+          <ChatView active={!workspaceCovered()} />
           <Show
             when={state.viewMode === 'map'}
             fallback={
@@ -72,25 +84,29 @@ export default function App() {
             <MapSearch />
           </Show>
         </main>
-        <Show when={state.modal === 'settings' && pageRevision()} keyed>
-          <SettingsModal />
-        </Show>
-        <Show when={state.modal === 'conversation' && pageRevision()} keyed>
-          <ConversationSettings />
-        </Show>
-        <Show
-          when={
-            (state.modal === 'gallery' ||
-              (state.modal === 'media-tools' && mediaToolSession()?.returnModal === 'gallery')) &&
-            pageRevision()
-          }
-          keyed
-        >
-          <GalleryModal active={state.modal === 'gallery'} />
-        </Show>
-        <Show when={state.modal === 'media-tools' && mediaToolSession()} keyed>
-          {(session) => <MediaToolsModal session={session} />}
-        </Show>
+        <For each={dialogStack.frames()}>
+          {(frame) => {
+            const active = () => dialogStack.top() === frame;
+            return (
+              <DialogContext.Provider value={{ frame, active }}>
+                <Switch>
+                  <Match when={frame.page.modal === 'settings'}>
+                    <SettingsModal />
+                  </Match>
+                  <Match when={frame.page.modal === 'conversation'}>
+                    <ConversationSettings />
+                  </Match>
+                  <Match when={frame.page.modal === 'gallery'}>
+                    <GalleryModal active={active()} />
+                  </Match>
+                  <Match when={frame.media}>
+                    <MediaToolsModal session={frame.media!} />
+                  </Match>
+                </Switch>
+              </DialogContext.Provider>
+            );
+          }}
+        </For>
         <ConfirmDialogHost />
         <div class="toasts" aria-live="polite" aria-atomic="false">
           <For each={state.toasts}>

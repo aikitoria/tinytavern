@@ -76,10 +76,17 @@ export default function MacroTextarea(props: {
   });
 
   // Match the textarea's scrollbar inset and scroll position to keep highlights aligned.
+  const syncScroll = () => {
+    if (area && overlay.scrollTop !== area.scrollTop) overlay.scrollTop = area.scrollTop;
+  };
   const sync = () => {
-    if (!area) return;
-    overlay.style.right = `${Math.max(0, area.offsetWidth - area.clientWidth - 2)}px`;
-    overlay.scrollTop = area.scrollTop;
+    if (!area?.isConnected) return;
+    const right = `${Math.max(0, area.offsetWidth - area.clientWidth - 2)}px`;
+    const scrollTop = area.scrollTop;
+    const insetChanged = overlay.style.right !== right;
+    const scrollChanged = overlay.scrollTop !== scrollTop;
+    if (insetChanged) overlay.style.right = right;
+    if (insetChanged || scrollChanged) overlay.scrollTop = scrollTop;
   };
   createEffect(() => {
     void text();
@@ -130,7 +137,7 @@ export default function MacroTextarea(props: {
         class={props.class}
         placeholder={props.placeholder}
         onInput={(e) => setText(e.currentTarget.value)}
-        onScroll={sync}
+        onScroll={syncScroll}
       />
     </div>
   );

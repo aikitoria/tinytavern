@@ -340,10 +340,15 @@ export async function testGallery(
     ),
     'Gallery variations remain drafts until accepted',
   );
-  await req('POST', `/api/media/jobs/${completed.id}/accept`, {
+  const savedVariation = await req<MediaJob>('POST', `/api/media/jobs/${completed.id}/accept`, {
     expectedRevision: completed.revision,
     expectedDraftRevision: completed.draft!.revision,
     assetId: completed.outputs[0]!.id,
+  });
+  assert(savedVariation.draft!.state === 'open', 'Gallery save keeps the generation session open');
+  await req('POST', `/api/media/jobs/${completed.id}/discard`, {
+    expectedRevision: savedVariation.revision,
+    expectedDraftRevision: savedVariation.draft!.revision,
   });
   const galleryGenerated = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
     (item) => item.media?.id === completed.outputs[0]!.id,
@@ -352,7 +357,7 @@ export async function testGallery(
   assert(
     galleryGenerated.id !== savedGallery.item.id &&
       galleryGenerated.prompt === galleryRevisedPrompt,
-    'Gallery rerun uses the shared accept-one media flow',
+    'Gallery rerun saves its selected result through the shared media flow',
   );
   assert(
     (await fetch(`${BASE}${generatedGalleryImageUrl}`)).status === 200,

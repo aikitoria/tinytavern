@@ -13,6 +13,7 @@ import type {
   ImageDescriptionProgress,
   Message,
   MediaAssetInput,
+  MediaResultDetails,
   MediaJob,
   MediaJobDraft,
   Persona,
@@ -239,6 +240,8 @@ export const api = {
     request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
   mediaAssetInputs: (assetId: number) =>
     request<MediaAssetInput[]>('GET', `/api/media/assets/${assetId}/inputs`),
+  mediaAssetResultDetails: (assetId: number) =>
+    request<MediaResultDetails>('GET', `/api/media/assets/${assetId}/details`),
   rerunMediaAsset: (assetId: number, requestKey: string, options: Partial<MediaJobDraft> = {}) =>
     request<MediaJob>('POST', `/api/media/assets/${assetId}/rerun`, { ...options, requestKey }),
   editMediaJob: (job: MediaJob, draft: Partial<MediaJobDraft>) =>

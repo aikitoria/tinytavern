@@ -226,7 +226,7 @@
 
 .app {
   display: flex;
-  height: 100dvh;
+  height: 100%;
   isolation: isolate;
 }
 
@@ -2538,7 +2538,10 @@
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* A nonzero duration creates transitions on otherwise unanimated elements:
+       transition-property defaults to all. Continuous resizing then restarts
+       those transitions every frame, preventing layout from catching up. */
+    transition-duration: 0s !important;
   }
 
   /* Preserve loading feedback even with reduced motion. */

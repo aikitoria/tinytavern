@@ -1,4 +1,9 @@
-import { guardPageNavigation, readPageLocation, writePageLocation } from '../state/pageLocation.ts';
+import {
+  useDialogActive,
+  useDialogNavigationGuard,
+  useDialogPage,
+} from '../state/dialogContext.ts';
+import { readPageLocation, writePageLocation } from '../state/pageLocation.ts';
 import { For, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
@@ -75,19 +80,21 @@ function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
 
 export default function SettingsModal() {
   const [actionsTarget, setActionsTarget] = createSignal<HTMLElement>();
-  const page = readPageLocation();
-  const initialTab = state.settingsCharacterId != null ? 'characters' : page.settingsTab;
+  const page = useDialogPage()();
+  const initialTab = page.settingsTab;
   const [tab, setTab] = createSignal(
     TABS.some((item) => item.key === initialTab) ? initialTab! : 'general',
   );
   const navigation = createSettingsNavigation();
-  onCleanup(guardPageNavigation(navigation.navigate));
+  useDialogNavigationGuard(navigation.navigate);
+  const paneActive = useDialogActive();
   const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS[0]!;
   let sectionPicker!: SelectHandle;
   let contentEl!: HTMLDivElement;
   const leaveSettings = () => navigation.navigate(() => openModal(null));
 
   const onWheel = (event: WheelEvent) => {
+    if (!paneActive()) return;
     if (!event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
     const target = event.target;
     if (!(target instanceof Element)) return;

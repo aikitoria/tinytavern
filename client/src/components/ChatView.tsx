@@ -6,7 +6,7 @@ import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from './TreeMap.tsx';
 
-export default function ChatView() {
+export default function ChatView(props: { active?: boolean }) {
   let scroller!: HTMLDivElement;
   let scroll!: ReturnType<typeof createChatScroll>;
   let lastTouchX = 0;
@@ -97,13 +97,13 @@ export default function ChatView() {
     if (state.tree.conversationId == null) return;
     scroll.reset();
     requestAnimationFrame(() => {
-      scroll.follow();
+      if (props.active !== false) scroll.follow();
     });
   });
 
   // Catch layout changes beyond token updates, including markdown and font settling.
   const resizeObserver = new ResizeObserver(() => {
-    scroll.follow();
+    if (props.active !== false) scroll.follow();
   });
   onCleanup(() => resizeObserver.disconnect());
 
@@ -112,7 +112,7 @@ export default function ChatView() {
     const last = path[path.length - 1];
     void last?.content.length;
     void last?.reasoning?.length;
-    scroll.follow();
+    if (props.active !== false) scroll.follow();
   });
 
   return (

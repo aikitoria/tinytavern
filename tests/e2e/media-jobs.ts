@@ -191,7 +191,7 @@ export async function testMediaJobs(): Promise<void> {
       [firstCandidate, secondCandidate].every((candidate) =>
         reviewHistory.some((job) => job.id === candidate.id),
       ),
-      'completed variations remain in the jobs list until accepted',
+      'completed variations remain in the jobs list while reviewing',
     );
     assert(
       (await tree(reviewChat.id)).messages.length === beforeReview.messages.length,
@@ -223,18 +223,14 @@ export async function testMediaJobs(): Promise<void> {
         assetId: firstCandidate.outputs[0]!.id,
       }),
     );
-    jobIds.splice(jobIds.indexOf(another.id), 1);
-    jobIds.splice(jobIds.indexOf(firstCandidate.id), 1);
-    await expectStatus('GET', `/api/media/jobs/${accepted.id}`, undefined, 404);
-    await ws.waitFor(
-      (event) => event.t === 'mediaJobDeleted' && event.id === accepted.id,
-      'acceptance notifies clients of the chosen job deletion',
+    assert(
+      accepted.draft?.state === 'open' &&
+        accepted.draft.savedAssetIds.includes(firstCandidate.outputs[0]!.id),
+      'Saving marks the result and keeps the review session open',
     );
     assert(
-      !(await req<MediaJob[]>('GET', '/api/media/jobs')).some(
-        (job) => job.draft?.id === accepted.draft!.id,
-      ),
-      'accepting a result removes its draft from the jobs list',
+      (await req<MediaJob[]>('GET', `/api/media/jobs/${another.id}/variations`)).length === 2,
+      'Saving retains every variation for further review',
     );
     const acceptedTree = await tree(reviewChat.id);
     const acceptedMessage = acceptedTree.messages.find((item) => item.id === accepted.messageId)!;
@@ -246,10 +242,52 @@ export async function testMediaJobs(): Promise<void> {
       'accepting an earlier candidate inserts exactly its prompt and selected media',
     );
     assert(
-      (await fetch(`${BASE}${secondCandidate.outputs[0]!.url}`)).status === 404,
-      'acceptance deletes the discarded variation file',
+      (await fetch(`${BASE}${secondCandidate.outputs[0]!.url}`)).status === 200,
+      'Saving keeps the other variation available',
     );
+    const repeated = await req<MediaJob>(
+      'POST',
+      `/api/media/jobs/${accepted.id}/accept`,
+      await branchBody(reviewChat.id, {
+        expectedRevision: accepted.revision,
+        expectedDraftRevision: accepted.draft!.revision,
+        assetId: firstCandidate.outputs[0]!.id,
+      }),
+    );
+    assert(
+      (await tree(reviewChat.id)).messages.length === acceptedTree.messages.length,
+      'Repeated save requests do not duplicate chat attachments',
+    );
+    const secondSaved = await req<MediaJob>(
+      'POST',
+      `/api/media/jobs/${another.id}/accept`,
+      await branchBody(reviewChat.id, {
+        expectedRevision: secondCandidate.revision,
+        expectedDraftRevision: repeated.draft!.revision,
+        assetId: secondCandidate.outputs[0]!.id,
+      }),
+    );
+    assert(
+      secondSaved.draft!.savedAssetIds.length === 2 &&
+        (await tree(reviewChat.id)).messages.length === acceptedTree.messages.length + 1,
+      'Multiple variations can be added to the same chat',
+    );
+    await req('POST', `/api/media/jobs/${another.id}/discard`, {
+      expectedRevision: secondSaved.revision,
+      expectedDraftRevision: secondSaved.draft!.revision,
+    });
+    jobIds.splice(jobIds.indexOf(another.id), 1);
+    jobIds.splice(jobIds.indexOf(firstCandidate.id), 1);
     await expectStatus('GET', `/api/media/jobs/${another.id}`, undefined, 404);
+    await ws.waitFor(
+      (event) => event.t === 'mediaJobDeleted' && event.id === another.id,
+      'Finishing notifies clients of draft removal',
+    );
+    assert(
+      (await fetch(`${BASE}${firstCandidate.outputs[0]!.url}`)).status === 200 &&
+        (await fetch(`${BASE}${secondCandidate.outputs[0]!.url}`)).status === 200,
+      'Finishing retains every saved result',
+    );
 
     console.log('== media images use normal chat swipes ==');
     const conversation = await req<{ id: number }>('POST', '/api/conversations', {});

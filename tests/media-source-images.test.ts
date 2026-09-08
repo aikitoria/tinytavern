@@ -5,7 +5,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { GalleryItem, MediaAssetInput, MediaJob, MediaWorkflow } from '@tinytavern/shared';
+import type {
+  GalleryItem,
+  MediaAssetInput,
+  MediaJob,
+  MediaWorkflow,
+  MediaResultDetails,
+} from '@tinytavern/shared';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
@@ -87,6 +93,7 @@ const results = workflows.map((workflow, index) => {
     { comfyUrl: 'http://127.0.0.1:1', workflow, timeoutSeconds: 60 },
     savedInputs[index]!,
     'Saved prompt',
+    { instruction: 'Original instruction', seed: index === 0 ? 0 : undefined },
   );
   const path = saveImage(`result-${index}.webm`, videoBytes);
   stmt('UPDATE media_assets SET recipe_id = ?, width = 32, height = 24 WHERE path = ?').run(
@@ -151,7 +158,27 @@ try {
   stmt('DELETE FROM conversations WHERE id = 1').run();
 
   assert.deepEqual(await request('GET', `/api/media/assets/${firstAsset.id}/inputs`), []);
+  const jobsBeforeDetails = stmt('SELECT COUNT(*) AS n FROM media_jobs').get()!.n;
   for (const [index, result] of results.entries()) {
+    stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run(
+      'Edited gallery annotation',
+      result.galleryId,
+    );
+    const details = (await request(
+      'GET',
+      `/api/media/assets/${result.asset.id}/details`,
+    )) as MediaResultDetails;
+    assert.deepEqual(
+      details,
+      {
+        instruction: 'Original instruction',
+        prompt: 'Saved prompt',
+        workflowSnapshot: workflows[index],
+        workflowValues: {},
+        seed: index === 0 ? 0 : null,
+      },
+      'Details use the original recipe, without leaking server configuration or using edited gallery text',
+    );
     const inputs = (await request(
       'GET',
       `/api/media/assets/${result.asset.id}/inputs`,
@@ -165,6 +192,14 @@ try {
       assert(url.searchParams.has('sig'), 'Available inputs use signed media URLs');
       assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(url.pathname))), png);
     }
+  }
+  assert.equal(
+    stmt('SELECT COUNT(*) AS n FROM media_jobs').get()!.n,
+    jobsBeforeDetails,
+    'Reading result details never creates a draft',
+  );
+  for (const id of [firstAsset.id, 999999]) {
+    assert.equal((await fetch(`${base}/api/media/assets/${id}/details`)).status, 404);
   }
   const activeJob = (await request('POST', `/api/media/assets/${results[0]!.asset.id}/rerun`, {
     requestKey: 'active-input-owner',

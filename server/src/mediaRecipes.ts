@@ -1,4 +1,4 @@
-import type { MediaAssetInput, MediaImageConfig } from '@tinytavern/shared';
+import type { MediaAssetInput, MediaImageConfig, MediaResultDetails } from '@tinytavern/shared';
 import { randomUUID } from 'node:crypto';
 import type { MediaJobInput, Message } from '@tinytavern/shared';
 import { stmt, toMediaAsset } from './db.ts';
@@ -16,7 +16,7 @@ export interface MediaRecipe {
   id: string;
   prompt: string;
   instruction: string;
-  configuration: MediaJobConfiguration;
+  configuration: MediaJobConfiguration & { seed?: number | null };
   inputs: MediaRecipeInput[];
 }
 
@@ -24,7 +24,7 @@ export function saveMediaRecipe(
   configuration: MediaJobConfiguration,
   inputs: MediaRecipeInput[],
   prompt: string,
-  options: { id?: string; instruction?: string } = {},
+  options: { id?: string; instruction?: string; seed?: number | null } = {},
 ): string {
   const id = options.id ?? randomUUID();
   const instruction = options.instruction ?? '';
@@ -46,7 +46,14 @@ export function saveMediaRecipe(
     id,
     prompt,
     instruction,
-    JSON.stringify({ comfyUrl, workflow, timeoutSeconds, workflowValues, characterIds }),
+    JSON.stringify({
+      comfyUrl,
+      workflow,
+      timeoutSeconds,
+      workflowValues,
+      characterIds,
+      seed: options.seed ?? null,
+    }),
     JSON.stringify(inputs),
     Date.now(),
   );
@@ -83,6 +90,27 @@ export function getMediaRecipe(id: string): MediaRecipe {
     instruction: String(row.instruction),
     configuration: JSON.parse(String(row.configuration_json)),
     inputs: JSON.parse(String(row.inputs_json)),
+  };
+}
+
+export function getMediaAssetResultDetails(assetId: number): MediaResultDetails {
+  const asset = stmt(`SELECT recipe_id FROM media_assets a
+    WHERE id = ? AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)`).get(assetId);
+  if (!asset) throw new HttpError(404, 'Media asset not found');
+  if (!asset.recipe_id) throw new HttpError(404, 'The rendering recipe is unavailable');
+  const recipe = getMediaRecipe(String(asset.recipe_id));
+  // Older recipes can recover their seed while their original job still exists.
+  const seed =
+    recipe.configuration.seed ??
+    (stmt('SELECT seed FROM media_jobs WHERE id = ?').get(recipe.id)?.seed as
+      number | null | undefined) ??
+    null;
+  return {
+    instruction: recipe.instruction,
+    prompt: recipe.prompt,
+    workflowSnapshot: recipe.configuration.workflow ?? null,
+    workflowValues: recipe.configuration.workflowValues ?? {},
+    seed,
   };
 }
 

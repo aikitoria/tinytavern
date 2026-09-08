@@ -100,11 +100,12 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
     if (order !== undefined) orders.set(nodeId, order);
     const value = object(node.inputs)?.[spec.input];
     const label = match[1]!.trim();
+    const defaultResolutionLabel = resolution && label.toLowerCase() === 'resolution';
     const base = {
       key: resolution ? `${nodeId}.megapixels` : nodeId,
       nodeId,
       input: spec.input,
-      label: resolution ? `${label} megapixels` : label,
+      label: defaultResolutionLabel ? 'Megapixels' : resolution ? `${label} megapixels` : label,
     };
     let control: MediaWorkflowInput;
     if (spec.type === 'boolean') {
@@ -137,7 +138,7 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
         key: `${nodeId}.aspect_ratio`,
         nodeId,
         input: 'aspect_ratio',
-        label: `${label} aspect ratio`,
+        label: defaultResolutionLabel ? 'Aspect ratio' : `${label} aspect ratio`,
         type: 'select',
         value: object(node.inputs)?.aspect_ratio as string,
         options: RESOLUTION_ASPECT_RATIOS,

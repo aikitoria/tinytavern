@@ -105,6 +105,7 @@ export function SettingsNavigationPrompt(props: {
   return (
     <Show when={guard.promptOpen()}>
       <Modal
+        active
         title="Save changes?"
         class="confirm-modal"
         backdropClass="confirm-backdrop"

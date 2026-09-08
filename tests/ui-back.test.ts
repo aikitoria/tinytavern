@@ -111,3 +111,30 @@ stop();
 back(false);
 assert.equal(surfaces.length, 1, 'Unmount removes the listeners');
 console.log('Mouse Back closes one visible UI layer per press and preserves browser navigation.');
+
+const { installUiBack } = await import(modulePath);
+const stopUi = installUiBack();
+surfaces = [];
+const previousActions = actions.length;
+layer('gallery details');
+layer('jobs');
+layer('job');
+layer('picker');
+layer('dropdown');
+function escape() {
+  const event = new Event('keydown', { cancelable: true });
+  Object.defineProperty(event, 'key', { value: 'Escape' });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+for (let i = 0; i < 5; i++) assert(escape());
+assert.deepEqual(actions.slice(previousActions), [
+  'dropdown',
+  'picker',
+  'job',
+  'jobs',
+  'gallery details',
+]);
+assert(!escape(), 'Escape reaches inline editors when no dialog can close');
+stopUi();
+console.log('Escape dismisses exactly one layer using the same stack as mouse Back.');

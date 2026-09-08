@@ -1,3 +1,4 @@
+import { useDialogActive, useDialogPage } from './state/dialogContext.ts';
 import { readPageLocation, writePageLocation } from './state/pageLocation.ts';
 import { createEffect, createSignal, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
@@ -38,7 +39,8 @@ export function numberOrNull(value: string): number | null {
 export function createEntityEditor<T extends { id: number }, D extends Record<string, unknown>>(
   options: EntityEditorOptions<T, D>,
 ) {
-  const initialPage = readPageLocation();
+  const initialPage = useDialogPage()();
+  const paneActive = useDialogActive();
   const [locationReady, setLocationReady] = createSignal(false);
   const emptySelection = options.emptySelection ?? (options.activate ? 'default' : 'new');
   const [selectedId, setSelectedId] = createSignal<EditorId>('new');
@@ -127,7 +129,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     setLocationReady(true);
   });
   createEffect(() => {
-    if (!locationReady()) return;
+    if (!locationReady() || !paneActive()) return;
     const entity = selectedId();
     const detail = rawNav.detailOpen();
     const page = readPageLocation();

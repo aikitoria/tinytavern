@@ -56,3 +56,21 @@ export function installMouseBack(): () => void {
     window.removeEventListener('pointercancel', reset);
   };
 }
+
+/** Capture once, before any underlying dialog or editor can handle the same Escape. */
+export function installUiBack(): () => void {
+  const stopMouse = installMouseBack();
+  const onEscape = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+    const action = currentBackAction();
+    if (!action) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    action();
+  };
+  window.addEventListener('keydown', onEscape, true);
+  return () => {
+    stopMouse();
+    window.removeEventListener('keydown', onEscape, true);
+  };
+}

@@ -12,7 +12,7 @@ const { mediaCharacterIds, setMediaCharacters, captureMediaCharacters } =
 const { getSettings, putSettings } = await import('../server/src/settingsStore.ts');
 const { createMediaJob, startMediaJob, createMediaJobFromAsset } =
   await import('../server/src/mediaJobs.ts');
-const { requireMediaJob } = await import('../server/src/mediaJobStore.ts');
+const { requireMediaJob, mediaJobDto } = await import('../server/src/mediaJobStore.ts');
 const { recordMediaResult } = await import('../server/src/mediaJobResults.ts');
 const { getMediaRecipe } = await import('../server/src/mediaRecipes.ts');
 const characters = ['Ashina', 'Haeun'].map((name) =>
@@ -47,6 +47,7 @@ const jobs = workflows.map((workflow) => {
     reviewBeforeSave: true,
     inputs: inputs.map((asset, index) => ({ slot: `reference${index + 1}`, assetId: asset.id })),
   });
+  assert.deepEqual(job.characterIds, characters, 'Draft cards expose input character associations');
   startMediaJob(requireMediaJob(job.id), {}, false);
   assert.deepEqual(
     JSON.parse(requireMediaJob(job.id).configuration_json!).characterIds,
@@ -56,6 +57,11 @@ const jobs = workflows.map((workflow) => {
 });
 setMediaCharacters(inputs[0]!.id, [characters[1]!]);
 setMediaCharacters(inputs[1]!.id, [characters[1]!]);
+assert.deepEqual(
+  mediaJobDto(requireMediaJob(jobs[0]!.id)).characterIds,
+  characters,
+  'Running cards retain the character associations captured by the job',
+);
 assert.deepEqual(
   captureMediaCharacters(
     requireMediaJob(jobs[0]!.id),

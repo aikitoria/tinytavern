@@ -229,7 +229,7 @@ assert.deepEqual(resolution.controls[1], {
   key: 'size.megapixels',
   nodeId: 'size',
   input: 'megapixels',
-  label: 'Resolution megapixels',
+  label: 'Megapixels',
   type: 'float',
   value: 1,
   min: 0.1,
@@ -237,6 +237,7 @@ assert.deepEqual(resolution.controls[1], {
   step: 0.1,
 });
 const aspectRatio = resolution.controls[0]!;
+assert.equal(aspectRatio.label, 'Aspect ratio');
 assert(aspectRatio.type === 'select');
 assert.equal(aspectRatio.options.length, 8);
 assert(aspectRatio.options.includes('9:16 (Portrait Widescreen)'));

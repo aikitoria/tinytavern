@@ -154,11 +154,22 @@ export interface MediaAssetInput {
   asset: MediaAsset | null;
 }
 
+/** Original render metadata, independent of editable gallery annotations. */
+export interface MediaResultDetails {
+  instruction: string;
+  prompt: string;
+  workflowSnapshot: MediaWorkflow | null;
+  workflowValues: MediaWorkflowValues;
+  seed: number | null;
+}
+
 export interface MediaDraft {
   id: string;
   revision: number;
   state: 'open' | 'accepted' | 'discarding';
   selectedAssetId: number | null;
+  /** Results already owned by a chat or the gallery; saving keeps the draft open. */
+  savedAssetIds: number[];
 }
 
 export interface MediaJobDraft {
@@ -232,6 +243,8 @@ export function mergeMediaProgress(
 }
 
 export interface MediaJob {
+  /** Captured render associations, or current input/chat associations before capture. */
+  characterIds: number[];
   workflowValues: MediaWorkflowValues;
   id: string;
   draft: MediaDraft | null;

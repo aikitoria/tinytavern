@@ -1,4 +1,5 @@
-import { parsePageLocation, readPageLocation, writePageLocation } from '../state/pageLocation.ts';
+import { useDialogPage } from '../state/dialogContext.ts';
+import { readPageLocation, writePageLocation } from '../state/pageLocation.ts';
 import {
   faArrowLeft,
   faBarsProgress,
@@ -26,18 +27,16 @@ import {
 } from 'solid-js';
 import { mediaJobActive, type GalleryItem } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
-import {
-  applyGalleryItem,
-  openModal,
-  selectConversation,
-  setState,
-  state,
-  toast,
-} from '../state/store.ts';
+import { applyGalleryItem, openModal, setState, state, toast } from '../state/store.ts';
 import { confirmAction } from '../state/confirm.ts';
 import { filterGallery, indexGallery } from '../galleryModel.ts';
 import { errorMessage } from '../util.ts';
-import { MEDIA_TOOL_LINKS, openMediaTool } from '../media/navigation.ts';
+import {
+  MEDIA_TOOL_LINKS,
+  openMediaJobs,
+  openMediaTool,
+  restorePage,
+} from '../media/navigation.ts';
 import Avatar from './Avatar.tsx';
 import DropdownSurface from './DropdownSurface.tsx';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
@@ -195,12 +194,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     }
   };
   const leave = () => (props.picker ? props.picker.onCancel() : openModal(null));
-  const openPage = readPageLocation();
-  const initialPage = props.picker
-    ? null
-    : openPage.media?.returnHash
-      ? parsePageLocation(openPage.media.returnHash)
-      : openPage;
+  const initialPage = props.picker ? null : useDialogPage()();
   const initialSize = Number(readPreference('size'));
   const [imageSize, setImageSize] = createSignal(
     initialSize >= 140 && initialSize <= 320 ? initialSize : 240,
@@ -463,6 +457,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
 
   return (
     <Modal
+      active={props.active}
       title={props.picker ? 'Choose reference images' : 'Gallery'}
       hideCloseButton
       fullscreen
@@ -650,11 +645,9 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                   )}
                 </For>
               </DropdownSurface>
-              <button
-                type="button"
-                aria-label="Media jobs"
-                onClick={() => openMediaTool('image', { showJobs: true })}
-              >
+            </Show>
+            <Show when={!selectionMode()}>
+              <button type="button" aria-label="Media jobs" onClick={openMediaJobs}>
                 <FontAwesomeIcon icon={faBarsProgress} size={14} />
                 Jobs{runningJobs() ? ` (${runningJobs()})` : ''}
               </button>
@@ -814,8 +807,9 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                 showDetails={showDetails()}
                 onDelete={deleteItem}
                 onOpenSource={(conversationId) => {
-                  openModal(null);
-                  selectConversation(conversationId);
+                  const page = { chatId: conversationId, modal: null };
+                  writePageLocation(page, true);
+                  restorePage(page);
                 }}
               />
             </div>

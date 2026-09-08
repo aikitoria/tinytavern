@@ -1,4 +1,4 @@
-import { guardPageNavigation } from '../state/pageLocation.ts';
+import { useDialogNavigationGuard } from '../state/dialogContext.ts';
 import SettingLabel, { createDefaultField } from './SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
@@ -136,7 +136,6 @@ function Editor(props: {
   const duplicateChat = () => {
     const id = props.conv.id;
     props.navigate(() => {
-      openModal(null);
       void duplicateConversation(id).catch((err) => toast(errorMessage(err)));
     });
   };
@@ -159,10 +158,7 @@ function Editor(props: {
             <button
               type="button"
               class="conversation-character-edit"
-              onClick={() => {
-                const id = current().id;
-                props.navigate(() => openCharacterSettings(id));
-              }}
+              onClick={() => openCharacterSettings(current().id)}
             >
               Edit character
             </button>
@@ -267,7 +263,7 @@ function Editor(props: {
 
 export default function ConversationSettings() {
   const navigation = createSettingsNavigation();
-  onCleanup(guardPageNavigation(navigation.navigate));
+  useDialogNavigationGuard(navigation.navigate);
 
   return (
     <>

@@ -1,4 +1,27 @@
-import type { MediaAsset, MediaWorkflowInput, MediaWorkflowValues } from '@tinytavern/shared';
+import type {
+  MediaAsset,
+  MediaJob,
+  MediaWorkflow,
+  MediaWorkflowInput,
+  MediaWorkflowValues,
+} from '@tinytavern/shared';
+
+/** Locked controls describe the captured job, even when a local draft or settings differ. */
+export function mediaWorkflowView(
+  job: MediaJob | undefined,
+  selectedId: string,
+  workflows: MediaWorkflow[],
+  draftValues: MediaWorkflowValues,
+  locked: boolean,
+) {
+  const id = locked && job ? (job.workflowSnapshot?.id ?? job.workflowId ?? '') : selectedId;
+  const snapshot = job?.workflowSnapshot;
+  return {
+    id,
+    workflow: snapshot?.id === id ? snapshot : workflows.find((workflow) => workflow.id === id),
+    values: locked && job ? job.workflowValues : draftValues,
+  };
+}
 
 export function imageWorkflowDefaults(
   controls: MediaWorkflowInput[],

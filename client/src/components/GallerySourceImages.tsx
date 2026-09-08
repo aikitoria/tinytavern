@@ -67,7 +67,7 @@ export default function GallerySourceImages(props: {
                     onClick={() => props.onView(asset().url)}
                   >
                     <img
-                      src={asset().url}
+                      src={asset().thumbnail ?? asset().url}
                       alt={INPUT_LABELS[input.slot]}
                       loading="lazy"
                       decoding="async"

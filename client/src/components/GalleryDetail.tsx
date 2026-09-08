@@ -3,6 +3,7 @@ import { For, Show, createEffect, createSignal, on, onCleanup } from 'solid-js';
 import {
   faArrowUpRightFromSquare,
   faCopy,
+  faCircleInfo,
   faDownload,
   faExpand,
   faRotateRight,
@@ -18,6 +19,7 @@ import {
 import { applyGalleryItem, state, toast } from '../state/store.ts';
 import { api } from '../state/api.ts';
 import { download, errorMessage } from '../util.ts';
+import { prepareTextareaResize } from '../textareaResize.ts';
 import Avatar from './Avatar.tsx';
 import Select from './Select.tsx';
 import SamplerProgress from '../images/SamplerProgress.tsx';
@@ -27,6 +29,7 @@ import GallerySourceImages from './GallerySourceImages.tsx';
 import MediaPlayer from '../media/MediaPlayer.tsx';
 import VideoFullscreenButton from '../media/VideoFullscreenButton.tsx';
 import MediaActions from '../media/MediaActions.tsx';
+import MediaAssetResultDetails from '../media/MediaAssetResultDetails.tsx';
 import { openMediaRerun } from '../media/navigation.ts';
 
 export default function GalleryDetail(props: {
@@ -39,6 +42,7 @@ export default function GalleryDetail(props: {
 }) {
   let videoPlayer: HTMLVideoElement | undefined;
   const [zoomed, setZoomed] = createSignal(false);
+  const [resultDetailsOpen, setResultDetailsOpen] = createSignal(false);
   const [sourceImage, setSourceImage] = createSignal<string | null>(null);
   const [failed, setFailed] = createSignal(false);
   const [naturalRatio, setNaturalRatio] = createSignal(1);
@@ -209,13 +213,18 @@ export default function GalleryDetail(props: {
               }}
               asset={asset()}
               class="gallery-detail-video"
-              active={props.active !== false && sourceImage() === null}
+              active={props.active !== false && sourceImage() === null && !resultDetailsOpen()}
               autoPlay
               loop
             />
           )}
         </Show>
         <div class="media-preview-actions">
+          <Show when={props.item.media?.recipeId}>
+            <button type="button" onClick={() => setResultDetailsOpen(true)}>
+              <FontAwesomeIcon icon={faCircleInfo} size={14} /> Result details
+            </button>
+          </Show>
           <button type="button" onClick={() => download(props.item.image)}>
             <FontAwesomeIcon icon={faDownload} size={14} /> Download
           </button>
@@ -326,7 +335,7 @@ export default function GalleryDetail(props: {
             />
           )}
         </Show>
-        <div class="form-stack">
+        <div class="form-stack gallery-detail-prompt">
           <div class="gallery-field-head">
             <label for="gallery-detail-prompt">Saved prompt</label>
             <Show when={generatingPrompt()}>
@@ -347,6 +356,7 @@ export default function GalleryDetail(props: {
           </div>
           <textarea
             id="gallery-detail-prompt"
+            onPointerDown={prepareTextareaResize}
             rows={9}
             value={prompt()}
             readOnly={props.readOnly || savingDetails() || generatingPrompt()}
@@ -389,42 +399,46 @@ export default function GalleryDetail(props: {
                 </div>
               )}
             </Show>
-            <div class="key-row">
-              <button
-                class="primary-btn"
-                disabled={savingDetails() || generatingPrompt() || !dirty()}
-                onClick={() => void saveDetails()}
-              >
-                {savingDetails() ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                disabled={savingDetails() || generatingPrompt() || !dirty()}
-                onClick={() => {
-                  setPrompt(props.item.prompt);
-                  setSavedPrompt(props.item.prompt);
-                  setCharacterIds(itemCharacterIds());
-                  setSavedCharacterIds(itemCharacterIds());
-                  setError('');
-                }}
-              >
-                Discard
-              </button>
-              <Show when={!video()}>
-                <Show
-                  when={generatingPrompt()}
-                  fallback={
-                    <button
-                      disabled={savingDetails() || !selectedDescriptionWorkflow()}
-                      onClick={() => void generatePrompt()}
-                    >
-                      <FontAwesomeIcon icon={faWandMagicSparkles} size={14} /> Generate
-                    </button>
-                  }
-                >
-                  <button onClick={() => descriptionAbort?.abort()}>Cancel</button>
+            <Show when={dirty() || savingDetails() || !video()}>
+              <div class="key-row">
+                <Show when={dirty() || savingDetails()}>
+                  <button
+                    class="primary-btn"
+                    disabled={savingDetails() || generatingPrompt() || !dirty()}
+                    onClick={() => void saveDetails()}
+                  >
+                    {savingDetails() ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    disabled={savingDetails() || generatingPrompt() || !dirty()}
+                    onClick={() => {
+                      setPrompt(props.item.prompt);
+                      setSavedPrompt(props.item.prompt);
+                      setCharacterIds(itemCharacterIds());
+                      setSavedCharacterIds(itemCharacterIds());
+                      setError('');
+                    }}
+                  >
+                    Discard
+                  </button>
                 </Show>
-              </Show>
-            </div>
+                <Show when={!video()}>
+                  <Show
+                    when={generatingPrompt()}
+                    fallback={
+                      <button
+                        disabled={savingDetails() || !selectedDescriptionWorkflow()}
+                        onClick={() => void generatePrompt()}
+                      >
+                        <FontAwesomeIcon icon={faWandMagicSparkles} size={14} /> Generate
+                      </button>
+                    }
+                  >
+                    <button onClick={() => descriptionAbort?.abort()}>Cancel</button>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
             <Show when={!video() && !selectedDescriptionWorkflow()}>
               <p class="hint">Add a Describe image workflow in Settings → Media rendering.</p>
             </Show>
@@ -447,6 +461,14 @@ export default function GalleryDetail(props: {
           </div>
         </Show>
       </aside>
+      <Show when={resultDetailsOpen() && props.item.media}>
+        {(asset) => (
+          <MediaAssetResultDetails
+            assetId={asset().id}
+            onClose={() => setResultDetailsOpen(false)}
+          />
+        )}
+      </Show>
       <Show when={sourceImage()}>
         {(url) => <ImageViewer src={url()} onClose={() => setSourceImage(null)} />}
       </Show>

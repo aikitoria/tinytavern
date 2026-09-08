@@ -1,6 +1,7 @@
 import {
   For,
   Show,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -162,6 +163,7 @@ export default function GalleryGrid(props: {
   let previous: GalleryLayout | undefined;
   let previousKey = props.resetKey;
   let wasHidden = false;
+  let layoutWasVisible = false;
   let scrollHost: HTMLElement | undefined;
   let stageOffset = 0;
   const scrollRoot = () => scrollHost ?? viewport;
@@ -203,7 +205,7 @@ export default function GalleryGrid(props: {
   });
   const updateViewport = () => {
     frame = 0;
-    if (!props.hidden) {
+    if (!props.hidden && props.active !== false) {
       returnTop = scrollTop();
       setView({ top: returnTop, height: scrollRoot().clientHeight });
     }
@@ -225,6 +227,9 @@ export default function GalleryGrid(props: {
     onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
     const mobile = window.matchMedia('(max-width: 767px)');
     const measure = () => {
+      if (props.hidden || props.active === false) return;
+      cancelAnimationFrame(frame);
+      frame = 0;
       const nextHost = mobile.matches
         ? (viewport.closest<HTMLElement>('.gallery-modal') ?? viewport)
         : viewport;
@@ -233,17 +238,46 @@ export default function GalleryGrid(props: {
         scrollHost = nextHost;
         scrollHost.addEventListener('scroll', onScroll, { passive: true });
       }
-      if (props.hidden) return;
       measureOffset();
-      if (stage.clientWidth > 0) setWidth(stage.clientWidth);
-      updateViewport();
+      const measuredWidth = stage.clientWidth;
+      // Read the viewport before publishing width, which updates row layout.
+      const top = scrollTop();
+      const height = scrollRoot().clientHeight;
+      batch(() => {
+        if (measuredWidth > 0) setWidth(measuredWidth);
+        returnTop = top;
+        setView({ top, height });
+      });
     };
-    const observer = new ResizeObserver(measure);
+    const sizes = new WeakMap<Element, { width: number; height: number }>();
+    const observer = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        const previous = sizes.get(entry.target);
+        sizes.set(entry.target, { width, height });
+        // Our own row layout changes the stage height; only its width is an input.
+        if (
+          !previous ||
+          previous.width !== width ||
+          (entry.target !== stage && previous.height !== height)
+        ) {
+          changed = true;
+        }
+      }
+      if (changed) measure();
+    });
     observer.observe(viewport);
     observer.observe(stage);
     observer.observe(viewport.closest('.gallery-modal') ?? viewport);
     mobile.addEventListener('change', measure);
-    measure();
+    createEffect(() => {
+      if (!props.hidden && props.active !== false) untrack(measure);
+      else {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    });
     onCleanup(() => {
       observer.disconnect();
       scrollHost?.removeEventListener('scroll', onScroll);
@@ -263,9 +297,12 @@ export default function GalleryGrid(props: {
   createEffect(() => {
     const next = layout();
     const key = props.resetKey;
+    const visible = !props.hidden && props.active !== false;
     untrack(() => {
       if (focusedId() != null && !next.rowById.has(focusedId()!)) setFocusedId(null);
-      let top = props.hidden ? returnTop : scrollTop();
+      // Hidden scroll containers can report zero; restore the retained anchor on reveal.
+      let top = visible && layoutWasVisible ? scrollTop() : returnTop;
+      layoutWasVisible = visible;
       if (key !== previousKey) {
         top = -stageOffset;
         setFocusedId(null);
@@ -278,7 +315,7 @@ export default function GalleryGrid(props: {
       previous = next;
       previousKey = key;
       returnTop = top;
-      if (!props.hidden) {
+      if (visible) {
         setScrollTop(top);
         updateViewport();
       }

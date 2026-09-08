@@ -1,6 +1,8 @@
+import { useDialogActive } from '../state/dialogContext.ts';
+import { dialogLayers } from '../state/dialogLayers.ts';
 import { faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import { createUniqueId, onCleanup, onMount, Show, type JSX } from 'solid-js';
+import { createEffect, createUniqueId, onCleanup, onMount, Show, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { openModal } from '../state/store.ts';
 import { registerUiBack } from '../state/uiBack.ts';
@@ -8,6 +10,7 @@ import '../styles/pages.css';
 
 export default function Modal(props: {
   title: string;
+  active?: boolean;
   class?: string;
   backdropClass?: string;
   headerExtra?: JSX.Element;
@@ -18,7 +21,12 @@ export default function Modal(props: {
 }) {
   const titleId = `modal-title-${createUniqueId()}`;
   let dialog!: HTMLDivElement;
+  const paneActive = useDialogActive();
+  const enabled = () => props.active ?? paneActive();
+  const layer = dialogLayers.register(enabled);
+  let lastFocused: HTMLElement | null = null;
   let previouslyFocused: HTMLElement | null = null;
+  onCleanup(layer.dispose);
   const close = () => (props.onClose ?? (() => openModal(null)))();
   const focusable = () =>
     [
@@ -36,16 +44,12 @@ export default function Modal(props: {
     const dialogs = [
       ...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'),
     ];
-    return dialogs[dialogs.length - 1] === dialog;
+    return (
+      layer.isTop() && dialogs.filter((element) => !element.closest('[hidden]')).at(-1) === dialog
+    );
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (!isTopDialog()) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
     if (event.key !== 'Tab') return;
     const items = focusable();
     if (items.length === 0) {
@@ -68,33 +72,51 @@ export default function Modal(props: {
     registerUiBack(dialog, close);
     previouslyFocused = document.activeElement as HTMLElement | null;
     document.addEventListener('keydown', onKeyDown, true);
+  });
+  createEffect(() => {
+    if (!layer.isTop() || !enabled()) {
+      if (dialog?.contains(document.activeElement))
+        lastFocused = document.activeElement as HTMLElement;
+      return;
+    }
     queueMicrotask(() => {
-      const preferred =
-        dialog.querySelector<HTMLElement>('[data-modal-initial-focus]') ??
-        dialog.querySelector<HTMLElement>(
-          '.modal-body button, .modal-body [href], .modal-body input, .modal-body select, .modal-body textarea, .modal-body [tabindex]',
-        );
+      if (!dialog?.isConnected || !layer.isTop() || !enabled()) return;
+      const preferred = lastFocused?.isConnected
+        ? lastFocused
+        : (dialog.querySelector<HTMLElement>('[data-modal-initial-focus]') ??
+          dialog.querySelector<HTMLElement>(
+            '.modal-body button, .modal-body [href], .modal-body input, .modal-body select, .modal-body textarea, .modal-body [tabindex]',
+          ));
       (preferred ?? focusable()[0] ?? dialog).focus({ preventScroll: true });
     });
   });
   onCleanup(() => {
     document.removeEventListener('keydown', onKeyDown, true);
-    previouslyFocused?.focus({ preventScroll: true });
+    queueMicrotask(() => {
+      if (previouslyFocused?.isConnected && !previouslyFocused.closest('[hidden], [inert]'))
+        previouslyFocused.focus({ preventScroll: true });
+    });
   });
 
   return (
     <Portal>
       {/* No close-on-backdrop-click: modals hold unsaved form state. */}
       <div
+        hidden={!enabled()}
+        inert={!enabled() || !layer.isTop()}
+        aria-hidden={!enabled() || !layer.isTop()}
         class={`modal-backdrop ${props.fullscreen ? 'fullscreen-backdrop' : ''} ${props.backdropClass ?? ''}`}
       >
         <div
           ref={dialog}
           class={`modal ${props.fullscreen ? 'fullscreen-page' : ''} ${props.class ?? ''}`}
           role="dialog"
-          aria-modal="true"
+          aria-modal={enabled() && layer.isTop() ? 'true' : undefined}
           aria-labelledby={titleId}
           tabIndex={-1}
+          onFocusIn={(event) => {
+            lastFocused = event.target as HTMLElement;
+          }}
         >
           <div class="modal-head">
             <span class="modal-title" id={titleId}>
