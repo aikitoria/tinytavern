@@ -1,4 +1,13 @@
-import { copyFileSync, readdirSync, unlinkSync, writeFileSync, statSync, constants } from 'node:fs';
+import {
+  closeSync,
+  openSync,
+  copyFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+  statSync,
+  constants,
+} from 'node:fs';
 import { basename, join, extname } from 'node:path';
 import { crc32 } from 'node:zlib';
 import { IMAGES_DIR, stmt, invalidateMediaAsset, mediaAssetForPath, transaction } from './db.ts';
@@ -150,11 +159,46 @@ export function savedImageDimensions(imagePath: string) {
   return file ? imageFileDimensions(file) : null;
 }
 
-export function saveImage(name: string, data: Buffer): string {
-  writeFileSync(join(IMAGES_DIR, basename(name)), data);
-  const path = `/images/${basename(name)}`;
-  registerImage(path, data.length);
-  return path;
+/** Allocate the SQLite ID and its filename together, before any file is created.
+ * Committed reservations advance AUTOINCREMENT even if later released; exclusive creation
+ * protects file names left by an outer transaction that rolled back its reservation. */
+export function reserveMediaFile(extension: string): { id: number; path: string } {
+  if (!/^\.(png|jpe?g|webp|webm|part)$/.test(extension)) throw new Error('Invalid media extension');
+  return stmt(`INSERT INTO media_assets(path, created_at)
+    VALUES ('/images/media-' || (COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'), 0) + 1) || ?, ?)
+    RETURNING id, path`).get(extension, Date.now()) as { id: number; path: string };
+}
+
+export function saveImage(extension: string, data: Buffer): string {
+  let written: string | undefined;
+  let reservation: { id: number; path: string } | undefined;
+  try {
+    return transaction(() => {
+      reservation = reserveMediaFile(extension);
+      const { path } = reservation;
+      const file = join(IMAGES_DIR, basename(path));
+      // Exclusive creation also protects unexpected files left by an interrupted outer transaction.
+      const fd = openSync(file, 'wx');
+      written = file;
+      try {
+        writeFileSync(fd, data);
+      } finally {
+        closeSync(fd);
+      }
+      registerImage(path, data.length);
+      return path;
+    });
+  } catch (error) {
+    try {
+      if (written) unlinkSync(written);
+    } finally {
+      if (reservation) {
+        stmt('DELETE FROM media_assets WHERE id = ?').run(reservation.id);
+        invalidateMediaAsset(reservation.path);
+      }
+    }
+    throw error;
+  }
 }
 
 function registerImage(path: string, byteSize: number): void {
@@ -169,18 +213,8 @@ function registerImage(path: string, byteSize: number): void {
         : ext === '.jpg' || ext === '.jpeg'
           ? 'image/jpeg'
           : 'image/png';
-  stmt(`INSERT INTO media_assets(path, kind, mime, byte_size, width, height, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET
-    kind = excluded.kind, mime = excluded.mime, byte_size = excluded.byte_size,
-    width = excluded.width, height = excluded.height`).run(
-    path,
-    kind,
-    mime,
-    byteSize,
-    size?.width ?? null,
-    size?.height ?? null,
-    Date.now(),
-  );
+  stmt(`UPDATE media_assets SET kind = ?, mime = ?, byte_size = ?, width = ?, height = ?
+    WHERE path = ?`).run(kind, mime, byteSize, size?.width ?? null, size?.height ?? null, path);
   invalidateMediaAsset(path);
 }
 
@@ -188,36 +222,52 @@ function registerImage(path: string, byteSize: number): void {
  * Copies must own separate files so deleting one message cannot break another.
  * Returns the new served path, or null if the source is invalid or missing.
  */
-export function copyImage(imagePath: string, newName: string): string | null {
+export function copyImage(imagePath: string): string | null {
   const file = imageFile(imagePath);
   if (!file) return null;
+  let written: string | undefined;
+  let reservation: { id: number; path: string } | undefined;
   try {
-    copyFileSync(file, join(IMAGES_DIR, basename(newName)), constants.COPYFILE_FICLONE);
+    return transaction(() => {
+      reservation = reserveMediaFile(extname(imagePath).toLowerCase());
+      const { path } = reservation;
+      const destination = join(IMAGES_DIR, basename(path));
+      copyFileSync(file, destination, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+      written = destination;
+      registerImage(path, statSync(file).size);
+      const original = mediaAssetForPath(imagePath);
+      if (original) {
+        stmt(
+          'UPDATE media_assets SET kind = ?, mime = ?, width = ?, height = ?, duration = ?, recipe_id = ? WHERE path = ?',
+        ).run(
+          original.kind,
+          original.mime,
+          original.width,
+          original.height,
+          original.duration,
+          original.recipeId,
+          path,
+        );
+        stmt(`INSERT INTO media_characters(asset_id, character_id)
+          SELECT target.id, mc.character_id FROM media_assets target, media_characters mc
+          WHERE target.path = ? AND mc.asset_id = ?`).run(path, original.id);
+        invalidateMediaAsset(path);
+      }
+      return path;
+    });
   } catch (err) {
+    try {
+      if (written) unlinkSync(written);
+    } finally {
+      // A missing source is recoverable inside a larger copy/import transaction.
+      if (reservation) {
+        stmt('DELETE FROM media_assets WHERE id = ?').run(reservation.id);
+        invalidateMediaAsset(reservation.path);
+      }
+    }
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
-  const path = `/images/${basename(newName)}`;
-  registerImage(path, statSync(file).size);
-  const original = mediaAssetForPath(imagePath);
-  if (original) {
-    stmt(
-      'UPDATE media_assets SET kind = ?, mime = ?, width = ?, height = ?, duration = ?, recipe_id = ? WHERE path = ?',
-    ).run(
-      original.kind,
-      original.mime,
-      original.width,
-      original.height,
-      original.duration,
-      original.recipeId,
-      path,
-    );
-    stmt(`INSERT INTO media_characters(asset_id, character_id)
-      SELECT target.id, mc.character_id FROM media_assets target, media_characters mc
-      WHERE target.path = ? AND mc.asset_id = ?`).run(path, original.id);
-    invalidateMediaAsset(path);
-  }
-  return path;
 }
 
 export function deleteImageFiles(imagePaths: string[]): void {
@@ -332,5 +382,8 @@ export function sweepOrphanedImages(): void {
       console.error(`[images] failed to sweep ${name}:`, err);
     }
   }
+  // A process may die after reserving an ID but before creating its .part file.
+  stmt(`DELETE FROM media_assets WHERE path = '/images/media-' || id || '.part'
+    AND NOT EXISTS (SELECT 1 FROM media_owners WHERE asset_id = media_assets.id)`).run();
   if (removed > 0) console.log(`[images] swept ${removed} orphaned image file(s)`);
 }

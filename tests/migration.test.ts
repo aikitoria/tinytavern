@@ -43,6 +43,10 @@ function upgrade(path: string, code = '') {
 // Inverse DDL reconstructs each released schema independently of migrate().
 // Fixtures are empty while rewinding, then populated with historical data.
 const rewind: Record<number, string> = {
+  65: '', // Shorter avatar thumbnail prefix; no DDL changes.
+  64: '', // Numeric media/avatar filenames; no DDL changes.
+  63: 'ALTER TABLE avatar_thumbnails DROP COLUMN thumbnail_revision;',
+  62: '', // Canonical media filenames; no DDL changes.
   61: '',
   60: `DROP TRIGGER media_message_characters; DROP TABLE media_characters;
     ALTER TABLE gallery_items ADD COLUMN character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
@@ -170,7 +174,7 @@ try {
   const freshPath = join(root, 'fresh.db');
   upgrade(freshPath);
   const fresh = new DatabaseSync(freshPath);
-  assert.equal(fresh.prepare('PRAGMA user_version').get()!.user_version, 61);
+  assert.equal(fresh.prepare('PRAGMA user_version').get()!.user_version, 65);
   const expectedSchema = schema(fresh);
   fresh.close();
 
@@ -212,6 +216,7 @@ try {
   const videoGalleryPath = join(root, 'video-gallery-v55.db');
   copyFileSync(freshPath, videoGalleryPath);
   const videoGalleryFixture = new DatabaseSync(videoGalleryPath);
+  videoGalleryFixture.exec(rewind[63]!);
   videoGalleryFixture.exec(rewind[60]!);
   videoGalleryFixture.exec(rewind[59]!);
   videoGalleryFixture.exec(`PRAGMA user_version = 55;
@@ -232,6 +237,7 @@ try {
   const timeoutPath = join(root, 'media-timeout-v56.db');
   copyFileSync(freshPath, timeoutPath);
   const timeoutFixture = new DatabaseSync(timeoutPath);
+  timeoutFixture.exec(rewind[63]!);
   timeoutFixture.exec(rewind[60]!);
   timeoutFixture.exec(rewind[59]!);
   timeoutFixture.exec(`PRAGMA user_version = 56;
@@ -274,6 +280,7 @@ try {
   const editPath = join(root, 'image-edit-v57.db');
   copyFileSync(freshPath, editPath);
   const editFixture = new DatabaseSync(editPath);
+  editFixture.exec(rewind[63]!);
   editFixture.exec(rewind[60]!);
   editFixture.exec(rewind[59]!);
   editFixture.exec('PRAGMA user_version = 57');
@@ -430,6 +437,7 @@ try {
   const instructionPath = join(root, 'recipe-instructions-v58.db');
   copyFileSync(freshPath, instructionPath);
   const instructionFixture = new DatabaseSync(instructionPath);
+  instructionFixture.exec(rewind[63]!);
   instructionFixture.exec(rewind[60]!);
   instructionFixture.exec(rewind[59]!);
   instructionFixture.exec(`PRAGMA user_version = 58;
@@ -452,6 +460,7 @@ try {
   const associationsPath = join(root, 'media-associations-v59.db');
   copyFileSync(freshPath, associationsPath);
   const associationsFixture = new DatabaseSync(associationsPath);
+  associationsFixture.exec(rewind[63]!);
   associationsFixture.exec(rewind[60]!);
   associationsFixture.exec(`PRAGMA user_version = 59;
     INSERT INTO characters(id, name, created_at) VALUES (900, 'Haeun', 1), (901, 'Ashina', 1);
@@ -476,6 +485,7 @@ try {
       .all()
       .some((row) => row.name === 'character_id'),
   );
+  associationsDb.exec(rewind[63]!);
   associationsDb.exec('DROP TRIGGER media_message_characters; PRAGMA user_version = 60');
   associationsDb.close();
   upgrade(associationsPath);
@@ -487,11 +497,11 @@ try {
   );
   repairedAssociations.close();
 
-  for (let version = 1; version <= 61; version++) {
+  for (let version = 1; version <= 65; version++) {
     const path = join(root, `v${version}.db`);
     copyFileSync(freshPath, path);
     const fixture = new DatabaseSync(path);
-    for (let undo = 61; undo > version; undo--) fixture.exec(rewind[undo]!);
+    for (let undo = 65; undo > version; undo--) fixture.exec(rewind[undo]!);
     fixture.exec(`PRAGMA user_version = ${version};
       INSERT INTO characters (id, name, personality, card_json, created_at)
         VALUES (100, 'Historical character', 'Preserved personality', '{"custom":true}', 11);
@@ -534,7 +544,7 @@ try {
     upgrade(path);
     const upgraded = new DatabaseSync(path);
     assert.deepEqual(schema(upgraded), expectedSchema, `schema upgraded from v${version}`);
-    assert.equal(upgraded.prepare('PRAGMA user_version').get()!.user_version, 61);
+    assert.equal(upgraded.prepare('PRAGMA user_version').get()!.user_version, 65);
     if (version < 36) {
       const settings = JSON.parse(
         String(upgraded.prepare("SELECT value FROM settings WHERE key = 'app'").get()!.value),
@@ -1549,7 +1559,7 @@ try {
   }
 
   console.log(
-    'Migration regressions passed: fresh schema, versions 1–61, preserved image settings and gallery templates, data conversions, nested transactions and migration rollback.',
+    'Migration regressions passed: fresh schema, versions 1–65, preserved image settings and gallery templates, data conversions, nested transactions and migration rollback.',
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

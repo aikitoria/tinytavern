@@ -53,7 +53,7 @@ export async function testGenerationFailures(
       : undefined;
   assert(
     failedMsg?.imagePending === false &&
-      failedMsg.images.length === 0 &&
+      failedMsg.media.length === 0 &&
       failedMsg.status === 'done' &&
       failedMsg.genMeta?.imageError?.includes('rejected the workflow (400)') === true,
     'a rejected submission clears imagePending and surfaces genMeta.imageError',
@@ -67,7 +67,7 @@ export async function testGenerationFailures(
   );
   const retried = await waitForImageState(
     failRes.toolMessageId,
-    (m) => !m.imagePending && m.images.length === 1,
+    (m) => !m.imagePending && m.media.length === 1,
     'retry render finished',
   );
   assert(retried.genMeta?.imageError == null, 'a successful retry clears the stored imageError');
@@ -88,7 +88,7 @@ export async function testGenerationFailures(
       true,
     'execution failures relay the ComfyUI node traceback',
   );
-  assert(execFailed.images.length === 1, 'a failed re-render keeps previously rendered images');
+  assert(execFailed.media.length === 1, 'a failed re-render keeps previously rendered images');
 
   console.log('== tool message guards ==');
   await expectStatus(
@@ -122,7 +122,7 @@ export async function testGenerationFailures(
   assert(
     stoppedMsg?.status === 'stopped' &&
       stoppedMsg.imagePending === false &&
-      stoppedMsg.images.length === 0,
+      stoppedMsg.media.length === 0,
     'stopping a tool generation clears its queued image render',
   );
 
@@ -145,7 +145,7 @@ export async function testGenerationFailures(
   );
   const assistantRendered = await waitForImageState(
     renderSend.assistantMessageId,
-    (m) => !m.imagePending && m.images.length === 1,
+    (m) => !m.imagePending && m.media.length === 1,
     'assistant-message render finished',
   );
   assert(assistantRendered.hasImageRender, 'fallback render config is stored for future swipes');

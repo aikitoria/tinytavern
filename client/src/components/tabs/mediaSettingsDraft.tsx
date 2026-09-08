@@ -6,62 +6,39 @@ import {
   importPromptCollection,
 } from '@tinytavern/shared';
 import SettingsActions from '../SettingsActions.tsx';
-import { Show, createEffect, createSignal, untrack } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import type { Settings, MediaPromptSettingsKey } from '@tinytavern/shared';
 import { state, applySettings } from '../../state/store.ts';
-import { api, ApiError } from '../../state/api.ts';
-import { errorMessage, createSavedFlash } from '../../util.ts';
+import { api } from '../../state/api.ts';
+import { createSavedFlash } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
+import { createSettingsSubmission } from '../../state/settingsSubmission.ts';
 
 export function mediaSettingsDraft<K extends 'mediaRendering' | MediaPromptSettingsKey>(key: K) {
   const snapshot = () => JSON.parse(JSON.stringify(state.settings[key])) as Settings[K];
   const [draft, setDraft] = createSignal<Settings[K]>(snapshot());
   const [baseline, setBaseline] = createSignal(JSON.stringify(draft()));
-  const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal('');
   const [saved, flashSaved] = createSavedFlash();
-  let revision = state.settings.revision;
-  const isDirty = () => JSON.stringify(draft()) !== baseline();
-  const discard = () => {
-    const next = snapshot();
-    setDraft(() => next);
-    setBaseline(JSON.stringify(next));
-    revision = state.settings.revision;
-    setError('');
-  };
-  createEffect(() => {
-    void state.settings.revision;
-    if (!untrack(isDirty) && !untrack(saving)) {
-      untrack(discard);
-    }
-  });
-  const save = async () => {
-    if (saving()) {
-      return false;
-    }
-    const value = draft();
-    const encoded = JSON.stringify(value);
-    setSaving(true);
-    setError('');
-    try {
-      const next = await api.putSettings({ [key]: value }, revision);
+  const submission = createSettingsSubmission({
+    revision: () => state.settings.revision,
+    isDirty: () => JSON.stringify(draft()) !== baseline(),
+    snapshot: draft,
+    submit: (value, revision) => api.putSettings({ [key]: value }, revision),
+    accepted: (value, next) => {
       applySettings(next);
-      revision = next.revision;
-      setBaseline(encoded);
+      setBaseline(JSON.stringify(value));
       flashSaved();
-      return !isDirty();
-    } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 409
-          ? 'Settings changed elsewhere. Discard to load them, then review your changes.'
-          : errorMessage(err),
-      );
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
-  useSettingsGuard({ isDirty, save, discard });
+    },
+    discard: () => {
+      const next = snapshot();
+      setDraft(() => next);
+      setBaseline(JSON.stringify(next));
+    },
+    onError: setError,
+  });
+  const { saving, save, discard } = submission;
+  useSettingsGuard(submission);
   const Actions = () => (
     <>
       <Show when={error()}>

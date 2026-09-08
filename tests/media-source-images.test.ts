@@ -36,8 +36,8 @@ function gallery(path: string): number {
   );
 }
 const png = makePlaceholderPng();
-const first = saveImage('first-frame.png', png);
-const reference = saveImage('reference.png', png);
+const first = saveImage('.png', png);
+const reference = saveImage('.png', png);
 const firstAsset = mediaAssetForPath(first)!;
 const referenceAsset = mediaAssetForPath(reference)!;
 const firstGallery = gallery(first);
@@ -95,7 +95,7 @@ const results = workflows.map((workflow, index) => {
     'Saved prompt',
     { instruction: 'Original instruction', seed: index === 0 ? 0 : undefined },
   );
-  const path = saveImage(`result-${index}.webm`, videoBytes);
+  const path = saveImage('.webm', videoBytes);
   stmt('UPDATE media_assets SET recipe_id = ?, width = 32, height = 24 WHERE path = ?').run(
     recipeId,
     path,

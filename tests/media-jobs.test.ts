@@ -213,6 +213,13 @@ try {
   const finished = await waitFor(first.id, 'succeeded');
   assert.equal(submitCount, 1, 'Lost acceptance is reconciled without another submission');
   assert.equal(finished.outputs.length, 2);
+  for (const asset of finished.outputs) {
+    assert.match(
+      asset.url,
+      new RegExp(`^/images/media-${asset.id}\\.(png|jpe?g|webp|webm)$`),
+      'Worker outputs use ownership-neutral original names',
+    );
+  }
   assert.equal(stmt('SELECT count(*) AS n FROM gallery_items').get()!.n, 2);
   assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(finished.outputs[0]!.url))), raster);
   assert.throws(() => requireMediaJob(first.id), { status: 404 });
@@ -258,7 +265,7 @@ try {
   }
   extraOutput = null;
 
-  const sourcePath = saveImage('source.png', raster);
+  const sourcePath = saveImage('.png', raster);
   stmt(`
     INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at)
     VALUES ('Input', 'Saved source description', ?, 1, 1)
@@ -298,7 +305,10 @@ try {
     'Cleanup deletes the exact uploaded file from the input root',
   );
   assert.throws(() => requireMediaJob(edit.id), { status: 404 });
-  assert(existsSync(join(IMAGES_DIR, 'source.png')), 'Saved result recipes retain rerun inputs');
+  assert(
+    existsSync(join(IMAGES_DIR, sourcePath.slice(8))),
+    'Saved result recipes retain rerun inputs',
+  );
 
   const renderingSettings = getSettings().mediaRendering;
   putSettings({
@@ -359,7 +369,7 @@ try {
   assert.equal(updatedMessage.content, message.content);
   assert.equal(updatedMessage.status, 'done');
   assert.equal(
-    updatedMessage.images.length,
+    updatedMessage.media.length,
     3,
     'All new recipe outputs append to the original image alternatives',
   );
@@ -377,7 +387,7 @@ try {
   assert.equal(submitted.get(swiped.comfyPromptId!)!.prompt['1']!.inputs.text, message.content);
   assert.throws(() => requireMediaJob(swiped.id), { status: 404 });
   stmt("UPDATE messages SET images_json = '[]', active_image = 0 WHERE id = ?").run(message.id);
-  deleteImageFiles(updatedMessage.images);
+  deleteImageFiles(updatedMessage.media.map((asset) => asset.url));
   const emptyMessage = getMessage(message.id)!;
   assert(
     emptyMessage.hasImageRender,
@@ -390,7 +400,7 @@ try {
     edited.inputs,
     'A recipe with no remaining outputs still retains its reference inputs',
   );
-  assert.equal(getMessage(message.id)!.images.length, 2);
+  assert.equal(getMessage(message.id)!.media.length, 2);
   putSettings({ ...getSettings(), mediaRendering: renderingSettings });
 
   const removedResult = restoredResult.outputs[0]!;
@@ -537,6 +547,31 @@ try {
     values,
     'Invalid edits do not change saved values',
   );
+  const updatedWorkflow = {
+    ...controlledWorkflow,
+    json: controlledWorkflow.json.replace('"multiple":16', '"multiple":32'),
+  };
+  const updatedSettings = getSettings();
+  putSettings({
+    ...updatedSettings,
+    mediaRendering: {
+      ...updatedSettings.mediaRendering,
+      workflows: updatedSettings.mediaRendering.workflows.map((workflow) =>
+        workflow.id === controlledWorkflow.id ? updatedWorkflow : workflow,
+      ),
+    },
+  });
+  const fresh = draft('controlled-updated', {
+    workflowId: controlledWorkflow.id,
+    workflowValues: {},
+  });
+  startMediaJob(requireMediaJob(fresh.id), {}, false);
+  const freshResult = await waitFor(fresh.id, 'succeeded');
+  assert.equal(
+    submitted.get(freshResult.comfyPromptId!)!.prompt.resolution!.inputs.multiple,
+    32,
+    'New jobs use edited source even when the workflow ID is unchanged',
+  );
   startMediaJob(requireMediaJob(controlled.id), {}, false);
   const rendered = await waitFor(controlled.id, 'succeeded');
   const sent = submitted.get(rendered.comfyPromptId!)!.prompt;
@@ -552,6 +587,11 @@ try {
     requestKey: 'controlled-rerun',
   });
   assert.deepEqual(rerun.workflowValues, values, 'The durable asset recipe retains controls');
+  assert.equal(
+    rerun.workflowSnapshot!.json,
+    controlledWorkflow.json,
+    'Reruns retain their persisted original graph after the saved workflow changes',
+  );
   const editedControls = editMediaJob(requireMediaJob(rerun.id), {
     workflowValues: { ...values, frames: 161 },
   });

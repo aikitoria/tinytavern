@@ -10,6 +10,7 @@ import { broadcastConv, invalidate } from './events.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
 import { generationParameters, prepareStandaloneCompletion } from './completionConfig.ts';
 import type { CompletionOptions } from './completionConfig.ts';
+import { completionDataReader, startCompletionIdleWatchdog } from './completionStream.ts';
 
 interface ActiveGen {
   mid: number;
@@ -182,12 +183,6 @@ export function stopAllGenerations(): void {
   for (const mid of [...active.keys()]) stopGeneration(mid);
 }
 
-interface SseDelta {
-  content?: string;
-  reasoning_content?: string;
-  reasoning?: string;
-}
-
 /**
  * Independent of client connections: forwards deltas immediately and persists only at finalization.
  * `resumeFrom` sends existing content as an assistant prefill and appends new tokens.
@@ -264,7 +259,6 @@ export function startGeneration(
   launch(0);
 }
 
-const IDLE_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RETRIES = 2;
 
 export function resolveEndpoint(conversation: Conversation | null): Endpoint {
@@ -376,21 +370,7 @@ export async function streamEndpointCompletion(
 ): Promise<string> {
   const prepared = prepareStandaloneCompletion(endpoint, messages, maxTokens, options);
   const idleAbort = new AbortController();
-  let lastActivity = Date.now();
-  const onIdle = () => {
-    const remaining = IDLE_TIMEOUT_MS - (Date.now() - lastActivity);
-    if (remaining > 0) {
-      idleTimer = setTimeout(onIdle, remaining);
-      return;
-    }
-    idleAbort.abort(
-      new Error(`Upstream idle timeout — no data received for ${IDLE_TIMEOUT_MS / 1000}s`),
-    );
-  };
-  let idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
-  const resetIdle = () => {
-    lastActivity = Date.now();
-  };
+  const idle = startCompletionIdleWatchdog((error) => idleAbort.abort(error));
   const requestSignal = signal ? AbortSignal.any([signal, idleAbort.signal]) : idleAbort.signal;
   try {
     requestSignal.throwIfAborted();
@@ -402,7 +382,7 @@ export async function streamEndpointCompletion(
       prepared.parameters,
       requestSignal,
     );
-    resetIdle();
+    idle.touch();
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
@@ -418,53 +398,30 @@ export async function streamEndpointCompletion(
     let finishReason: string | null = null;
     await readSseData(
       res.body,
-      (data) => {
-        if (data === '[DONE]') {
-          completed = true;
-          return;
-        }
-        if (!data) {
-          return;
-        }
-        let json: {
-          choices?: {
-            finish_reason?: string | null;
-            delta?: {
-              content?: unknown;
-              refusal?: unknown;
-              reasoning_content?: unknown;
-              reasoning?: unknown;
-            };
-          }[];
-        };
-        try {
-          json = JSON.parse(data);
-        } catch {
-          return; // Ignore malformed upstream frames.
-        }
-        const choice = json?.choices?.[0];
-        if (choice?.finish_reason) {
-          finishReason = choice.finish_reason;
-        }
-        const delta = choice?.delta;
-        if (typeof delta?.content === 'string' && delta.content) {
-          emittedContent = true;
-          if (!emittedPrefill && prepared.messagePrefill) {
-            emittedPrefill = true;
-            onDelta(prepared.messagePrefill);
+      completionDataReader(
+        (delta, reasoning, rejected) => {
+          if (delta) {
+            emittedContent = true;
+            if (!emittedPrefill && prepared.messagePrefill) {
+              emittedPrefill = true;
+              onDelta(prepared.messagePrefill);
+            }
+            if (delta.trim()) receivedVisibleContent = true;
+            content += delta;
+            onDelta(delta);
           }
-          if (delta.content.trim()) receivedVisibleContent = true;
-          content += delta.content;
-          onDelta(delta.content);
-        }
-        if (typeof delta?.refusal === 'string') refusal += delta.refusal;
-        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
-        if (typeof reasoning === 'string' && reasoning) {
-          sawReasoning = true;
-          if (!emittedContent) options?.onReasoning?.(reasoning);
-        }
-      },
-      resetIdle,
+          refusal += rejected;
+          if (reasoning) {
+            sawReasoning = true;
+            if (!emittedContent) options?.onReasoning?.(reasoning);
+          }
+        },
+        (reason) => {
+          if (reason === null) completed = true;
+          else finishReason = reason;
+        },
+      ),
+      idle.touch,
     );
     if (options?.requireComplete && receivedVisibleContent) {
       if (finishReason === 'length') {
@@ -487,7 +444,7 @@ export async function streamEndpointCompletion(
     }
     throw new Error('The model returned an empty reply');
   } finally {
-    clearTimeout(idleTimer);
+    idle.stop();
   }
 }
 
@@ -546,15 +503,10 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   const p = endpoint.genParams;
 
   // Idle watchdog: abort if the backend goes silent (including before headers).
-  const onIdle = () => {
-    gen.meta.error = `Upstream idle timeout — no data received for ${IDLE_TIMEOUT_MS / 1000}s`;
+  const idle = startCompletionIdleWatchdog((error) => {
+    gen.meta.error = error.message;
     gen.abort.abort();
-  };
-  let idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
-  const resetIdle = () => {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
-  };
+  });
 
   try {
     const res = await completionRequest(
@@ -569,16 +521,16 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
       },
       gen.abort.signal,
     );
-    resetIdle();
+    idle.touch();
 
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
     }
     // Prefixed history can cause "Name:" echoes even with prefills disabled.
-    await consumeStream(res.body, gen, namePrefill, isResume, resetIdle);
+    await consumeStream(res.body, gen, namePrefill, isResume, idle.touch);
   } finally {
-    clearTimeout(idleTimer);
+    idle.stop();
   }
 }
 
@@ -632,19 +584,8 @@ async function consumeStream(
     return out;
   };
 
-  const processData = (data: string): void => {
-    if (!data || data === '[DONE]') return;
-    let parsed: { choices?: { delta?: SseDelta }[] };
-    try {
-      parsed = JSON.parse(data);
-    } catch {
-      return;
-    }
-    const delta = parsed?.choices?.[0]?.delta;
-    const d = delta?.content ?? undefined;
-    const r = delta?.reasoning_content ?? delta?.reasoning ?? undefined;
-    if (d == null && r == null) return;
-    const dOut = d != null ? passContent(d) : '';
+  const processData = completionDataReader((d, r) => {
+    const dOut = d ? passContent(d) : '';
     if (dOut) gen.content += dOut;
     if (r) gen.reasoning += r;
     if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
@@ -654,7 +595,7 @@ async function consumeStream(
       ...(dOut ? { d: dOut } : {}),
       ...(r ? { r } : {}),
     });
-  };
+  });
   try {
     await readSseData(
       body,

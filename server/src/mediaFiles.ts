@@ -1,13 +1,13 @@
 import { createWriteStream } from 'node:fs';
-import { open, readFile, rename, rm } from 'node:fs/promises';
+import { link, open, readFile, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream } from 'node:stream/web';
-import { IMAGES_DIR } from './db.ts';
-import { rasterImageFormat } from './images.ts';
+import { IMAGES_DIR, stmt } from './db.ts';
+import { rasterImageFormat, reserveMediaFile } from './images.ts';
 import { imageDimensions } from './imageDimensions.ts';
 import type { MediaKind } from '@tinytavern/shared';
 
@@ -145,18 +145,18 @@ async function readVideoMetadata(path: string, signal: AbortSignal) {
 /** Stream originals to disk; only raster validation uses a bounded memory buffer. */
 export async function downloadMedia(
   response: Response,
-  name: string,
   kind: MediaKind,
   signal: AbortSignal,
 ): Promise<DownloadedMedia> {
   if (!response.ok || !response.body) {
     throw new Error(`Comfy download failed (${response.status})`);
   }
-  const stem = basename(name);
-  const temporary = join(IMAGES_DIR, `${stem}.part`);
+  const reservation = reserveMediaFile('.part');
+  const temporary = join(IMAGES_DIR, basename(reservation.path));
   const limit = kind === 'video' ? 1024 * 1024 * 1024 : 64 * 1024 * 1024;
   let byteSize = 0;
   let finalized: string | undefined;
+  let temporaryOwned = false;
   try {
     if (Number(response.headers.get('content-length')) > limit) {
       await response.body.cancel();
@@ -174,6 +174,9 @@ export async function downloadMedia(
       },
     });
     const destination = createWriteStream(temporary, { flags: 'wx' });
+    destination.once('open', () => {
+      temporaryOwned = true;
+    });
     await pipeline(source, sizeLimiter, destination, { signal });
 
     let ext: string;
@@ -201,9 +204,14 @@ export async function downloadMedia(
       mime = 'video/webm';
     }
     await syncFile(temporary);
-    finalized = join(IMAGES_DIR, `${stem}${ext}`);
-    await rename(temporary, finalized);
+    const path = `/images/media-${reservation.id}${ext}`;
+    const finalDestination = join(IMAGES_DIR, basename(path));
+    // Exclusive publication cannot replace a file belonging to an earlier failed transaction.
+    await link(temporary, finalDestination);
+    finalized = finalDestination;
     await syncFile(IMAGES_DIR);
+    stmt('UPDATE media_assets SET path = ? WHERE id = ?').run(path, reservation.id);
+    await rm(temporary);
     return {
       path: `/images/${basename(finalized)}`,
       kind,
@@ -214,11 +222,15 @@ export async function downloadMedia(
       duration,
     };
   } catch (err) {
-    const discardPaths = [temporary];
+    const discardPaths = temporaryOwned ? [temporary] : [];
     if (finalized) {
       discardPaths.push(finalized);
     }
-    await Promise.all(discardPaths.map((path) => rm(path, { force: true })));
+    try {
+      await Promise.all(discardPaths.map((path) => rm(path, { force: true })));
+    } finally {
+      stmt('DELETE FROM media_assets WHERE id = ?').run(reservation.id);
+    }
     throw err;
   }
 }

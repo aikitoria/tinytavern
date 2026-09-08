@@ -92,7 +92,7 @@ putSettings({
   },
 });
 function image(name: string, prompt: string | null) {
-  const path = saveImage(name + '.png', makePlaceholderPng());
+  const path = saveImage('.png', makePlaceholderPng());
   let recipeId: string | null = null;
   if (prompt !== null) {
     recipeId = saveMediaRecipe(

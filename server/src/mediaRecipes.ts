@@ -135,8 +135,7 @@ export function getMediaAssetInputs(assetId: number): MediaAssetInput[] {
 }
 
 export function messageRecipeId(message: Message): string | null {
-  const selected = message.images[Math.min(message.activeImage, message.images.length - 1)];
-  const asset = message.media?.find((item) => item.url === selected);
+  const asset = message.media[Math.min(message.activeImage, message.media.length - 1)];
   if (asset?.recipeId) {
     return asset.recipeId;
   }

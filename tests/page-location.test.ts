@@ -38,6 +38,18 @@ for (const old of [
     '#71+/gallery/35?sort=newest+/media/job/e886b56a-cd06-490f-9c22-5dcecbf75623',
   );
 }
+for (const hash of [
+  '#71/jobs',
+  '#71/media/image?jobs=1',
+  '#71/media/video/job-id?jobs=1&context=71',
+]) {
+  const page = parsePageLocation(hash);
+  assert.equal(page.modal, 'media-jobs');
+  assert.equal(page.media, undefined, 'Legacy Jobs links cannot restore a media editor');
+  assert.equal(formatPageLocation(page), '#71+/jobs');
+}
+const legacyJobs = '#71/media/image?jobs=1&return=%2371%2Fgallery%2F35';
+assert.equal(formatPageLocation(parsePageLocation(legacyJobs)), '#71+/gallery/35+/jobs');
 const media = parsePageLocation('#70/media/video/job-123?return=%2370%2Fgallery%2F123');
 assert.equal(media.chatId, 70);
 assert.equal(

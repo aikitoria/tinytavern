@@ -5,7 +5,7 @@ import type { MediaWorkflow } from '@tinytavern/shared';
 
 requireTestIsolation();
 const { stmt, mediaAssetForPath } = await import('../server/src/db.ts');
-const { saveImage, copyImage } = await import('../server/src/images.ts');
+const { saveImage, copyImage, reserveMediaFile } = await import('../server/src/images.ts');
 const { makePlaceholderPng } = await import('../server/src/pngCard.ts');
 const { mediaCharacterIds, setMediaCharacters, captureMediaCharacters } =
   await import('../server/src/mediaCharacters.ts');
@@ -19,7 +19,7 @@ const characters = ['Ashina', 'Haeun'].map((name) =>
   Number(stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid),
 );
 const inputs = characters.map((characterId, index) => {
-  const path = saveImage(`reference-${index}.png`, makePlaceholderPng());
+  const path = saveImage('.png', makePlaceholderPng());
   const asset = mediaAssetForPath(path)!;
   stmt(
     "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Uploads', '', ?, 1, 1)",
@@ -74,7 +74,7 @@ stmt('DELETE FROM gallery_items').run();
 setMediaCharacters(inputs[0]!.id, []);
 setMediaCharacters(inputs[1]!.id, []);
 for (const [index, job] of jobs.entries()) {
-  const path = `/images/result-${index}.${index ? 'webm' : 'png'}`;
+  const { path } = reserveMediaFile(index ? '.webm' : '.png');
   const assetId = recordMediaResult(job.id, index + 1, {
     path,
     kind: index ? 'video' : 'image',
@@ -96,10 +96,10 @@ for (const [index, job] of jobs.entries()) {
     characters,
   );
 }
-const original = saveImage('copy-source.png', makePlaceholderPng());
+const original = saveImage('.png', makePlaceholderPng());
 const originalAsset = mediaAssetForPath(original)!;
 setMediaCharacters(originalAsset.id, characters);
-const copy = copyImage(original, 'copy-target.png')!;
+const copy = copyImage(original)!;
 const copiedAsset = mediaAssetForPath(copy)!;
 assert.deepEqual(mediaCharacterIds(copiedAsset.id), characters);
 setMediaCharacters(copiedAsset.id, [characters[1]!]);

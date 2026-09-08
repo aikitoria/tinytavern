@@ -14,11 +14,7 @@ const { createImageRecipe } = await import('../server/src/mediaRecipes.ts');
 const { makePlaceholderPng } = await import('../server/src/pngCard.ts');
 
 const png = makePlaceholderPng();
-const images = [
-  '/images/missing.png',
-  saveImage('copy-source-a.png', png),
-  saveImage('copy-source-b.png', png),
-];
+const images = ['/images/missing.png', saveImage('.png', png), saveImage('.png', png)];
 const now = Date.now();
 const id = Number(
   stmt('INSERT INTO conversations (title, created_at, updated_at) VALUES (?, ?, ?)').run(
@@ -43,6 +39,13 @@ const messageId = Number(
 const source = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(id)!);
 const row = stmt('SELECT * FROM messages WHERE id = ?').get(messageId)!;
 const live = { ...toMessage(row), content: 'live content', reasoning: 'live reasoning' };
+assert.deepEqual(
+  live.media.map((asset) => asset.url),
+  images,
+  'Attachment order includes a missing file rather than shifting the selected asset',
+);
+assert.equal(live.media[live.activeImage]!.url, images[1]);
+assert.equal('images' in live, false, 'The live DTO has one ordered attachment representation');
 let copiedMessageId = 0;
 const copiedConversationId = copyConversation(source, ' (copy)', (conversationId, written) => {
   copiedMessageId = insertCopiedMessage(
@@ -62,14 +65,21 @@ assert.equal(copied.status, 'stopped');
 assert.equal(copied.imagePending, false);
 assert.equal(copiedRow.render_recipe_id, row.render_recipe_id);
 assert.equal(copiedRow.gen_meta_json, row.gen_meta_json);
-assert.equal(copied.images.length, 2);
+assert.equal(copied.media.length, 2);
+for (const asset of copied.media) {
+  assert.match(
+    asset.url,
+    new RegExp(`^/images/media-${asset.id}\\.(png|jpe?g|webp|webm)$`),
+    'Copies of legacy paths use ownership-neutral original names',
+  );
+}
 assert.equal(
   copied.activeImage,
   0,
   'selected A retains its identity after the preceding missing file is skipped',
 );
-assert.notEqual(copied.images[0], images[1]);
-assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(copied.images[0]!))), png);
+assert.notEqual(copied.media[0]!.url, images[1]);
+assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(copied.media[0]!.url))), png);
 
 for (const [selected, expected] of [
   [0, 0],
@@ -77,7 +87,7 @@ for (const [selected, expected] of [
   [2, 1],
 ]) {
   const written: string[] = [];
-  const result = copyMessageImages({ images, activeImage: selected! }, written);
+  const result = copyMessageImages({ media: live.media, activeImage: selected! }, written);
   assert.equal(result.activeImage, expected);
   deleteImageFiles(written);
 }
@@ -95,8 +105,8 @@ assert.equal(stmt('SELECT COUNT(*) AS n FROM conversations').get()!.n, countBefo
 assert.deepEqual(readdirSync(IMAGES_DIR).sort(), filesBefore, 'rolled-back copies leave no files');
 
 deleteImageFiles(images);
-for (const path of copied.images)
-  assert.ok(existsSync(join(IMAGES_DIR, basename(path))), 'copy owns files independently');
+for (const asset of copied.media)
+  assert.ok(existsSync(join(IMAGES_DIR, basename(asset.url))), 'copy owns files independently');
 console.log(
   'Conversation copies: missing-file selection, snapshots, independent ownership and rollback passed.',
 );

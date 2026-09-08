@@ -141,8 +141,6 @@ async function renderAvatar(ctx: Ctx) {
     ctx.res.off('close', onClose);
     if (jobId) finishRenderProgress(jobId);
   }
-  // The response owns its buffer now; discard the temporary local preview before sending it.
-  result.release();
   ctx.res.writeHead(200, {
     'content-type': IMAGE_CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
   });

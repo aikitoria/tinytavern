@@ -92,12 +92,11 @@ function result(jobId: string, count = 1) {
   updateMediaJob(jobId, { state: 'downloading', submission_id: randomUUID() });
   const outputs: number[] = [];
   for (let i = 0; i < count; i++) {
-    const name = `${randomUUID()}.png`;
     const bytes = makePlaceholderPng();
-    writeFileSync(join(IMAGES_DIR, name), bytes);
+    const path = saveImage('.png', bytes);
     outputs.push(
       recordMediaResult(jobId, ++remoteId, {
-        path: `/images/${name}`,
+        path,
         kind: 'image',
         mime: 'image/png',
         byteSize: bytes.length,
@@ -382,7 +381,7 @@ for (const asset of saved.outputs)
     'Every saved gallery output survives finishing',
   );
 
-const inputPath = saveImage('draft-reference.png', makePlaceholderPng());
+const inputPath = saveImage('.png', makePlaceholderPng());
 const input = mediaAssetForPath(inputPath)!;
 stmt("INSERT INTO media_owners VALUES (?, 'gallery', 'test-input', '0')").run(input.id);
 const editWorkflow = {
@@ -411,12 +410,12 @@ discardMediaDraft(requireMediaJob(discarded.id), {
 });
 deleteImageFiles([inputPath]);
 assert.ok(
-  existsSync(join(IMAGES_DIR, 'draft-reference.png')),
+  existsSync(join(IMAGES_DIR, inputPath.slice(8))),
   'Running discard keeps inputs until cancellation completes',
 );
 finishMediaJob(discarded.id, 'cancelled');
 cleanupDiscardedMediaDraft(requireMediaJob(discarded.id));
-assert.equal(existsSync(join(IMAGES_DIR, 'draft-reference.png')), false);
+assert.equal(existsSync(join(IMAGES_DIR, inputPath.slice(8))), false);
 assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(discarded.draft!.id), undefined);
 assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
 console.log(

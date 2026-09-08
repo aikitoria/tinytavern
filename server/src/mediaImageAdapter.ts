@@ -1,19 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
-import { mediaJobActive, type Message, type MediaJobInputSnapshot } from '@tinytavern/shared';
+import type { Message, MediaJobInputSnapshot } from '@tinytavern/shared';
 import { IMAGES_DIR, stmt, toMediaAsset, transaction } from './db.ts';
-import {
-  createMediaJob,
-  createMediaJobFromRecipe,
-  startMediaJob,
-  cancelMediaJob,
-  deleteMediaJob,
-} from './mediaJobs.ts';
+import { createMediaJob, createMediaJobFromRecipe, startMediaJob } from './mediaJobs.ts';
 import {
   mediaLive,
-  mediaJobRow,
-  observeMediaJob,
   requireMediaJob,
   updateMediaJob,
   type MediaJobConfiguration,
@@ -22,6 +14,7 @@ import {
 import { tickMediaWorker } from './mediaWorker.ts';
 import { getMediaRecipe, messageRecipeId } from './mediaRecipes.ts';
 import { HttpError } from './router.ts';
+import { consumeTemporaryMediaJob } from './temporaryMediaJob.ts';
 
 export interface ImageRenderRequest {
   configuration: MediaJobConfiguration;
@@ -64,7 +57,7 @@ export function startMessageImageRender(
 }
 
 /** Interactive image callers use the same workflow snapshots and background worker. */
-export function startImageMediaJob(request: ImageRenderRequest): MediaJobRow {
+function startImageMediaJob(request: ImageRenderRequest): MediaJobRow {
   request.signal?.throwIfAborted();
   const configuration: MediaJobConfiguration = {
     ...request.configuration,
@@ -85,83 +78,33 @@ export function startImageMediaJob(request: ImageRenderRequest): MediaJobRow {
       request.inputs,
     );
     startMediaJob(requireMediaJob(draft.id), {}, false);
-    queueMicrotask(tickMediaWorker);
     return requireMediaJob(draft.id);
   });
 }
 
-/** Interactive callers retain the durable local result until they save or discard it. */
-export async function renderImageAsset(request: ImageRenderRequest) {
-  const job = startImageMediaJob(request);
-  let unsubscribe = () => {};
-  let rejectWait: ((reason: unknown) => void) | undefined;
-  const release = () => {
-    unsubscribe();
-    request.signal?.removeEventListener('abort', onAbort);
-    const current = mediaJobRow(job.id);
-    if (current && !mediaJobActive(current.state)) {
-      deleteMediaJob(current);
-    }
-  };
-  const onAbort = () => {
-    const current = mediaJobRow(job.id);
-    if (current && mediaJobActive(current.state)) {
-      cancelMediaJob(current);
-      queueMicrotask(tickMediaWorker);
-    }
-    rejectWait?.(request.signal?.reason ?? new Error('Image generation cancelled'));
-  };
-  try {
-    await new Promise<void>((resolve, reject) => {
-      rejectWait = reject;
-      const update = (row: MediaJobRow) => {
+/** Only the avatar preview needs raster bytes; the temporary asset is released after reading. */
+export async function renderImageBuffer(request: ImageRenderRequest) {
+  return consumeTemporaryMediaJob(
+    startImageMediaJob(request),
+    {
+      signal: request.signal,
+      onProgress: (row) => {
         const progress = mediaLive.get(row.id)?.progress;
         if (progress?.value !== undefined && progress.max !== undefined) {
           request.onProgress?.(progress.value, progress.max);
         }
-        if (progress?.preview) {
-          request.onPreview?.(progress.preview);
-        }
-        if (row.state === 'succeeded') {
-          resolve();
-        } else if (row.state === 'failed' || row.state === 'cancelled') {
-          reject(new Error(row.error ?? 'Image generation cancelled'));
-        }
-      };
-      unsubscribe = observeMediaJob(job.id, update);
-      request.signal?.addEventListener('abort', onAbort, { once: true });
-      update(requireMediaJob(job.id));
-    });
-    request.signal?.throwIfAborted();
-    const current = requireMediaJob(job.id);
-    const assetId = (JSON.parse(current.outputs_json) as number[])[0];
-    const assetRow = stmt('SELECT * FROM media_assets WHERE id = ?').get(assetId!);
-    if (!assetRow) {
-      throw new Error('The saved image result is unavailable');
-    }
-    const asset = toMediaAsset(assetRow);
-    return {
-      ext: extname(asset.url),
-      path: asset.url,
-      promptId: current.comfy_prompt_id!,
-      release,
-    };
-  } catch (err) {
-    release();
-    throw err;
-  }
-}
-
-/** Only the avatar preview needs the raster bytes in the HTTP response. */
-export async function renderImageBuffer(request: ImageRenderRequest) {
-  const result = await renderImageAsset(request);
-  try {
-    const data = await readFile(join(IMAGES_DIR, basename(result.path)), {
-      signal: request.signal,
-    });
-    return { ...result, data };
-  } catch (err) {
-    result.release();
-    throw err;
-  }
+        if (progress?.preview) request.onPreview?.(progress.preview);
+      },
+    },
+    async (row) => {
+      const assetId = (JSON.parse(row.outputs_json) as number[])[0];
+      const assetRow = stmt('SELECT * FROM media_assets WHERE id = ?').get(assetId!);
+      if (!assetRow) throw new Error('The saved image result is unavailable');
+      const asset = toMediaAsset(assetRow);
+      const data = await readFile(join(IMAGES_DIR, basename(asset.url)), {
+        signal: request.signal,
+      });
+      return { ext: extname(asset.url), data };
+    },
+  );
 }

@@ -26,8 +26,8 @@ export interface MediaJobConfiguration {
   timeoutSeconds: number;
   temporary?: boolean;
   messageRenderOnly?: boolean;
+  /** Historical job snapshots can retain a label even after its character was deleted. */
   galleryOutput?: {
-    characterId: number | null;
     characterName: string;
   };
 }

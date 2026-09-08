@@ -32,16 +32,17 @@ import {
 } from '../generation.ts';
 import { broadcastTree } from '../sync.ts';
 import { invalidate, hasConversationSubscribers } from '../events.ts';
-import {
-  cancelBackgroundSwipe,
-  getConversation,
-  prepareNextSwipe,
-  spawnAssistantReply,
-  touchConversation,
-} from './conversations.ts';
+import { spawnAssistantReply } from './conversations.ts';
+import { getConversation, touchConversation } from '../conversationStore.ts';
 import { objectBody, optionalNumber, positiveId, requiredString } from '../validation.ts';
 import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
-import { discardSpeculativeSwipes, markSwipeRead, nextUnreadSibling } from '../speculation.ts';
+import {
+  cancelBackgroundSwipe,
+  discardSpeculativeSwipes,
+  markSwipeRead,
+  nextUnreadSibling,
+  prepareNextSwipe,
+} from '../speculation.ts';
 import { parseImageConfig, startImageRender } from '../comfy.ts';
 import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../prompt.ts';
 import { bumpConversationRevision } from '../conversationRevision.ts';
@@ -581,7 +582,7 @@ route.post('/api/messages/:id/active-image', ({ params, body }) => {
     typeof index !== 'number' ||
     !Number.isSafeInteger(index) ||
     index < 0 ||
-    index >= msg.images.length
+    index >= msg.media.length
   ) {
     throw new HttpError(400, 'index out of range');
   }
@@ -607,11 +608,11 @@ route.post('/api/messages/:id/delete-image', ({ params, body }) => {
     typeof index !== 'number' ||
     !Number.isSafeInteger(index) ||
     index < 0 ||
-    index >= msg.images.length
+    index >= msg.media.length
   ) {
     throw new HttpError(400, 'index out of range');
   }
-  const images = [...msg.images];
+  const images = msg.media.map((asset) => asset.url);
   const [removed] = images.splice(index, 1);
   const activeImage = images.length > 0 ? Math.min(index, images.length - 1) : 0;
   transaction(() => {

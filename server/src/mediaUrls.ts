@@ -39,11 +39,10 @@ export function publicAvatar<T extends { avatar: string | null }>(
   };
 }
 export function publicMessage<T extends Message | null | undefined>(message: T): T {
-  return key && message?.images.length
+  return key && message?.media.length
     ? {
         ...message,
-        images: message.images.map(signMediaUrl),
-        media: message.media?.map(publicMediaAsset),
+        media: message.media.map(publicMediaAsset),
       }
     : message;
 }

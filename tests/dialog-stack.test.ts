@@ -19,7 +19,8 @@ localState.set(galleryFrame, galleryEdits);
 const jobs = parsePageLocation(formatPageLocation(gallery) + '+/jobs');
 stack.push(jobs, gallery);
 assert.equal(stack.frames().length, 2, 'Jobs from details does not create an empty draft');
-assert.equal(stack.top()!.media!.showJobs, true);
+assert.equal(stack.top()!.page.modal, 'media-jobs');
+assert.equal(stack.top()!.media, undefined, 'Jobs has no editor session or draft');
 assert.equal(stack.parent(), galleryFrame.page);
 assert.equal(stack.pop(), galleryFrame.page);
 assert.equal(localState.get(stack.top()!), galleryEdits);
@@ -34,7 +35,6 @@ const session = {
   prompt: 'Prompt from a chat selection',
   inputs: [],
   assets: [],
-  showJobs: false,
 };
 stack.push(draft, gallery, session);
 const draftFrame = stack.top()!;
@@ -74,12 +74,12 @@ const restored = createDialogStack();
 restored.restore(parsePageLocation(snapshot));
 assert.deepEqual(
   restored.frames().map((frame: { page: { modal: string } }) => frame.page.modal),
-  ['gallery', 'media-tools', 'media-tools', 'media-tools'],
+  ['gallery', 'media-tools', 'media-jobs', 'media-tools'],
 );
 assert.equal(restored.frames()[0]!.page.galleryId, 123);
 assert.equal(restored.frames()[0]!.page.query, 'night sky');
 assert.equal(restored.frames()[1]!.media!.jobId, 'job-a');
-assert.equal(restored.frames()[2]!.media!.showJobs, true);
+assert.equal(restored.frames()[2]!.media, undefined, 'Restored Jobs has no editor session');
 assert.equal(restored.frames()[3]!.media!.jobId, 'job-b');
 assert.equal(
   restored.frames()[1]!.media!.prompt,

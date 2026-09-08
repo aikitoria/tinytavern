@@ -123,7 +123,7 @@ try {
     }
   ).updated_at;
   assert(successUpdatedAt > oldTimestamp, 'successful render advances conversation recency');
-  assert(getMessage(successMessage)?.images.length === 1, 'successful render stores its image');
+  assert(getMessage(successMessage)?.media.length === 1, 'successful render stores its image');
 
   failSubmission = true;
   const failedTimestamp = Date.now() - 30_000;

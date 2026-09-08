@@ -5,6 +5,8 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { imageFileDimensions } from './imageDimensions.ts';
 import { MEDIA_SCHEMA_SQL } from './mediaSchema.ts';
+import { migrateMediaFileNames, migrateNumericMediaFileNames } from './mediaFileMigration.ts';
+import { migrateAvatarFileNames, migrateAvatarThumbnailPrefix } from './avatarFileMigration.ts';
 import type {
   Character,
   CharacterFolder,
@@ -1432,6 +1434,20 @@ migrate(61, () => {
     END;`);
 });
 
+// Durable links precede the path transaction; startup's orphan sweep removes old names afterward.
+migrate(62, () => migrateMediaFileNames(IMAGES_DIR, stmt));
+
+migrate(63, () => {
+  db.exec('ALTER TABLE avatar_thumbnails ADD COLUMN thumbnail_revision INTEGER NOT NULL DEFAULT 0');
+});
+
+migrate(64, () => {
+  migrateNumericMediaFileNames(IMAGES_DIR, stmt);
+  migrateAvatarFileNames(AVATAR_DIR, stmt);
+});
+
+migrate(65, () => migrateAvatarThumbnailPrefix(AVATAR_DIR, stmt));
+
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 stmt("DELETE FROM messages WHERE status = 'streaming' AND generation_kind = 'speculative'").run();
@@ -1526,10 +1542,11 @@ export function toMessage(r: Row): Message {
     genMeta: r.gen_meta_json ? JSON.parse(r.gen_meta_json as string) : null,
     generationKind: r.generation_kind as Message['generationKind'],
     generationToken: (r.generation_token as number | null) ?? null,
-    images,
-    media: images.flatMap((path) => {
+    media: images.map((path) => {
       const asset = mediaAssetForPath(path);
-      return asset ? [asset] : [];
+      // Attachment triggers create asset records for every stored path, including missing files.
+      if (!asset) throw new Error(`Missing media asset for message ${r.id}: ${path}`);
+      return asset;
     }),
     activeImage: (r.active_image as number) ?? 0,
     imagePending: (r.image_pending as number) === 1,

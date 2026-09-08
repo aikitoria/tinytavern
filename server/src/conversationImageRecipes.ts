@@ -1,6 +1,5 @@
 import { setMediaCharacters } from './mediaCharacters.ts';
 import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
 import {
   DEFAULT_MEDIA_RENDERING,
   namedItem,
@@ -248,7 +247,7 @@ export function importRecipeImages(
   const paths = new Map<string, string>();
   const assetIds = new Map<string, number>();
   for (const [id, asset] of assets) {
-    const path = saveImage(`msg-import-${randomUUID()}${asset.ext}`, asset.data);
+    const path = saveImage(asset.ext, asset.data);
     writtenImages.push(path);
     paths.set(id, path);
     const assetId = mediaAssetForPath(path)!.id;
@@ -313,7 +312,7 @@ export function importRecipeImages(
       return path;
     }
     // Each message alternative retains independent deletion ownership, as in legacy imports.
-    const copy = copyImage(path, `msg-import-${randomUUID()}${extname(path)}`);
+    const copy = copyImage(path);
     if (!copy) {
       throw new Error('Imported image disappeared before attachment');
     }

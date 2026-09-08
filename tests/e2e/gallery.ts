@@ -265,8 +265,8 @@ export async function testGallery(
       savedGallery.item.sourceConversationId === imageBranch.id &&
       savedGallery.item.sourceMessageId === branchedImageMessage.id &&
       savedGallery.item.sourceImage ===
-        branchedImageMessage.images[branchedImageMessage.activeImage] &&
-      savedGalleryImageUrl !== branchedImageMessage.images[branchedImageMessage.activeImage] &&
+        branchedImageMessage.media[branchedImageMessage.activeImage]!.url &&
+      savedGalleryImageUrl !== branchedImageMessage.media[branchedImageMessage.activeImage]!.url &&
       (await fetch(`${BASE}${savedGalleryImageUrl}`)).status === 200,
     'saving an image swipe copies its file and snapshots its prompt and source metadata',
   );
@@ -293,8 +293,8 @@ export async function testGallery(
     ),
   );
   assert(
-    (await fetch(`${BASE}${branchedImageMessage.images[0]}`)).status === 404 &&
-      (await fetch(`${BASE}${regenMsg.images[0]}`)).status === 200,
+    (await fetch(`${BASE}${branchedImageMessage.media[0]!.url}`)).status === 404 &&
+      (await fetch(`${BASE}${regenMsg.media[0]!.url}`)).status === 200,
     'deleting a branched conversation removes only its copied image files',
   );
   const detachedGallery = (await req<GalleryItem[]>('GET', '/api/gallery')).find(
@@ -386,12 +386,12 @@ export async function testGallery(
   const duplicatedImageMessage = imageOffPath.messages.find(
     (message) => message.id === imageDuplicate.messageId,
   )!;
-  const duplicatedImageUrls = duplicatedImageMessage.images;
+  const duplicatedImageUrls = duplicatedImageMessage.media.map((asset) => asset.url);
   assert(
-    duplicatedImageUrls.length === sourceBeforeImageCopy.images.length &&
+    duplicatedImageUrls.length === sourceBeforeImageCopy.media.length &&
       duplicatedImageUrls.every(
         (image, index) =>
-          image !== sourceBeforeImageCopy.images[index] && image.startsWith('/images/'),
+          image !== sourceBeforeImageCopy.media[index]!.url && image.startsWith('/images/'),
       ) &&
       duplicatedImageMessage.activeImage === sourceBeforeImageCopy.activeImage &&
       duplicatedImageMessage.parentId === imgRes.toolMessageId &&
@@ -424,7 +424,7 @@ export async function testGallery(
       (response) => response.status === 404,
     ) &&
       (
-        await Promise.all(sourceBeforeImageCopy.images.map((image) => fetch(`${BASE}${image}`)))
+        await Promise.all(sourceBeforeImageCopy.media.map((asset) => fetch(`${BASE}${asset.url}`)))
       ).every((response) => response.status === 200) &&
       afterImageDuplicateDelete.activeLeafId === imgRes.toolMessageId,
     'deleting an inserted image duplicate restores the source and removes only copied files',
@@ -482,7 +482,7 @@ export async function testGallery(
     'invalid raster render is rejected',
   );
   assert(
-    rejectedMessageRender?.images.length === 2,
+    rejectedMessageRender?.media.length === 2,
     'rejected active content creates no image reference',
   );
   assert(

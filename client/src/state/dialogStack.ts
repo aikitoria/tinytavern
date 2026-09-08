@@ -60,7 +60,7 @@ export function createDialogStack() {
       const draftId = jobs[jobId]?.draft?.id;
       return frames().find((frame) => {
         const media = frame.page.media;
-        if (!media?.jobId || media.showJobs) return false;
+        if (!media?.jobId) return false;
         return (
           media.jobId === jobId || (draftId != null && jobs[media.jobId]?.draft?.id === draftId)
         );

@@ -160,7 +160,7 @@ putSettings({
     jobTimeoutSeconds: 60,
   },
 });
-const inputPath = saveImage('restart-input.png', png);
+const inputPath = saveImage('.png', png);
 stmt(
   "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Test', '', ?, 1, 1)",
 ).run(inputPath);

@@ -28,7 +28,6 @@ export interface MediaToolSession {
   prompt: string;
   inputs: MediaJobInput[];
   assets: MediaAsset[];
-  showJobs: boolean;
 }
 
 export function openMediaTool(
@@ -38,13 +37,9 @@ export function openMediaTool(
     prompt?: string;
     input?: { asset: MediaAsset; slot: MediaJobInput['slot'] };
     jobId?: string;
-    showJobs?: boolean;
   } = {},
 ): void {
-  const existing =
-    options.jobId && !options.showJobs
-      ? dialogStack.findJob(options.jobId, state.mediaJobs)
-      : undefined;
+  const existing = options.jobId ? dialogStack.findJob(options.jobId, state.mediaJobs) : undefined;
   if (existing) {
     if (existing !== dialogStack.top()) {
       const target = existing.page;
@@ -63,7 +58,6 @@ export function openMediaTool(
     prompt: options.prompt ?? '',
     inputs: input ? [{ slot: input.slot, assetId: input.asset.id }] : [],
     assets: input ? [input.asset] : [],
-    showJobs: options.showJobs ?? false,
   };
   const current = readPageLocation();
   openDialog(
@@ -73,7 +67,7 @@ export function openMediaTool(
 }
 
 export function openMediaJobs(): void {
-  openMediaTool('image', { showJobs: true });
+  openModal('media-jobs');
 }
 
 export function leaveMediaTool(): void {

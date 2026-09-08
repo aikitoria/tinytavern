@@ -632,12 +632,7 @@ async function retrieve(
     const response = await fetch(`${config.comfyUrl}/view?${comfyFileParams(file)}`, {
       signal: requestSignal(signal, 180_000),
     });
-    const media = await downloadMedia(
-      response,
-      `job-${row.id}-${remote.id}-${randomUUID()}`,
-      kind,
-      signal,
-    );
+    const media = await downloadMedia(response, kind, signal);
     const current = requireMediaJob(row.id);
     if (current.state !== 'downloading') {
       deleteImageFiles([media.path]);

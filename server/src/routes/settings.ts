@@ -15,9 +15,8 @@ import {
   optionalNumber,
   optionalString,
 } from '../validation.ts';
-import { discardSpeculativeSwipes } from '../speculation.ts';
+import { discardSpeculativeSwipes, prepareSubscribedSwipes } from '../speculation.ts';
 import { subscribedConversationIds } from '../events.ts';
-import { prepareActiveSwipe } from './conversations.ts';
 import { bumpAllConversationRevisions } from '../conversationRevision.ts';
 import { broadcastTree } from '../sync.ts';
 import { clearSession, setAccessPassword, startSession, validateNewPassword } from '../auth.ts';
@@ -163,7 +162,7 @@ route.put('/api/settings', ({ req, res, body }) => {
     (!current.backgroundSwipeGeneration ||
       (!current.parallelBackgroundSwipeGeneration && next.parallelBackgroundSwipeGeneration))
   ) {
-    for (const conversationId of subscribedConversationIds()) prepareActiveSwipe(conversationId);
+    prepareSubscribedSwipes();
   }
   if (accessPassword === undefined) invalidate('settings');
   else {

@@ -1,4 +1,5 @@
 import { defineEntityTransfer } from './entityTransfer.ts';
+import { createEntityWriter } from './entityWriter.ts';
 import type { InvalidateEntity } from '@tinytavern/shared';
 import { stmt } from '../db.ts';
 import { invalidate } from '../events.ts';
@@ -93,21 +94,17 @@ export function refIdField<T>(
  * Patches merge fields; patch/delete discard speculative swipes because entities affect prompts.
  */
 export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T>): void {
-  defineEntityTransfer(cfg);
+  const writer = createEntityWriter(cfg);
+  defineEntityTransfer(cfg, writer);
   const publish = (dto: T): T => (cfg.toPublic ? cfg.toPublic(dto) : dto);
-  const columns = cfg.fields.map((field) => field.column);
-  const insertSql = `INSERT INTO ${cfg.table} (${columns.join(', ')}, created_at)
-     VALUES (${columns.map(() => '?').join(', ')}, ?)`;
-  const updateSql = `UPDATE ${cfg.table} SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`;
 
   route.get(`/api/${cfg.table}`, () => rows(cfg.table).map(cfg.toDto).map(publish));
 
   route.post(`/api/${cfg.table}`, ({ body }) => {
     const b = objectBody(body);
-    const values = cfg.fields.map((field) => field.value(b, undefined));
-    const result = stmt(insertSql).run(...values, Date.now());
+    const id = writer.insert(writer.values(b));
     invalidate(cfg.table);
-    return publish(cfg.toDto(rowById(cfg.table, Number(result.lastInsertRowid))));
+    return publish(cfg.toDto(rowById(cfg.table, id)));
   });
 
   // Include noneditable columns (api_key, card_json); the unreferenced copy cannot affect prompts.
@@ -136,10 +133,8 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     if (cfg.readOnlyColumn && row[cfg.readOnlyColumn] === 1) {
       throw new HttpError(403, 'This default is read-only. Duplicate it to make changes.');
     }
-    const cur = cfg.toDto(row);
     const b = objectBody(body);
-    const values = cfg.fields.map((field) => field.value(b, cur));
-    stmt(updateSql).run(...values, id);
+    writer.update(id, writer.values(b, row));
     invalidate(cfg.table);
     discardSpeculativeSwipes();
     bumpAllConversationRevisions();

@@ -6,7 +6,6 @@ export interface MediaPageLocation {
   operation: MediaOperation;
   jobId: string | null;
   contextConversationId: number | null;
-  showJobs: boolean;
 }
 
 export interface PageLocation {
@@ -59,8 +58,7 @@ function parsePane(hash: string): PageLocation {
   } else if (page === 'map' || page === 'trace') {
     result.viewMode = page;
   } else if (page === 'jobs') {
-    result.modal = 'media-tools';
-    result.media = { operation: 'image', jobId: null, contextConversationId: null, showJobs: true };
+    result.modal = 'media-jobs';
   } else if (page === 'media' && detail === 'job' && entity) {
     result.modal = 'media-tools';
     // The operation and context are resolved from the saved job, never from its URL.
@@ -68,7 +66,6 @@ function parsePane(hash: string): PageLocation {
       operation: 'image',
       jobId: entity,
       contextConversationId: null,
-      showJobs: false,
     };
   } else if (page === 'media') {
     const namedOperation: MediaOperation | undefined =
@@ -87,13 +84,17 @@ function parsePane(hash: string): PageLocation {
               : undefined;
     const operation = MEDIA_OPERATIONS.find((item) => item.id === (namedOperation ?? detail));
     if (operation) {
-      result.modal = 'media-tools';
-      result.media = {
-        operation: operation.id,
-        jobId: entity || null,
-        contextConversationId: positiveId(params.get('context')),
-        showJobs: params.get('jobs') === '1',
-      };
+      if (params.get('jobs') === '1') {
+        // Older tool URLs embedded the Jobs list in an otherwise unused editor.
+        result.modal = 'media-jobs';
+      } else {
+        result.modal = 'media-tools';
+        result.media = {
+          operation: operation.id,
+          jobId: entity || null,
+          contextConversationId: positiveId(params.get('context')),
+        };
+      }
     }
   }
   return result;
@@ -112,9 +113,10 @@ function formatPane(page: PageLocation): string {
     parts.push('settings', page.settingsTab ?? 'general');
     if (page.settingsEntity !== undefined) parts.push(String(page.settingsEntity));
     if (page.settingsDetail) params.set('detail', '1');
+  } else if (page.modal === 'media-jobs') {
+    parts.push('jobs');
   } else if (page.modal === 'media-tools' && page.media) {
-    if (page.media.showJobs) parts.push('jobs');
-    else if (page.media.jobId) parts.push('media', 'job', page.media.jobId);
+    if (page.media.jobId) parts.push('media', 'job', page.media.jobId);
     else {
       const operation = page.media.operation;
       parts.push(
@@ -130,7 +132,7 @@ function formatPane(page: PageLocation): string {
       if (operation === 'video-first') params.set('mode', 'first-frame');
       if (operation === 'video-references') params.set('mode', 'references');
     }
-    if (!page.media.showJobs && !page.media.jobId && page.media.contextConversationId)
+    if (!page.media.jobId && page.media.contextConversationId)
       params.set('context', String(page.media.contextConversationId));
   } else if (page.modal === 'conversation') {
     parts.push('conversation');
@@ -184,10 +186,8 @@ export function parsePageLocation(hash: string): PageLocation {
   // Previously shared URLs may revisit the same saved job. Revisiting unwinds to it.
   const unique: PageLocation[] = [];
   for (const pane of pages) {
-    const jobId = pane.media?.showJobs ? null : pane.media?.jobId;
-    const existing = jobId
-      ? unique.findIndex((item) => !item.media?.showJobs && item.media?.jobId === jobId)
-      : -1;
+    const jobId = pane.media?.jobId;
+    const existing = jobId ? unique.findIndex((item) => item.media?.jobId === jobId) : -1;
     if (existing >= 0) unique.splice(existing + 1);
     else unique.push(pane);
   }

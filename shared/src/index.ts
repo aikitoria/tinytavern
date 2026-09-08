@@ -45,11 +45,9 @@ export interface Message {
   generationKind: GenerationKind;
   /** Generation attempt-group identity; changes on in-place continuation. */
   generationToken: number | null;
-  /** /images/ paths, swipeable within the message. */
-  images: string[];
-  /** Typed image/video alternatives; images remains the file-path compatibility view. */
-  media?: MediaAsset[];
-  /** Server-persisted index into images. */
+  /** Ordered image/video alternatives, swipeable within the message. */
+  media: MediaAsset[];
+  /** Server-persisted index into media. */
   activeImage: number;
   imagePending: boolean;
   /** A stored render config permits generating more images. */

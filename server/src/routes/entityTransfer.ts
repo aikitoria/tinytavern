@@ -15,6 +15,7 @@ import { route, HttpError } from '../router.ts';
 import { objectBody, positiveId } from '../validation.ts';
 import { rowById, rows } from './entityUtils.ts';
 import type { EntityConfig } from './entityRoutes.ts';
+import type { EntityWriter } from './entityWriter.ts';
 import {
   readAvatarFile,
   saveAvatar,
@@ -28,7 +29,10 @@ import { bumpAllConversationRevisions } from '../conversationRevision.ts';
 import { broadcastTree } from '../sync.ts';
 
 /** Reuse the entity's normal field validators; bulk imports commit as one database change. */
-export function defineEntityTransfer<T extends { id: number }>(cfg: EntityConfig<T>): void {
+export function defineEntityTransfer<T extends { id: number }>(
+  cfg: EntityConfig<T>,
+  writer: EntityWriter,
+): void {
   if (!Object.hasOwn(ENTITY_TRANSFER_FIELDS, cfg.table)) return;
   const type = cfg.table as TransferEntity;
   const snapshot = () =>
@@ -108,28 +112,16 @@ export function defineEntityTransfer<T extends { id: number }>(cfg: EntityConfig
         }
         // Imported sampling settings replace the exported parameter object in full.
         if (type === 'endpoints') item.replaceGenParams = true;
-        const values = cfg.fields.map((field) =>
-          field.value(item, current ? cfg.toDto(current) : undefined),
-        );
+        const values = writer.values(item, current);
         return { name, values, id: current ? Number(current.id) : null, avatar };
       });
       const backups: { id: number; data: Buffer | null }[] = [];
       const imported: { name: string; id: number }[] = [];
-      const columns = cfg.fields.map((field) => field.column);
       try {
         transaction(() => {
           for (const item of plan) {
-            const id =
-              item.id ??
-              Number(
-                stmt(`INSERT INTO ${cfg.table} (${columns.join(', ')}, created_at)
-              VALUES (${columns.map(() => '?').join(', ')}, ?)`).run(...item.values, Date.now())
-                  .lastInsertRowid,
-              );
-            if (item.id !== null)
-              stmt(
-                `UPDATE ${cfg.table} SET ${columns.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`,
-              ).run(...item.values, id);
+            const id = item.id ?? writer.insert(item.values);
+            if (item.id !== null) writer.update(id, item.values);
             if (item.avatar !== undefined) {
               backups.push({ id, data: readAvatarFile('persona', id) });
               const avatar = item.avatar === null ? null : saveAvatar('persona', id, item.avatar);

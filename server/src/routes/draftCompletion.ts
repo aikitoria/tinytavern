@@ -8,7 +8,7 @@ import { requireExpectedActiveLeaf } from '../concurrency.ts';
 import { objectBody, optionalNullableId, optionalNumber, positiveId } from '../validation.ts';
 import { streamResponse } from './streamResponse.ts';
 import { getSettings } from '../settingsStore.ts';
-import { getConversation } from './conversations.ts';
+import { getConversation } from '../conversationStore.ts';
 
 const DRAFT_COMPLETION_MAX_TOKENS = 1024;
 const streaming = new Set<number>();

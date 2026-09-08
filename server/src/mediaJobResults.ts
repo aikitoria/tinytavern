@@ -1,4 +1,4 @@
-import { setMediaCharacters, mediaCharacterNames } from './mediaCharacters.ts';
+import { setMediaCharacters } from './mediaCharacters.ts';
 import { stmt, transaction, invalidateMediaAsset, toMediaAsset } from './db.ts';
 import { invalidate } from './events.ts';
 import {
@@ -14,6 +14,7 @@ import type { DownloadedMedia } from './mediaFiles.ts';
 import type { MediaJobState } from '@tinytavern/shared';
 import { saveMediaRecipe } from './mediaRecipes.ts';
 import { deleteImageFiles } from './images.ts';
+import { insertGalleryAsset } from './galleryStore.ts';
 
 /** A remote-file ledger ID is a stable ingestion key across retries and restarts. */
 export function ingestedMedia(jobId: string, remoteFileId: number) {
@@ -38,11 +39,9 @@ export function recordMediaResult(
       seed: job.seed,
     });
     const result = stmt(`
-      INSERT INTO media_assets (
-        path, kind, mime, byte_size, width, height, duration, recipe_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      media.path,
+      UPDATE media_assets SET kind = ?, mime = ?, byte_size = ?, width = ?, height = ?,
+        duration = ?, recipe_id = ?, created_at = ? WHERE path = ? RETURNING id
+    `).get(
       media.kind,
       media.mime,
       media.byteSize,
@@ -51,8 +50,10 @@ export function recordMediaResult(
       media.duration,
       job.id,
       Date.now(),
+      media.path,
     );
-    const assetId = Number(result.lastInsertRowid);
+    if (!result) throw new Error('The downloaded media asset reservation is missing');
+    const assetId = Number(result.id);
     setMediaCharacters(assetId, configuration.characterIds ?? []);
     stmt(`
       INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)
@@ -144,34 +145,12 @@ export function completeMediaJob(jobId: string): void {
       );
       touchMediaConversation(Number(message.conversation_id));
     } else if (!config.temporary) {
-      const character =
-        job.context_conversation_id === null
-          ? null
-          : stmt(`
-        SELECT c.id, c.name FROM characters c
-        JOIN conversations conv ON conv.character_id = c.id WHERE conv.id = ?
-      `).get(job.context_conversation_id);
-      const now = Date.now();
-      const gallery = config.galleryOutput;
       for (const asset of assets) {
-        stmt(`
-          INSERT INTO gallery_items (
-            character_name, source_conversation_id, prompt, image,
-            image_width, image_height, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          mediaCharacterNames(asset.id) ||
-            gallery?.characterName ||
-            character?.name ||
-            'Media tools',
-          job.context_conversation_id,
-          job.prompt,
-          asset.url,
-          asset.width,
-          asset.height,
-          now,
-          now,
-        );
+        insertGalleryAsset(asset, {
+          conversationId: job.context_conversation_id,
+          prompt: job.prompt,
+          characterName: config.galleryOutput?.characterName,
+        });
       }
       invalidate('gallery');
     }

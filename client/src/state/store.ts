@@ -35,7 +35,8 @@ import {
 import { isCurrentSettingsRevision, SuccessfulFetchSequence, upsertById } from './sync.ts';
 import { afterOperationEnd, afterTreeFrame } from './swipeSync.ts';
 
-export type ModalKind = 'settings' | 'conversation' | 'gallery' | 'media-tools' | null;
+export type ModalKind =
+  'settings' | 'conversation' | 'gallery' | 'media-tools' | 'media-jobs' | null;
 
 const GROUP_BY_CHARACTER_KEY = 'tinytavern.groupByCharacter';
 
@@ -73,7 +74,6 @@ interface AppState {
   sidebarOpen: boolean;
   groupByCharacter: boolean;
   modal: ModalKind;
-  settingsCharacterId: number | null;
   /** 'trace' replaces the timeline with the assembled upstream request;
    * 'map' shows the conversation tree as a zoomable 2D map. */
   viewMode: 'chat' | 'trace' | 'map';
@@ -99,7 +99,6 @@ export const [state, setState] = createStore<AppState>({
   sidebarOpen: false,
   groupByCharacter: loadGroupByCharacter(),
   modal: null,
-  settingsCharacterId: null,
   viewMode: 'chat',
   treeNavigationPending: false,
   toasts: [],
@@ -813,7 +812,6 @@ export function openDialog(
   const next = { ...page, stack: pageStack(from).map(paneLocation) };
   batch(() => {
     dialogStack.push(next, from, session);
-    setState('settingsCharacterId', null);
     setState('modal', page.modal);
     writePageLocation(next, true);
   });

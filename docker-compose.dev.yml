@@ -37,9 +37,6 @@ services:
     working_dir: /app
     user: "1000:1000"
     command: npm run dev -w client
-    environment:
-      CADDY_FRONTEND: "1"
-      TINYTAVERN_IP_ALLOWLIST: ""
     volumes:
       - .:/app
       - ./.git:/app/.git:ro

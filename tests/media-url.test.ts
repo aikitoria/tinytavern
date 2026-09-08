@@ -44,9 +44,23 @@ try {
     publicAvatar(avatar).avatarThumbnail!,
     /^\/avatars\/avatar-thumb-test\.jpg\?expires=.*&sig=/,
   );
+  stmt(
+    "INSERT INTO media_assets(path, thumbnail) VALUES ('/images/a.png', '/images/a-thumb.jpg')",
+  ).run();
   const message = toMessage({ id: 1, images_json: '["/images/a.png"]' });
-  assert.match(publicMessage(message).images[0]!, /&sig=/);
-  assert.deepEqual(message.images, ['/images/a.png']);
+  assert.match(publicMessage(message).media[0]!.url, /&sig=/);
+  assert.deepEqual(
+    message.media.map((asset) => asset.url),
+    ['/images/a.png'],
+  );
+  assert.match(publicMessage(message).media[0]!.thumbnail!, /&sig=/);
+  assert.equal(message.media[0]!.thumbnail, '/images/a-thumb.jpg');
+  assert.equal('images' in publicMessage(message), false);
+  assert.throws(
+    () => toMessage({ id: 1, images_json: '["/images/a.png","/images/missing-record.png"]' }),
+    /Missing media asset for message 1: \/images\/missing-record\.png/,
+    'A missing asset record fails explicitly instead of shifting attachment indices',
+  );
   stmt(
     "INSERT INTO media_assets(path, thumbnail) VALUES ('/images/g.png', '/images/thumbnail.jpg')",
   ).run();

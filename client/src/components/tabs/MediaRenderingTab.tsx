@@ -1,8 +1,6 @@
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { exportWorkflow, importWorkflow, transferObject } from '@tinytavern/shared';
-import { faPlus } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
-import { For, Show, createSignal } from 'solid-js';
+import { For, Show } from 'solid-js';
 import {
   MEDIA_OPERATIONS,
   DEFAULT_MEDIA_RENDERING,
@@ -16,6 +14,10 @@ import {
 import { state } from '../../state/store.ts';
 import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import Select from '../Select.tsx';
+import NamedCollectionToolbar, {
+  type NamedCollectionToolbarHandle,
+} from '../NamedCollectionToolbar.tsx';
+import { uniqueCollectionName } from '../../state/collectionNames.ts';
 import MacroTextarea from '../MacroTextarea.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import { mediaSettingsDraft } from './mediaSettingsDraft.tsx';
@@ -35,8 +37,7 @@ export default function MediaRenderingTab() {
     label: string;
     referenceCount: MediaWorkflow['referenceCount'];
   }) => {
-    const [renaming, setRenaming] = createSignal(false);
-    let nameInput: HTMLInputElement | undefined;
+    let toolbar!: NamedCollectionToolbarHandle;
     const key = () => mediaWorkflowKey(props.operation, props.referenceCount);
     const workflows = () =>
       form
@@ -49,24 +50,13 @@ export default function MediaRenderingTab() {
     const current = () => workflows().find((item) => item.id === selected());
     const json = createDefaultField(() => '');
     const select = (id: string) => {
-      setRenaming(false);
       form.setDraft((value) => ({ ...value, defaults: { ...value.defaults, [key()]: id } }));
-    };
-    const rename = () => {
-      setRenaming(true);
-      queueMicrotask(() => {
-        nameInput?.focus({ preventScroll: true });
-        nameInput?.select();
-      });
     };
     const add = (duplicate = false) => {
       const source = current();
       const id = crypto.randomUUID();
       const baseName = duplicate && source ? `${source.name} (copy)` : 'New workflow';
-      let name = baseName;
-      for (let number = 2; workflows().some((item) => item.name === name); number++) {
-        name = `${baseName} ${number}`;
-      }
+      const name = uniqueCollectionName(baseName, workflows());
       form.setDraft((value) => ({
         ...value,
         defaults: { ...value.defaults, [key()]: id },
@@ -83,15 +73,12 @@ export default function MediaRenderingTab() {
           },
         ],
       }));
-      if (!duplicate) rename();
-      else setRenaming(false);
     };
     const remove = () => {
       const id = selected();
       const choices = workflows();
       const index = choices.findIndex((item) => item.id === id);
       const next = choices[index + 1] ?? choices[index - 1];
-      setRenaming(false);
       form.setDraft((value) => {
         const defaults = { ...value.defaults };
         if (next) defaults[key()] = next.id;
@@ -116,26 +103,23 @@ export default function MediaRenderingTab() {
             ? ` · ${props.referenceCount} reference${props.referenceCount === 1 ? '' : 's'}`
             : ''}
         </label>
-        <div class="key-row prompt-preset-toolbar">
-          <Select
-            ariaLabel={`${props.label} saved workflows`}
-            value={selected()}
-            options={workflows().map((item) => ({ value: item.id, label: item.name }))}
-            buttonLabel={
-              current()?.name ?? (workflows().length ? 'Select a workflow' : 'No saved workflows')
-            }
-            onChange={select}
-          />
-          <button onClick={() => add()}>
-            <FontAwesomeIcon icon={faPlus} size={12} /> New
-          </button>
-          <Show when={current()}>
-            <button onClick={() => add(true)}>Duplicate</button>
-            <button onClick={rename}>Rename</button>
-            <button class="danger-btn" onClick={remove}>
-              Delete
-            </button>
-          </Show>
+        <NamedCollectionToolbar
+          ref={toolbar}
+          ariaLabel={`${props.label} saved workflows`}
+          selected={selected()}
+          options={workflows().map((item) => ({ value: item.id, label: item.name }))}
+          buttonLabel={
+            current()?.name ?? (workflows().length ? 'Select a workflow' : 'No saved workflows')
+          }
+          hasSelection={!!current()}
+          name={current()?.name ?? ''}
+          nameLabel="Workflow name"
+          onRename={(name) => updateWorkflow(selected(), { name })}
+          onSelect={select}
+          onNew={() => add()}
+          onDuplicate={() => add(true)}
+          onDelete={remove}
+        >
           <SettingsTransferButtons
             type={`workflow:${key()}`}
             onError={form.setError}
@@ -161,25 +145,11 @@ export default function MediaRenderingTab() {
                   : [...value.workflows, workflow],
                 defaults: { ...value.defaults, [key()]: workflow.id },
               }));
-              setRenaming(false);
+              toolbar.closeRename();
             }}
           />
-        </div>
+        </NamedCollectionToolbar>
         <Show when={current()}>
-          <div class="prompt-preset-rename" classList={{ hidden: !renaming() }}>
-            <label>Workflow name</label>
-            <div class="key-row">
-              <input
-                ref={nameInput}
-                value={current()?.name ?? ''}
-                onInput={(event) => updateWorkflow(selected(), { name: event.currentTarget.value })}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') setRenaming(false);
-                }}
-              />
-              <button onClick={() => setRenaming(false)}>Done</button>
-            </div>
-          </div>
           <SettingLabel field={json}>
             Workflow JSON
             <Show when={props.operation !== 'image-describe'}>

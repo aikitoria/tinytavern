@@ -1,4 +1,5 @@
 import type { ChatMessage } from './prompt.ts';
+import { appendChatMessage } from './prompt.ts';
 
 import { expandPromptSlots, systemNote } from '@tinytavern/shared';
 
@@ -32,39 +33,14 @@ export class DraftSuffixFilter {
 }
 
 /**
- * Add the upstream-only draft instruction with nonempty, alternating turns
- * for strict chat APIs; merge consecutive same-role messages.
+ * Append the draft instruction to the fresh, normalized buildChatMessages result.
  */
 export function buildDraftCompletionMessages(
   history: ChatMessage[],
   draft: string,
   template: string,
 ): ChatMessage[] {
-  const normalized: ChatMessage[] = [];
-  for (const source of history) {
-    const content = source.content.trim();
-    // Strict APIs need visible content even for reasoning-only responses.
-    if (!content && !source.reasoning_content?.trim()) continue;
-    const message: ChatMessage = {
-      ...source,
-      content: content || '(No visible response)',
-    };
-    const previous = normalized[normalized.length - 1];
-    if (previous && previous.role === message.role) {
-      previous.content = `${previous.content}\n\n${message.content}`;
-      if (message.reasoning_content) {
-        previous.reasoning_content = previous.reasoning_content
-          ? `${previous.reasoning_content}\n\n${message.reasoning_content}`
-          : message.reasoning_content;
-      }
-    } else {
-      normalized.push(message);
-    }
-  }
-
   const request = expandPromptSlots(systemNote(template), { draft });
-  const previous = normalized[normalized.length - 1];
-  if (previous?.role === 'user') previous.content += `\n\n${request}`;
-  else normalized.push({ role: 'user', content: request });
-  return normalized;
+  appendChatMessage(history, { role: 'user', content: request });
+  return history;
 }

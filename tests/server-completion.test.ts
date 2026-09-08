@@ -42,6 +42,22 @@ try {
   assert.deepEqual(deltas, ['hé', '🦊']);
   assert.deepEqual(wire, { model: 'test-model', messages, stream: true, max_tokens: 71 });
 
+  for (const [finish, error] of [
+    ['', /ended before a complete reply/],
+    ['data: [DONE]\n\n', null],
+    ['data: {"choices":[{"finish_reason":"stop"}]}\n\n', null],
+    ['data: {"choices":[{"finish_reason":"length"}]}\n\n', /truncated by the token limit/],
+    ['data: {"choices":[{"finish_reason":"content_filter"}]}\n\n', /ended before a complete reply/],
+  ] as const) {
+    reply = () => new Response(frame({ content: 'Prompt' }) + finish);
+    const complete = streamChatCompletion(null, messages, 71, () => {}, undefined, {
+      requireComplete: true,
+    });
+    if (error) await assert.rejects(complete, error);
+    else assert.equal(await complete, 'Prompt');
+  }
+  reply = () => new Response(frame({ content: 'hé' }) + frame({ content: '🦊' }));
+
   stmt("UPDATE endpoints SET prefill_mode = 'vllm', gen_params_json = ? WHERE id = ?").run(
     JSON.stringify({ temperature: 0, maxTokens: 99, reasoningEffort: 'high' }),
     endpointId,

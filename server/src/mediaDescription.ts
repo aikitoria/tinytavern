@@ -1,18 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import {
-  mediaJobActive,
-  mediaWorkflowKey,
-  type ImageDescriptionProgress,
-} from '@tinytavern/shared';
-import { createMediaJob, startMediaJob, cancelMediaJob, deleteMediaJob } from './mediaJobs.ts';
-import {
-  mediaJobRow,
-  mediaLive,
-  observeMediaJob,
-  requireMediaJob,
-  type MediaJobRow,
-} from './mediaJobStore.ts';
-import { tickMediaWorker } from './mediaWorker.ts';
+import { mediaWorkflowKey, type ImageDescriptionProgress } from '@tinytavern/shared';
+import { createMediaJob, startMediaJob } from './mediaJobs.ts';
+import { mediaLive, requireMediaJob } from './mediaJobStore.ts';
+import { consumeTemporaryMediaJob } from './temporaryMediaJob.ts';
 import { getSettings } from './settingsStore.ts';
 import { HttpError } from './router.ts';
 import { transaction } from './db.ts';
@@ -55,37 +45,15 @@ export async function describeImage(
     startMediaJob(requireMediaJob(draft.id), {}, false);
     return requireMediaJob(draft.id);
   });
-  let unsubscribe = () => {};
-  let rejectWait: ((reason: unknown) => void) | undefined;
-  const abort = () => {
-    const current = mediaJobRow(job.id);
-    if (current && mediaJobActive(current.state)) cancelMediaJob(current);
-    queueMicrotask(tickMediaWorker);
-    rejectWait?.(signal.reason);
-  };
-  try {
-    return await new Promise<string>((resolve, reject) => {
-      rejectWait = reject;
-      const update = (row: MediaJobRow) => {
+  return consumeTemporaryMediaJob(
+    job,
+    {
+      signal,
+      onProgress: (row) => {
         const { value, max, node, graph } = mediaLive.get(row.id)?.progress ?? {};
         onProgress({ state: row.state, progress: { value, max, node, graph } });
-        if (row.state === 'succeeded') resolve(row.prompt);
-        else if (row.state === 'failed' || row.state === 'cancelled') {
-          reject(new Error(row.error ?? 'Prompt generation cancelled'));
-        }
-      };
-      unsubscribe = observeMediaJob(job.id, update);
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) abort();
-      else {
-        update(job);
-        queueMicrotask(tickMediaWorker);
-      }
-    });
-  } finally {
-    unsubscribe();
-    signal.removeEventListener('abort', abort);
-    const current = mediaJobRow(job.id);
-    if (current && !mediaJobActive(current.state)) deleteMediaJob(current);
-  }
+      },
+    },
+    (row) => row.prompt,
+  );
 }

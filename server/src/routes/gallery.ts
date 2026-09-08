@@ -1,7 +1,6 @@
 import { mediaCharacterIds, mediaCharacterNames, setMediaCharacters } from '../mediaCharacters.ts';
 import { publicGalleryItem } from '../mediaUrls.ts';
-import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
+import { insertGalleryAsset } from '../galleryStore.ts';
 import type { GalleryItem } from '@tinytavern/shared';
 import {
   mediaAssetForPath,
@@ -77,14 +76,11 @@ route.post(
       if (!character) throw new HttpError(404, 'character not found');
       characterName = character.name;
     } else if (characterName.length > 500) throw new HttpError(400, 'character name is too long');
-    const saved = saveImage(`gallery-${randomUUID()}${format.ext}`, raw);
+    const saved = saveImage(format.ext, raw);
     try {
-      const now = Date.now();
-      const result = stmt(`INSERT INTO gallery_items
-      (character_name, prompt, image, image_width, image_height, created_at, updated_at)
-      VALUES (?, '', ?, ?, ?, ?, ?)`).run(characterName, saved, size.width, size.height, now, now);
-      if (characterId !== null) setMediaCharacters(mediaAssetForPath(saved)!.id, [characterId]);
-      const item = galleryItem(Number(result.lastInsertRowid));
+      const asset = mediaAssetForPath(saved)!;
+      if (characterId !== null) setMediaCharacters(asset.id, [characterId]);
+      const item = galleryItem(insertGalleryAsset(asset, { characterName, prompt: '' }));
       invalidate('gallery');
       return item;
     } catch (err) {
@@ -129,31 +125,18 @@ route.post('/api/gallery', ({ body }) => {
     GalleryRow | undefined;
   if (existing) return { item: toGalleryItem(existing), created: false };
 
-  const ext = extname(sourceImage).toLowerCase();
-  const copied = copyImage(sourceImage, `gallery-${randomUUID()}${ext}`);
+  const copied = copyImage(sourceImage);
   if (!copied) throw new HttpError(409, 'the source image file no longer exists');
   try {
-    const size = mediaAssetForPath(copied);
-    const now = Date.now();
-    const result = stmt(
-      `INSERT INTO gallery_items
-         (character_name, source_conversation_id, source_message_id,
-          source_image, prompt, image, created_at, updated_at,
-          image_width, image_height)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      mediaCharacterNames(size!.id) || source.character_name,
-      source.conversation_id,
-      source.id,
-      sourceImage,
-      source.content,
-      copied,
-      now,
-      now,
-      size?.width ?? null,
-      size?.height ?? null,
+    const item = galleryItem(
+      insertGalleryAsset(mediaAssetForPath(copied)!, {
+        characterName: source.character_name,
+        conversationId: source.conversation_id,
+        messageId: source.id,
+        image: sourceImage,
+        prompt: source.content,
+      }),
     );
-    const item = galleryItem(Number(result.lastInsertRowid));
     invalidate('gallery');
     return { item, created: true };
   } catch (err) {

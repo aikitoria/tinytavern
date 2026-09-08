@@ -13,7 +13,6 @@ import {
   faChevronLeft,
   faChevronRight,
   faImages as faImagesSolid,
-  faPlus,
   faRotateRight,
   faSpinner,
   faXmark,
@@ -29,7 +28,7 @@ import {
   type Message,
 } from '@tinytavern/shared';
 import type { ComposerCommand } from '../composerCommands.ts';
-import { api, ApiError } from '../state/api.ts';
+import { api } from '../state/api.ts';
 import {
   activePath,
   applyGalleryItem,
@@ -50,7 +49,11 @@ import { openMediaTool, openMediaRerun } from '../media/navigation.ts';
 import MacroHelp from '../components/MacroHelp.tsx';
 import MacroTextarea from '../components/MacroTextarea.tsx';
 import Markdown from '../components/Markdown.tsx';
-import Select from '../components/Select.tsx';
+import NamedCollectionToolbar, {
+  type NamedCollectionToolbarHandle,
+} from '../components/NamedCollectionToolbar.tsx';
+import { uniqueCollectionName } from '../state/collectionNames.ts';
+import { createSettingsSubmission } from '../state/settingsSubmission.ts';
 import { useSettingsGuard } from '../components/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
@@ -305,14 +308,6 @@ export function imageGenerationTools() {
   return [...promptTools('describe', 'Character'), ...promptTools('face', 'Face')];
 }
 
-/** Names identify active selections, so copies must have unique names. */
-function copyName(base: string, taken: (name: string) => boolean): string {
-  for (let n = 1; ; n++) {
-    const candidate = n === 1 ? `${base} (copy)` : `${base} (copy ${n})`;
-    if (!taken(candidate)) return candidate;
-  }
-}
-
 /** The same available built-in name is used when adding an item or reverting its name. */
 function numberedName(prefix: string, items: readonly { name: string }[], index = items.length) {
   let number = index + 1;
@@ -340,10 +335,8 @@ function PromptPresetEditor(props: {
   const [presets, setPresets] = createSignal<ImagePromptPreset[]>([]);
   /** Index into presets(); -1 = built-in Default. */
   const [selected, setSelected] = createSignal(-1);
-  const [renaming, setRenaming] = createSignal(false);
-  const nameEl = createDefaultField(() =>
-    selected() < 0 ? '' : numberedName('Preset', presets(), selected()),
-  );
+  const [name, setName] = createSignal('');
+  let toolbar!: NamedCollectionToolbarHandle;
   const promptEl = createDefaultField(() => props.defaultPrompt);
   const contextEl = createDefaultField(() => props.defaultContext ?? '');
 
@@ -352,7 +345,7 @@ function PromptPresetEditor(props: {
     return presets().map((preset, i) => {
       if (i !== idx) return preset;
       return {
-        name: nameEl.value.trim() || preset.name,
+        name: name().trim() || preset.name,
         prompt: promptEl.value,
         ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
       };
@@ -363,9 +356,9 @@ function PromptPresetEditor(props: {
 
   const showPreset = (idx: number) => {
     setSelected(idx);
-    setRenaming(false);
+    toolbar.closeRename();
     const preset = presets()[idx];
-    nameEl.value = preset?.name ?? '';
+    setName(preset?.name ?? '');
     promptEl.value = preset?.prompt ?? props.defaultPrompt;
     (promptEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
     if (props.defaultContext !== undefined) {
@@ -394,7 +387,6 @@ function PromptPresetEditor(props: {
       ];
     });
     showPreset(presets().length - 1);
-    rename();
   };
 
   const duplicate = () => {
@@ -402,9 +394,7 @@ function PromptPresetEditor(props: {
     if (idx === -1) return;
     stash();
     const source = presets()[idx]!;
-    const name = copyName(source.name, (candidate) =>
-      presets().some((preset) => preset.name === candidate),
-    );
+    const name = uniqueCollectionName(`${source.name} (copy)`, presets());
     setPresets((list) => [...list, { ...source, name }]);
     showPreset(presets().length - 1);
   };
@@ -414,20 +404,6 @@ function PromptPresetEditor(props: {
     if (idx === -1) return;
     setPresets((list) => list.filter((_, i) => i !== idx));
     showPreset(-1);
-  };
-
-  const rename = () => {
-    setRenaming(true);
-    queueMicrotask(() => {
-      const input = nameEl.element() as HTMLInputElement;
-      input.focus({ preventScroll: true });
-      input.select();
-    });
-  };
-
-  const finishRename = () => {
-    stash();
-    setRenaming(false);
   };
 
   const handle: PromptPresetEditorHandle = {
@@ -445,29 +421,28 @@ function PromptPresetEditor(props: {
   return (
     <div class="form-stack field-group prompt-preset-editor">
       <SettingLabel>{props.label}</SettingLabel>
-      <div class="key-row prompt-preset-toolbar">
-        <Select
-          value={String(selected())}
-          ariaLabel="Prompt preset"
-          onChange={(value) => pick(Number(value))}
-          options={[
-            { value: '-1', label: 'Default' },
-            ...presets().map((preset, i) => ({
-              value: String(i),
-              label: preset.name || `Preset ${i + 1}`,
-            })),
-          ]}
-        />
-        <button onClick={add}>
-          <FontAwesomeIcon icon={faPlus} size={12} /> New
-        </button>
-        <Show when={selected() !== -1}>
-          <button onClick={duplicate}>Duplicate</button>
-          <button onClick={rename}>Rename</button>
-          <button class="danger-btn" onClick={remove}>
-            Delete
-          </button>
-        </Show>
+      <NamedCollectionToolbar
+        ref={toolbar}
+        ariaLabel="Prompt preset"
+        selected={String(selected())}
+        options={[
+          { value: '-1', label: 'Default' },
+          ...presets().map((preset, i) => ({
+            value: String(i),
+            label: preset.name || `Preset ${i + 1}`,
+          })),
+        ]}
+        hasSelection={selected() !== -1}
+        name={name()}
+        nameLabel="Preset name"
+        defaultName={selected() < 0 ? '' : numberedName('Preset', presets(), selected())}
+        onRename={setName}
+        onFinishRename={stash}
+        onSelect={(value) => pick(Number(value))}
+        onNew={add}
+        onDuplicate={duplicate}
+        onDelete={remove}
+      >
         <SettingsTransferButtons
           type={`image-prompt:${props.transferKey}`}
           onError={props.onError}
@@ -494,15 +469,7 @@ function PromptPresetEditor(props: {
             showPreset(index === -1 ? list.length - 1 : index);
           }}
         />
-      </div>
-      {/* Stays mounted so switching/default loads can keep using the imperative ref. */}
-      <div class="prompt-preset-rename" classList={{ hidden: !renaming() }}>
-        <SettingLabel field={nameEl}>Preset name</SettingLabel>
-        <div class="key-row">
-          <input ref={nameEl.ref} placeholder="Preset name" />
-          <button onClick={finishRename}>Done</button>
-        </div>
-      </div>
+      </NamedCollectionToolbar>
       <SettingLabel field={promptEl}>
         {props.promptLabel ??
           (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')}
@@ -543,13 +510,10 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
   const revisionOriginalEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL);
   const revisionEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE);
   let baseline = '';
-  /** Save with the form's loaded revision: invalidation can update the store
-   * without refreshing these fields, allowing a stale form to overwrite newer edits. */
-  let baseRevision = state.settings.revision;
 
   const showError = (message: string) => {
     setError(message);
-    queueMicrotask(() => errorEl?.scrollIntoView({ block: 'nearest' }));
+    if (message) queueMicrotask(() => errorEl?.scrollIntoView({ block: 'nearest' }));
   };
 
   const draft = () => ({
@@ -576,59 +540,45 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
     }
     for (const { kind } of promptEditors) editors[kind].value = baseSettings.promptPresets[kind];
     baseline = JSON.stringify(draft());
-    baseRevision = state.settings.revision;
   };
-  onMount(load);
-
-  const save = async () => {
-    const values = draft();
-    const invalidRevision = imageRevisionTemplateError(
-      values.imageGeneration.promptRevisionTemplate,
-    );
-    if (invalidRevision) {
-      showError(invalidRevision);
-      return false;
-    }
-    for (const { kind } of promptEditors) {
-      const selection = values.imageGeneration.promptPresets[kind];
-      const names = selection.presets.map((preset) => preset.name);
-      if (new Set(names).size !== names.length) {
-        showError(`${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`);
-        return false;
-      }
-      if (names.some((name) => name.toLowerCase() === 'default')) {
-        showError('“Default” is reserved for the built-in prompt. Choose another preset name.');
-        return false;
-      }
-    }
-    try {
-      const next = await api.putSettings(values, baseRevision);
-      applySettings(next);
-      baseRevision = next.revision;
-      baseline = JSON.stringify(values);
-      setError('');
-      flashSaved();
-      return true;
-    } catch (err) {
-      showError(
-        err instanceof ApiError && err.status === 409
-          ? 'Image generation settings changed elsewhere. Discard to load the latest version, then review your changes.'
-          : errorMessage(err),
-      );
-      return false;
-    }
-  };
-
-  const discard = () => {
-    load();
-    setError('');
-  };
-
-  useSettingsGuard({
+  const submission = createSettingsSubmission({
+    revision: () => state.settings.revision,
     isDirty: () => JSON.stringify(draft()) !== baseline,
-    save,
-    discard,
+    snapshot: () => {
+      const values = draft();
+      const invalidRevision = imageRevisionTemplateError(
+        values.imageGeneration.promptRevisionTemplate,
+      );
+      if (invalidRevision) throw new Error(invalidRevision);
+      for (const { kind } of promptEditors) {
+        const names = values.imageGeneration.promptPresets[kind].presets.map(
+          (preset) => preset.name,
+        );
+        if (new Set(names).size !== names.length) {
+          throw new Error(
+            `${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`,
+          );
+        }
+        if (names.some((name) => name.toLowerCase() === 'default')) {
+          throw new Error(
+            '“Default” is reserved for the built-in prompt. Choose another preset name.',
+          );
+        }
+      }
+      return values;
+    },
+    submit: (values, revision) => api.putSettings(values, revision),
+    accepted: (values, next) => {
+      applySettings(next);
+      baseline = JSON.stringify(values);
+      flashSaved();
+    },
+    discard: load,
+    onError: showError,
   });
+  const { save, discard, saving } = submission;
+  onMount(discard);
+  useSettingsGuard(submission);
 
   return (
     <>
@@ -740,8 +690,8 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
       </Show>
 
       <SettingsActions>
-        <button class="primary-btn" onClick={() => void save()}>
-          Save
+        <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
+          {saving() ? 'Saving…' : 'Save'}
         </button>
         <SettingsTransferButtons
           type={`page:${props.mode === 'chat' ? 'chatImagePrompts' : 'avatarPrompts'}`}
@@ -782,7 +732,9 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
             }
           }}
         />
-        <button onClick={discard}>Discard</button>
+        <button disabled={saving()} onClick={discard}>
+          Discard
+        </button>
         <Show when={saved()}>
           <span class="saved-flash">
             <FontAwesomeIcon icon={faCheck} size={12} /> Saved
@@ -798,20 +750,17 @@ const imageSwipeBusy = new Set<number>();
 const imageOnActivePath = (message: Message) =>
   activePath().some((active) => active.id === message.id);
 
-const selectedImageAsset = (message: Message) => {
-  const path = message.images[Math.min(message.activeImage, message.images.length - 1)];
-  return message.media?.find((asset) => asset.url === path);
-};
+const selectedImageAsset = (message: Message) =>
+  message.media[Math.min(message.activeImage, message.media.length - 1)];
 
 const canRenderImage = (message: Message) =>
   !state.treeNavigationPending &&
   imageOnActivePath(message) &&
   !message.imagePending &&
-  !message.media?.some((asset) => asset.kind === 'video') &&
+  !message.media.some((asset) => asset.kind === 'video') &&
   (message.hasImageRender ||
     selectedImageAsset(message)?.recipeId != null ||
-    (!message.media?.some((asset) => asset.recipeId !== null) &&
-      activeImageRenderConfig() != null));
+    (!message.media.some((asset) => asset.recipeId !== null) && activeImageRenderConfig() != null));
 
 /** Shared by header buttons and ChatView's Left/Right shortcut. */
 async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
@@ -845,12 +794,12 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
     }
     return;
   }
-  const activeImage = Math.min(message.activeImage, message.images.length - 1);
+  const activeImage = Math.min(message.activeImage, message.media.length - 1);
   const index = activeImage + dir;
   if (index < 0 || imageSwipeBusy.has(message.id) || state.treeNavigationPending) return;
   imageSwipeBusy.add(message.id);
   try {
-    if (index >= message.images.length) {
+    if (index >= message.media.length) {
       if (!canRenderImage(message)) return;
       await navigateTree(() =>
         api.renderImage(
@@ -873,7 +822,7 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
 export const imageMessage = {
   matches: (message: Message) =>
     message.role === 'tool' &&
-    (message.images.length > 0 ||
+    (message.media.length > 0 ||
       message.imagePending ||
       message.hasImageRender ||
       message.name === 'Image prompt' ||
@@ -886,21 +835,21 @@ export const imageMessage = {
     void swipeImage(message, dir);
   },
   canDeleteSwipe: (message: Message) =>
-    message.images.length > 1 && !message.imagePending && imageOnActivePath(message),
+    message.media.length > 1 && !message.imagePending && imageOnActivePath(message),
   deleteSwipe: (message: Message) =>
     api.deleteImage(
       message.id,
-      Math.min(message.activeImage, message.images.length - 1),
+      Math.min(message.activeImage, message.media.length - 1),
       state.tree,
     ),
   create: (message: () => Message, ctx: { streaming: () => boolean; inMap?: () => boolean }) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
     const [savingToGallery, setSavingToGallery] = createSignal(false);
-    const images = () => message().images;
-    const activeImage = () => Math.min(message().activeImage, images().length - 1);
-    const currentImage = () => images()[activeImage()];
-    const currentAsset = () => message().media?.find((asset) => asset.url === currentImage());
+    const media = () => message().media;
+    const activeImage = () => Math.min(message().activeImage, media().length - 1);
+    const currentAsset = () => media()[activeImage()];
+    const currentImage = () => currentAsset()?.url;
     const currentVideo = () => (currentAsset()?.kind === 'video' ? currentAsset() : undefined);
     const mediaJob = () => mediaJobsByMessage().get(message().id);
     const renderProgress = () => mediaJob()?.progress ?? imageProgress()[message().id];
@@ -908,7 +857,7 @@ export const imageMessage = {
     const displayedImage = () =>
       livePreview() ?? (currentVideo() ? currentVideo()?.thumbnail : currentImage());
     // Collapse the prompt on the first preview to keep the render in focus.
-    const promptCollapsed = () => images().length > 0 || livePreview() != null;
+    const promptCollapsed = () => media().length > 0 || livePreview() != null;
     const onActivePath = () => activePath().some((active) => active.id === message().id);
     const canRender = () => canRenderImage(message());
     const savedItem = () => {
@@ -996,7 +945,7 @@ export const imageMessage = {
             />
           </span>
         </Show>
-        <Show when={images().length > 0}>
+        <Show when={media().length > 0}>
           <span class="msg-actions">
             <Show when={currentAsset()}>
               {(asset) => (
@@ -1026,24 +975,24 @@ export const imageMessage = {
             </button>
             <span
               class="branch-count"
-              aria-label={`Image ${activeImage() + 1} of ${images().length}`}
+              aria-label={`Image ${activeImage() + 1} of ${media().length}`}
             >
-              {activeImage() + 1}/{images().length}
+              {activeImage() + 1}/{media().length}
             </span>
             <button
               class="icon-btn"
               disabled={
                 state.treeNavigationPending ||
                 !onActivePath() ||
-                (activeImage() >= images().length - 1 && !canRender())
+                (activeImage() >= media().length - 1 && !canRender())
               }
               title={
-                activeImage() >= images().length - 1
+                activeImage() >= media().length - 1
                   ? 'Generate another image (same prompt, new seed)'
                   : 'Next image'
               }
               aria-label={
-                activeImage() >= images().length - 1
+                activeImage() >= media().length - 1
                   ? 'Generate another image with a new seed'
                   : 'Next image'
               }

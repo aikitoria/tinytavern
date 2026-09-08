@@ -131,10 +131,11 @@ export async function testImages(
 
   const renderedMessage = await waitForImageState(
     imgRes.toolMessageId,
-    (message) => !message.imagePending && message.images.length > 0,
+    (message) => !message.imagePending && message.media.length > 0,
     'rendered image attached to the tool message',
   );
-  const imageUrl = renderedMessage.images[0]!;
+  assert(!('images' in renderedMessage), 'message DTOs expose one ordered media array');
+  const imageUrl = renderedMessage.media[0]!.url;
   assert(imageUrl?.startsWith('/images/'), 'rendered image attached to the tool message');
   const served = await fetch(`${BASE}${imageUrl}`);
   assert(
@@ -198,14 +199,17 @@ export async function testImages(
   );
   const regenMsg = await waitForImageState(
     imgRes.toolMessageId,
-    (message) => !message.imagePending && message.images.length === 2,
+    (message) => !message.imagePending && message.media.length === 2,
     'regenerated image is appended',
   );
   assert(
     regenMsg != null && regenMsg.activeImage === 1,
     'regenerated image is appended and selected',
   );
-  assert(regenMsg.images[0] !== regenMsg.images[1], 'each render produces a distinct image file');
+  assert(
+    regenMsg.media[0]!.url !== regenMsg.media[1]!.url,
+    'each render produces a distinct image file',
+  );
   assert(
     regenMsg.content === originalImagePrompt,
     'a pending image render cannot be attached to an edited prompt',
@@ -240,7 +244,7 @@ export async function testImages(
     (await tree(conv2.id)).messages.find((m) => m.id === imgRes.toolMessageId)?.activeImage === 0,
     'active image selection persists and a stale selection cannot overwrite it',
   );
-  const secondImageUrl = regenMsg.images[1]!;
+  const secondImageUrl = regenMsg.media[1]!.url;
 
   const imageBranch = await req<Conversation>(
     'POST',
@@ -249,11 +253,12 @@ export async function testImages(
   const imageBranchSnap = await tree(imageBranch.id);
   const branchedImageMessage = pathOf(imageBranchSnap).at(-1)!;
   assert(
-    branchedImageMessage.images.length === regenMsg.images.length &&
-      branchedImageMessage.images.every(
-        (image, index) => image !== regenMsg.images[index] && image.startsWith('/images/'),
+    branchedImageMessage.media.length === regenMsg.media.length &&
+      branchedImageMessage.media.every(
+        (asset, index) =>
+          asset.url !== regenMsg.media[index]!.url && asset.url.startsWith('/images/'),
       ) &&
-      (await fetch(`${BASE}${branchedImageMessage.images[0]}`)).status === 200,
+      (await fetch(`${BASE}${branchedImageMessage.media[0]!.url}`)).status === 200,
     'branch to new conversation copies generated image files instead of sharing paths',
   );
   return {

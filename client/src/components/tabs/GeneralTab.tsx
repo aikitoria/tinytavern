@@ -7,13 +7,15 @@ import { DEFAULT_SETTINGS } from '@tinytavern/shared';
 import SettingLabel from '../SettingField.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
-import { Show, createEffect, createSignal, untrack } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import type { Settings } from '@tinytavern/shared';
-import { api, ApiError } from '../../state/api.ts';
-import { applySettings, deleteAllConversations, setState, state } from '../../state/store.ts';
+import { api } from '../../state/api.ts';
+import { applySettings, deleteAllConversations, state } from '../../state/store.ts';
 import { createSavedFlash, errorMessage } from '../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
 import { confirmAction } from '../../state/confirm.ts';
+import { createSettingsSubmission } from '../../state/settingsSubmission.ts';
+import { changedFields, sameValue } from '../../state/editorSync.ts';
 
 type SettingKey =
   | 'autoExpandThinking'
@@ -24,66 +26,50 @@ type SettingKey =
   | 'draftCompletionPrompt';
 
 export default function GeneralTab() {
-  const [overrides, setOverrides] = createSignal<Partial<Pick<Settings, SettingKey>>>({});
-  const [baseRevision, setBaseRevision] = createSignal(state.settings.revision);
+  const settingsValues = () =>
+    Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, state.settings[key]])) as Pick<
+      Settings,
+      SettingKey
+    >;
+  const [draft, setDraft] = createSignal(settingsValues());
+  let baseline = draft();
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [removePassword, setRemovePassword] = createSignal(false);
   const [deletingChats, setDeletingChats] = createSignal(false);
 
-  const passwordDirty = () => password() !== '' || removePassword();
-  const isDirty = () => Object.keys(overrides()).length > 0 || passwordDirty();
-  const value = <K extends SettingKey>(key: K): Settings[K] =>
-    (overrides()[key] ?? state.settings[key]) as Settings[K];
+  const value = <K extends SettingKey>(key: K): Settings[K] => draft()[key] as Settings[K];
   const change = <K extends SettingKey>(key: K, value: Settings[K]) =>
-    setOverrides((current) => {
-      const next = { ...current };
-      if (value === state.settings[key]) delete next[key];
-      else next[key] = value;
-      return next;
-    });
-
-  createEffect(() => {
-    const revision = state.settings.revision;
-    if (!untrack(isDirty)) setBaseRevision(revision);
-  });
-
-  const save = async () => {
-    try {
-      if (!isDirty()) return true;
-      const accessPassword = removePassword() ? null : password() || undefined;
-      const next = await api.putSettings(overrides(), baseRevision(), accessPassword);
+    setDraft((current) => ({ ...current, [key]: value }));
+  const submission = createSettingsSubmission({
+    revision: () => state.settings.revision,
+    isDirty: () => !sameValue(draft(), baseline) || password() !== '' || removePassword(),
+    snapshot: () => ({ values: draft(), password: password(), removePassword: removePassword() }),
+    submit: (snapshot, revision) =>
+      api.putSettings(
+        changedFields(baseline, snapshot.values),
+        revision,
+        snapshot.removePassword ? null : snapshot.password || undefined,
+      ),
+    accepted: (snapshot, next) => {
       applySettings(next);
-      setOverrides({});
-      setBaseRevision(next.revision);
+      baseline = snapshot.values;
+      // Fields remain editable while saving. Clear only the credentials that were submitted.
+      if (password() === snapshot.password) setPassword('');
+      if (removePassword() === snapshot.removePassword) setRemovePassword(false);
+      flashSaved();
+    },
+    discard: () => {
+      const next = settingsValues();
+      baseline = next;
+      setDraft(next);
       setPassword('');
       setRemovePassword(false);
-      setError('');
-      flashSaved();
-      return true;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        try {
-          const latest = await api.settings();
-          setState('settings', latest);
-          setBaseRevision(latest.revision);
-        } catch {
-          /* Keep the original conflict visible if the refresh also fails. */
-        }
-      }
-      setError(errorMessage(err));
-      return false;
-    }
-  };
-
-  const discard = () => {
-    setOverrides({});
-    setBaseRevision(state.settings.revision);
-    setPassword('');
-    setRemovePassword(false);
-    setError('');
-  };
+    },
+    onError: setError,
+  });
+  const { save, discard, saving } = submission;
 
   const deleteChats = async () => {
     if (
@@ -108,7 +94,7 @@ export default function GeneralTab() {
     }
   };
 
-  useSettingsGuard({ isDirty, save, discard });
+  useSettingsGuard(submission);
 
   return (
     <div class="form">
@@ -294,8 +280,8 @@ export default function GeneralTab() {
       </section>
 
       <SettingsActions>
-        <button class="primary-btn" onClick={() => void save()}>
-          Save
+        <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
+          {saving() ? 'Saving…' : 'Save'}
         </button>
         <SettingsTransferButtons
           type="page:general"
@@ -314,7 +300,9 @@ export default function GeneralTab() {
             }
           }}
         />
-        <button onClick={discard}>Discard</button>
+        <button disabled={saving()} onClick={discard}>
+          Discard
+        </button>
         <Show when={saved()}>
           <span class="saved-flash">
             <FontAwesomeIcon icon={faCheck} size={12} /> Saved

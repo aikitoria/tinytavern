@@ -124,34 +124,48 @@ function parseInputs(
   });
 }
 
-function workflowForJob(row: MediaJobRow): MediaWorkflow {
+function resolveJobConfiguration(
+  operation: MediaOperation,
+  workflowId: string | null,
+  inputs: MediaJobInput[],
+  configurationJson: string | null,
+): { configuration: MediaJobConfiguration; captured: boolean } | null {
   const settings = getSettings().mediaRendering;
-  const inputs = parseInputs(JSON.parse(row.inputs_json));
   const referenceCount = inputs.filter((input) => input.slot.startsWith('reference')).length;
-  const workflowId =
-    row.workflow_id ?? settings.defaults[mediaWorkflowKey(row.operation, referenceCount)];
-  const snapshot = row.configuration_json
-    ? (JSON.parse(row.configuration_json) as MediaJobConfiguration).workflow
+  const selectedId = workflowId ?? settings.defaults[mediaWorkflowKey(operation, referenceCount)];
+  const snapshot: MediaJobConfiguration | null = configurationJson
+    ? JSON.parse(configurationJson)
     : null;
-  const workflow =
-    snapshot?.id === workflowId
-      ? snapshot
-      : settings.workflows.find((item) => item.id === workflowId);
-  if (!workflow || workflow.operation !== row.operation) {
+  if (
+    snapshot &&
+    snapshot.workflow.id === selectedId &&
+    snapshot.workflow.operation === operation
+  ) {
+    return { configuration: snapshot, captured: true };
+  }
+  const workflow = settings.workflows.find((item) => item.id === selectedId);
+  return workflow
+    ? {
+        configuration: {
+          comfyUrl: settings.comfyUrl,
+          timeoutSeconds: settings.jobTimeoutSeconds,
+          workflow,
+        },
+        captured: false,
+      }
+    : null;
+}
+
+function validateJobWorkflow(operation: MediaOperation, configuration: MediaJobConfiguration) {
+  const workflow = configuration.workflow;
+  if (workflow.operation !== operation) {
     throw new HttpError(400, 'Choose a saved workflow matching the operation and reference count');
   }
   const invalid = mediaWorkflowError(workflow);
   if (invalid) {
     throw new HttpError(400, invalid);
   }
-  const requiredSlots = mediaInputSlots(row.operation, workflow.referenceCount);
-  const hasAllInputs =
-    requiredSlots.length === inputs.length &&
-    requiredSlots.every((slot) => inputs.some((input) => input.slot === slot));
-  if (!hasAllInputs) {
-    throw new HttpError(400, `Select the required images: ${requiredSlots.join(', ')}`);
-  }
-  return workflow;
+  return compileMediaWorkflow(workflow.json);
 }
 
 function requireEditable(row: MediaJobRow): void {
@@ -178,48 +192,16 @@ function draftConfiguration(
   values: unknown,
 ): string | null {
   if (values === undefined && configurationJson === null) return null;
-  const settings = getSettings().mediaRendering;
-  const referenceCount = inputs.filter((input) => input.slot.startsWith('reference')).length;
-  const selectedId = workflowId ?? settings.defaults[mediaWorkflowKey(operation, referenceCount)];
-  let snapshot: MediaJobConfiguration | null = configurationJson
-    ? JSON.parse(configurationJson)
-    : null;
-  if (
-    snapshot &&
-    (snapshot.workflow.id !== selectedId || snapshot.workflow.operation !== operation)
-  ) {
-    snapshot = null;
-    configurationJson = null;
-  }
-  if (values === undefined) return configurationJson;
-  const workflow =
-    snapshot && snapshot.workflow.id === selectedId
-      ? snapshot.workflow
-      : settings.workflows.find((item) => item.id === selectedId);
+  const resolved = resolveJobConfiguration(operation, workflowId, inputs, configurationJson);
+  if (values === undefined) return resolved?.captured ? configurationJson : null;
   try {
-    if (!workflow) {
+    if (!resolved) {
       validateWorkflowValues([], values);
       return null;
     }
-    if (workflow.operation !== operation) {
-      throw new Error('Choose a workflow matching the operation and reference count');
-    }
-    const invalid = mediaWorkflowError(workflow);
-    if (invalid) throw new Error(invalid);
-    const workflowValues = validateWorkflowValues(
-      compileMediaWorkflow(workflow.json).controls,
-      values,
-    );
-    const configuration: MediaJobConfiguration =
-      snapshot?.workflow.id === workflow.id
-        ? { ...snapshot, workflowValues }
-        : {
-            comfyUrl: settings.comfyUrl,
-            timeoutSeconds: settings.jobTimeoutSeconds,
-            workflow,
-            workflowValues,
-          };
-    return JSON.stringify(configuration);
+    const compiled = validateJobWorkflow(operation, resolved.configuration);
+    const workflowValues = validateWorkflowValues(compiled.controls, values);
+    return JSON.stringify({ ...resolved.configuration, workflowValues });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }
@@ -564,30 +546,34 @@ function attachToolMessage(row: MediaJobRow, body: JobBody, preparing: boolean):
 
 export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean) {
   requireEditable(row);
-  const workflow = workflowForJob(row);
+  const inputs = parseInputs(JSON.parse(row.inputs_json));
+  const resolved = resolveJobConfiguration(
+    row.operation,
+    row.workflow_id,
+    inputs,
+    row.configuration_json,
+  );
+  if (!resolved) {
+    throw new HttpError(400, 'Choose a saved workflow matching the operation and reference count');
+  }
+  const { configuration } = resolved;
+  const { workflow } = configuration;
+  const compiled = validateJobWorkflow(row.operation, configuration);
+  const requiredSlots = mediaInputSlots(row.operation, workflow.referenceCount);
+  if (
+    requiredSlots.length !== inputs.length ||
+    !requiredSlots.every((slot) => inputs.some((input) => input.slot === slot))
+  ) {
+    throw new HttpError(400, `Select the required images: ${requiredSlots.join(', ')}`);
+  }
   if (row.operation === 'image-describe' && prepare) {
     throw new HttpError(400, 'Image descriptions use the instruction inside the Comfy workflow');
   }
   if (!prepare && row.operation !== 'image-describe' && !row.prompt.trim()) {
     throw new HttpError(400, 'Enter a final prompt before rendering');
   }
-  const settings = getSettings().mediaRendering;
-  const snapshot: MediaJobConfiguration | null = row.configuration_json
-    ? JSON.parse(row.configuration_json)
-    : null;
-  const configuration: MediaJobConfiguration =
-    snapshot?.workflow.id === workflow.id
-      ? snapshot
-      : {
-          comfyUrl: settings.comfyUrl,
-          workflow,
-          timeoutSeconds: settings.jobTimeoutSeconds,
-        };
   try {
-    validateWorkflowValues(
-      compileMediaWorkflow(workflow.json).controls,
-      configuration.workflowValues ?? {},
-    );
+    validateWorkflowValues(compiled.controls, configuration.workflowValues ?? {});
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }

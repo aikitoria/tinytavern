@@ -10,6 +10,7 @@ import {
 import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import SamplerProgress from '../images/SamplerProgress.tsx';
 import VideoPreview from './VideoPreview.tsx';
+import { createStreamScroll } from '../streamScroll.ts';
 import {
   MEDIA_INPUT_LABELS,
   MEDIA_JOB_STATUS,
@@ -76,20 +77,12 @@ export default function MediaJobCard(props: {
       : MEDIA_JOB_STATUS[job().state];
   const open = () => props.onOpen(job());
   let textArea: HTMLParagraphElement | undefined;
-  let frame: number | undefined;
-  let follow = true;
+  const scroll = createStreamScroll(() => textArea, requestAnimationFrame, cancelAnimationFrame);
   createEffect(() => {
-    if (!visible() || !preparing()) return;
     excerpt();
-    if (!follow || frame !== undefined) return;
-    frame = requestAnimationFrame(() => {
-      frame = undefined;
-      if (follow && textArea) textArea.scrollTop = textArea.scrollHeight;
-    });
+    scroll.update(preparing() ? job().id : null, visible() && preparing());
   });
-  onCleanup(() => {
-    if (frame !== undefined) cancelAnimationFrame(frame);
-  });
+  onCleanup(scroll.dispose);
 
   return (
     <article
@@ -177,10 +170,7 @@ export default function MediaJobCard(props: {
             class="media-job-excerpt"
             classList={{ 'media-job-streaming': preparing() }}
             aria-label={preparing() && !job().prompt ? 'Streaming reasoning' : 'Prompt excerpt'}
-            onScroll={(event) => {
-              const area = event.currentTarget;
-              follow = area.scrollHeight - area.scrollTop - area.clientHeight < 16;
-            }}
+            onScroll={scroll.onScroll}
           >
             {excerpt().text || (preparing() ? 'Waiting for the first tokens…' : 'No prompt yet.')}
           </p>

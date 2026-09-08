@@ -1,8 +1,6 @@
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { importPromptCollection, transferObject } from '@tinytavern/shared';
-import { For, Show, createSignal } from 'solid-js';
-import { faPlus } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
+import { For, Show } from 'solid-js';
 import {
   MEDIA_OPERATIONS,
   mediaInputSlots,
@@ -18,7 +16,10 @@ import {
 import SettingLabel, { createDefaultField, type DefaultField } from '../SettingField.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
-import Select from '../Select.tsx';
+import NamedCollectionToolbar, {
+  type NamedCollectionToolbarHandle,
+} from '../NamedCollectionToolbar.tsx';
+import { uniqueCollectionName } from '../../state/collectionNames.ts';
 import { mediaSettingsDraft } from './mediaSettingsDraft.tsx';
 
 const FIELDS: [keyof StandalonePromptTemplate, string][] = [
@@ -37,8 +38,7 @@ function MediaPromptFields(props: {
 }) {
   const form = { draft: () => props.value, setDraft: props.onChange };
   const Group = (group: { operation: MediaOperation; label: string }) => {
-    const [renaming, setRenaming] = createSignal(false);
-    let nameInput: HTMLInputElement | undefined;
+    let toolbar!: NamedCollectionToolbarHandle;
     const selected = () => form.draft().defaults[group.operation] ?? '';
     const defaults = defaultMediaPrompt(group.operation);
     const inputSlots = mediaInputSlots(
@@ -86,13 +86,6 @@ function MediaPromptFields(props: {
       const preset = current();
       return preset && 'systemPrompt' in preset ? preset[key] : defaults[key];
     };
-    const rename = () => {
-      setRenaming(true);
-      queueMicrotask(() => {
-        nameInput?.focus({ preventScroll: true });
-        nameInput?.select();
-      });
-    };
     const patch = (changes: Partial<MediaPromptPreset>) =>
       form.setDraft((value) => ({
         ...value,
@@ -104,10 +97,7 @@ function MediaPromptFields(props: {
       const id = crypto.randomUUID();
       const source = current();
       const baseName = copy && source ? `${source.name} (copy)` : 'New preset';
-      let name = baseName;
-      for (let number = 2; presets().some((item) => item.name === name); number++) {
-        name = `${baseName} ${number}`;
-      }
+      const name = uniqueCollectionName(baseName, presets());
       form.setDraft((value) => ({
         ...value,
         defaults: { ...value.defaults, [group.operation]: id },
@@ -124,8 +114,6 @@ function MediaPromptFields(props: {
           },
         ],
       }));
-      if (copy) setRenaming(false);
-      else rename();
     };
     const remove = () => {
       const id = selected();
@@ -136,10 +124,8 @@ function MediaPromptFields(props: {
           Object.entries(value.defaults).filter(([, preset]) => preset !== id),
         ),
       }));
-      setRenaming(false);
     };
     const select = (id: string) => {
-      setRenaming(false);
       form.setDraft((value) => {
         const defaults = { ...value.defaults };
         if (id) {
@@ -159,26 +145,23 @@ function MediaPromptFields(props: {
           aria-label={`${group.label} preset editor`}
         >
           <label>Saved presets</label>
-          <div class="key-row prompt-preset-toolbar">
-            <Select
-              ariaLabel={`${group.label} saved prompt presets`}
-              value={selected()}
-              options={[
-                { value: '', label: 'Default' },
-                ...presets().map((item) => ({ value: item.id, label: item.name })),
-              ]}
-              onChange={select}
-            />
-            <button onClick={() => add()}>
-              <FontAwesomeIcon icon={faPlus} size={12} /> New
-            </button>
-            <Show when={current()}>
-              <button onClick={() => add(true)}>Duplicate</button>
-              <button onClick={rename}>Rename</button>
-              <button class="danger-btn" onClick={remove}>
-                Delete
-              </button>
-            </Show>
+          <NamedCollectionToolbar
+            ref={toolbar}
+            ariaLabel={`${group.label} saved prompt presets`}
+            selected={selected()}
+            options={[
+              { value: '', label: 'Default' },
+              ...presets().map((item) => ({ value: item.id, label: item.name })),
+            ]}
+            hasSelection={!!current()}
+            name={current()?.name ?? ''}
+            nameLabel="Preset name"
+            onRename={(name) => patch({ name })}
+            onSelect={select}
+            onNew={() => add()}
+            onDuplicate={() => add(true)}
+            onDelete={remove}
+          >
             <SettingsTransferButtons
               type={`media-prompt:${props.mode}:${group.operation}`}
               onError={props.onError}
@@ -217,26 +200,10 @@ function MediaPromptFields(props: {
                     : [...value.presets, imported],
                   defaults: { ...value.defaults, [group.operation]: imported.id },
                 }));
-                setRenaming(false);
+                toolbar.closeRename();
               }}
             />
-          </div>
-          <Show when={current()}>
-            <div class="prompt-preset-rename" classList={{ hidden: !renaming() }}>
-              <label>Preset name</label>
-              <div class="key-row">
-                <input
-                  ref={nameInput}
-                  value={current()?.name ?? ''}
-                  onInput={(event) => patch({ name: event.currentTarget.value })}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') setRenaming(false);
-                  }}
-                />
-                <button onClick={() => setRenaming(false)}>Done</button>
-              </div>
-            </div>
-          </Show>
+          </NamedCollectionToolbar>
           <Show when={props.mode === 'chat'}>
             <SettingLabel field={current() ? chatPrompt : undefined}>
               Chat steering template{' '}

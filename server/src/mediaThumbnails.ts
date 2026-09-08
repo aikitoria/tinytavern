@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,6 +7,7 @@ import { broadcast, invalidate, observeInvalidation } from './events.ts';
 import { deleteImageFiles } from './images.ts';
 import { signMediaUrl } from './mediaUrls.ts';
 import { getSettings } from './settingsStore.ts';
+import { avatarThumbnailName } from './avatarFileNames.ts';
 
 const runFile = promisify(execFile);
 const CONCURRENCY = 2;
@@ -17,6 +17,7 @@ interface ThumbnailSource {
   path: string;
   avatar: number;
   thumbnail: string | null;
+  thumbnail_revision: number;
 }
 
 let running = false;
@@ -97,7 +98,7 @@ function synchronizeAvatars(): void {
 }
 
 const pendingSources = `
-  SELECT id, path, thumbnail, thumbnail_retry_at, 0 AS avatar, '0:' || id AS task_key
+  SELECT id, path, thumbnail, thumbnail_revision, thumbnail_retry_at, 0 AS avatar, '0:' || id AS task_key
   FROM media_assets WHERE thumbnail_size IS NULL
     AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = media_assets.id
       AND (o.owner_type != 'job' OR NOT EXISTS (
@@ -105,7 +106,7 @@ const pendingSources = `
           AND json_extract(j.configuration_json, '$.temporary') = 1
       )))
   UNION ALL
-  SELECT source AS id, source AS path, thumbnail, thumbnail_retry_at, 1 AS avatar,
+  SELECT source AS id, source AS path, thumbnail, thumbnail_revision, thumbnail_retry_at, 1 AS avatar,
     '1:' || source AS task_key
   FROM avatar_thumbnails WHERE thumbnail_size IS NULL`;
 
@@ -115,12 +116,16 @@ async function generate(
   signal: AbortSignal,
 ): Promise<void> {
   const directory = source.avatar ? AVATAR_DIR : IMAGES_DIR;
-  const name = `${source.avatar ? 'avatar-' : ''}thumb-${randomUUID()}.jpg`;
-  const path = `/${source.avatar ? 'avatars' : 'images'}/${name}`;
-  const temporary = join(directory, `${name}.part`);
-  const destination = join(directory, name);
+  const revision = source.thumbnail_revision + 1;
+  let temporary: string | undefined;
   const { table, key, path: pathColumn } = sourceTable(source);
   try {
+    const name = source.avatar
+      ? avatarThumbnailName(source.path, revision)
+      : `thumb-${source.id}-${revision}.jpg`;
+    const path = `/${source.avatar ? 'avatars' : 'images'}/${name}`;
+    temporary = join(directory, `${name}.part`);
+    const destination = join(directory, name);
     const encoding = runFile(
       'ffmpeg',
       [
@@ -166,20 +171,22 @@ async function generate(
     // Nothing can delete the item or change its settings between this check and publication.
     signal.throwIfAborted();
     const current = stmt(
-      `SELECT ${pathColumn} AS path, thumbnail FROM ${table} WHERE ${key} = ?`,
+      `SELECT ${pathColumn} AS path, thumbnail, thumbnail_revision FROM ${table} WHERE ${key} = ?`,
     ).get(source.id);
     if (
       !running ||
       targetSize !== (source.avatar ? 128 : size) ||
       !current ||
-      current.path !== source.path
+      current.path !== source.path ||
+      current.thumbnail_revision !== source.thumbnail_revision
     )
       return;
     renameSync(temporary, destination);
     try {
       stmt(
-        `UPDATE ${table} SET thumbnail = ?, thumbnail_size = ?, thumbnail_retry_at = 0 ${source.avatar ? '' : ', thumbnail_revision = thumbnail_revision + 1'} WHERE ${key} = ?`,
-      ).run(path, targetSize, source.id);
+        `UPDATE ${table} SET thumbnail = ?, thumbnail_size = ?, thumbnail_retry_at = 0,
+          thumbnail_revision = ? WHERE ${key} = ?`,
+      ).run(path, targetSize, revision, source.id);
     } catch (error) {
       removeTemporary(destination);
       throw error;
@@ -191,14 +198,7 @@ async function generate(
     } else {
       invalidateMediaAsset(source.path);
       if (typeof current.thumbnail === 'string') deleteImageFiles([current.thumbnail]);
-      publishThumbnail(
-        Number(source.id),
-        path,
-        Number(
-          stmt('SELECT thumbnail_revision FROM media_assets WHERE id = ?').get(source.id)!
-            .thumbnail_revision,
-        ),
-      );
+      publishThumbnail(Number(source.id), path, revision);
     }
   } catch (error) {
     if (!running || signal.aborted) return;
@@ -209,7 +209,7 @@ async function generate(
     );
     console.error(`[thumbnails] Could not generate thumbnail for source ${source.path}:`, error);
   } finally {
-    removeTemporary(temporary);
+    if (temporary) removeTemporary(temporary);
   }
 }
 
@@ -279,7 +279,10 @@ export function initMediaThumbnails(): void {
     }
     if (avatar) {
       for (const file of files) {
-        if (file.startsWith('avatar-thumb-') && !referenced.has(file))
+        if (
+          (file.startsWith('avatar-thumb-') || file.startsWith('thumb-')) &&
+          !referenced.has(file)
+        )
           removeTemporary(join(directory, file));
       }
     }

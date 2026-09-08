@@ -99,7 +99,7 @@ export async function testImageRevisions(
   );
   const steeredImageRendered = await waitForImageState(
     steeredImage.assistantMessageId,
-    (message) => !message.imagePending && message.images.length === 1,
+    (message) => !message.imagePending && message.media.length === 1,
     'steered image prompt renders',
   );
   assert(steeredImageRendered != null, 'steered image prompt automatically renders a fresh image');
@@ -206,7 +206,7 @@ export async function testImageRevisions(
   );
   const insertedRendered = await waitForImageState(
     insertedRevision.assistantMessageId,
-    (message) => !message.imagePending && message.images.length === 1,
+    (message) => !message.imagePending && message.media.length === 1,
     'inserted image revision renders',
   );
   assert(insertedRendered != null, 'inserted image revision renders normally');
@@ -250,10 +250,10 @@ export async function testImageRevisions(
     (message) => message.id === imgRes.toolMessageId,
   )!;
   const removedImageUrl =
-    sourceBeforeImageSwipeDelete.images[sourceBeforeImageSwipeDelete.activeImage]!;
-  const survivingImageUrl = sourceBeforeImageSwipeDelete.images.find(
+    sourceBeforeImageSwipeDelete.media[sourceBeforeImageSwipeDelete.activeImage]!.url;
+  const survivingImageUrl = sourceBeforeImageSwipeDelete.media.find(
     (_, index) => index !== sourceBeforeImageSwipeDelete.activeImage,
-  )!;
+  )!.url;
   await req('POST', `/api/messages/${imgRes.toolMessageId}/delete-image`, {
     index: sourceBeforeImageSwipeDelete.activeImage,
     expectedActiveLeafId: restoredChain.activeLeafId,
@@ -274,8 +274,8 @@ export async function testImageRevisions(
     (message) => message.id === imgRes.toolMessageId,
   )!;
   assert(
-    sourceAfterImageSwipeDelete.images.length === 1 &&
-      sourceAfterImageSwipeDelete.images[0] === survivingImageUrl &&
+    sourceAfterImageSwipeDelete.media.length === 1 &&
+      sourceAfterImageSwipeDelete.media[0]!.url === survivingImageUrl &&
       sourceAfterImageSwipeDelete.activeImage === 0 &&
       (await fetch(`${BASE}${removedImageUrl}`)).status === 404 &&
       (await fetch(`${BASE}${survivingImageUrl}`)).status === 200,

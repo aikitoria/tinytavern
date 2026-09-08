@@ -1,13 +1,15 @@
-import { Show, createContext, createSignal, onCleanup, useContext } from 'solid-js';
+import { Show, createContext, onCleanup, useContext } from 'solid-js';
 import Modal from './Modal.tsx';
 import type { JSX } from 'solid-js';
 
-export interface SettingsSectionActions {
-  isDirty: () => boolean;
-  /** Returns false when validation or persistence failed. */
-  save: () => Promise<boolean>;
-  discard: () => void;
-}
+import {
+  createSettingsNavigation,
+  type SettingsSectionActions,
+} from '../state/settingsSubmission.ts';
+export {
+  createSettingsNavigation,
+  type SettingsSectionActions,
+} from '../state/settingsSubmission.ts';
 
 type Register = (actions: SettingsSectionActions) => () => void;
 type Navigate = (action: () => void) => void;
@@ -42,61 +44,6 @@ export function useSettingsNavigation(): Navigate {
   return useContext(SettingsNavigationContext) ?? ((action) => action());
 }
 
-/** One guard owns the mounted editor and a single deferred navigation. */
-export function createSettingsNavigation() {
-  const [promptOpen, setPromptOpen] = createSignal(false);
-  const [saving, setSaving] = createSignal(false);
-  let activeActions: SettingsSectionActions | undefined;
-  let pendingNavigation: (() => void) | undefined;
-
-  const cancel = () => {
-    pendingNavigation = undefined;
-    setPromptOpen(false);
-  };
-  const finish = () => {
-    const action = pendingNavigation;
-    cancel();
-    action?.();
-  };
-  return {
-    promptOpen,
-    saving,
-    register(actions: SettingsSectionActions) {
-      activeActions = actions;
-      return () => {
-        if (activeActions === actions) activeActions = undefined;
-      };
-    },
-    navigate(action: () => void) {
-      if (!activeActions?.isDirty()) action();
-      else {
-        pendingNavigation = action;
-        setPromptOpen(true);
-      }
-    },
-    cancel,
-    async save() {
-      if (!activeActions || saving()) return;
-      const actions = activeActions;
-      const navigation = pendingNavigation;
-      setSaving(true);
-      try {
-        const saved = await actions.save();
-        // A closed prompt or replacement editor must not complete an old save.
-        if (actions !== activeActions || navigation !== pendingNavigation) return;
-        if (saved) finish();
-        else cancel();
-      } finally {
-        setSaving(false);
-      }
-    },
-    discard() {
-      activeActions?.discard();
-      finish();
-    },
-  };
-}
-
 export function SettingsNavigationPrompt(props: {
   navigation: ReturnType<typeof createSettingsNavigation>;
   children: JSX.Element;
@@ -119,7 +66,7 @@ export function SettingsNavigationPrompt(props: {
           <button disabled={guard.saving()} onClick={guard.discard}>
             Discard
           </button>
-          <button data-modal-initial-focus disabled={guard.saving()} onClick={guard.cancel}>
+          <button data-modal-initial-focus onClick={guard.cancel}>
             Cancel
           </button>
         </div>

@@ -18,7 +18,7 @@ export function snippet(message: Message, query: string): string {
     const start = Math.max(0, match - 60);
     return `${start ? '…' : ''}${text.slice(start, start + 500)}`;
   }
-  if (message.images.length > 0 || message.imagePending) return '[image]';
+  if (message.media.length > 0 || message.imagePending) return '[image]';
   return '(empty)';
 }
 

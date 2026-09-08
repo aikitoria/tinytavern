@@ -1,22 +1,15 @@
 import { caddyEnabled } from './mediaUrls.ts';
 import http from 'node:http';
-import https from 'node:https';
-import net from 'node:net';
-import { createReadStream, existsSync, readFileSync, watch } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AVATAR_DIR, IMAGES_DIR, db } from './db.ts';
 import { stopAllGenerations } from './generation.ts';
 import { dispatch } from './router.ts';
-import {
-  initWebSocket,
-  setSubscribeHandler,
-  setUnsubscribeHandler,
-  subscribedConversationIds,
-} from './events.ts';
+import { initWebSocket, setSubscribeHandler, setUnsubscribeHandler } from './events.ts';
 import { sendTreeTo } from './sync.ts';
-import { cancelBackgroundSwipe, prepareActiveSwipe } from './routes/conversations.ts';
+import { cancelBackgroundSwipe, prepareActiveSwipe } from './speculation.ts';
 import {
   configuredIpAllowlist,
   isRequestIpAllowed,
@@ -24,10 +17,10 @@ import {
   requestIp,
 } from './ipAccess.ts';
 import { isRequestAuthenticated } from './auth.ts';
-import { setSpeculativeRefillHandler } from './speculation.ts';
 import { sweepOrphanedImages } from './images.ts';
 import { initMediaWorker, stopMediaWorker } from './mediaWorker.ts';
 import { initMediaThumbnails, stopMediaThumbnails } from './mediaThumbnails.ts';
+import './routes/conversations.ts';
 import './routes/messages.ts';
 import './routes/gallery.ts';
 import './routes/mediaJobs.ts';
@@ -44,7 +37,6 @@ import './routes/draftCompletion.ts';
 import './routes/auth.ts';
 
 const PORT = Number(process.env.PORT ?? 5487);
-const CLIENT_DIST = process.env.CLIENT_DIST ?? '';
 
 // Backstop for image-file deletion guarantees (crash windows, late renders).
 initMediaWorker();
@@ -52,25 +44,17 @@ sweepOrphanedImages();
 initMediaThumbnails();
 
 const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json',
-  '.webmanifest': 'application/manifest+json',
-  '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.webm': 'video/webm',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
 };
 
+/** Isolated HTTP regressions serve media here; deployed stacks serve it through Caddy. */
 async function serveFile(
   res: ServerResponse,
   path: string,
-  immutable: boolean,
   extraHeaders: Record<string, string> = {},
   range?: string,
 ): Promise<boolean> {
@@ -105,7 +89,7 @@ async function serveFile(
       'content-type': MIME[extname(path)] ?? 'application/octet-stream',
       'content-length': Math.max(0, end - start + 1),
       'accept-ranges': 'bytes',
-      'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+      'cache-control': 'private, no-store',
       ...(partial ? { 'content-range': `bytes ${start}-${end}/${info.size}` } : {}),
       ...extraHeaders,
     });
@@ -179,8 +163,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     const path = safeJoin(AVATAR_DIR, pathname.slice('/avatars/'.length));
-    if (path && (await serveFile(res, path, false, { 'cache-control': 'private, no-store' })))
-      return;
+    if (path && (await serveFile(res, path))) return;
     res.writeHead(404).end();
     return;
   }
@@ -202,7 +185,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       (await serveFile(
         res,
         path,
-        true,
         {
           'x-content-type-options': 'nosniff',
           'content-security-policy': "default-src 'none'; sandbox",
@@ -216,15 +198,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
-  if (CLIENT_DIST) {
-    const path = safeJoin(CLIENT_DIST, pathname === '/' ? '/index.html' : pathname);
-    const immutable = pathname.startsWith('/assets/');
-    if (path && (await serveFile(res, path, immutable))) return;
-    // SPA fallback for client-side routes.
-    if (req.method === 'GET' && !extname(pathname)) {
-      if (await serveFile(res, join(CLIENT_DIST, 'index.html'), false)) return;
-    }
-  }
   res.writeHead(404).end('not found');
 }
 
@@ -235,67 +208,7 @@ function onRequest(req: IncomingMessage, res: ServerResponse): void {
   });
 }
 
-const certPath = process.env.TLS_CERT_PATH;
-const keyPath = process.env.TLS_KEY_PATH;
-let server: http.Server | https.Server;
-let listener: net.Server;
-
-if (certPath && keyPath) {
-  if (!existsSync(certPath) || !existsSync(keyPath)) {
-    console.error(`TLS cert or key not found (${certPath}, ${keyPath})`);
-    process.exit(1);
-  }
-  const readContext = () => ({ cert: readFileSync(certPath), key: readFileSync(keyPath) });
-  const tlsServer = https.createServer(readContext(), onRequest);
-  server = tlsServer;
-  // Hot-reload the certificate on renewal without dropping the process.
-  let reloadTimer: NodeJS.Timeout | null = null;
-  const scheduleReload = () => {
-    if (reloadTimer) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => {
-      try {
-        tlsServer.setSecureContext(readContext());
-        console.log('[tls] certificate reloaded');
-      } catch (err) {
-        console.error('[tls] certificate reload failed:', err);
-      }
-    }, 1000);
-  };
-  for (const file of [certPath, keyPath]) {
-    try {
-      watch(file, scheduleReload);
-    } catch (err) {
-      console.error(`[tls] cannot watch ${file}:`, err);
-    }
-  }
-  // Browsers default to plain http for bare IP:port URLs; sniff the first byte
-  // (0x16 = TLS handshake) and redirect http requests to https on the same port.
-  const redirect = http.createServer((req, res) => {
-    res
-      .writeHead(301, { location: `https://${req.headers.host ?? 'localhost'}${req.url ?? '/'}` })
-      .end();
-  });
-  listener = net.createServer((socket) => {
-    // Bound sockets held by peers that never send the first byte.
-    const sniffTimeout = setTimeout(() => socket.destroy(), 10_000);
-    socket.once('readable', () => {
-      clearTimeout(sniffTimeout);
-      const first = socket.read(1) as Buffer | null;
-      if (!first) {
-        socket.destroy();
-        return;
-      }
-      socket.unshift(first);
-      (first[0] === 0x16 ? tlsServer : redirect).emit('connection', socket);
-    });
-    socket.once('close', () => clearTimeout(sniffTimeout));
-    socket.on('error', () => socket.destroy());
-  });
-  console.log('[tls] HTTPS enabled (plain http redirects)');
-} else {
-  server = http.createServer(onRequest);
-  listener = server;
-}
+const server = http.createServer(onRequest);
 
 setUnsubscribeHandler((conversationId) => {
   try {
@@ -313,22 +226,10 @@ setSubscribeHandler((ws, conversationId) => {
     console.error(`[ws] subscribe handler failed for conversation ${conversationId}:`, err);
   }
 });
-setSpeculativeRefillHandler((conversationId) => {
-  const subscribed = subscribedConversationIds();
-  const targets =
-    conversationId == null
-      ? subscribed
-      : subscribed.includes(conversationId)
-        ? [conversationId]
-        : [];
-  for (const id of targets) prepareActiveSwipe(id);
-});
-initWebSocket(server as http.Server);
+initWebSocket(server);
 
-listener.listen(PORT, () => {
-  console.log(
-    `tinytavern server listening on ${certPath && keyPath ? 'https' : 'http'}://0.0.0.0:${PORT}`,
-  );
+server.listen(PORT, () => {
+  console.log(`tinytavern server listening on http://0.0.0.0:${PORT}`);
   console.log(`IP allowlist: ${configuredIpAllowlist()}`);
 });
 

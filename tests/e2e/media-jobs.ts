@@ -237,8 +237,8 @@ export async function testMediaJobs(): Promise<void> {
     assert(
       acceptedTree.messages.length === beforeReview.messages.length + 1 &&
         acceptedMessage.content === 'First candidate' &&
-        acceptedMessage.images.length === 1 &&
-        acceptedMessage.media?.[0]?.id === firstCandidate.outputs[0]!.id,
+        acceptedMessage.media.length === 1 &&
+        acceptedMessage.media[0]?.id === firstCandidate.outputs[0]!.id,
       'accepting an earlier candidate inserts exactly its prompt and selected media',
     );
     assert(
@@ -311,7 +311,7 @@ export async function testMediaJobs(): Promise<void> {
     const beforeSwipe = await tree(conversation.id);
     const message = beforeSwipe.messages.find((item) => item.id === chatResult.messageId)!;
     assert(
-      message.hasImageRender && message.media?.[0]?.recipeId != null,
+      message.hasImageRender && message.media[0]?.recipeId != null,
       'media-tool image messages retain the shared rendering recipe',
     );
     await expectStatus('GET', `/api/media/jobs/${chatResult.id}`, undefined, 404);
@@ -350,9 +350,9 @@ export async function testMediaJobs(): Promise<void> {
       'swiping a media image keeps the existing tool message and active branch',
     );
     assert(
-      updated.images.length === 2 &&
+      updated.media.length === 2 &&
         updated.activeImage === 1 &&
-        updated.images[0] === message.images[0],
+        updated.media[0]!.url === message.media[0]!.url,
       'the fresh render is appended and selected as an image alternative',
     );
     assert(

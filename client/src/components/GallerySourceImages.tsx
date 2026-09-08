@@ -1,16 +1,10 @@
 import { For, Show, createResource } from 'solid-js';
-import type { MediaAsset, MediaAssetInput } from '@tinytavern/shared';
+import type { MediaAsset } from '@tinytavern/shared';
 import { api } from '../state/api.ts';
 import { galleryRevision } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 
-const INPUT_LABELS: Record<MediaAssetInput['slot'], string> = {
-  source: 'Source image',
-  first_frame: 'First frame',
-  reference1: 'Reference 1',
-  reference2: 'Reference 2',
-  reference3: 'Reference 3',
-};
+import { MEDIA_INPUT_LABELS as INPUT_LABELS } from '../media/jobCards.ts';
 
 export default function GallerySourceImages(props: {
   asset: MediaAsset;

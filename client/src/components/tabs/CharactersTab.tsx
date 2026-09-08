@@ -1,7 +1,7 @@
 import SettingLabel, { createDefaultField } from '../SettingField.tsx';
 import { faChevronDown, faChevronRight, faPen, faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
-import { For, Show, createSignal, onMount } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import type { Character } from '@tinytavern/shared';
 import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
@@ -46,7 +46,6 @@ export default function CharactersTab() {
 
   const editor = createEntityEditor({
     items: () => state.characters,
-    initialId: () => state.settingsCharacterId,
     load: (character) => {
       nameEl.value = character?.name ?? '';
       chatNameEl.value = character?.chatName ?? '';
@@ -91,9 +90,6 @@ export default function CharactersTab() {
   });
 
   const [collapsedFolders, setCollapsedFolders] = createSignal<ReadonlySet<number>>(new Set());
-  onMount(() => {
-    if (editor.selectedId() === state.settingsCharacterId) editor.nav.openDetail();
-  });
   const toggleFolder = (id: number) => {
     setCollapsedFolders((current) => {
       const next = new Set(current);

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
-const { IMAGES_DIR } = await import('../server/src/db.ts');
+const { IMAGES_DIR, stmt } = await import('../server/src/db.ts');
 const { downloadMedia, InvalidMediaOutput } = await import('../server/src/mediaFiles.ts');
 const { makePlaceholderPng } = await import('../server/src/pngCard.ts');
 const runFile = promisify(execFile);
@@ -32,51 +32,35 @@ const original = readFileSync(sourcePath);
 const matroskaPath = join(IMAGES_DIR, 'source.mkv');
 await runFile('ffmpeg', ['-v', 'error', '-i', sourcePath, '-c', 'copy', '-y', matroskaPath]);
 await assert.rejects(
-  downloadMedia(
-    new Response(readFileSync(matroskaPath)),
-    'wrong-container',
-    'video',
-    new AbortController().signal,
-  ),
+  downloadMedia(new Response(readFileSync(matroskaPath)), 'video', new AbortController().signal),
   InvalidMediaOutput,
   'An AV1 Matroska file must not be stored or served as WebM',
 );
-const video = await downloadMedia(
-  new Response(original),
-  'saved',
-  'video',
-  new AbortController().signal,
-);
+const video = await downloadMedia(new Response(original), 'video', new AbortController().signal);
 assert.equal(video.mime, 'video/webm');
 assert.equal(video.width, 64);
 assert.equal(video.height, 48);
 assert(video.duration !== null && video.duration > 0);
-assert.equal(existsSync(join(IMAGES_DIR, 'saved-poster.jpg')), false);
+assert(!readdirSync(IMAGES_DIR).some((name) => name.includes('poster')));
 assert.deepEqual(
   readFileSync(join(IMAGES_DIR, basename(video.path))),
   original,
   'The AV1 WebM original is stored byte-for-byte',
 );
-assert.equal(existsSync(join(IMAGES_DIR, 'saved.part')), false);
+assert(!readdirSync(IMAGES_DIR).some((name) => name.endsWith('.part')));
 
 const png = makePlaceholderPng();
-const image = await downloadMedia(
-  new Response(png),
-  'image',
-  'image',
-  new AbortController().signal,
-);
+const image = await downloadMedia(new Response(png), 'image', new AbortController().signal);
 assert.equal(image.mime, 'image/png');
 assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(image.path))), png);
 
 await assert.rejects(
-  downloadMedia(new Response(original), 'wrong-kind', 'image', new AbortController().signal),
+  downloadMedia(new Response(original), 'image', new AbortController().signal),
   /invalid raster/,
 );
 await assert.rejects(
   downloadMedia(
     new Response(png, { headers: { 'content-length': String(2 ** 30 + 1) } }),
-    'oversized',
     'video',
     new AbortController().signal,
   ),
@@ -101,7 +85,6 @@ await assert.rejects(
         },
       }),
     ),
-    'oversized-stream',
     'image',
     new AbortController().signal,
   ),
@@ -118,8 +101,30 @@ const response = new Response(
     },
   }),
 );
-await assert.rejects(downloadMedia(response, 'aborted', 'video', controller.signal), /abort/i);
-assert(!readdirSync(IMAGES_DIR).some((name) => name.startsWith('aborted')));
+await assert.rejects(downloadMedia(response, 'video', controller.signal), /abort/i);
+assert(!readdirSync(IMAGES_DIR).some((name) => name.endsWith('.part')));
+assert.equal(
+  stmt('SELECT count(*) AS count FROM media_assets').get()!.count,
+  2,
+  'Failed downloads release their asset reservations',
+);
+for (const asset of stmt('SELECT id, path FROM media_assets').all()) {
+  assert.match(String(asset.path), new RegExp(`/media-${asset.id}\\.(png|webm)$`));
+}
+
+// Deterministic names must preserve unexpected files rather than overwrite or clean them up.
+for (const extension of ['.part', '.png']) {
+  const nextId =
+    Number(stmt("SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'").get()!.seq) + 1;
+  const collision = join(IMAGES_DIR, `media-${nextId}${extension}`);
+  writeFileSync(collision, 'Unrelated bytes');
+  await assert.rejects(downloadMedia(new Response(png), 'image', new AbortController().signal), {
+    code: 'EEXIST',
+  });
+  assert.equal(readFileSync(collision, 'utf8'), 'Unrelated bytes');
+  assert.equal(stmt('SELECT count(*) AS count FROM media_assets').get()!.count, 2);
+  unlinkSync(collision);
+}
 
 console.log(
   'Media files preserve AV1 WebM originals, extract dimensions/duration without separate posters and discard invalid, oversized or aborted downloads',

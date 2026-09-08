@@ -303,12 +303,23 @@ const SLOTS = new Set([
 ]);
 const MARKER = '\u001fTT:';
 
-/** Parse once at configuration load, expand a fresh graph for every job. */
-export function compileMediaWorkflow(json: string): {
+interface CompiledMediaWorkflow {
   graph: JsonValue;
   slots: ReadonlySet<string>;
   controls: MediaWorkflowInput[];
-} {
+}
+
+// Bound both small-workflow count and retained source size. Cache by content so
+// editing a saved workflow never replaces a running job's captured graph.
+const compiledWorkflows = new Map<string, CompiledMediaWorkflow>();
+const MAX_COMPILED_WORKFLOWS = 64;
+const MAX_COMPILED_SOURCE_LENGTH = 8 * 1024 * 1024;
+let compiledSourceLength = 0;
+
+/** Reuse the read-only compilation; expansion creates a fresh graph for every job. */
+export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
+  const cached = compiledWorkflows.get(json);
+  if (cached) return cached;
   let inString = false;
   let escaped = false;
   let encoded = '';
@@ -364,7 +375,20 @@ export function compileMediaWorkflow(json: string): {
     inputs.image = `${MARKER}${slot}\u001f`;
     slots.add(slot);
   }
-  return { graph, slots, controls: discoverWorkflowInputs(graph) };
+  const compiled = { graph, slots, controls: discoverWorkflowInputs(graph) };
+  if (json.length <= MAX_COMPILED_SOURCE_LENGTH) {
+    while (
+      compiledWorkflows.size >= MAX_COMPILED_WORKFLOWS ||
+      compiledSourceLength + json.length > MAX_COMPILED_SOURCE_LENGTH
+    ) {
+      const oldest = compiledWorkflows.keys().next().value!;
+      compiledWorkflows.delete(oldest);
+      compiledSourceLength -= oldest.length;
+    }
+    compiledWorkflows.set(json, compiled);
+    compiledSourceLength += json.length;
+  }
+  return compiled;
 }
 
 export function expandMediaWorkflow(

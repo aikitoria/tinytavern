@@ -1,4 +1,4 @@
-import { mediaCharacterNames } from './mediaCharacters.ts';
+import { insertGalleryAsset } from './galleryStore.ts';
 import { mediaJobActive } from '@tinytavern/shared';
 import { stmt, toConversation, toMediaAsset, transaction } from './db.ts';
 import { HttpError } from './router.ts';
@@ -109,23 +109,10 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       touchMediaConversation(chat.id);
       broadcastTree(chat.id);
     } else {
-      const character =
-        conversation?.character_id === null || !conversation
-          ? null
-          : stmt('SELECT id, name FROM characters WHERE id = ?').get(conversation.character_id!);
-      const now = Date.now();
-      stmt(`INSERT INTO gallery_items (character_name, source_conversation_id,
-        prompt, image, image_width, image_height, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        mediaCharacterNames(asset.id) || character?.name || 'Media tools',
-        source.context_conversation_id,
-        source.prompt,
-        asset.url,
-        asset.width,
-        asset.height,
-        now,
-        now,
-      );
+      insertGalleryAsset(asset, {
+        conversationId: source.context_conversation_id,
+        prompt: source.prompt,
+      });
       invalidate('gallery');
     }
     stmt(`UPDATE media_drafts SET selected_asset_id = ?, revision = revision + 1

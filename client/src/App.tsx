@@ -22,6 +22,7 @@ import {
 import MessageSelectionBar from './components/MessageSelectionBar.tsx';
 import GalleryModal from './components/GalleryModal.tsx';
 import MediaToolsModal from './media/MediaToolsModal.tsx';
+import MediaJobsModal from './media/MediaJobsModal.tsx';
 
 export default function App() {
   const workspaceCovered = () =>
@@ -31,6 +32,7 @@ export default function App() {
         (frame) =>
           frame.page.modal === 'gallery' ||
           frame.page.modal === 'media-tools' ||
+          frame.page.modal === 'media-jobs' ||
           frame.page.modal === 'settings',
       );
   onMount(() => onCleanup(installUiBack()));
@@ -98,6 +100,9 @@ export default function App() {
                   </Match>
                   <Match when={frame.page.modal === 'gallery'}>
                     <GalleryModal active={active()} />
+                  </Match>
+                  <Match when={frame.page.modal === 'media-jobs'}>
+                    <MediaJobsModal />
                   </Match>
                   <Match when={frame.media}>
                     <MediaToolsModal session={frame.media!} />

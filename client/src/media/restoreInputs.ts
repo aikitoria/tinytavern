@@ -13,7 +13,7 @@ export function restoreMediaInputs(
   jobs: Readonly<Record<string, MediaJob>>,
 ): RestoredMediaInputs | undefined {
   const media = page.media;
-  if (!media || media.showJobs || media.jobId) return;
+  if (!media || media.jobId) return;
   const slot =
     media.operation === 'video-first'
       ? 'first_frame'
@@ -28,7 +28,7 @@ export function restoreMediaInputs(
     let asset: MediaAsset | undefined;
     if (ancestor.modal === 'gallery' && ancestor.galleryId) {
       asset = gallery.find((item) => item.id === ancestor.galleryId)?.media;
-    } else if (ancestor.media?.jobId && !ancestor.media.showJobs) {
+    } else if (ancestor.media?.jobId) {
       const job = jobs[ancestor.media.jobId];
       if (job) {
         const selected = job.draft?.selectedAssetId;

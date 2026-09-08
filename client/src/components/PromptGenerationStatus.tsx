@@ -1,6 +1,7 @@
 import { Show, createEffect, onCleanup } from 'solid-js';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
+import { createStreamScroll } from '../streamScroll.ts';
 
 /** Reasoning is a temporary preview, never the editable or rendered prompt. */
 export default function PromptGenerationStatus(props: {
@@ -10,23 +11,12 @@ export default function PromptGenerationStatus(props: {
   showStatus?: boolean;
 }) {
   let preview: HTMLDivElement | undefined;
-  let frame: number | undefined;
-  let follow = true;
+  const scroll = createStreamScroll(() => preview, requestAnimationFrame, cancelAnimationFrame);
   createEffect(() => {
     const reasoning = props.active && !props.content ? props.reasoning : '';
-    if (!reasoning) {
-      follow = true;
-      return;
-    }
-    if (frame !== undefined) return;
-    frame = requestAnimationFrame(() => {
-      frame = undefined;
-      if (follow && preview?.isConnected) preview.scrollTop = preview.scrollHeight;
-    });
+    scroll.update(reasoning ? 'reasoning' : null, Boolean(reasoning));
   });
-  onCleanup(() => {
-    if (frame !== undefined) cancelAnimationFrame(frame);
-  });
+  onCleanup(scroll.dispose);
   return (
     <Show when={props.active}>
       <div class="prompt-generation-status" aria-busy="true">
@@ -41,10 +31,7 @@ export default function PromptGenerationStatus(props: {
             ref={preview}
             class="reasoning-text prompt-generation-reasoning"
             aria-label="Prompt reasoning"
-            onScroll={(event) => {
-              const area = event.currentTarget;
-              follow = area.scrollHeight - area.scrollTop - area.clientHeight < 24;
-            }}
+            onScroll={scroll.onScroll}
           >
             {props.reasoning}
           </div>

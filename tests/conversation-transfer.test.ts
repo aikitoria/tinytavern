@@ -22,10 +22,7 @@ const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
-const sourceImages = [
-  saveImage('transfer-source-a.png', png),
-  saveImage('transfer-source-b.png', png),
-];
+const sourceImages = [saveImage('.png', png), saveImage('.png', png)];
 const { createImageRecipe, getMediaRecipe } = await import('../server/src/mediaRecipes.ts');
 const now = Date.now();
 const convResult = stmt(
@@ -169,6 +166,12 @@ assert(
 );
 
 const imported = importPortableConversation(portable);
+for (const row of stmt('SELECT id, path FROM media_assets').all()) {
+  assert(
+    new RegExp(`^/images/media-${row.id}\\.(png|jpe?g|webp|webm)$`).test(String(row.path)),
+    'imported originals use ownership-neutral names',
+  );
+}
 assert(
   imported.scenarioOverride === 'A portable scenario',
   'conversation scenario override is imported',
@@ -189,12 +192,12 @@ const importedPrompt = path[1]!;
 assert(importedRoot.activeChildId === importedPrompt.id, 'selected alternative is preserved');
 assert(importedPrompt.activeChildId === importedLeaf, 'deep active-child link is preserved');
 assert(
-  importedPrompt.images.length === 2 && importedPrompt.activeImage === 1,
+  importedPrompt.media.length === 2 && importedPrompt.activeImage === 1,
   'selected image alternative round-trips',
 );
 assert(
-  importedPrompt.images.every(
-    (path) =>
+  importedPrompt.media.every(
+    ({ url: path }) =>
       !sourceImages.includes(path) &&
       existsSync(join(IMAGES_DIR, path.slice('/images/'.length))) &&
       readFileSync(join(IMAGES_DIR, path.slice('/images/'.length))).equals(png),
@@ -215,7 +218,7 @@ assert(sibling?.parent_id === importedRoot.id, 'inactive sibling branch round-tr
 const siblingImages = JSON.parse(sibling!.images_json as string) as string[];
 assert(
   siblingImages.length === 1 &&
-    siblingImages[0] !== importedPrompt.images[0] &&
+    siblingImages[0] !== importedPrompt.media[0]!.url &&
     existsSync(join(IMAGES_DIR, siblingImages[0]!.slice('/images/'.length))),
   'a reused embedded asset gets per-message files with independent deletion ownership',
 );
@@ -223,7 +226,7 @@ assert(
 // Videos are deliberately absent on disk: exporting them must not read their bytes.
 const mixedPaths = [
   '/images/omitted-first.webm',
-  ...importedPrompt.images,
+  ...importedPrompt.media.map((asset) => asset.url),
   '/images/omitted-last.webm',
 ];
 stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(

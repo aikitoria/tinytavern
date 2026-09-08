@@ -1,21 +1,122 @@
 import type { Message } from '@tinytavern/shared';
 import { stmt } from './db.ts';
-import { stopBackgroundGenerations } from './generation.ts';
+import {
+  activeGenerationToken,
+  hasActiveGeneration,
+  isBackgroundGeneration,
+  startGeneration,
+  stopBackgroundGenerations,
+} from './generation.ts';
+import { getConversation } from './conversationStore.ts';
+import { hasConversationSubscribers, subscribedConversationIds } from './events.ts';
+import { getSettings } from './settingsStore.ts';
 import { broadcastTree } from './sync.ts';
 import { deleteImageFiles } from './images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
-import { getActiveLeafId, getPathToMessage, setActiveLeaf } from './tree.ts';
+import {
+  appendMessage,
+  deleteMessage,
+  getActiveLeafId,
+  getMessage,
+  getPathToMessage,
+  setActiveLeaf,
+} from './tree.ts';
 
 const retryTimers = new Map<number, NodeJS.Timeout>();
-let refillHandler: ((conversationId?: number) => void) | null = null;
 
 const RETRY_BACKOFF_MS = Number(
   process.env.SPECULATION_BACKOFF_MS ?? (process.env.E2E_BASE ? 50 : 500),
 );
 
-/** Installed at startup to lazily restore the one-ahead invariant for visible chats. */
-export function setSpeculativeRefillHandler(handler: (conversationId?: number) => void): void {
-  refillHandler = handler;
+/** Removes an in-flight speculative sibling before a foreground action takes over. */
+export function cancelBackgroundSwipe(conversationId: number): boolean {
+  cancelSpeculativeRetries(conversationId);
+  const mid = stopBackgroundGenerations(conversationId);
+  if (mid == null) return false;
+  deleteMessage(mid);
+  // Broadcast even if the caller later rejects; microtask coalescing avoids duplicate frames.
+  broadcastTree(conversationId);
+  return true;
+}
+
+/** Ensures the active assistant reply has one unread sibling ready or in progress. */
+export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
+  const message = getMessage(messageId);
+  if (!message || message.role !== 'assistant') return;
+  if (!hasConversationSubscribers(message.conversationId)) return;
+  const conversation = getConversation(message.conversationId);
+  if (conversation.activeLeafId !== message.id) return;
+  const settings = getSettings();
+  if (!settings.backgroundSwipeGeneration) return;
+  const parallel =
+    settings.parallelBackgroundSwipeGeneration &&
+    message.status === 'streaming' &&
+    activeGenerationToken(message.id) != null &&
+    !isBackgroundGeneration(message.id);
+  if (message.status !== 'done' && !parallel) return;
+  // Only the visible reply may overlap its speculative sibling; another
+  // assistant, tool or speculative stream still occupies the second slot.
+  if (hasActiveGeneration(conversation.id, parallel ? message.id : undefined)) return;
+  if (
+    conversation.characterId != null &&
+    stmt('SELECT 1 FROM characters WHERE id = ? AND disable_background_swipe_generation = 1').get(
+      conversation.characterId,
+    )
+  )
+    return;
+
+  if (nextUnreadSibling(message) != null) return;
+
+  cancelSpeculativeRetries(conversation.id);
+
+  const speculative = appendMessage(
+    conversation.id,
+    'assistant',
+    '',
+    message.parentId,
+    'streaming',
+    null,
+    message.name,
+    false,
+    'speculative',
+  );
+  startGeneration(getConversation(conversation.id), speculative.id, undefined, {
+    background: true,
+    onDone: () => {
+      if (hasConversationSubscribers(conversation.id)) prepareNextSwipe(speculative.id);
+    },
+    onError: () => {
+      const row = getMessage(speculative.id);
+      if (row?.generationKind !== 'speculative') {
+        if (getActiveLeafId(conversation.id) === speculative.id)
+          cancelBackgroundSwipe(conversation.id);
+        return;
+      }
+      deleteMessage(speculative.id);
+      broadcastTree(conversation.id);
+      if (!hasConversationSubscribers(conversation.id)) return;
+      scheduleSpeculativeRetry(conversation.id, retryAttempt + 1, () => {
+        // Re-check at fire time: the last client may have left during the backoff.
+        if (hasConversationSubscribers(conversation.id))
+          prepareNextSwipe(message.id, retryAttempt + 1);
+      });
+    },
+  });
+  broadcastTree(conversation.id);
+}
+
+export function prepareActiveSwipe(conversationId: number): void {
+  const leaf = getActiveLeafId(conversationId);
+  if (leaf != null) prepareNextSwipe(leaf);
+}
+
+/** Restores the one-ahead invariant only for conversations that still have viewers. */
+export function prepareSubscribedSwipes(conversationId?: number): void {
+  if (conversationId != null) {
+    if (hasConversationSubscribers(conversationId)) prepareActiveSwipe(conversationId);
+    return;
+  }
+  for (const id of subscribedConversationIds()) prepareActiveSwipe(id);
 }
 
 /** Cancels delayed refill attempts after the leaf or generation context changes. */
@@ -34,7 +135,7 @@ export function cancelSpeculativeRetries(conversationId?: number): void {
 const MAX_RETRY_ATTEMPTS = 8;
 
 /** Keeps retrying failed background requests without creating concurrent refills. */
-export function scheduleSpeculativeRetry(
+function scheduleSpeculativeRetry(
   conversationId: number,
   attempt: number,
   retry: () => void,
@@ -100,7 +201,7 @@ export function discardSpeculativeSwipes(conversationId?: number): void {
     }
     broadcastTree(row.conversation_id);
   }
-  queueMicrotask(() => refillHandler?.(conversationId));
+  queueMicrotask(() => prepareSubscribedSwipes(conversationId));
 }
 
 export function markSwipeRead(messageId: number): void {

@@ -38,6 +38,26 @@ assert.equal(result['1'].inputs.text, `prefix ${prompt}`);
 assert.equal(result['1'].inputs.seed, 0);
 assert.deepEqual(result['1'].inputs.refs, ['a.png', 'b.png', 'c.png']);
 assert.equal(JSON.stringify(compiled.graph), before, 'Compilation can be reused without mutation');
+assert.equal(compileMediaWorkflow(workflow.json), compiled, 'Identical source reuses compilation');
+const changedWorkflow = { ...workflow, json: workflow.json.replace('prefix ', 'edited ') };
+assert.notEqual(
+  compileMediaWorkflow(changedWorkflow.json),
+  compiled,
+  'Edits under the same workflow ID compile the changed source',
+);
+const nextResult = expandMediaWorkflow(compiled, {
+  prompt: 'Second prompt',
+  seed: 42,
+  job_id: 'next-job',
+  reference1: 'next-a.png',
+  reference2: 'next-b.png',
+  reference3: 'next-c.png',
+}) as typeof result;
+(result['1'].inputs.refs as string[])[0] = 'mutated-output.png';
+assert.equal(nextResult['1'].inputs.text, 'prefix Second prompt');
+assert.equal(nextResult['1'].inputs.seed, 42);
+assert.deepEqual(nextResult['1'].inputs.refs, ['next-a.png', 'next-b.png', 'next-c.png']);
+assert.equal(JSON.stringify(compiled.graph), before, 'Expanded jobs cannot mutate cached inputs');
 for (const count of [1, 2, 3]) {
   assert.deepEqual(
     mediaInputSlots('image-edit', count),
@@ -208,4 +228,15 @@ const firstFrame = {
 };
 assert.equal(mediaWorkflowError(firstFrame), null);
 assert.ok(compileMediaWorkflow(firstFrame.json).slots.has('first_frame'));
+// Eviction drops only the derived cache; existing jobs can still expand their capture.
+const evictionSource = '{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}';
+const evicted = compileMediaWorkflow(evictionSource);
+for (let index = 0; index < 64; index++) {
+  compileMediaWorkflow(`{"1":{"inputs":{"text":"{{prompt}}","tag":${index}}}}`);
+}
+assert.notEqual(compileMediaWorkflow(evictionSource), evicted, 'Compilation cache is bounded');
+assert.deepEqual(
+  expandMediaWorkflow(evicted, { prompt: 'after eviction', seed: 0, job_id: 'retained' }),
+  { '1': { inputs: { text: 'after eviction', tag: 'eviction' } } },
+);
 console.log('Media workflow bindings and independent chat/gallery prompt schemas passed');

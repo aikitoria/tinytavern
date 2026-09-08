@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
   Conversation,
   GenerationKind,
@@ -24,14 +23,14 @@ export interface MessageRow {
 
 /** Track files before SQL commit so any partial failure can remove every copy. */
 export function copyMessageImages(
-  message: Pick<Message, 'images' | 'activeImage'>,
+  message: Pick<Message, 'media' | 'activeImage'>,
   written: string[],
 ) {
   const images: string[] = [];
   let activeImage = 0;
-  for (const [index, path] of message.images.entries()) {
-    const ext = path.includes('.') ? path.slice(path.lastIndexOf('.')) : '.png';
-    const copied = copyImage(path, `msg-copy-${randomUUID()}${ext}`);
+  for (const [index, asset] of message.media.entries()) {
+    const path = asset.url;
+    const copied = copyImage(path);
     if (copied == null) {
       console.warn(`[messages] copy: source image ${path} is missing`);
       continue;

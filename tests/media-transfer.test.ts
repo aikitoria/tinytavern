@@ -22,9 +22,9 @@ const organizationCharacters = ['Ashina', 'Haeun'].map((name) =>
   Number(stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid),
 );
 const png = makePlaceholderPng();
-const source = saveImage('transfer-original.png', png);
-const reference = saveImage('transfer-reference.png', png);
-const output = saveImage('transfer-edited.png', png);
+const source = saveImage('.png', png);
+const reference = saveImage('.png', png);
+const output = saveImage('.png', png);
 const sourceId = mediaAssetForPath(source)!.id;
 const referenceId = mediaAssetForPath(reference)!.id;
 const workflow: MediaWorkflow = {
@@ -142,6 +142,13 @@ assert.equal(stmt('SELECT count(*) AS n FROM media_recipes').get()!.n, 0);
 assert.equal(readdirSync(IMAGES_DIR).length, 0);
 
 const imported = importPortableConversation(portable);
+for (const row of stmt('SELECT id, path FROM media_assets').all()) {
+  assert.match(
+    String(row.path),
+    new RegExp(`^/images/media-${row.id}\\.(png|jpe?g|webp|webm)$`),
+    'Imported results and transitive inputs use ownership-neutral original names',
+  );
+}
 const paths = collectConversationImages(imported.id);
 assert.equal(paths.length, 2);
 assert.notEqual(paths[0], paths[1], 'Each imported message has an independently owned result file');

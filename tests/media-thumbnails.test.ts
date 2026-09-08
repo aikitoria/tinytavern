@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { basename, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { DEFAULT_SETTINGS, GENERAL_TRANSFER_FIELDS, type GalleryItem } from '@tinytavern/shared';
@@ -47,7 +47,8 @@ async function fixture(
     '-y',
     file,
   ]);
-  const path = saveImage(name, readFileSync(file));
+  const path = saveImage(extname(name), readFileSync(file));
+  unlinkSync(file);
   const result =
     stmt(`INSERT INTO gallery_items(character_name, prompt, image, image_width, image_height, created_at, updated_at)
     VALUES ('Uploads', 'Saved prompt', ?, ?, ?, 1, 1)`).run(path, width, height);
@@ -77,6 +78,10 @@ async function ready(size: number) {
 function checkThumbnail(gallery: GalleryItem, width: number, height: number) {
   const current = item(gallery.id);
   assert(current.media!.thumbnail);
+  assert.equal(
+    current.media!.thumbnail,
+    `/images/thumb-${current.media!.id}-${current.media!.thumbnailRevision}.jpg`,
+  );
   const data = readFileSync(file(current.media!.thumbnail));
   assert.equal(rasterImageFormat(data)?.mime, 'image/jpeg');
   assert.deepEqual(imageDimensions(data), { width, height });
@@ -115,6 +120,7 @@ try {
       .lastInsertRowid,
   );
   const avatar = saveAvatar('character', characterId, avatarOriginal);
+  assert.match(avatar, /^\/avatars\/character-\d+\.png\?v=\d+$/);
   stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(avatar, characterId);
   const personaId = Number(
     stmt("INSERT INTO personas(name, created_at) VALUES ('Persona test', 1)").run().lastInsertRowid,
@@ -134,6 +140,14 @@ try {
       ) === 2,
   );
   const avatarPreview = publicAvatar({ avatar }).avatarThumbnail!;
+  assert.equal(
+    avatarPreview,
+    `/avatars/thumb-character-${characterId}-${avatar.split('?v=')[1]}-1.jpg`,
+  );
+  assert.equal(
+    publicAvatar({ avatar: personaAvatar }).avatarThumbnail,
+    `/avatars/thumb-persona-${personaId}-${personaAvatar.split('?v=')[1]}-1.jpg`,
+  );
   assert.deepEqual(imageDimensions(readFileSync(join(AVATAR_DIR, basename(avatarPreview)))), {
     width: 128,
     height: 72,
@@ -144,12 +158,26 @@ try {
     'Avatar export retains original PNG bytes',
   );
   const replacement = saveAvatar('character', characterId, avatarOriginal);
+  assert(Number(replacement.split('?v=')[1]) > Number(avatar.split('?v=')[1]));
   stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(replacement, characterId);
   invalidate('characters');
   await until(() => Boolean(publicAvatar({ avatar: replacement }).avatarThumbnail));
   assert(
     !existsSync(join(AVATAR_DIR, basename(avatarPreview))),
     'Replacing an avatar removes its old thumbnail',
+  );
+  await stopMediaThumbnails();
+  const replacedPreview = publicAvatar({ avatar: replacement }).avatarThumbnail!;
+  unlinkSync(join(AVATAR_DIR, basename(replacedPreview)));
+  initMediaThumbnails();
+  await until(() => {
+    const preview = publicAvatar({ avatar: replacement }).avatarThumbnail;
+    return Boolean(preview && preview !== replacedPreview);
+  });
+  assert.equal(
+    publicAvatar({ avatar: replacement }).avatarThumbnail,
+    `/avatars/thumb-character-${characterId}-${replacement.split('?v=')[1]}-2.jpg`,
+    'A restart repair advances the derivative revision without reusing its old URL',
   );
   deleteAvatarFiles('character', characterId);
   stmt('DELETE FROM characters WHERE id = ?').run(characterId);
@@ -202,7 +230,7 @@ try {
   await resize(384);
   await ready(384);
   checkThumbnail(video, 384, 216);
-  const standalone = saveImage('chat-only.png', originals[0]!);
+  const standalone = saveImage('.png', originals[0]!);
   const standaloneAsset = mediaAssetForPath(standalone)!;
   stmt("INSERT INTO media_owners VALUES (?, 'job', 'draft-only', 'output:1')").run(
     standaloneAsset.id,

@@ -190,7 +190,7 @@ putSettings({
     defaults: { 'image-describe:0': IMAGE_DESCRIPTION_WORKFLOW.id },
   },
 });
-const path = saveImage('uploaded.png', makePlaceholderPng());
+const path = saveImage('.png', makePlaceholderPng());
 const id = Number(
   stmt(
     "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Uploads', 'Saved before generation', ?, 1, 1)",
