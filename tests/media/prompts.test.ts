@@ -36,6 +36,9 @@ test('media prompts', async () => {
     model: 'original-model',
     prefill_mode: 'vllm',
     gen_params_json: JSON.stringify({ temperature: 0.2, maxTokens: 1000 }),
+    system_prompt_prefix: 'Endpoint prefix\n',
+    system_prompt_suffix: '\nEndpoint suffix',
+    reasoning_prefill_prefix: 'Endpoint reasoning\n',
     created_at: 1,
   });
   const workflow: MediaWorkflow = {
@@ -175,7 +178,8 @@ test('media prompts', async () => {
       'Chat media uses exactly the original image tool prefix and trailing steering turn',
     );
     assert(!captured.endpoint_json!.includes('private-key'), 'Saved requests exclude credentials');
-    stmt("UPDATE endpoints SET model = 'changed-model', gen_params_json = '{}' WHERE id = ?").run(
+    stmt(`UPDATE endpoints SET model = 'changed-model', gen_params_json = '{}',
+      system_prompt_prefix = '', system_prompt_suffix = '', reasoning_prefill_prefix = '' WHERE id = ?`).run(
       endpointId,
     );
     stmt("UPDATE messages SET content = 'Changed conversation' WHERE id = ?").run(userId);
@@ -191,10 +195,17 @@ test('media prompts', async () => {
     }[];
     assert.deepEqual(
       messages.slice(0, -1),
-      expected.messages,
-      'The wire preserves the structured prefix',
+      expected.messages.map((message) =>
+        message.role === 'system'
+          ? { ...message, content: `Endpoint prefix\n${message.content}\nEndpoint suffix` }
+          : message,
+      ),
+      'The wire composes captured endpoint additions with the original structured chat prefix',
     );
-    assert.equal(messages[0]!.content, 'Original chat system context');
+    assert.equal(
+      messages[0]!.content,
+      'Endpoint prefix\nOriginal chat system context\nEndpoint suffix',
+    );
     assert(messages[1]!.content.includes('A sunset by the lake'));
     assert.equal(messages[2]!.reasoning_content, 'Original assistant reasoning');
     assert(messages[3]!.content.includes('Use literal {{context}} in the title'));
@@ -202,7 +213,7 @@ test('media prompts', async () => {
     assert.deepEqual(messages.at(-1), {
       role: 'assistant',
       content: '',
-      reasoning_content: 'Chat reasoning',
+      reasoning_content: 'Endpoint reasoning\nChat reasoning',
     });
     assert.equal(ready.prompt, 'A camera glides across the lake');
     assert.equal(
@@ -357,6 +368,16 @@ test('media prompts', async () => {
               { name: 'My portrait', prompt: 'My portrait style for {{char}}: {{instruction}}' },
             ],
           },
+          references: {
+            active: 'Reference style',
+            presets: [
+              {
+                name: 'Reference style',
+                prompt:
+                  'Reference style for {{char}}: {{instruction}}\n{{#if reference1_prompt}}Source: {{reference1_prompt}}{{/if}}',
+              },
+            ],
+          },
         },
       },
       mediaRendering: {
@@ -473,23 +494,58 @@ test('media prompts', async () => {
     );
     const edit = createMediaJob({
       requestKey: testRequestKey('edit-with-chat-destination'),
-      operation: 'image-edit',
-      workflowId: 'edit',
+      operation: 'image',
       contextConversationId: conversationId,
       destination: 'chat',
       reviewBeforeSave: true,
       instruction: 'Change the lighting',
+    });
+    editMediaJob(requireMediaJob(edit.id), {
+      operation: 'image-edit',
+      workflowId: 'edit',
+      presetId: null,
       inputs: [{ assetId: sourceId, slot: 'reference1' }],
     });
     startMediaJob(requireMediaJob(edit.id), {}, true);
     const editReady = await waitFor(edit.id, 'ready');
+    const expectedEdit = buildToolPrompt(
+      toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId)!),
+      getActivePath(conversationId),
+      'Reference style for {{char}}: Change the lighting\nSource: Source description',
+    );
     assert.deepEqual(
       JSON.parse(editReady.context_json!).messages,
+      expectedEdit.messages,
+      'Switching from chat image creation to references keeps the exact chat prefix and uses the active reference prompt',
+    );
+    assert.equal(JSON.parse(editReady.context_json!).template.reasoningPrefill, 'Chat reasoning');
+    const referencePreset = chatImagePromptPresets(
+      getSettings().imageGeneration,
+      false,
+      'image-edit',
+    ).find((preset) => preset.name === 'Image from references — Reference style')!;
+    assert(referencePreset, 'Reference presets are available without an instruction');
+    assert.deepEqual(
+      chatImagePromptPresets(getSettings().imageGeneration, true, 'image-edit'),
+      chatImagePromptPresets(getSettings().imageGeneration, false, 'image-edit'),
+    );
+    const standaloneEdit = createMediaJob({
+      requestKey: testRequestKey('edit-with-gallery-destination'),
+      operation: 'image-edit',
+      workflowId: 'edit',
+      reviewBeforeSave: true,
+      instruction: 'Change the lighting',
+      inputs: [{ assetId: sourceId, slot: 'reference1' }],
+    });
+    startMediaJob(requireMediaJob(standaloneEdit.id), {}, true);
+    const standaloneEditReady = await waitFor(standaloneEdit.id, 'ready');
+    assert.deepEqual(
+      JSON.parse(standaloneEditReady.context_json!).messages,
       [
         { role: 'system', content: 'Edit-only system' },
         { role: 'user', content: 'Edit: Change the lighting' },
       ],
-      'Editing an actual image uses standalone instructions even when its result returns to chat',
+      'Gallery reference images retain standalone instructions',
     );
     putSettings({
       ...getSettings(),

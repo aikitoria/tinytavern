@@ -4,6 +4,7 @@ export * from './imagePrompts.ts';
 export * from './settingsTransfer.ts';
 export * from './template.ts';
 export * from './entityFields.ts';
+export * from './promptMessages.ts';
 import type { Character } from './entityFields.ts';
 import { DEFAULT_MEDIA_RENDERING, DEFAULT_MEDIA_PROMPTS } from './media.ts';
 import type { MediaAsset, MediaRenderingSettings, MediaPromptSettings, MediaJob } from './media.ts';

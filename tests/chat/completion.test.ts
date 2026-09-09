@@ -99,6 +99,33 @@ databaseCase('server completion', async () => {
       messages: [...messages, { role: 'assistant', content: 'Seed: ', reasoning_content: 'Think' }],
     });
 
+    stmt(`UPDATE endpoints SET system_prompt_prefix = ?, system_prompt_suffix = ?,
+      reasoning_prefill_prefix = ? WHERE id = ?`).run(
+      'Prefix\n',
+      '\nSuffix',
+      'Global\n',
+      endpointId,
+    );
+    reply = () => Response.json({ choices: [{ message: { content: 'one shot' } }] });
+    assert.equal(await chatCompletionOnce(null, messages, 23), 'one shot');
+    assert.deepEqual(wire.messages, [
+      { role: 'system', content: 'Prefix\n\nSuffix' },
+      ...messages,
+      { role: 'assistant', content: '', reasoning_content: 'Global\n' },
+    ]);
+    const withSystem = [{ role: 'system' as const, content: 'Task system' }, ...messages];
+    reply = () => new Response(upstreamFrame({ content: 'Prompt' }));
+    assert.equal(
+      await streamChatCompletion(null, withSystem, 71, () => {}, undefined, options),
+      'Seed: Prompt',
+    );
+    assert.deepEqual(wire.messages, [
+      { role: 'system', content: 'Prefix\nTask system\nSuffix' },
+      ...messages,
+      { role: 'assistant', content: 'Seed: ', reasoning_content: 'Global\nThink' },
+    ]);
+    assert.equal(withSystem[0]!.content, 'Task system');
+
     for (const [delta, diagnosis] of [
       [{ refusal: 'no thanks' }, /The model refused: no thanks/],
       [{ reasoning_content: 'thinking' }, /only reasoning/],
@@ -224,10 +251,27 @@ databaseCase('generation stream', async () => {
     jest.advanceTimersByTime(120_000);
     assert(!active.signal.aborted, 'Finalization clears the idle watchdog');
 
+    stmt(`UPDATE endpoints SET system_prompt_prefix = ?, system_prompt_suffix = ?,
+      reasoning_prefill_prefix = ? WHERE id = ?`).run(
+      'Prefix\n',
+      '\nSuffix',
+      'Global\n',
+      endpointId,
+    );
+    const retryPrompt = { ...prompt, reasoningPrefill: 'Template reasoning' };
     const retryId = message();
-    startGeneration(conversation, retryId, undefined, { prompt });
+    startGeneration(conversation, retryId, undefined, { prompt: retryPrompt });
     await flush();
     const stalled = requests.at(-1)!;
+    assert.deepEqual(stalled.messages[0], { role: 'system', content: 'Prefix\n\nSuffix' });
+    assert.deepEqual(stalled.messages.at(-1), {
+      role: 'assistant',
+      content: 'Hal:',
+      reasoning_content: 'Global\nTemplate reasoning',
+    });
+    stmt(
+      "UPDATE endpoints SET system_prompt_prefix = 'Changed', reasoning_prefill_prefix = 'Changed' WHERE id = ?",
+    ).run(endpointId);
     jest.advanceTimersByTime(90_000);
     stalled.stream.write(upstreamFrame({ content: 'Ha' }));
     await flush();
@@ -242,12 +286,23 @@ databaseCase('generation stream', async () => {
     await flush();
     const retry = requests.at(-1)!;
     assert.notEqual(retry, stalled);
-    assert.deepEqual(retry.messages.at(-1), { role: 'assistant', content: 'Hal: Ha' });
+    assert.deepEqual(
+      retry.messages[0],
+      stalled.messages[0],
+      'Retries retain the captured endpoint additions',
+    );
+    assert.deepEqual(retry.messages.at(-1), {
+      role: 'assistant',
+      content: 'Hal: Ha',
+      reasoning_content: 'Global\nTemplate reasoning',
+    });
     retry.stream.write(upstreamFrame({ content: 'ppy' }));
     retry.stream.close();
     await flush();
     assert.equal(getMessage(retryId)!.status, 'done');
     assert.equal(getMessage(retryId)!.content, 'Happy', 'Held prefix survives the idle retry once');
+    assert.equal(getMessage(retryId)!.reasoning, 'Global\nTemplate reasoning');
+    assert.deepEqual(prompt.messages, [{ role: 'user', content: 'Hello' }]);
 
     // A request that stalls before returning response headers has the same deadline.
     let waitingSignal!: AbortSignal;
@@ -425,6 +480,9 @@ databaseCase('prompt reasoning', async () => {
     model: null,
     createdAt: 0,
     prefillMode: 'vllm',
+    systemPromptPrefix: '',
+    systemPromptSuffix: '',
+    reasoningPrefillPrefix: '',
     genParams: {},
   };
   const originalFetch = globalThis.fetch;

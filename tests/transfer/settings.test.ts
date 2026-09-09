@@ -32,6 +32,14 @@ test('settings transfer', async () => {
   const portrait = { name: 'Portrait', prompt: 'Paint a portrait', context: '{{description}}' };
   const imageSet = { presets: [portrait], active: portrait.name };
   assert.deepEqual(importImagePromptSet(imageSet, { presets: [], active: '' }, true), imageSet);
+  const references = {
+    presets: [{ name: 'Reference style', prompt: '{{instruction}}: {{reference1_prompt}}' }],
+    active: 'Reference style',
+  };
+  assert.deepEqual(
+    parseImageGenerationSettings({ promptPresets: { references } })?.promptPresets?.references,
+    importImagePromptSet(references, { presets: [], active: '' }, false),
+  );
   for (const presets of [
     [{ ...portrait, context: ' ' }],
     [{ ...portrait, name: 'Default' }],
@@ -206,9 +214,15 @@ test('settings transfer', async () => {
       name: 'Portable endpoint',
       baseUrl: 'http://endpoint.invalid/v1',
       apiKey: 'private-credential',
+      systemPromptPrefix: 'Prefix\n',
+      systemPromptSuffix: '\nSuffix',
+      reasoningPrefillPrefix: 'Reasoning\n',
     });
     const endpoints = await request('GET', '/api/endpoints/settings-export');
     assert(!JSON.stringify(endpoints.document).includes('private-credential'));
+    assert.equal(endpoints.document.data.items[0].systemPromptPrefix, 'Prefix\n');
+    assert.equal(endpoints.document.data.items[0].systemPromptSuffix, '\nSuffix');
+    assert.equal(endpoints.document.data.items[0].reasoningPrefillPrefix, 'Reasoning\n');
     await request('POST', '/api/endpoints/settings-import', {
       expectedSnapshot: endpoints.snapshot,
       document: endpoints.document,
@@ -217,6 +231,16 @@ test('settings transfer', async () => {
       stmt('SELECT api_key FROM endpoints WHERE id = ?').get(endpoint.id)!.api_key,
       'private-credential',
     );
+    const [endpointCopy] = await request('POST', '/api/endpoints/settings-import', {
+      targetId: null,
+      document: transferDocument('entity:endpoints', {
+        ...endpoints.document.data.items[0],
+        name: 'Copied endpoint',
+      }),
+    });
+    assert.equal(endpointCopy.systemPromptPrefix, 'Prefix\n');
+    assert.equal(endpointCopy.systemPromptSuffix, '\nSuffix');
+    assert.equal(endpointCopy.reasoningPrefillPrefix, 'Reasoning\n');
 
     const preset = await request('POST', '/api/presets', {
       name: 'Linked prompt',

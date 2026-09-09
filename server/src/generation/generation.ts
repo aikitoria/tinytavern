@@ -1,14 +1,19 @@
-import { readSseData } from '@tinytavern/shared';
+import { readSseData, prepareChatMessages } from '@tinytavern/shared';
 import { publicMessage } from '../media/mediaUrls.ts';
 import type { Conversation, Endpoint, GenMeta, Message } from '@tinytavern/shared';
 import { stmt, toEndpoint, toMessage, transaction } from '../db/db.ts';
 import { getMessage, getPathToMessage } from '../conversations/tree.ts';
-import { appendChatMessage, buildChatMessages, withDisabledPrefillSpeakerNote } from './prompt.ts';
+import { buildChatMessages } from './prompt.ts';
 import type { BuiltPrompt, ChatMessage } from './prompt.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { broadcastConv, invalidate } from '../realtime/events.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
-import { generationParameters, prepareStandaloneCompletion } from './completionConfig.ts';
+import {
+  generationParameters,
+  prepareStandaloneCompletion,
+  withEndpointSystemPrompt,
+  endpointReasoningPrefill,
+} from './completionConfig.ts';
 import type { CompletionOptions } from './completionConfig.ts';
 import { completionDataReader, startCompletionIdleWatchdog } from './completionStream.ts';
 
@@ -293,7 +298,7 @@ function completionRequest(
     },
     body: JSON.stringify({
       ...(endpoint.model ? { model: endpoint.model } : {}),
-      messages,
+      messages: withEndpointSystemPrompt(endpoint, messages),
       stream,
       ...parameters,
     }),
@@ -477,40 +482,21 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   gen.model = endpoint.model;
 
   // Seed fresh replies only; retries/resumes already carry the template in their buffers.
-  if (endpoint.prefillMode !== 'disabled' && !isResume) {
-    if (built.reasoningPrefill) gen.reasoning = built.reasoningPrefill;
-    if (built.messagePrefill) gen.content = built.messagePrefill;
+  if (endpoint.prefillMode !== 'disabled') {
+    gen.reasoning = endpointReasoningPrefill(
+      endpoint,
+      isResume ? gen.reasoning : built.reasoningPrefill,
+      isResume,
+    );
+    if (!isResume && built.messagePrefill) gen.content = built.messagePrefill;
   }
 
-  // Copy the snapshotted list because continuation flags are added per attempt.
-  const messages: (ChatMessage & { prefix?: boolean })[] =
-    endpoint.prefillMode === 'disabled'
-      ? withDisabledPrefillSpeakerNote(built)
-      : built.messages.map((message) => ({ ...message }));
+  const { messages, prefilled } = prepareChatMessages(built, {
+    prefillMode: endpoint.prefillMode,
+    content: gen.content,
+    reasoning: gen.reasoning,
+  });
   const namePrefill = built.namePrefill;
-  // Reasoning-only prefills keep content empty so compatible APIs continue thinking.
-  // Continuation is nonstandard: vLLM/DeepSeek require backend-specific flags.
-  let prefilled = false;
-  if (
-    endpoint.prefillMode !== 'disabled' &&
-    (isResume || built.reasoningPrefill || built.messagePrefill) &&
-    (gen.content.length > 0 || gen.reasoning.length > 0)
-  ) {
-    appendChatMessage(messages, {
-      role: 'assistant',
-      content: namePrefill
-        ? gen.content
-          ? `${namePrefill} ${gen.content}`
-          : namePrefill
-        : gen.content,
-      ...(gen.reasoning ? { reasoning_content: gen.reasoning } : {}),
-    });
-    prefilled = true;
-  } else if (endpoint.prefillMode !== 'disabled' && namePrefill) {
-    appendChatMessage(messages, { role: 'assistant', content: namePrefill });
-    prefilled = true;
-  }
-  if (prefilled && endpoint.prefillMode === 'deepseek') messages.at(-1)!.prefix = true;
   const p = endpoint.genParams;
 
   // Hold initial characters to strip echoed "Name:" prefixes.

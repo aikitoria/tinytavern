@@ -1,4 +1,5 @@
 import type { ImageGenerationSettings } from './index.ts';
+import type { MediaOperation } from './media.ts';
 
 export const DEFAULT_IMAGE_CHAT_PROMPTS = {
   describe:
@@ -9,6 +10,8 @@ export const DEFAULT_IMAGE_CHAT_PROMPTS = {
   faceInstruction:
     "[System Note]\nDescribe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting, and apply this instruction: {{instruction}}. Reply with only the prompt.",
   instruction: '[System Note]\n{{instruction}}',
+  references:
+    '[System Note]\nUse the preceding conversation and any reference-image descriptions below to write a detailed image-generation prompt for rendering with reference images. Apply this instruction: {{instruction}}. Return only the complete final prompt.\n{{#if reference1_prompt}}\nReference image 1: {{reference1_prompt}}\n{{/if}}{{#if reference2_prompt}}\nReference image 2: {{reference2_prompt}}\n{{/if}}{{#if reference3_prompt}}\nReference image 3: {{reference3_prompt}}\n{{/if}}',
 };
 
 export type ImageChatPromptKind = keyof typeof DEFAULT_IMAGE_CHAT_PROMPTS;
@@ -19,6 +22,7 @@ const LABELS: Record<ImageChatPromptKind, string> = {
   face: 'Face',
   faceInstruction: 'Face',
   instruction: 'Generic image',
+  references: 'Image from references',
 };
 
 export interface ChatImagePromptPreset {
@@ -35,11 +39,15 @@ function presetId(kind: ImageChatPromptKind, name?: string): string {
 export function chatImagePromptPresets(
   settings: ImageGenerationSettings,
   hasInstruction: boolean,
+  operation: MediaOperation = 'image',
 ): ChatImagePromptPreset[] {
   const result: ChatImagePromptPreset[] = [];
-  const kinds: ImageChatPromptKind[] = hasInstruction
-    ? ['characterInstruction', 'faceInstruction', 'instruction']
-    : ['describe', 'face', 'instruction'];
+  const kinds: ImageChatPromptKind[] =
+    operation === 'image-edit'
+      ? ['references']
+      : hasInstruction
+        ? ['characterInstruction', 'faceInstruction', 'instruction']
+        : ['describe', 'face', 'instruction'];
   for (const kind of kinds) {
     result.push({
       id: presetId(kind),
@@ -57,12 +65,18 @@ export function chatImagePromptPresets(
   return result;
 }
 
-/** Matches /imagechar: the instruction chooses the corresponding character preset set. */
+/** Plain images match /imagechar; reference images use their own active preset. */
 export function defaultChatImagePrompt(
   settings: ImageGenerationSettings,
   instruction: string,
+  operation: MediaOperation = 'image',
 ): ChatImagePromptPreset {
-  const kind = instruction.trim() ? 'characterInstruction' : 'describe';
+  const kind =
+    operation === 'image-edit'
+      ? 'references'
+      : instruction.trim()
+        ? 'characterInstruction'
+        : 'describe';
   const selection = settings.promptPresets?.[kind];
   const active = selection?.presets.find((preset) => preset.name === selection.active);
   return {

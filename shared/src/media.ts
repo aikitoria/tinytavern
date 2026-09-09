@@ -11,7 +11,7 @@ export * from './workflowInputs.ts';
 export const MEDIA_OPERATIONS = [
   { id: 'image', label: 'Create image', kind: 'image', slots: [] },
   { id: 'image-describe', label: 'Describe image', kind: 'text', slots: ['source'] },
-  { id: 'image-edit', label: 'Edit image', kind: 'image', slots: [] },
+  { id: 'image-edit', label: 'Image from references', kind: 'image', slots: [] },
   { id: 'video', label: 'Create video', kind: 'video', slots: [] },
   { id: 'video-first', label: 'Video from first frame', kind: 'video', slots: ['first_frame'] },
   { id: 'video-references', label: 'Video from references', kind: 'video', slots: [] },

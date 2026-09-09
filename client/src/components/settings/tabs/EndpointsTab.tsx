@@ -25,6 +25,9 @@ export default function EndpointsTab() {
     presencePenalty: '',
     reasoningEffort: '',
     prefillMode: 'none',
+    systemPromptPrefix: '',
+    systemPromptSuffix: '',
+    reasoningPrefillPrefix: '',
   });
   const keyEl = form.fields.apiKey;
   const sampling = [
@@ -48,6 +51,9 @@ export default function EndpointsTab() {
         baseUrl: endpoint?.baseUrl ?? '',
         apiKey: '',
         prefillMode: endpoint?.prefillMode ?? 'none',
+        systemPromptPrefix: endpoint?.systemPromptPrefix ?? '',
+        systemPromptSuffix: endpoint?.systemPromptSuffix ?? '',
+        reasoningPrefillPrefix: endpoint?.reasoningPrefillPrefix ?? '',
         reasoningEffort: endpoint?.genParams.reasoningEffort ?? '',
         ...Object.fromEntries(
           sampling.map(([key]) => [key, String(endpoint?.genParams[key] ?? '')]),
@@ -55,7 +61,17 @@ export default function EndpointsTab() {
       });
     },
     data: () => {
-      const { name, baseUrl, apiKey, prefillMode, reasoningEffort, ...numeric } = form.value();
+      const {
+        name,
+        baseUrl,
+        apiKey,
+        prefillMode,
+        reasoningEffort,
+        systemPromptPrefix,
+        systemPromptSuffix,
+        reasoningPrefillPrefix,
+        ...numeric
+      } = form.value();
       const genParams: GenParams = Object.fromEntries(
         Object.entries(numeric)
           .filter(([, value]) => value !== '')
@@ -69,6 +85,9 @@ export default function EndpointsTab() {
         model: model() || null,
         genParams,
         prefillMode: prefillMode as Endpoint['prefillMode'],
+        systemPromptPrefix,
+        systemPromptSuffix,
+        reasoningPrefillPrefix,
         // An empty field preserves the stored key unless explicitly cleared.
         ...(!editingExisting() || apiKey !== '' || keyCleared() ? { apiKey } : {}),
       };
@@ -179,6 +198,35 @@ export default function EndpointsTab() {
             <button onClick={() => void fetchModels()}>Fetch models</button>
           </Show>
         </div>
+      </section>
+
+      <section class="settings-section">
+        <h3>Global prompt additions</h3>
+        <p class="hint">
+          Apply to every request using this endpoint, including chats, media prompts, and background
+          tasks. Text is joined exactly as entered; include any spaces or line breaks you need.
+        </p>
+        <FormField
+          field={form.fields.systemPromptPrefix}
+          label="System prompt prefix"
+          kind="textarea"
+          rows={4}
+          hint="Added before the assembled system prompt."
+        />
+        <FormField
+          field={form.fields.systemPromptSuffix}
+          label="System prompt suffix"
+          kind="textarea"
+          rows={4}
+          hint="Added after the assembled system prompt. If there is no system prompt, the prefix and suffix form one."
+        />
+        <FormField
+          field={form.fields.reasoningPrefillPrefix}
+          label="Reasoning prefill prefix"
+          kind="textarea"
+          rows={4}
+          hint="Added before the prompt template's reasoning prefill, or used on its own when that is empty. Requires prefill support to be enabled."
+        />
       </section>
 
       <section class="settings-section">

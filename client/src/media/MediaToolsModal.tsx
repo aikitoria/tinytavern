@@ -134,8 +134,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     state.conversations.find((conversation) => conversation.id === draft.contextConversationId),
   );
   const chatTitle = () => contextConversation()?.title ?? 'Linked chat';
-  const usesChatContext = () =>
-    draft.contextConversationId !== null && draft.operation !== 'image-edit';
+  const usesChatContext = () => draft.contextConversationId !== null;
   const job = () => (jobId() ? state.mediaJobs[jobId()!] : undefined);
   const variations = createMemo(() => {
     const current = job();
@@ -209,14 +208,16 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           ? usesChatContext()
             ? 'Create image from chat'
             : 'Create image'
-          : 'Edit image';
+          : usesChatContext()
+            ? 'Create image from chat'
+            : 'Edit image';
   const operationChoices = () =>
     MEDIA_OPERATIONS.filter((operation) => {
       const operationFamily = job()?.operation ?? session.operation;
       if (operationFamily.startsWith('video')) {
         return operation.kind === 'video';
       }
-      return operationFamily === 'image' ? operation.id === 'image' : operation.id === 'image-edit';
+      return operation.kind === 'image';
     });
   const workflows = createMemo(() => {
     const locked = frozen() ? (runningJob() ?? job()) : undefined;
@@ -281,10 +282,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   );
   const resetWorkflowValues = () => setDraft('workflowValues', reconcile({}));
   const createsChatImage = () =>
-    draft.operation === 'image' && draft.contextConversationId !== null;
+    (draft.operation === 'image' || draft.operation === 'image-edit') && usesChatContext();
   const hasInstruction = createMemo(() => Boolean(draft.instruction.trim()));
   const chatPresets = createMemo(() =>
-    chatImagePromptPresets(state.settings.imageGeneration, hasInstruction()),
+    chatImagePromptPresets(state.settings.imageGeneration, hasInstruction(), draft.operation),
   );
   const mediaPrompts = () =>
     state.settings[mediaPromptSettingsKey(draft.operation, usesChatContext())];
@@ -292,7 +293,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     if (createsChatImage()) {
       return (
         draft.presetId ??
-        defaultChatImagePrompt(state.settings.imageGeneration, draft.instruction).id
+        defaultChatImagePrompt(state.settings.imageGeneration, draft.instruction, draft.operation)
+          .id
       );
     }
     return draft.presetId ?? '';
@@ -306,7 +308,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       if (previousPreset && !chatPresets().some((preset) => preset.id === previousPreset.id)) {
         const matchingPreset = chatPresets().find((preset) => preset.name === previousPreset.name);
         const nextPreset =
-          matchingPreset ?? defaultChatImagePrompt(state.settings.imageGeneration, instruction);
+          matchingPreset ??
+          defaultChatImagePrompt(state.settings.imageGeneration, instruction, draft.operation);
         setDraft('presetId', nextPreset.id);
       }
     });

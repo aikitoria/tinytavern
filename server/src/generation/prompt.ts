@@ -4,59 +4,23 @@ import type {
   CustomTemplate,
   Message,
   Persona,
-  Role,
   Template,
 } from '@tinytavern/shared';
 import {
   characterChatName,
   systemNote,
   expandPromptSlots,
+  appendChatMessage,
+  prepareChatMessages,
+  type PromptMessage,
   type ImageGenerationSettings,
 } from '@tinytavern/shared';
 import { stmt, toCharacter, toPersona, toPreset, toTemplate } from '../db/db.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { HttpError } from '../http/router.ts';
 
-export interface ChatMessage {
-  /** Upstream chat roles only — 'tool' messages never leave the server. */
-  role: Exclude<Role, 'tool'>;
-  /** Empty only for a reasoning-only assistant prefill. */
-  content: string;
-  /** Preserve model reasoning when replaying assistant history/continuations. */
-  reasoning_content?: string;
-}
-
-/** Merge adjacent same-role turns from tree edits/prologues for strict upstream APIs. */
-export function appendChatMessage(messages: ChatMessage[], message: ChatMessage): void {
-  if (message.role === 'system' && messages.length > 0) {
-    const leading = messages[0]?.role === 'system' ? messages[0] : null;
-    if (leading) {
-      if (message.content) {
-        leading.content = leading.content
-          ? `${leading.content}\n\n${message.content}`
-          : message.content;
-      }
-      return;
-    }
-    messages.unshift(message);
-    return;
-  }
-  const previous = messages.at(-1);
-  if (previous && previous.role === message.role) {
-    if (message.content) {
-      previous.content = previous.content
-        ? `${previous.content}\n\n${message.content}`
-        : message.content;
-    }
-    if (message.reasoning_content) {
-      previous.reasoning_content = previous.reasoning_content
-        ? `${previous.reasoning_content}\n\n${message.reasoning_content}`
-        : message.reasoning_content;
-    }
-    return;
-  }
-  messages.push(message);
-}
+export type ChatMessage = PromptMessage;
+export { appendChatMessage };
 
 export function getCharacter(id: number | null): Character | null {
   if (id == null) return null;
@@ -247,18 +211,7 @@ export function buildChatMessages(
 
 /** Copies a prompt and appends its upstream-only speaker handoff to the final user turn. */
 export function withDisabledPrefillSpeakerNote(built: BuiltPrompt): ChatMessage[] {
-  const messages = built.messages.map((message) => ({ ...message }));
-  const note = systemNote(built.disabledPrefillSpeakerNote ?? '');
-  if (!note) return messages;
-  const userIndex = messages.findLastIndex((message) => message.role === 'user');
-  if (userIndex !== -1) {
-    const message = messages[userIndex]!;
-    messages[userIndex] = { ...message, content: `${message.content}\n${note}` };
-  } else {
-    // Without user history, the handoff supplies a user turn for strict chat APIs.
-    appendChatMessage(messages, { role: 'user', content: note });
-  }
-  return messages;
+  return prepareChatMessages(built, { prefillMode: 'disabled' }).messages;
 }
 
 /** Tool prompts retain chat context and reasoning prefill, but omit character reply prefills. */

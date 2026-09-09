@@ -11,7 +11,7 @@ export interface FormFieldProps<T extends Value> extends Omit<
 > {
   label: JSX.Element;
   field?: DefaultField<string> | DefaultField<boolean>;
-  kind?: 'text' | 'number' | 'password' | 'check' | 'macro';
+  kind?: 'text' | 'number' | 'password' | 'check' | 'macro' | 'textarea';
   value?: T;
   defaultValue?: T;
   onChange?: (value: T) => void;
@@ -87,6 +87,23 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
         template={props.template}
         class={props.mono ? 'mono' : props.class}
         classList={props.classList}
+      />
+    );
+  else if (props.kind === 'textarea')
+    control = (
+      <textarea
+        ref={(el) => {
+          ref(el);
+          props.ref?.(el);
+        }}
+        value={props.value as string | undefined}
+        readOnly={props.readOnly}
+        disabled={props.disabled}
+        placeholder={props.placeholder}
+        rows={props.rows}
+        class={props.class}
+        classList={props.classList}
+        onInput={(event) => change(event.currentTarget.value)}
       />
     );
   else

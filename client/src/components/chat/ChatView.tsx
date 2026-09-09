@@ -6,7 +6,7 @@ import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from '../tree/TreeMap.tsx';
 
-export default function ChatView(props: { active?: boolean }) {
+export default function ChatView(props: { active?: boolean; pendingMessage?: string }) {
   let scroller!: HTMLDivElement;
   let scroll!: ReturnType<typeof createChatScroll>;
   let lastTouchX = 0;
@@ -156,7 +156,7 @@ export default function ChatView(props: { active?: boolean }) {
             when={state.viewMode === 'chat'}
             fallback={
               <Show when={state.viewMode === 'trace'} fallback={<TreeMap />}>
-                <TraceView />
+                <TraceView pendingMessage={props.pendingMessage ?? ''} />
               </Show>
             }
           >

@@ -109,7 +109,7 @@ if (version === 0) {
   version = SCHEMA_VERSION;
 }
 
-// Future upgrades go here, starting at 69. Also update schema.ts and fresh seeds above.
+// Also update schema.ts and fresh seeds above when adding a migration.
 function migrate(target: number, apply: () => void): void {
   if (version >= target) return;
   transaction(() => {
@@ -118,6 +118,15 @@ function migrate(target: number, apply: () => void): void {
   });
   version = target;
 }
+migrate(69, () => {
+  db.exec(`ALTER TABLE endpoints ADD COLUMN system_prompt_prefix TEXT NOT NULL DEFAULT '';
+    ALTER TABLE endpoints ADD COLUMN system_prompt_suffix TEXT NOT NULL DEFAULT '';
+    ALTER TABLE endpoints ADD COLUMN reasoning_prefill_prefix TEXT NOT NULL DEFAULT '';`);
+  // Existing media requests keep their captured behavior, independent of later endpoint edits.
+  stmt(`UPDATE media_jobs SET endpoint_json = json_insert(endpoint_json,
+    '$.systemPromptPrefix', '', '$.systemPromptSuffix', '', '$.reasoningPrefillPrefix', '')
+    WHERE endpoint_json IS NOT NULL`).run();
+});
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 deleteMessageSubtrees(
@@ -380,6 +389,9 @@ export function toEndpoint(r: Row): Endpoint {
     models: JSON.parse(r.models_json as string),
     model: r.model as string | null,
     genParams: JSON.parse(r.gen_params_json as string),
+    systemPromptPrefix: r.system_prompt_prefix as string,
+    systemPromptSuffix: r.system_prompt_suffix as string,
+    reasoningPrefillPrefix: r.reasoning_prefill_prefix as string,
     prefillMode: r.prefill_mode as Endpoint['prefillMode'],
     createdAt: r.created_at as number,
   };

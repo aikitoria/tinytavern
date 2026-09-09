@@ -2,12 +2,18 @@
 // handlers or generation callbacks invalidate generation and active-leaf guards.
 import { copyConversation, insertCopiedMessage } from '../conversations/conversationCopies.ts';
 import type { MessageRow } from '../conversations/conversationCopies.ts';
-import { characterChatName, type Conversation, type Message } from '@tinytavern/shared';
+import {
+  characterChatName,
+  type Conversation,
+  type Message,
+  type PromptTrace,
+} from '@tinytavern/shared';
 import {
   deleteConversationRows,
   deleteMessageSubtrees,
   stmt,
   toConversation,
+  toEndpoint,
   toMessage,
   transaction,
 } from '../db/db.ts';
@@ -30,9 +36,12 @@ import {
   getCharacter,
   getPersona,
   substituteMacros,
-  withDisabledPrefillSpeakerNote,
 } from '../generation/prompt.ts';
 import type { BuiltPrompt } from '../generation/prompt.ts';
+import {
+  withEndpointSystemPrompt,
+  endpointReasoningPrefill,
+} from '../generation/completionConfig.ts';
 import { clearSettingReference, getSettings } from '../settings/settingsStore.ts';
 import {
   chatCompletionOnce,
@@ -449,23 +458,28 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   return { toolMessageId: mid, activeLeafId: mid };
 });
 
-/** The exact upstream request messages a generation on the current branch would send. */
+/** Resolve history and endpoint additions once; the client composes its local pending message. */
 route.get('/api/conversations/:id/trace', ({ params }) => {
   const conv = getConversation(positiveId(params.id));
   const history = getActivePath(conv.id);
   const built = buildChatMessages(conv, history);
   const endpointId = conv.endpointId ?? getSettings().activeEndpointId;
   const endpointRow = endpointId
-    ? (stmt('SELECT prefill_mode FROM endpoints WHERE id = ?').get(endpointId) as
-        { prefill_mode: string } | undefined)
+    ? stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId)
     : undefined;
-  const prefillDisabled = endpointRow?.prefill_mode === 'disabled';
+  const endpoint = endpointRow ? toEndpoint(endpointRow) : null;
+  const prefillDisabled = endpoint?.prefillMode === 'disabled';
   return {
-    messages: prefillDisabled ? withDisabledPrefillSpeakerNote(built) : built.messages,
-    reasoningPrefill: prefillDisabled ? null : built.reasoningPrefill,
+    messages: endpoint ? withEndpointSystemPrompt(endpoint, built.messages) : built.messages,
+    reasoningPrefill: endpoint
+      ? endpointReasoningPrefill(endpoint, built.reasoningPrefill) || null
+      : built.reasoningPrefill,
     messagePrefill: prefillDisabled ? null : built.messagePrefill,
     namePrefill: prefillDisabled ? null : built.namePrefill,
-  };
+    disabledPrefillSpeakerNote: built.disabledPrefillSpeakerNote,
+    prefillMode: endpoint?.prefillMode ?? 'none',
+    userMessagePrefix: built.namePrefill ? `${built.userName.trim()}: ` : '',
+  } satisfies PromptTrace;
 });
 
 route.get('/api/search', ({ req }) => {

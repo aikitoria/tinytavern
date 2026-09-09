@@ -55,7 +55,7 @@ export function namedItem<T extends { name: string }>(
 export const ENTITY_TRANSFER_FIELDS = {
   presets: Object.keys(ENTITY_FIELDS.presets),
   templates: Object.keys(ENTITY_FIELDS.templates),
-  endpoints: ['name', 'baseUrl', 'model', 'genParams', 'prefillMode'],
+  endpoints: Object.keys(ENTITY_FIELDS.endpoints).filter((key) => key !== 'apiKey'),
   personas: [...Object.keys(ENTITY_FIELDS.personas), 'avatarData'],
 } as const;
 export type TransferEntity = keyof typeof ENTITY_TRANSFER_FIELDS;

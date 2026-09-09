@@ -175,7 +175,7 @@ export default function GeneralTab() {
             rows={5}
             label={
               <>
-                Automatic chat title
+                Chat title prompt template
                 <MacroHelp />
               </>
             }
@@ -190,7 +190,7 @@ export default function GeneralTab() {
             keys={['draft']}
             label={
               <>
-                Draft completion
+                Draft completion prompt template
                 <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
               </>
             }

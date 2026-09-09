@@ -18,6 +18,7 @@ import type {
   MediaJobDraft,
   Persona,
   Preset,
+  PromptTrace,
   Settings,
   Template,
 } from '@tinytavern/shared';
@@ -370,13 +371,7 @@ export const api = {
       'GET',
       `/api/search?q=${encodeURIComponent(q)}`,
     ),
-  trace: (id: number) =>
-    request<{
-      messages: { role: string; content: string; reasoning_content?: string }[];
-      reasoningPrefill: string | null;
-      messagePrefill: string | null;
-      namePrefill: string | null;
-    }>('GET', `/api/conversations/${id}/trace`),
+  trace: (id: number) => request<PromptTrace>('GET', `/api/conversations/${id}/trace`),
   send: mutation<{ userMessageId: number; assistantMessageId: number }, ContentBody>(
     'conversations',
     'messages',

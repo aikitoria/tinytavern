@@ -415,18 +415,21 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
 /** Snapshot the exact text request without persisting endpoint credentials. */
 function prepareContext(row: MediaJobRow, workflow: MediaWorkflow) {
   const settings = getSettings();
-  const conversation = row.operation === 'image-edit' ? null : conversationForJob(row);
-  const chatImage = row.operation === 'image' && conversation !== null;
+  const conversation = conversationForJob(row);
+  const chatImage =
+    (row.operation === 'image' || row.operation === 'image-edit') && conversation !== null;
   let presetId: string | null;
   let template = defaultMediaPrompt(row.operation);
   let chatPrompt = defaultChatMediaPrompt(row.operation);
   if (chatImage) {
     const preset =
       row.preset_id === null
-        ? defaultChatImagePrompt(settings.imageGeneration, row.instruction)
-        : chatImagePromptPresets(settings.imageGeneration, Boolean(row.instruction.trim())).find(
-            (item) => item.id === row.preset_id,
-          );
+        ? defaultChatImagePrompt(settings.imageGeneration, row.instruction, row.operation)
+        : chatImagePromptPresets(
+            settings.imageGeneration,
+            Boolean(row.instruction.trim()),
+            row.operation,
+          ).find((item) => item.id === row.preset_id);
     if (!preset) {
       throw new HttpError(400, 'Choose a chat image prompt preset');
     }

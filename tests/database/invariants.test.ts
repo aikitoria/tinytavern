@@ -212,7 +212,8 @@ test('online backup preserves committed state and refuses replacement', async ()
   using copy = new Database(target, { readonly: true });
   assert.deepEqual(copy.query('PRAGMA integrity_check').get(), { integrity_check: 'ok' });
   assert.deepEqual(copy.query('PRAGMA foreign_key_check').all(), []);
-  assert.deepEqual(copy.query('PRAGMA user_version').get(), { user_version: 68 });
+  const { SCHEMA_VERSION } = await import('../../server/src/db/schema.ts');
+  assert.deepEqual(copy.query('PRAGMA user_version').get(), { user_version: SCHEMA_VERSION });
   assert.deepEqual(copy.query('SELECT content FROM messages WHERE id=?').get(mid), {
     content: 'backupftsprobe',
   });
@@ -226,4 +227,101 @@ test('online backup preserves committed state and refuses replacement', async ()
   assert.notEqual(again.status, 0);
   assert.match(again.stderr, /Refusing to overwrite/);
   assert.deepEqual(readFileSync(target), before);
+});
+
+test('endpoint additions migrate existing databases and captured requests without replaying seeds', async () => {
+  const { Database } = await import('bun:sqlite');
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { DATA_DIR } = await import('../../server/src/db/db.ts');
+  const { SCHEMA_SQL, SCHEMA_VERSION } = await import('../../server/src/db/schema.ts');
+  const directory = mkdtempSync(join(DATA_DIR, 'upgrade-'));
+  const path = join(directory, 'tinytavern.db');
+  const settings = JSON.stringify({ revision: 7, titlePrompt: 'Preserve this setting' });
+  const captured = {
+    id: 1,
+    name: 'Captured endpoint',
+    model: 'original-model',
+    genParams: { temperature: 0 },
+  };
+  {
+    using baseline = new Database(path);
+    baseline.exec(
+      SCHEMA_SQL.replace(
+        /^  (?:system_prompt_prefix|system_prompt_suffix|reasoning_prefill_prefix) TEXT NOT NULL DEFAULT '',\n/gm,
+        '',
+      ),
+    );
+    baseline.query("INSERT INTO settings (key, value) VALUES ('app', ?)").run(settings);
+    baseline
+      .query(
+        "INSERT INTO endpoints (id, name, base_url, api_key, created_at) VALUES (1, 'Existing endpoint', 'http://endpoint.invalid/v1', 'preserved-key', 1)",
+      )
+      .run();
+    baseline
+      .query(
+        "INSERT INTO media_jobs (operation, state, endpoint_json, created_at, updated_at) VALUES ('image', 'ready', ?, 1, 1)",
+      )
+      .run(JSON.stringify(captured));
+    baseline.exec('PRAGMA user_version = 68');
+  }
+  const migrate = () => {
+    const result = spawnSync(
+      process.execPath,
+      ['-e', "const { db } = await import('./server/src/db/db.ts'); db.close(true);"],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DATA_DIR: directory,
+          DB_PATH: path,
+          TINYTAVERN_TEST_DATA_DIR: directory,
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  };
+  migrate();
+  {
+    using upgraded = new Database(path);
+    assert.deepEqual(upgraded.query('PRAGMA user_version').get(), { user_version: SCHEMA_VERSION });
+    assert.deepEqual(
+      upgraded
+        .query(
+          'SELECT system_prompt_prefix, system_prompt_suffix, reasoning_prefill_prefix, api_key FROM endpoints',
+        )
+        .get(),
+      {
+        system_prompt_prefix: '',
+        system_prompt_suffix: '',
+        reasoning_prefill_prefix: '',
+        api_key: 'preserved-key',
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(
+        (upgraded.query('SELECT endpoint_json FROM media_jobs').get() as { endpoint_json: string })
+          .endpoint_json,
+      ),
+      {
+        ...captured,
+        systemPromptPrefix: '',
+        systemPromptSuffix: '',
+        reasoningPrefillPrefix: '',
+      },
+    );
+    assert.deepEqual(upgraded.query("SELECT value FROM settings WHERE key = 'app'").get(), {
+      value: settings,
+    });
+    assert.deepEqual(upgraded.query('SELECT count(*) AS n FROM characters').get(), { n: 0 });
+    assert.deepEqual(upgraded.query('SELECT count(*) AS n FROM presets').get(), { n: 0 });
+    upgraded.query("UPDATE endpoints SET system_prompt_prefix = 'Saved prefix'").run();
+  }
+  migrate();
+  using reopened = new Database(path, { readonly: true });
+  assert.deepEqual(reopened.query('SELECT system_prompt_prefix FROM endpoints').get(), {
+    system_prompt_prefix: 'Saved prefix',
+  });
+  assert.deepEqual(reopened.query('PRAGMA foreign_key_check').all(), []);
 });

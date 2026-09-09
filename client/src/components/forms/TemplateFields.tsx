@@ -18,6 +18,7 @@ export default function TemplateFields(props: {
   inline?: boolean;
   readOnly?: boolean;
 }) {
+  let prefills: HTMLDetailsElement | undefined;
   const form = createFormFields({
     content: props.inline ? '' : DEFAULT_PROMPT_TEMPLATE,
     userPrologue: '',
@@ -34,6 +35,7 @@ export default function TemplateFields(props: {
     },
     set value(value) {
       form.load(value);
+      if (prefills) prefills.open = !!(value?.reasoningPrefill || value?.messagePrefill);
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);
@@ -52,15 +54,11 @@ export default function TemplateFields(props: {
     [
       'Prompt assembly',
       [
-        text(
-          'content',
-          props.inline ? 'Custom template — system prompt' : 'System prompt template',
-          '',
-        ),
+        text('content', custom('System prompt template'), ''),
         text(
           'userPrologue',
-          'First user message (optional — sent as a fake user turn before the history)',
-          'Leave empty to send no fake user message',
+          'Initial user message template (optional)',
+          'Sent before the chat history; leave empty to omit it',
         ),
       ],
     ],
@@ -78,7 +76,7 @@ export default function TemplateFields(props: {
           'Leave empty to let the model start the visible reply',
         ),
       ],
-      "A reasoning prefill continues the model's reasoning. Adding a message prefill continues the visible reply from that text. Both become part of the saved response.",
+      "A reasoning prefill starts the model's reasoning with this text. An assistant message prefill starts the visible reply with this text. Both become part of the saved response.",
     ],
     [
       'Advanced',
@@ -91,7 +89,7 @@ export default function TemplateFields(props: {
         },
         {
           key: 'speakerHandoffTemplate',
-          label: 'Speaker handoff instruction',
+          label: 'Speaker handoff prompt template',
           keys: ['speaker'],
           rows: 2,
           hint: 'Used when speaker names are enabled and the endpoint has prefills disabled. {{speaker}} is the requested speaker. Leave empty to send no handoff instruction.',
@@ -103,35 +101,52 @@ export default function TemplateFields(props: {
         },
         {
           key: 'steerTemplate',
-          label: `${custom('Steer template')} (regenerate with instruction)`,
+          label: custom('Regeneration prompt template'),
           keys: ['instruction'],
           rows: 2,
-          hint: "{{instruction}} is replaced with your instruction and injected into that regeneration's prompt only. An empty template disables regeneration with an instruction.",
+          hint: 'Used when regenerating a reply with an instruction. {{instruction}} is replaced with the requested change for that regeneration only. Leave empty to disable regeneration with an instruction.',
         },
       ],
     ],
   ];
+  const Fields = (section: { fields: Field[]; hint?: string }) => (
+    <>
+      <For each={section.fields}>
+        {(field) => (
+          <FormField
+            kind="macro"
+            {...field}
+            field={form.fields[field.key]}
+            readOnly={props.readOnly}
+          />
+        )}
+      </For>
+      <Show when={section.hint}>
+        <p class="hint">{section.hint}</p>
+      </Show>
+    </>
+  );
   return (
     <For each={sections}>
       {([title, fields, hint]) => (
-        <section class={props.inline ? 'form-stack' : 'settings-section'}>
-          <Show when={!props.inline}>
-            <h3>{title}</h3>
-          </Show>
-          <For each={fields}>
-            {(field) => (
-              <FormField
-                kind="macro"
-                {...field}
-                field={form.fields[field.key]}
-                readOnly={props.readOnly}
-              />
-            )}
-          </For>
-          <Show when={hint}>
-            <p class="hint">{hint}</p>
-          </Show>
-        </section>
+        <Show
+          when={title === 'Prefills'}
+          fallback={
+            <section class={props.inline ? 'form-stack' : 'settings-section'}>
+              <Show when={!props.inline}>
+                <h3>{title}</h3>
+              </Show>
+              <Fields fields={fields} hint={hint} />
+            </section>
+          }
+        >
+          <details ref={prefills} class="settings-section block">
+            <summary class="cursor-pointer">Advanced prefills</summary>
+            <div class="form-stack">
+              <Fields fields={fields} hint={hint} />
+            </div>
+          </details>
+        </Show>
       )}
     </For>
   );

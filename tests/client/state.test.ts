@@ -2,6 +2,73 @@ import { mockFetch, controlledStream, byteResponse } from '../support/streams.ts
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
+test('pending prompt trace preserves history and replaces only its editable tail', async () => {
+  const { prepareChatMessages, preparePromptTrace } = await import('@tinytavern/shared');
+  const prompt = {
+    messages: [
+      { role: 'system' as const, content: 'System' },
+      { role: 'user' as const, content: 'Earlier user message' },
+    ],
+    reasoningPrefill: 'Global reasoning\nTemplate reasoning',
+    messagePrefill: '',
+    namePrefill: null,
+    disabledPrefillSpeakerNote: 'Reply as Guest.',
+  };
+  const original = structuredClone(prompt);
+  const first = prepareChatMessages(prompt, { prefillMode: 'none', pendingMessage: ' first ' });
+  const second = prepareChatMessages(prompt, { prefillMode: 'none', pendingMessage: 'second' });
+  assert.strictEqual(first.messages[0], prompt.messages[0]);
+  assert.strictEqual(
+    second.messages[0],
+    first.messages[0],
+    'Keystrokes retain the committed history DOM',
+  );
+  assert.equal(first.messages[1]!.content, 'Earlier user message\n\nfirst');
+  assert.equal(second.messages[1]!.content, 'Earlier user message\n\nsecond');
+  assert.equal(second.pendingMessageIndex, 1);
+  assert.equal(second.prefillMessageIndex, 2);
+  assert.deepEqual(second.messages[2], {
+    role: 'assistant',
+    content: '',
+    reasoning_content: 'Global reasoning\nTemplate reasoning',
+  });
+  const disabled = prepareChatMessages(prompt, {
+    prefillMode: 'disabled',
+    pendingMessage: 'third',
+  });
+  assert.equal(
+    disabled.messages[1]!.content,
+    'Earlier user message\n\nthird\n[System Note]\nReply as Guest.',
+  );
+  assert.equal(disabled.prefillMessageIndex, null);
+  assert.deepEqual(prompt, original);
+  const historicalAssistant = {
+    role: 'assistant' as const,
+    content: 'Previous reply',
+    reasoning_content: 'Previous reasoning',
+  };
+  const trace = {
+    ...prompt,
+    messages: [...prompt.messages, historicalAssistant],
+    prefillMode: 'none' as const,
+    userMessagePrefix: 'User: ',
+  };
+  const withoutDraft = preparePromptTrace(trace, '  ');
+  assert.strictEqual(withoutDraft.messages.at(-1), historicalAssistant);
+  assert.equal(
+    withoutDraft.prefillMessageIndex,
+    null,
+    'Historical replies are never relabeled or extended with a new prefill',
+  );
+  const withDraft = preparePromptTrace(trace, 'Next message');
+  assert.strictEqual(withDraft.messages[2], historicalAssistant);
+  assert.deepEqual(withDraft.messages[3], { role: 'user', content: 'User: Next message' });
+  assert.equal(withDraft.prefillMessageIndex, 4);
+  assert.equal(withDraft.messages[4]!.reasoning_content, prompt.reasoningPrefill);
+  const awaitingReply = preparePromptTrace({ ...trace, messages: prompt.messages }, '');
+  assert.equal(awaitingReply.prefillMessageIndex, 2);
+});
+
 test('client sync', async () => {
   const { prepareEndpointPatch } = await import('../../client/src/state/endpointSync.ts');
 

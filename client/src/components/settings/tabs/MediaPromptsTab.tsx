@@ -1,6 +1,6 @@
 import { nextCollectionId } from '@tinytavern/shared';
 import { importPromptCollection, transferObject } from '@tinytavern/shared';
-import { For, Show } from 'solid-js';
+import { For, Show, createEffect, createMemo, on } from 'solid-js';
 import {
   MEDIA_OPERATIONS,
   mediaInputSlots,
@@ -21,7 +21,7 @@ const FIELDS: [keyof StandalonePromptTemplate, string][] = [
   ['systemPrompt', 'System instructions'],
   ['userMessage', 'User message template'],
   ['reasoningPrefill', 'Reasoning prefill'],
-  ['messagePrefill', 'Assistant prefill'],
+  ['messagePrefill', 'Assistant message prefill'],
 ];
 
 function MediaPromptsPage(props: { kind: 'image' | 'video'; mode: 'chat' | 'gallery' }) {
@@ -93,6 +93,56 @@ function MediaPromptsPage(props: { kind: 'image' | 'video'; mode: 'chat' | 'gall
           : defaultChatMediaPrompt(group.operation);
       return preset && 'systemPrompt' in preset ? preset[key] : defaults[key];
     };
+    let prefills: HTMLDetailsElement | undefined;
+    const hasPrefill = createMemo(() => !!(value('reasoningPrefill') || value('messagePrefill')));
+    createEffect(
+      on([selected, hasPrefill], ([id, filled], previous) => {
+        // Reset on selection; clearing the last field while editing must not collapse it.
+        if (prefills && (!previous || id !== previous[0] || filled)) prefills.open = filled;
+      }),
+    );
+    const Fields = (fields: {
+      items: readonly (readonly [keyof StandalonePromptTemplate | 'chatPrompt', string])[];
+    }) => (
+      <For each={fields.items}>
+        {([key, label]) => (
+          <FormField
+            label={
+              <>
+                {label}{' '}
+                <MacroHelp
+                  rows={[
+                    ['{{instruction}}', 'Your generation instruction'],
+                    ['{{prompt}}', 'The original prompt when revising'],
+                    ...(props.mode === 'chat'
+                      ? [['{{char}} / {{user}}', 'Character and persona names'] as [string, string]]
+                      : []),
+                    ...inputMacroHelp,
+                  ]}
+                />
+              </>
+            }
+            kind="macro"
+            readOnly={!current()}
+            value={value(key)}
+            defaultValue={
+              key === 'chatPrompt' ? defaultChatMediaPrompt(group.operation) : defaults[key]
+            }
+            rows={key === 'chatPrompt' ? 12 : key.endsWith('Prefill') ? 3 : 7}
+            template
+            keys={macroKeys}
+            onChange={(text) => {
+              if (current() && value(key) !== text) patch({ [key]: text });
+            }}
+            hint={
+              key === 'chatPrompt'
+                ? "Appended after the full chat history to generate a media prompt. The chat's system prompt and reasoning prefill are retained. Include the desired output format here."
+                : undefined
+            }
+          />
+        )}
+      </For>
+    );
     return (
       <section class="settings-section">
         <h3>{group.label}</h3>
@@ -138,53 +188,19 @@ function MediaPromptsPage(props: { kind: 'image' | 'video'; mode: 'chat' | 'gall
               },
             }}
           />
-          <For
-            each={
-              props.mode === 'chat' ? [['chatPrompt', 'Chat steering template'] as const] : FIELDS
-            }
-          >
-            {([key, label]) => (
-              <FormField
-                label={
-                  <>
-                    {label}{' '}
-                    <MacroHelp
-                      rows={[
-                        ['{{instruction}}', 'Your generation instruction'],
-                        ['{{prompt}}', 'The original prompt when revising'],
-                        ...(props.mode === 'chat'
-                          ? [
-                              ['{{char}} / {{user}}', 'Character and persona names'] as [
-                                string,
-                                string,
-                              ],
-                            ]
-                          : []),
-                        ...inputMacroHelp,
-                      ]}
-                    />
-                  </>
-                }
-                kind="macro"
-                readOnly={!current()}
-                value={value(key)}
-                defaultValue={
-                  key === 'chatPrompt' ? defaultChatMediaPrompt(group.operation) : defaults[key]
-                }
-                rows={key === 'chatPrompt' ? 12 : key.endsWith('Prefill') ? 3 : 7}
-                template
-                keys={macroKeys}
-                onChange={(text) => {
-                  if (current() && value(key) !== text) patch({ [key]: text });
-                }}
-                hint={
-                  key === 'chatPrompt'
-                    ? "Appended after the chat history. The chat's system prompt and reasoning prefill are retained. Put all media formatting instructions here."
-                    : undefined
-                }
-              />
-            )}
-          </For>
+          <Fields
+            items={props.mode === 'chat' ? [['chatPrompt', 'Prompt template']] : FIELDS.slice(0, 2)}
+          />
+          <Show when={props.mode === 'gallery'}>
+            <details ref={prefills} class="block">
+              <summary class="cursor-pointer text-foreground font-semibold">
+                Advanced prefills
+              </summary>
+              <div class="form-stack">
+                <Fields items={FIELDS.slice(2)} />
+              </div>
+            </details>
+          </Show>
           <Show when={!current()}>
             <span class="text-dim text-caption">
               Built-in default · create a preset to customize

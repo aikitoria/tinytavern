@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 import { once, EventEmitter } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
 import { test, onTestFinished } from 'bun:test';
-import type { ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
+import { preparePromptTrace, type PromptTrace, type PromptMessage } from '@tinytavern/shared';
+import type { Endpoint, ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
 import { requireTestIsolation } from '../support/isolation.ts';
 
 // Exercise the public boundary once; feature suites cover combinations directly.
@@ -22,6 +23,7 @@ test('application HTTP and WebSocket contracts', async () => {
   let held: ServerResponse | undefined;
   let hold = true;
   let upstreamStatus = 200;
+  const completionRequests: { messages: PromptMessage[]; stream: boolean }[] = [];
   const delta = (res: ServerResponse, content: string) =>
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
   const finish = (res: ServerResponse) => {
@@ -29,14 +31,14 @@ test('application HTTP and WebSocket contracts', async () => {
     res.end('data: [DONE]\n\n');
   };
   const upstream = createServer(async (req, res) => {
-    for await (const _chunk of req) {
-      /* consume the real request body */
-    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
     if (req.url?.endsWith('/models')) {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ data: [{ id: 'test-model' }] }));
       return;
     }
+    completionRequests.push(JSON.parse(Buffer.concat(chunks).toString()));
     if (upstreamStatus !== 200) {
       res.writeHead(upstreamStatus).end('Invalid request');
       return;
@@ -181,11 +183,29 @@ test('application HTTP and WebSocket contracts', async () => {
     assert.equal(hostile.status, 403);
     await hostile.arrayBuffer();
     await connect('http://attacker.invalid', 403);
-    const endpoint = await request<{ id: number }>('POST', '/api/endpoints', {
+    const endpoint = await request<Endpoint>('POST', '/api/endpoints', {
       name: 'Test',
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
       apiKey: 'private-key',
       model: 'test-model',
+    });
+    assert.equal(endpoint.systemPromptPrefix, '');
+    assert.equal(endpoint.systemPromptSuffix, '');
+    assert.equal(endpoint.reasoningPrefillPrefix, '');
+    const additions = {
+      systemPromptPrefix: 'Prefix\n',
+      systemPromptSuffix: '\nSuffix',
+      reasoningPrefillPrefix: 'Think\n',
+    };
+    const updated = await request<Endpoint>('PATCH', `/api/endpoints/${endpoint.id}`, additions);
+    for (const [field, value] of Object.entries(additions)) {
+      assert.equal(updated[field as keyof Endpoint], value);
+      await request('PATCH', `/api/endpoints/${endpoint.id}`, { [field]: 123 }, 400);
+    }
+    await request('PATCH', `/api/endpoints/${endpoint.id}`, {
+      systemPromptPrefix: '',
+      systemPromptSuffix: '',
+      reasoningPrefillPrefix: '',
     });
     const listed = await request<{ id: number; apiKey: string; hasApiKey: boolean }[]>(
       'GET',
@@ -290,6 +310,110 @@ test('application HTTP and WebSocket contracts', async () => {
     assert.equal(persisted.messages[0]!.content, 'Hello');
     assert.equal(persisted.messages.find((message) => message.id === mid)!.status, 'done');
   });
+
+  await step(
+    'prompt trace matches the sent request including pending text and endpoint prefills',
+    async () => {
+      const endpoint = await request<Endpoint>('POST', '/api/endpoints', {
+        name: 'Trace endpoint',
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        systemPromptPrefix: 'Endpoint prefix\n',
+        systemPromptSuffix: '\nEndpoint suffix',
+        reasoningPrefillPrefix: 'Endpoint reasoning\n',
+      });
+      const template = await request<{ id: number }>('POST', '/api/templates', {
+        name: 'Trace template',
+        content: 'Template system',
+        userPrologue: 'Prologue',
+        reasoningPrefill: 'Template reasoning',
+        messagePrefill: 'Template reply',
+        prefixNames: true,
+        speakerHandoffTemplate: 'Reply as {{speaker}}.',
+      });
+      const character = await request<{ id: number }>('POST', '/api/characters', {
+        name: 'Trace assistant',
+        templateId: template.id,
+      });
+      const persona = await request<{ id: number }>('POST', '/api/personas', {
+        name: 'Trace user',
+      });
+      const chat = await request<{ id: number }>('POST', '/api/conversations', {
+        characterId: character.id,
+      });
+      await request('PATCH', `/api/conversations/${chat.id}`, {
+        ...guard(await tree(chat.id)),
+        endpointId: endpoint.id,
+        personaId: persona.id,
+        speakerName: 'Guest',
+      });
+      const viewer = await connect();
+      viewer.socket.send(JSON.stringify({ sub: chat.id }));
+      for (const mode of ['deepseek', 'disabled'] as const) {
+        await request('PATCH', `/api/endpoints/${endpoint.id}`, { prefillMode: mode });
+        const before = await tree(chat.id);
+        const trace = await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`);
+        assert.deepEqual(
+          await tree(chat.id),
+          before,
+          'Reading trace does not persist drafts or mutate the branch',
+        );
+        assert.equal(
+          trace.messages[0]!.content,
+          'Endpoint prefix\nTemplate system\nEndpoint suffix',
+        );
+        assert.equal(
+          trace.reasoningPrefill,
+          mode === 'disabled' ? null : 'Endpoint reasoning\nTemplate reasoning',
+        );
+        const pendingMessage = `  Pending ${mode} {{char}} $&\nSecond line  `;
+        const preview = preparePromptTrace(trace, pendingMessage);
+        const pending = preview.messages[preview.pendingMessageIndex!]!;
+        assert(pending.content.includes(`Trace user: ${pendingMessage.trim()}`));
+        if (mode === 'deepseek') {
+          assert.equal(pending.content, `Prologue\n\nTrace user: ${pendingMessage.trim()}`);
+          assert.deepEqual(preview.messages.at(-1), {
+            role: 'assistant',
+            content: 'Guest: Template reply',
+            reasoning_content: 'Endpoint reasoning\nTemplate reasoning',
+            prefix: true,
+          });
+        } else {
+          assert.equal(preview.prefillMessageIndex, null);
+          assert.equal(
+            pending.content,
+            `Trace user: ${pendingMessage.trim()}\n[System Note]\nReply as Guest.`,
+          );
+          assert(
+            trace.messages.some(
+              (message) => message.reasoning_content === 'Endpoint reasoning\nTemplate reasoning',
+            ),
+            'Historical reasoning remains visible when new prefills are disabled',
+          );
+        }
+        const start = completionRequests.length;
+        const sent = await request<{ assistantMessageId: number }>(
+          'POST',
+          `/api/conversations/${chat.id}/messages`,
+          {
+            ...guard(before),
+            content: pendingMessage,
+          },
+        );
+        await viewer.wait(
+          (event) => event.t === 'final' && event.message.id === sent.assistantMessageId,
+        );
+        const actual = completionRequests.slice(start).find((entry) => entry.stream)!;
+        assert.deepEqual(
+          preview.messages,
+          actual.messages,
+          `${mode}: trace must match the actual upstream messages`,
+        );
+      }
+      const closed = once(viewer.socket, 'close');
+      viewer.socket.close();
+      await closed;
+    },
+  );
 
   await step('image commands and revisions work without a rendering workflow', async () => {
     const chat = await request<{ id: number }>('POST', '/api/conversations', {});

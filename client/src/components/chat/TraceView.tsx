@@ -1,6 +1,7 @@
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import { faCopy } from '@fortawesome/free-regular-svg-icons';
-import { For, Show, createResource, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
+import { preparePromptTrace } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { state, toast } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
@@ -51,53 +52,81 @@ function TraceMessage(props: { role: string; label?: string; content: string }) 
   );
 }
 
-export default function TraceView() {
+export default function TraceView(props: { pendingMessage: string }) {
   const [trace] = createResource(
     () => ({
       id: state.selectedId,
       leaf: state.tree.activeLeafId,
-      // refetch when a stream finalizes or messages change
-      count: Object.values(state.tree.messages).filter((m) => m.status !== 'streaming').length,
+      revision: state.tree.mutationRevision,
+      settingsRevision: state.settings.revision,
+      connected: state.connected,
     }),
     (key) => (key.id != null ? api.trace(key.id) : Promise.resolve(null)),
   );
+  const isCommand = () => props.pendingMessage.trimStart().startsWith('/');
+  const prepared = createMemo(() => {
+    if (trace.error || trace.loading) return null;
+    const current = trace();
+    return current ? preparePromptTrace(current, isCommand() ? '' : props.pendingMessage) : null;
+  });
 
   return (
     <div class="trace flex flex-col gap-3">
-      <Show when={trace()} fallback={<p class="hint">Loading…</p>}>
+      <Show
+        when={prepared()}
+        fallback={
+          <p
+            class={trace.error ? 'notice notice-error' : 'hint'}
+            role={trace.error ? 'alert' : undefined}
+          >
+            {trace.error ? `Could not load prompt trace: ${errorMessage(trace.error)}` : 'Loading…'}
+          </p>
+        }
+      >
         {(t) => (
           <>
             <p
               class="hint"
-              title="The next generation on this branch, with system prompt, template, macros and name prefixes applied."
+              title="The next chat request, including endpoint additions, your pending message, and enabled reasoning and message prefills."
             >
               Next request · {t().messages.length}{' '}
               {t().messages.length === 1 ? 'message' : 'messages'}
             </p>
+            <Show when={isCommand()}>
+              <p class="hint">
+                Slash commands run separate actions; this trace previews a normal chat reply.
+              </p>
+            </Show>
             <For each={t().messages}>
-              {(msg) => <TraceMessage role={msg.role} content={msg.content} />}
+              {(msg, index) => (
+                <div class="flex flex-col gap-1">
+                  <Show when={msg.reasoning_content}>
+                    <TraceMessage
+                      role="assistant"
+                      label={
+                        index() === t().prefillMessageIndex
+                          ? 'assistant reasoning (prefill)'
+                          : 'assistant reasoning'
+                      }
+                      content={msg.reasoning_content!}
+                    />
+                  </Show>
+                  <Show when={msg.content || !msg.reasoning_content}>
+                    <TraceMessage
+                      role={msg.role}
+                      label={
+                        index() === t().pendingMessageIndex
+                          ? 'user (includes pending message)'
+                          : index() === t().prefillMessageIndex
+                            ? 'assistant message (prefill)'
+                            : undefined
+                      }
+                      content={msg.content}
+                    />
+                  </Show>
+                </div>
+              )}
             </For>
-            <Show when={t().namePrefill}>
-              <TraceMessage
-                role="assistant"
-                label="assistant name (prefill)"
-                content={t().namePrefill!}
-              />
-            </Show>
-            <Show when={t().reasoningPrefill}>
-              <TraceMessage
-                role="assistant"
-                label="assistant reasoning (prefill)"
-                content={t().reasoningPrefill!}
-              />
-            </Show>
-            <Show when={t().messagePrefill}>
-              <TraceMessage
-                role="assistant"
-                label="assistant message (prefill)"
-                content={t().messagePrefill!}
-              />
-            </Show>
           </>
         )}
       </Show>

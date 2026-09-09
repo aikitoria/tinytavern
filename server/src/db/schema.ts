@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 68;
+export const SCHEMA_VERSION = 69;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -35,6 +35,9 @@ CREATE TABLE endpoints (
   created_at INTEGER NOT NULL,
   gen_params_json TEXT NOT NULL DEFAULT '{}',
   model TEXT,
+  system_prompt_prefix TEXT NOT NULL DEFAULT '',
+  system_prompt_suffix TEXT NOT NULL DEFAULT '',
+  reasoning_prefill_prefix TEXT NOT NULL DEFAULT '',
   prefill_mode TEXT NOT NULL DEFAULT 'none'
 );
 

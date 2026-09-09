@@ -25,6 +25,7 @@ import MediaToolsModal from './media/MediaToolsModal.tsx';
 import MediaJobsModal from './media/MediaJobsModal.tsx';
 
 export default function App() {
+  const [composerText, setComposerText] = createSignal('');
   const workspaceCovered = () =>
     dialogStack
       .frames()
@@ -77,11 +78,14 @@ export default function App() {
         </Show>
         <main class="main bg-canvas flex flex-col flex-1 min-w-0 relative">
           <Header />
-          <ChatView active={!workspaceCovered()} />
+          <ChatView active={!workspaceCovered()} pendingMessage={composerText()} />
           <Show
             when={state.viewMode === 'map'}
             fallback={
-              <Show when={messageSelectionActive()} fallback={<Composer />}>
+              <Show
+                when={messageSelectionActive()}
+                fallback={<Composer text={composerText()} onText={setComposerText} />}
+              >
                 <MessageSelectionBar />
               </Show>
             }

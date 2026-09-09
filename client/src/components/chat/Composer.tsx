@@ -80,8 +80,9 @@ const COMMANDS: ComposerCommand[] = [...BUILTIN_COMMANDS, ...imageGenerationComm
   }
 }
 
-export default function Composer() {
-  const [text, setText] = createSignal('');
+export default function Composer(props: { text: string; onText: (text: string) => void }) {
+  const text = () => props.text;
+  const setText = (value: string) => props.onText(value);
   const [selIdx, setSelIdx] = createSignal(0);
   const [toolsOpen, setToolsOpen] = createSignal(false);
   let area: HTMLTextAreaElement | undefined;
@@ -363,7 +364,10 @@ export default function Composer() {
           </DropdownSurface>
         </span>
         <textarea
-          ref={area}
+          ref={(element) => {
+            area = element;
+            queueMicrotask(resize);
+          }}
           class="composer-input"
           rows="1"
           placeholder="Type a message or / for commands…"

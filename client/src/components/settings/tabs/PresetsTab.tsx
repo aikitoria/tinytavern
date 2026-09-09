@@ -44,7 +44,7 @@ export default function PresetsTab() {
       <section class="settings-section">
         <h3>System prompt</h3>
         <SettingLabel field={readOnly() ? undefined : contentEl}>
-          Instructions <MacroHelp />
+          System instructions <MacroHelp />
         </SettingLabel>
         <MacroTextarea
           readOnly={readOnly()}

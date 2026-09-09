@@ -171,7 +171,7 @@ databaseCase('chat prompt', async () => {
 
 databaseCase('completion config', async () => {
   type Endpoint = import('@tinytavern/shared').Endpoint;
-  const { prepareStandaloneCompletion } =
+  const { prepareStandaloneCompletion, withEndpointSystemPrompt, endpointReasoningPrefill } =
     await import('../../server/src/generation/completionConfig.ts');
 
   type ChatMessage = import('../../server/src/generation/prompt.ts').ChatMessage;
@@ -186,6 +186,9 @@ databaseCase('completion config', async () => {
     model: null,
     createdAt: 0,
     prefillMode: 'vllm',
+    systemPromptPrefix: '',
+    systemPromptSuffix: '',
+    reasoningPrefillPrefix: '',
     genParams: {
       temperature: 0,
       topP: 0.8,
@@ -198,12 +201,23 @@ databaseCase('completion config', async () => {
   };
   const source: ChatMessage[] = [{ role: 'user', content: 'Revise this prompt' }];
   const original = structuredClone(source);
+  const additions = {
+    ...endpoint,
+    systemPromptPrefix: 'Global system\n',
+    systemPromptSuffix: '\nEnd {{literal}}',
+    reasoningPrefillPrefix: '\nGlobal reasoning\n',
+  };
   for (const mode of ['vllm', 'deepseek', 'none', 'disabled'] as const) {
-    const prepared = prepareStandaloneCompletion({ ...endpoint, prefillMode: mode }, source, 1024, {
-      useEndpointParameters: true,
-      reasoningPrefill: 'Consider the light',
-      messagePrefill: 'A scene ',
-    });
+    const prepared = prepareStandaloneCompletion(
+      { ...additions, prefillMode: mode },
+      source,
+      1024,
+      {
+        useEndpointParameters: true,
+        reasoningPrefill: 'Consider the light',
+        messagePrefill: 'A scene ',
+      },
+    );
     assert.deepEqual(prepared, {
       messages: [
         ...source,
@@ -213,7 +227,7 @@ databaseCase('completion config', async () => {
               {
                 role: 'assistant',
                 content: 'A scene ',
-                reasoning_content: 'Consider the light',
+                reasoning_content: '\nGlobal reasoning\nConsider the light',
                 ...(mode === 'deepseek' ? { prefix: true } : {}),
               },
             ]),
@@ -229,10 +243,41 @@ databaseCase('completion config', async () => {
         ...(mode === 'vllm' ? { continue_final_message: true, add_generation_prompt: false } : {}),
       },
       messagePrefill: mode === 'disabled' ? '' : 'A scene ',
-      reasoningPrefill: mode === 'disabled' ? '' : 'Consider the light',
+      reasoningPrefill: mode === 'disabled' ? '' : '\nGlobal reasoning\nConsider the light',
     });
   }
   assert.deepEqual(source, original, 'Preparing continuation must not mutate snapshotted messages');
+  assert.strictEqual(
+    withEndpointSystemPrompt(endpoint, source),
+    source,
+    'Empty additions allocate no message list',
+  );
+  assert.deepEqual(withEndpointSystemPrompt(additions, source), [
+    { role: 'system', content: 'Global system\n\nEnd {{literal}}' },
+    ...source,
+  ]);
+  const systemSource: ChatMessage[] = [{ role: 'system', content: 'Template system' }, ...source];
+  const systemOriginal = structuredClone(systemSource);
+  const wrapped = withEndpointSystemPrompt(additions, systemSource);
+  assert.deepEqual(wrapped, [
+    { role: 'system', content: 'Global system\nTemplate system\nEnd {{literal}}' },
+    ...source,
+  ]);
+  assert.deepEqual(withEndpointSystemPrompt(additions, systemSource), wrapped);
+  assert.deepEqual(systemSource, systemOriginal, 'System additions never mutate captured prompts');
+  assert.equal(
+    prepareStandaloneCompletion(additions, source, 1024).reasoningPrefill,
+    '\nGlobal reasoning\n',
+  );
+  for (const saved of ['\nGlobal reasoning\nThought', 'Global reasoning\nThought', 'Thought']) {
+    const continued = endpointReasoningPrefill(additions, saved, true);
+    assert.equal(continued, '\nGlobal reasoning\nThought');
+    assert.equal(endpointReasoningPrefill(additions, continued, true), continued);
+  }
+  assert.equal(
+    endpointReasoningPrefill(additions, 'Global reasoning', true),
+    '\nGlobal reasoning\n',
+  );
   assert.deepEqual(prepareStandaloneCompletion(endpoint, source, 1024), {
     messages: source,
     parameters: { max_tokens: 1024 },

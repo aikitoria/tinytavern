@@ -66,22 +66,27 @@ const IMAGE_PROMPT_SECTIONS = [
   {
     key: 'character',
     title: 'Character images',
-    hint: 'Prompts used by `/imagechar`, with and without an instruction.',
+    hint: 'Prompt templates used by /imagechar and Create image from chat, with and without an instruction.',
   },
   {
     key: 'face',
     title: 'Face images',
-    hint: 'Prompts used by `/imageface`, with and without an instruction.',
+    hint: 'Prompt templates used by /imageface and the Face presets in Create image from chat, with and without an instruction.',
   },
   {
     key: 'generic',
     title: 'Generic images',
-    hint: 'The instruction-based prompt used by `/image`.',
+    hint: 'Prompt template used by /image and the Generic image presets in Create image from chat.',
+  },
+  {
+    key: 'references',
+    title: 'Images from references',
+    hint: 'Prompt template for Image from references in a chat. Uses the full chat history and the saved prompts for the selected reference images.',
   },
   {
     key: 'avatar',
     title: 'Avatars',
-    hint: 'Prompt and context used by Generate avatar.',
+    hint: 'System instructions and a user message template for Generate avatar. The user message supplies the character or persona details.',
   },
 ] as const;
 
@@ -136,16 +141,41 @@ const PROMPT_EDITORS: {
   {
     kind: 'instruction',
     section: 'generic',
-    label: 'Prompt template',
+    label: 'Saved presets',
     command: '/image',
+  },
+  {
+    kind: 'references',
+    section: 'references',
+    label: 'Saved presets',
   },
   {
     kind: 'avatar',
     section: 'avatar',
-    label: 'Avatar prompt',
+    label: 'Saved presets',
   },
 ];
 const AVATAR_EXTRA_KEYS = ['name', 'description', 'personality', 'scenario', 'firstMessage'];
+const REFERENCE_EXTRA_KEYS = [
+  'instruction',
+  'prompt',
+  'reference1_prompt',
+  'reference2_prompt',
+  'reference3_prompt',
+];
+const REFERENCE_MACROS: [string, string][] = [
+  ['{{instruction}}', 'Your generation instruction'],
+  ['{{prompt}}', 'The original prompt when revising'],
+  ['{{char}} / {{user}}', 'Character and persona names'],
+  ...[1, 2, 3].map((index): [string, string] => [
+    `{{reference${index}_prompt}}`,
+    `Saved prompt for reference image ${index}; editable in gallery details, empty if none.`,
+  ]),
+  [
+    '{{#if reference1_prompt}}…{{/if}}',
+    'Include this block only when the macro has a nonempty value. Works with any available macro.',
+  ],
+];
 
 function promptRecord<T>(
   read: (editor: (typeof PROMPT_EDITORS)[number]) => T,
@@ -240,7 +270,9 @@ export function avatarPromptTemplates(): { prompt: string; context: string } {
   }
   const preset = selection.presets.find((candidate) => candidate.name === selection.active);
   if (!preset || !preset.context?.trim()) {
-    throw new Error('Select an avatar preset with a context template in Avatar prompts settings.');
+    throw new Error(
+      'Select an avatar preset with a user message template in Avatar prompts settings.',
+    );
   }
   return { prompt: preset.prompt, context: preset.context };
 }
@@ -398,7 +430,7 @@ function PromptPresetEditor(props: {
         readOnly={!current()}
         label={
           props.promptLabel ??
-          (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')
+          (props.defaultContext !== undefined ? 'System instructions' : 'Prompt template')
         }
         extraKeys={props.extraKeys}
       />
@@ -411,7 +443,7 @@ function PromptPresetEditor(props: {
           }}
           kind="macro"
           readOnly={!current()}
-          label={props.contextLabel ?? 'Context'}
+          label={props.contextLabel ?? 'User message template'}
           extraKeys={props.contextExtraKeys}
         />
       </Show>
@@ -521,22 +553,24 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
                   extraKeys={
                     editor.kind === 'avatar'
                       ? AVATAR_EXTRA_KEYS
-                      : editor.command
-                        ? ['instruction']
-                        : undefined
+                      : editor.kind === 'references'
+                        ? REFERENCE_EXTRA_KEYS
+                        : editor.command
+                          ? ['instruction']
+                          : undefined
                   }
                   defaultContext={editor.kind === 'avatar' ? DEFAULT_AVATAR_CONTEXT : undefined}
                   contextExtraKeys={AVATAR_EXTRA_KEYS}
                   promptLabel={
                     editor.kind === 'avatar' ? (
                       <>
-                        System instruction <MacroHelp rows={AVATAR_MACROS} />
+                        System instructions <MacroHelp rows={AVATAR_MACROS} />
                       </>
                     ) : undefined
                   }
                   contextLabel={
                     <>
-                      Character context <MacroHelp rows={AVATAR_MACROS} />
+                      User message template <MacroHelp rows={AVATAR_MACROS} />
                     </>
                   }
                   label={
@@ -544,6 +578,7 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
                       {editor.label}{' '}
                       <Show when={editor.kind !== 'avatar'}>
                         <MacroHelp
+                          rows={editor.kind === 'references' ? REFERENCE_MACROS : undefined}
                           extra={
                             editor.command
                               ? [['{{instruction}}', `The ${editor.command} command argument`]]
@@ -578,17 +613,22 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
                 [
                   [
                     'promptRevisionContext',
-                    'Context message',
+                    'Context message template',
                     3,
                     'Inserted before the original prompt when the chat does not end with a user turn. Leave empty to omit it.',
                   ],
                   [
                     'promptRevisionOriginal',
-                    'Original prompt message',
+                    'Original prompt message template',
                     4,
                     'Sent as the assistant turn being revised. Include {{prompt}}.',
                   ],
-                  ['promptRevisionTemplate', 'Revision instruction', 10, ''],
+                  [
+                    'promptRevisionTemplate',
+                    'Prompt template',
+                    10,
+                    'Instructions for revising the original image prompt.',
+                  ],
                 ] as const
               }
             >

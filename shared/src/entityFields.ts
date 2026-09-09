@@ -32,6 +32,11 @@ export const ENTITY_FIELDS = {
     /** Null omits the model field, letting the endpoint choose. */
     model: null as string | null,
     genParams: {} as GenParams,
+    /** Literal text wrapped around the assembled system prompt for every endpoint request. */
+    systemPromptPrefix: '',
+    systemPromptSuffix: '',
+    /** Literal text before the task/template reasoning prefill. */
+    reasoningPrefillPrefix: '',
     /** 'none' uses a trailing message; 'vllm' uses continue_final_message; 'deepseek' uses prefix. */
     prefillMode: 'none' as 'disabled' | 'none' | 'vllm' | 'deepseek',
   },

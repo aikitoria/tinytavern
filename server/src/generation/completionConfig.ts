@@ -7,6 +7,37 @@ export interface CompletionOptions {
   messagePrefill?: string | null;
 }
 
+/** Applied only at the wire boundary so snapshots and retries never accumulate additions. */
+export function withEndpointSystemPrompt(endpoint: Endpoint, source: ChatMessage[]): ChatMessage[] {
+  const prefix = endpoint.systemPromptPrefix;
+  const suffix = endpoint.systemPromptSuffix;
+  if (!prefix && !suffix) return source;
+  const index = source.findIndex((message) => message.role === 'system');
+  if (index === -1) return [{ role: 'system', content: prefix + suffix }, ...source];
+  const messages = source.slice();
+  messages[index] = { ...source[index]!, content: prefix + source[index]!.content + suffix };
+  return messages;
+}
+
+export function endpointReasoningPrefill(
+  endpoint: Endpoint,
+  source: string | null | undefined,
+  continuing = false,
+): string {
+  if (endpoint.prefillMode === 'disabled') return '';
+  const prefix = endpoint.reasoningPrefillPrefix;
+  const text = source ?? '';
+  if (!prefix) return text;
+  if (continuing) {
+    if (text.startsWith(prefix)) return text;
+    // Finalized reasoning is trimmed before storage; restore the prefix's original whitespace.
+    if (text === prefix.trim()) return prefix;
+    const storedPrefix = prefix.trimStart();
+    if (text.startsWith(storedPrefix)) return prefix + text.slice(storedPrefix.length);
+  }
+  return prefix + text;
+}
+
 /** Shared parameter mapping for foreground chat and standalone prompt tasks. */
 export function generationParameters(
   params: GenParams,
@@ -38,7 +69,7 @@ export function prepareStandaloneCompletion(
     : { max_tokens: maxTokens };
   const enabled = endpoint.prefillMode !== 'disabled';
   const messagePrefill = enabled ? options.messagePrefill || '' : '';
-  const reasoningPrefill = enabled ? options.reasoningPrefill || '' : '';
+  const reasoningPrefill = endpointReasoningPrefill(endpoint, options.reasoningPrefill);
   if (messagePrefill || reasoningPrefill) {
     messages.push({
       role: 'assistant',
