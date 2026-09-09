@@ -2,10 +2,9 @@ import { publicAvatar } from '../mediaUrls.ts';
 import { defineAvatarRoutes } from './avatarRoutes.ts';
 import {
   namedItem,
-  DEFAULT_STEER_TEMPLATE,
-  DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
+  DEFAULT_CUSTOM_TEMPLATE,
+  ENTITY_FIELDS,
   type Character,
-  type CustomTemplate,
 } from '@tinytavern/shared';
 import { stmt, toCharacter } from '../db.ts';
 import { invalidate } from '../events.ts';
@@ -26,14 +25,10 @@ import {
   readAvatarFile,
   saveAvatar,
 } from './avatarStore.ts';
-import {
-  defineEntityRoutes,
-  nameField,
-  nullableTextField,
-  refIdField,
-  textField,
-} from './entityRoutes.ts';
+import { defineEntityRoutes, entityFields, referenceValue } from './entityRoutes.ts';
 import { rowById } from './entityUtils.ts';
+
+const customTemplateFields = Object.entries(DEFAULT_CUSTOM_TEMPLATE);
 
 function parseCustomTemplate(raw: unknown): string | null {
   if (raw === null) return null;
@@ -41,17 +36,12 @@ function parseCustomTemplate(raw: unknown): string | null {
     throw new HttpError(400, 'customTemplate must be an object or null');
   }
   const t = raw as JsonObject;
-  const custom: CustomTemplate = {
-    content: optionalString(t, 'content') ?? '',
-    userPrologue: optionalString(t, 'userPrologue') ?? '',
-    reasoningPrefill: optionalString(t, 'reasoningPrefill') ?? '',
-    messagePrefill: optionalString(t, 'messagePrefill') ?? '',
-    prefixNames: optionalBoolean(t, 'prefixNames') ?? false,
-    usesPersonas: optionalBoolean(t, 'usesPersonas') ?? true,
-    steerTemplate: optionalString(t, 'steerTemplate') ?? DEFAULT_STEER_TEMPLATE,
-    speakerHandoffTemplate:
-      optionalString(t, 'speakerHandoffTemplate') ?? DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
-  };
+  const custom: Record<string, string | boolean> = {};
+  for (const [key, fallback] of customTemplateFields) {
+    custom[key] =
+      (typeof fallback === 'boolean' ? optionalBoolean(t, key) : optionalString(t, key)) ??
+      fallback;
+  }
   return JSON.stringify(custom);
 }
 
@@ -59,42 +49,20 @@ defineEntityRoutes<Character>({
   table: 'characters',
   toDto: toCharacter,
   toPublic: publicAvatar,
-  fields: [
-    nameField((cur) => cur.name),
-    {
-      column: 'chat_name',
-      value: (body, current) => {
-        const value = optionalNullableString(body, 'chatName');
-        return value === undefined ? (current?.chatName ?? null) : value?.trim() || null;
-      },
+  fields: entityFields(ENTITY_FIELDS.characters, {
+    chatName: (body, current) => {
+      const value = optionalNullableString(body, 'chatName');
+      return value === undefined ? (current?.chatName ?? null) : value?.trim() || null;
     },
-    refIdField('folderId', 'folder_id', 'character_folders', (cur) => cur.folderId),
-    textField('personality', 'personality', (cur) => cur.personality),
-    textField('scenario', 'scenario', (cur) => cur.scenario),
-    textField('examples', 'examples', (cur) => cur.examples),
-    textField('firstMessage', 'first_message', (cur) => cur.firstMessage),
-    refIdField('presetId', 'preset_id', 'presets', (cur) => cur.presetId),
-    nullableTextField('customPrompt', 'custom_prompt', (cur) => cur.customPrompt),
-    refIdField('templateId', 'template_id', 'templates', (cur) => cur.templateId),
-    {
-      column: 'disable_background_swipe_generation',
-      value: (b, cur) =>
-        Number(
-          optionalBoolean(b, 'disableBackgroundSwipeGeneration') ??
-            cur?.disableBackgroundSwipeGeneration ??
-            false,
-        ),
+    folderId: referenceValue('folderId', 'character_folders'),
+    presetId: referenceValue('presetId', 'presets'),
+    templateId: referenceValue('templateId', 'templates'),
+    customTemplate: (b, cur) => {
+      const raw = b.customTemplate;
+      if (raw === undefined) return cur?.customTemplate ? JSON.stringify(cur.customTemplate) : null;
+      return parseCustomTemplate(raw);
     },
-    {
-      column: 'custom_template',
-      value: (b, cur) => {
-        const raw = b.customTemplate;
-        if (raw === undefined)
-          return cur?.customTemplate ? JSON.stringify(cur.customTemplate) : null;
-        return parseCustomTemplate(raw);
-      },
-    },
-  ],
+  }),
   invalidateOnDelete: ['conversations'],
   onDelete: (id) => deleteAvatarFiles('character', id),
   onDuplicate: (sourceId, newId) => {
@@ -175,7 +143,9 @@ route.get('/api/characters/:id/card', ({ params }) => {
   const row = rowById('characters', id);
   const character = toCharacter(row);
   const original = row.card_json
-    ? (JSON.parse(row.card_json as string) as { data?: Record<string, unknown> })
+    ? (JSON.parse(row.card_json as string) as {
+        data?: Record<string, unknown>;
+      })
     : null;
   const extensions = cardObject(original?.data?.extensions);
   const ownExtension = cardObject(extensions.tinytavern);

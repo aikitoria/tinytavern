@@ -68,7 +68,7 @@ export default function CrossfadeImage(props: {
   const currentId = () => layers().at(-1)?.id;
 
   return (
-    <span class={`image-crossfade ${props.wrapperClass ?? ''}`}>
+    <span class={`grid [&>img]:row-start-1 [&>img]:col-start-1 ${props.wrapperClass ?? ''}`}>
       <For each={layers()}>
         {(layer) => {
           const current = () => layer.id === currentId();

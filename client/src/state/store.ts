@@ -27,11 +27,6 @@ import type {
 import { DEFAULT_SETTINGS, mediaJobActive, mergeMediaProgress } from '@tinytavern/shared';
 import { api, ApiError } from './api.ts';
 import { refreshWs, subscribe } from './ws.ts';
-import {
-  applyImageProgress,
-  retainPendingImageProgress,
-  type ImageProgressState,
-} from './imageProgressSync.ts';
 import { isCurrentSettingsRevision, SuccessfulFetchSequence, upsertById } from './sync.ts';
 import { afterOperationEnd, afterTreeFrame } from './swipeSync.ts';
 
@@ -266,22 +261,22 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
     setState('gallery', reconcile(items, { key: 'id' }));
     setGalleryRevision((revision) => revision + 1);
   }),
-  characters: loader('characters', api.characters, (data) =>
+  characters: loader('characters', api.characters.list, (data) =>
     setState('characters', reconcile(data, { key: 'id' })),
   ),
-  characterFolders: loader('characterFolders', api.characterFolders, (data) =>
+  characterFolders: loader('characterFolders', api.characterFolders.list, (data) =>
     setState('characterFolders', reconcile(data, { key: 'id' })),
   ),
-  presets: loader('presets', api.presets, (data) =>
+  presets: loader('presets', api.presets.list, (data) =>
     setState('presets', reconcile(data, { key: 'id' })),
   ),
-  templates: loader('templates', api.templates, (data) =>
+  templates: loader('templates', api.templates.list, (data) =>
     setState('templates', reconcile(data, { key: 'id' })),
   ),
-  personas: loader('personas', api.personas, (data) =>
+  personas: loader('personas', api.personas.list, (data) =>
     setState('personas', reconcile(data, { key: 'id' })),
   ),
-  endpoints: loader('endpoints', api.endpoints, (data) =>
+  endpoints: loader('endpoints', api.endpoints.list, (data) =>
     setState('endpoints', reconcile(data, { key: 'id' })),
   ),
   settings: loader('settings', api.settings, (data) => {
@@ -303,6 +298,8 @@ const mediaJobEvents = new Map<number, number>();
 // Job IDs are never reused. Late HTTP responses must not restore a deleted job.
 const deletedMediaJobs = new Set<number>();
 const mediaFetches = new SuccessfulFetchSequence<string>();
+let activeJobSnapshot = new Set<number>();
+let activeJobSnapshotSequence = 0;
 
 export function applyMediaJob(job: MediaJob): void {
   if (deletedMediaJobs.has(job.id)) return;
@@ -330,24 +327,31 @@ export function applyMediaJob(job: MediaJob): void {
 export async function refreshMediaJobs(): Promise<void> {
   const sequence = mediaFetches.start('jobs');
   const began = mediaEventSequence;
-  const [recent, active] = await Promise.all([api.mediaJobs(), api.activeMediaJobs()]);
+  const recent = await api.mediaJobs();
   if (!mediaFetches.accept('jobs', sequence)) {
     return;
   }
   const jobs: Record<number, MediaJob> = {};
   const oldest = recent.at(-1);
-  if (recent.length === 100 && oldest) {
-    // The first page cannot establish whether previously loaded older history was deleted.
-    for (const current of Object.values(state.mediaJobs)) {
-      const older =
-        current.createdAt < oldest.createdAt ||
-        (current.createdAt === oldest.createdAt && current.id < oldest.id);
-      if (older && !mediaJobActive(current.state)) {
-        jobs[current.id] = current;
-      }
-    }
+  // Active jobs arrive in the ordered WS snapshot. A history page cannot disprove their
+  // existence, nor establish whether already loaded history beyond its oldest row was deleted.
+  for (const current of Object.values(state.mediaJobs)) {
+    if (
+      mediaJobActive(current.state) ||
+      (recent.length === 100 &&
+        oldest &&
+        (current.createdAt < oldest.createdAt ||
+          (current.createdAt === oldest.createdAt && current.id < oldest.id)))
+    )
+      jobs[current.id] = current;
   }
-  for (const job of [...recent, ...active]) {
+  for (const job of recent) {
+    if (
+      mediaJobActive(job.state) &&
+      activeJobSnapshotSequence > began &&
+      !activeJobSnapshot.has(job.id)
+    )
+      continue;
     applyThumbnails(job.assets);
     applyThumbnails(job.outputs);
     if (!deletedMediaJobs.has(job.id)) jobs[job.id] = job;
@@ -397,6 +401,25 @@ export function handleServerEvent(ev: ServerEvent): void {
             for (const message of Object.values(messages)) applyThumbnails(message.media);
           }),
         );
+      });
+      break;
+    }
+    case 'mediaJobs': {
+      activeJobSnapshot = new Set(ev.jobs.map((job) => job.id));
+      activeJobSnapshotSequence = ++mediaEventSequence;
+      batch(() => {
+        for (const job of Object.values(state.mediaJobs)) {
+          if (mediaJobActive(job.state) && !activeJobSnapshot.has(job.id)) {
+            mediaJobEvents.set(job.id, ++mediaEventSequence);
+            setState(
+              'mediaJobs',
+              produce((jobs) => {
+                delete jobs[job.id];
+              }),
+            );
+          }
+        }
+        for (const job of ev.jobs) applyMediaJob(job);
       });
       break;
     }
@@ -463,8 +486,6 @@ export function handleServerEvent(ev: ServerEvent): void {
           );
         });
         consumePendingSwipe(ev.conversationId, ev.activeLeafId);
-        // Renders completed while disconnected must not leave stale progress for the next render.
-        setImageProgress((progress) => retainPendingImageProgress(progress, state.tree.messages));
       }
       break;
     case 'treePatch': {
@@ -500,7 +521,6 @@ export function handleServerEvent(ev: ServerEvent): void {
                 // The timeline is keyed by reference; preserve identity to retain MessageNode UI state.
                 if (existing) Object.assign(existing, body);
                 else messages[node.id] = body;
-                if (!body.imagePending) clearImageProgress(node.id);
               } else {
                 const msg = messages[node.id]!;
                 // parentId too: splice deletions and block moves reparent
@@ -515,7 +535,6 @@ export function handleServerEvent(ev: ServerEvent): void {
           }),
         );
       });
-      setImageProgress((progress) => retainPendingImageProgress(progress, state.tree.messages));
       consumePendingSwipe(ev.conversationId, ev.activeLeafId);
       break;
     }
@@ -549,35 +568,9 @@ export function handleServerEvent(ev: ServerEvent): void {
           produce((msg) => Object.assign(msg, ev.message)),
         );
       }
-      if (!ev.message.imagePending || !state.tree.messages[ev.message.id]) {
-        clearImageProgress(ev.message.id);
-      }
       break;
     }
-    case 'imageProgress':
-      if (ev.conversationId !== state.selectedId) break;
-      setImageProgress((progress) =>
-        applyImageProgress(progress, state.tree.messages, ev.mid, {
-          ...(ev.value === undefined ? {} : { value: ev.value }),
-          ...(ev.max === undefined ? {} : { max: ev.max }),
-          ...(ev.preview === undefined ? {} : { preview: ev.preview }),
-        }),
-      );
-      break;
   }
-}
-
-/** Per-message image render progress (ephemeral; only read while imagePending). */
-export const [imageProgress, setImageProgress] = createSignal<ImageProgressState>({});
-
-/** Prevent a later render from showing the previous render's progress. */
-function clearImageProgress(mid: number): void {
-  setImageProgress((progress) => {
-    if (!(mid in progress)) return progress;
-    const next = { ...progress };
-    delete next[mid];
-    return next;
-  });
 }
 
 /** Outstanding gap-triggered resync; cleared by its tree snapshot. */
@@ -607,7 +600,6 @@ export function selectConversation(id: number | null): void {
   });
   // Prevent the previous conversation's swipe animation from leaking into new nodes.
   setPendingSwipe(null);
-  setImageProgress({});
   subscribe(id);
   persistSelectedConversation(id);
   writePageLocation({ ...readPageLocation(), chatId: id, viewMode: undefined });

@@ -147,6 +147,14 @@ export function mediaDraft(id: number): MediaDraft {
   };
 }
 
+export function activeMediaJobs(): MediaJob[] {
+  return (
+    stmt(`SELECT * FROM media_jobs
+    WHERE state NOT IN ('draft', 'ready', 'succeeded', 'failed', 'cancelled')
+    ORDER BY created_at, id`).all() as unknown as MediaJobRow[]
+  ).map(mediaJobDto);
+}
+
 export function mediaJobDto(row: MediaJobRow): MediaJob {
   const assetRows = stmt(`
     SELECT DISTINCT a.*
@@ -239,33 +247,7 @@ export function publishMediaJob(id: number): void {
 }
 
 /** Internal column allowlist avoids accidental updates of immutable identities. */
-type JobPatch = Partial<
-  Pick<
-    MediaJobRow,
-    | 'state'
-    | 'operation'
-    | 'recipe_id'
-    | 'workflow_id'
-    | 'preset_id'
-    | 'instruction'
-    | 'prompt'
-    | 'inputs_json'
-    | 'configuration_json'
-    | 'context_json'
-    | 'endpoint_json'
-    | 'message_id'
-    | 'seed'
-    | 'comfy_prompt_id'
-    | 'submission_id'
-    | 'outputs_json'
-    | 'error'
-    | 'auto_render'
-    | 'started_at'
-    | 'deadline'
-    | 'retention_deadline'
-  >
->;
-const PATCH_COLUMNS = new Set([
+const PATCH_COLUMNS = [
   'state',
   'operation',
   'recipe_id',
@@ -287,9 +269,11 @@ const PATCH_COLUMNS = new Set([
   'started_at',
   'deadline',
   'retention_deadline',
-]);
+] as const satisfies readonly (keyof MediaJobRow)[];
+type JobPatch = Partial<Pick<MediaJobRow, (typeof PATCH_COLUMNS)[number]>>;
+const patchColumns: ReadonlySet<string> = new Set(PATCH_COLUMNS);
 export function updateMediaJob(id: number, patch: JobPatch): MediaJobRow {
-  const entries = Object.entries(patch).filter(([key]) => PATCH_COLUMNS.has(key));
+  const entries = Object.entries(patch).filter(([key]) => patchColumns.has(key));
   if (entries.length > 0) {
     const assignments = entries.map(([key]) => `${key} = ?`).join(', ');
     const values = entries.map(([, value]) => value);

@@ -2,34 +2,16 @@
 
 /* Keep the overlay visible between the wrapper background and native textarea text. */
 .macro-box {
-  position: relative;
-  background: var(--bg);
-  border-radius: var(--radius-control);
+  @apply relative bg-canvas rounded-sm;
   font-size: 13px;
   font-weight: 400;
   line-height: 1.5;
 }
 
-.macro-box textarea {
-  /* Avoid the inline descender gap that desynchronizes overlay scrolling. */
-  display: block;
-  position: relative;
-  background: transparent;
-}
-
 /* Theme Chrome's native scroll corner and grip without changing the resize hotspot. */
-.macro-box textarea::-webkit-scrollbar {
-  width: 10px;
-}
 
 .macro-box textarea::-webkit-scrollbar-thumb {
-  background: var(--bg-hover);
   border-radius: 5px;
-}
-
-.macro-box textarea::-webkit-scrollbar-track,
-.macro-box textarea::-webkit-scrollbar-corner {
-  background: transparent;
 }
 
 .macro-box textarea::-webkit-resizer {
@@ -43,21 +25,7 @@
   );
 }
 
-.macro-overlay {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  padding: var(--control-pad-y) var(--space-3);
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  color: transparent;
-  pointer-events: none;
-}
-
 .macro-overlay mark {
-  color: transparent;
   border-radius: 4px;
 }
 
@@ -77,50 +45,16 @@
 /* ---- Custom select ---- */
 
 .select-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-  min-width: 0;
-  min-height: var(--control-height);
-  height: var(--control-height);
-  background: var(--bg-panel);
-  border-color: var(--border-control-surface);
-  color: var(--text);
-  text-align: left;
+  @apply flex items-center justify-between gap-2 w-full min-w-0 min-h-control h-control bg-panel border-control-line text-foreground text-left;
 }
 
 .select-btn:hover:where(:not(:disabled)) {
   background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg-hover));
 }
 
-.select-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.select-caret {
-  color: var(--text-dim);
-  font-size: 11px;
-  flex-shrink: 0;
-}
-
 .popover-surface {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  overflow: hidden;
+  @apply bg-panel border border-solid border-line rounded-md overflow-hidden;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
-}
-
-.dropdown-surface {
-  position: fixed;
-  z-index: 300;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .dropdown-down {
@@ -129,39 +63,16 @@
 }
 
 .dropdown-up {
+  --menu-offset: 5px;
   transform-origin: bottom center;
-  animation: menu-in-up 0.1s ease-out;
+  animation: menu-in 0.1s ease-out;
 }
 
 :where(.popover-menu) button {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  border: none;
-  border-radius: 0;
-  background: none;
-  padding: var(--space-2) var(--space-3);
-  text-align: left;
-}
-
-.popover-menu button:hover:not(:disabled),
-.popover-menu button.active,
-.popover-menu button.highlighted:not([aria-selected='true']) {
-  background: var(--bg-hover);
-}
-
-.menu-separator {
-  height: 1px;
-  margin: var(--space-1) 0;
-  background: var(--border);
+  @apply flex items-center gap-2 w-full border-clear rounded-none bg-clear py-2 px-3 text-left;
 }
 
 /* Every dropdown uses the same surface, rows, and selection treatment. */
-.popover-menu button[aria-selected='true'],
-.popover-menu button[aria-checked='true'] {
-  background: var(--bg-raised);
-}
 
 input[type='number'] {
   appearance: textfield;
@@ -178,60 +89,37 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .fa-icon {
-  display: inline-block;
-  flex: none;
+  @apply inline-block flex-none overflow-visible;
   vertical-align: -0.125em;
-  overflow: visible;
 }
 
 .icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 28px;
-  min-width: 28px;
-  height: 24px;
-  padding: 0;
-  color: var(--text-control);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
+  @apply inline-flex items-center justify-center flex-none w-7 min-w-7 h-6 p-0 text-control bg-clear border border-solid border-transparent rounded-sm;
   font-size: 15px;
   line-height: 1;
 }
 
 .icon-btn:hover:where(:not(:disabled)),
 .icon-btn:focus-visible {
-  color: var(--text);
-  background: var(--bg-hover);
-  border-color: transparent;
+  @apply text-foreground bg-hover border-transparent;
 }
 
 .icon-btn.icon-btn-active {
-  color: var(--accent);
+  @apply text-accent border-transparent;
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
-  border-color: transparent;
 }
 
 .primary-btn {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
-  font-weight: 600;
+  @apply bg-accent text-accent-text border-accent font-semibold;
 }
 
 .primary-btn:hover:where(:not(:disabled)) {
+  @apply bg-accent-hot border-accent-hot;
   filter: none;
-  background: var(--accent-hot);
-  border-color: var(--accent-hot);
 }
 
 .danger-primary-btn {
-  color: #fff;
-  background: var(--danger);
-  border-color: var(--danger);
-  font-weight: 600;
+  @apply text-white bg-danger border-danger font-semibold;
 }
 
 .danger-primary-btn:hover:not(:disabled) {
@@ -241,21 +129,16 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .danger-btn {
-  color: var(--danger);
-  border-color: var(--danger);
+  @apply text-danger border-danger;
 }
 
 .hint {
-  color: var(--text-dim);
-  font-size: 13px;
-  margin: 0;
+  @apply text-dim text-sm m-0;
 }
 
 .notice {
-  margin: var(--space-2) 0;
-  padding: var(--space-2) var(--space-3);
+  @apply my-2 mx-0 py-2 px-3 rounded-sm;
   border: 1px solid;
-  border-radius: var(--radius-control);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -289,61 +172,8 @@ input[type='number']::-webkit-inner-spin-button {
   font-size: 13px;
 }
 
-.password-card label,
-.form label {
-  font-size: 13.5px;
-  color: var(--text);
-  margin-top: var(--space-2);
-}
-
-.setting-label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 24px;
-  margin-top: var(--space-2);
-}
-
-.setting-label > label {
-  margin: 0;
-  min-width: 0;
-}
-
-.setting-revert.icon-btn,
-.help-btn.icon-btn {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  padding: 0;
-  flex: none;
-  color: var(--text-muted);
-}
-
-.setting-revert.icon-btn:hover,
-.help-btn.icon-btn:hover {
-  color: var(--text);
-}
-
-.help-btn.icon-btn {
-  width: 18px;
-  min-width: 18px;
-  height: 18px;
-  font-size: inherit;
-}
-
 .tab {
-  display: flex;
-  align-items: center;
-  background: none;
-  border: none;
-  justify-content: center;
-  flex: none;
-  min-height: 34px;
-  border-radius: var(--radius-control);
-  padding: var(--space-1) var(--space-3);
-  font-size: 13px;
-  color: var(--text-dim);
-  white-space: nowrap;
+  @apply flex items-center bg-clear border-clear justify-center flex-none min-h-8.5 rounded-sm py-1 px-3 text-sm text-dim whitespace-nowrap;
   box-shadow: none;
   transition:
     color 0.12s,
@@ -352,8 +182,7 @@ input[type='number']::-webkit-inner-spin-button {
 
 .tab:hover:not(:disabled),
 .entity-list button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text);
+  @apply bg-hover text-foreground;
 }
 
 .tab.active,
@@ -368,33 +197,9 @@ input[type='number']::-webkit-inner-spin-button {
 
 /* Layout primitives add no descendant form semantics. */
 :where(.form, .form-stack, .settings-section) {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  @apply flex flex-col gap-2;
 }
 
 .field-group {
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-}
-
-.tab-strip {
-  display: flex;
-  gap: var(--space-1);
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.tab-strip::-webkit-scrollbar {
-  display: none;
-}
-
-.trace-role {
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  @apply p-3 border border-solid border-line rounded-sm;
 }

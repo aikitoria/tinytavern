@@ -1,4 +1,5 @@
 /* @refresh reload */
+import './styles/index.css';
 import { render } from 'solid-js/web';
 import App from './App.tsx';
 import { restoreOpenPage, restorePage } from './media/navigation.ts';
@@ -9,7 +10,6 @@ import { checkAuthentication, configureAuthLifecycle, requireLogin } from './sta
 import { setAuthenticationRequiredHandler } from './state/api.ts';
 import '@fontsource-variable/ibm-plex-sans';
 import '@fontsource-variable/ibm-plex-sans/wght-italic.css';
-import './styles/app.css';
 import 'highlight.js/styles/github-dark.css';
 
 configureWs({

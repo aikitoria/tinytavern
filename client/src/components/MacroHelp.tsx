@@ -42,10 +42,10 @@ export default function MacroHelp(props: {
     props.rows ?? [...(props.template ? [...BASIC, ...TEMPLATE] : BASIC), ...(props.extra ?? [])];
 
   return (
-    <span class="macro-help" ref={root}>
+    <span class="align-text-bottom ml-2 inline-flex relative" ref={root}>
       <button
         ref={trigger}
-        class="icon-btn help-btn"
+        class="icon-btn [&.icon-btn]:p-0 [&.icon-btn]:flex-none [&.icon-btn]:text-muted [&.icon-btn]:text-size-inherit [&.icon-btn]:w-4.5 [&.icon-btn]:min-w-4.5 [&.icon-btn]:h-4.5 [&.icon-btn:hover]:text-foreground"
         title="Available macros"
         aria-label="Available macros"
         aria-haspopup="dialog"
@@ -59,7 +59,7 @@ export default function MacroHelp(props: {
         anchor={() => root}
         focusTarget={() => trigger}
         onClose={() => setOpen(false)}
-        class="help-card"
+        class="z-150 p-3 items-baseline grid gap-y-2 gap-x-3 max-w-[calc(100vw_-_16px)] grid-cols-[max-content_1fr]"
         role="dialog"
         ariaLabel="Available macros"
         minWidth={CARD_WIDTH}
@@ -67,10 +67,12 @@ export default function MacroHelp(props: {
         anchorInset={-VIEWPORT_GUTTER}
         gap={CARD_GAP}
       >
-        <div class="help-title">Available macros</div>
+        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">
+          Available macros
+        </div>
         <For each={rows()}>
           {([macro, description]) => (
-            <div class="help-row">
+            <div class="contents text-dim text-caption [&_code]:font-code [&_code]:text-xs [&_code]:text-accent [&_code]:whitespace-nowrap [&_span]:text-caption [&_span]:text-dim [&_span]:leading-hint">
               <code>{macro}</code>
               <span>{description}</span>
             </div>

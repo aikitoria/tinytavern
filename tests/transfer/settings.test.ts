@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
+import { testApi } from '../support/http.ts';
 
 test('settings transfer', async () => {
-  const { once } = await import('node:events');
-
   const {
     DEFAULT_SETTINGS,
     defaultMediaPrompt,
@@ -84,8 +83,7 @@ test('settings transfer', async () => {
   assert(!JSON.stringify(settings.galleryVideoPrompts).includes('chatPrompt'));
 
   const { stmt } = await import('../../server/src/db.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { apiRoutes } = await import('../../server/src/router.ts');
+  const { getSettings } = await import('../../server/src/settingsStore.ts');
   await import('../../server/src/routes/templates.ts');
   await import('../../server/src/routes/presets.ts');
   await import('../../server/src/routes/personas.ts');
@@ -94,25 +92,9 @@ test('settings transfer', async () => {
   await import('../../server/src/routes/settings.ts');
   const { makePlaceholderPng, parseCharacterCard } = await import('../../server/src/pngCard.ts');
   const { readAvatarFile } = await import('../../server/src/routes/avatarStore.ts');
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    routes: apiRoutes(),
-    fetch: () => new Response(null, { status: 404 }),
-    idleTimeout: 0,
-  });
-  const address = { port: server.port };
-  const base = `http://127.0.0.1:${address.port}`;
-  async function request(method: string, path: string, body?: unknown, status = 200): Promise<any> {
-    const response = await fetch(`${base}${path}`, {
-      method,
-      headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const result = await response.json();
-    assert.equal(response.status, status, JSON.stringify(result));
-    return result;
-  }
+  const { server, base, request: send } = await testApi();
+  const request = (method: string, path: string, body?: unknown, status = 200) =>
+    send(method, path, body, status);
   try {
     const original = getSettings();
     let saved = await request('PUT', '/api/settings', {

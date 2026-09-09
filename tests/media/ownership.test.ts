@@ -1,14 +1,10 @@
+import { conversationFixture, messageFixture, insertFixture } from '../support/fixtures.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
 
 databaseCase('media ownership', async () => {
   const { existsSync, readdirSync, writeFileSync } = await import('node:fs');
-
   const { join } = await import('node:path');
-
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { stmt, IMAGES_DIR, mediaAssetForPath, transaction } =
     await import('../../server/src/db.ts');
   const { saveImage, copyImage, deleteImageFiles, sweepOrphanedImages, reserveMediaFile } =
@@ -19,12 +15,8 @@ databaseCase('media ownership', async () => {
   assert.equal(path, `/images/media-${asset.id}.png`);
   assert.equal(asset.mime, 'image/png');
   assert.ok(asset.byteSize! > 0);
-  stmt(
-    "INSERT INTO conversations(id, title, created_at, updated_at) VALUES (1, 'Test', 1, 1)",
-  ).run();
-  stmt(
-    "INSERT INTO messages(id, conversation_id, role, content, images_json, created_at) VALUES (1, 1, 'tool', 'image', ?, 1)",
-  ).run(JSON.stringify([path]));
+  conversationFixture({ id: 1 });
+  messageFixture(1, { id: 1, role: 'tool', content: 'image', images_json: JSON.stringify([path]) });
   stmt("INSERT INTO media_owners VALUES (?, 'job', 'active', 'source')").run(asset.id);
   const assetCount = stmt('SELECT count(*) AS count FROM media_assets').get()!.count;
   const beforeFailedSave = readdirSync(IMAGES_DIR).sort();
@@ -99,22 +91,15 @@ databaseCase('media ownership', async () => {
 });
 
 databaseCase('media attachment ownership', async () => {
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { stmt } = await import('../../server/src/db.ts');
   const { mediaCharacterIds, setMediaCharacters } =
     await import('../../server/src/mediaCharacters.ts');
-  const cid = Number(
-    stmt(`INSERT INTO conversations(character_id,title,created_at,updated_at)
-  VALUES (1,'Attachments',1,1)`).run().lastInsertRowid,
-  );
-  const paths = ['/images/101.png', '/images/102.png', '/images/103.png'];
-  const mid = Number(
-    stmt(`INSERT INTO messages(conversation_id,role,content,images_json,created_at)
-  VALUES (?,'assistant','originalsearchword',?,1)`).run(cid, JSON.stringify(paths.slice(0, 2)))
-      .lastInsertRowid,
-  );
+  const cid = conversationFixture({ character_id: 1, title: 'Attachments' });
+  const paths = ['/images/101.png', '/images/102.png', '/images/103.png'] as const;
+  const mid = messageFixture(cid, {
+    content: 'originalsearchword',
+    images_json: JSON.stringify(paths.slice(0, 2)),
+  });
   const asset = (path: string) =>
     Number(stmt('SELECT id FROM media_assets WHERE path=?').get(path)!.id);
   const associations = (path: string) => mediaCharacterIds(asset(path));
@@ -123,48 +108,27 @@ databaseCase('media attachment ownership', async () => {
   JOIN media_assets a ON a.id=o.asset_id WHERE owner_type='message' AND owner_id=? ORDER BY slot`).all(
       String(mid),
     );
-  const update = (images: string[]) =>
+  const update = (images: readonly string[]) =>
     stmt('UPDATE messages SET images_json=? WHERE id=?').run(JSON.stringify(images), mid);
   const changes = () => Number(stmt('SELECT total_changes() AS n').get()!.n);
-  assert.deepEqual(associations(paths[0]!), [1]);
-  assert.deepEqual(associations(paths[1]!), [1]);
-  setMediaCharacters(asset(paths[0]!), []);
+  assert.deepEqual(paths.slice(0, 2).map(associations), [[1], [1]]);
   const initialOwner = owners()[0];
-  update([paths[0]!]);
-  assert.deepEqual(
-    associations(paths[0]!),
-    [],
-    'Deleting another alternative preserves edited associations',
-  );
-  assert.deepEqual(owners(), [initialOwner], 'An unchanged owner keeps its row');
-
-  update([paths[0]!, paths[2]!]);
-  assert.deepEqual(
-    associations(paths[0]!),
-    [],
-    'A completed render does not retag surviving alternatives',
-  );
-  assert.deepEqual(
-    associations(paths[2]!),
-    [1],
-    'New attachments inherit the conversation character',
-  );
-  setMediaCharacters(asset(paths[2]!), []);
-  update([paths[2]!, paths[0]!, paths[0]!]);
-  assert.deepEqual(
-    owners().map(({ slot, path }) => [slot, path]),
-    [
-      ['0', paths[2]],
-      ['1', paths[0]],
-      ['2', paths[0]],
-    ],
-  );
-  assert.deepEqual(
-    associations(paths[0]!),
-    [],
-    'Reordering and repeated paths preserve associations',
-  );
-  assert.deepEqual(associations(paths[2]!), []);
+  for (const [name, images, clear, expected] of [
+    ['remove alternative', [paths[0]], paths[0], [[]]],
+    ['append completed render', [paths[0], paths[2]], paths[0], [[], [1]]],
+    ['reorder and repeat', [paths[2], paths[0], paths[0]], paths[2], [[], [], []]],
+  ] as const) {
+    setMediaCharacters(asset(clear), []);
+    update(images);
+    assert.deepEqual(images.map(associations), expected, `${name}: preserve edited associations`);
+    assert.deepEqual(
+      owners().map(({ slot, path }) => [slot, path]),
+      images.map((path, index) => [String(index), path]),
+      `${name}: maintain ordered attachment owners`,
+    );
+    if (name === 'remove alternative')
+      assert.deepEqual(owners(), [initialOwner], 'An unchanged owner keeps its row');
+  }
   const stableOwners = owners();
   let before = changes();
   update([paths[2]!, paths[0]!, paths[0]!]);
@@ -177,10 +141,7 @@ databaseCase('media attachment ownership', async () => {
   assert.deepEqual(associations(paths[0]!), []);
 
   // Another message introduces a new association; subsequent edits to either owner preserve removals.
-  const other = Number(
-    stmt(`INSERT INTO messages(conversation_id,role,images_json,created_at)
-  VALUES (?,'assistant',?,1)`).run(cid, JSON.stringify([paths[0]])).lastInsertRowid,
-  );
+  const other = messageFixture(cid, { images_json: JSON.stringify([paths[0]]) });
   assert.deepEqual(associations(paths[0]!), [1]);
   setMediaCharacters(asset(paths[0]!), []);
   update([paths[0]!]);
@@ -212,12 +173,8 @@ databaseCase('media attachment ownership', async () => {
 
 databaseCase('media characters', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
-
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
 
-  requireTestIsolation();
   const { stmt, mediaAssetForPath } = await import('../../server/src/db.ts');
   const { saveImage, copyImage, reserveMediaFile } = await import('../../server/src/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
@@ -230,11 +187,9 @@ databaseCase('media characters', async () => {
   const { recordMediaResult } = await import('../../server/src/mediaJobResults.ts');
   const { getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
   const characters = ['Ashina', 'Haeun'].map((name) =>
-    Number(
-      stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid,
-    ),
+    insertFixture('characters', { name, created_at: 1 }),
   );
-  const inputs = characters.map((characterId, index) => {
+  const inputs = characters.map((characterId) => {
     const path = saveImage('.png', makePlaceholderPng());
     const asset = mediaAssetForPath(path)!;
     stmt(
@@ -335,13 +290,8 @@ databaseCase('media characters', async () => {
 
 databaseCase('temporary media job', async () => {
   const { existsSync } = await import('node:fs');
-
   const { basename, join } = await import('node:path');
-
   type MediaJobState = import('@tinytavern/shared').MediaJobState;
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db.ts');
   const { saveImage } = await import('../../server/src/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
@@ -388,13 +338,20 @@ databaseCase('temporary media job', async () => {
   assert(!existsSync(files.get(1)!));
   assert(!hasMediaJobObservers(completed.id));
 
-  await assert.rejects(
-    consumeTemporaryMediaJob(job(2), {}, () => {
-      throw new Error('Read failed');
-    }),
-    /Read failed/,
-  );
-  assert(!existsSync(files.get(2)!));
+  for (const [id, state, error] of [
+    [2, 'succeeded', /Read failed/],
+    [5, 'failed', /cancelled/],
+  ] as const) {
+    await assert.rejects(
+      consumeTemporaryMediaJob(job(id, state), {}, () => {
+        assert.equal(state, 'succeeded', 'Failed jobs are never consumed');
+        throw new Error('Read failed');
+      }),
+      error,
+    );
+    assert(!mediaJobRow(id));
+    assert(!existsSync(files.get(id)!));
+  }
 
   const abort = new AbortController();
   abort.abort(new Error('Already cancelled'));
@@ -429,11 +386,5 @@ databaseCase('temporary media job', async () => {
   deleteMediaJob(requireMediaJob(4));
   assert(!existsSync(files.get(4)!));
 
-  const failed = job(5, 'failed');
-  await assert.rejects(
-    consumeTemporaryMediaJob(failed, {}, () => assert.fail()),
-    /cancelled/,
-  );
-  assert(!mediaJobRow(5));
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
 });

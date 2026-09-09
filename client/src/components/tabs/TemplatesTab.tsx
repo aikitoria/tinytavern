@@ -11,6 +11,7 @@ export default function TemplatesTab() {
   let fields!: TemplateFieldsHandle;
 
   const editor = createEntityEditor({
+    ...api.templates,
     items: () => state.templates,
     load: (template) => {
       nameEl.value = template?.name ?? '';
@@ -20,10 +21,6 @@ export default function TemplatesTab() {
       name: nameEl.value,
       ...fields.value,
     }),
-    create: api.createTemplate,
-    patch: api.patchTemplate,
-    remove: api.deleteTemplate,
-    duplicate: api.duplicateTemplate,
     deletePrompt: 'Delete this template?',
     initialId: () => state.settings.defaultTemplateId,
     emptySelection: 'new',

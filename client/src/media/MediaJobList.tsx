@@ -43,7 +43,10 @@ export default function MediaJobList(props: {
     };
   };
   return (
-    <div class="media-job-list" ref={root}>
+    <div
+      class="items-start my-0 mx-auto p-4 grid gap-3 overflow-y-auto w-full grid-cols-1 content-start max-w-chat [&>.hint]:col-span-full [&>.hint]:justify-self-start phone:p-2"
+      ref={root}
+    >
       <Show
         when={props.groups.length}
         fallback={<p class="hint">{props.loading ? 'Loading jobs…' : 'No media jobs yet.'}</p>}
@@ -64,7 +67,11 @@ export default function MediaJobList(props: {
         </For>
       </Show>
       <Show when={props.more}>
-        <button class="media-job-load-more" disabled={props.loading} onClick={props.onLoadMore}>
+        <button
+          class="col-span-full justify-self-start"
+          disabled={props.loading}
+          onClick={props.onLoadMore}
+        >
           {props.loading ? 'Loading…' : 'Load more'}
         </button>
       </Show>

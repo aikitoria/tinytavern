@@ -1,9 +1,10 @@
+import { ENTITY_FIELDS } from '@tinytavern/shared';
 import type { Endpoint, GenParams, ReasoningEffort } from '@tinytavern/shared';
 import { stmt, toEndpoint } from '../db.ts';
 import { invalidate } from '../events.ts';
 import { route, HttpError } from '../router.ts';
 import { objectBody, optionalNumber, optionalString, positiveId } from '../validation.ts';
-import { defineEntityRoutes, nameField, nullableTextField } from './entityRoutes.ts';
+import { defineEntityRoutes, entityFields } from './entityRoutes.ts';
 import { rowById } from './entityUtils.ts';
 
 const PREFILL_MODES = new Set<Endpoint['prefillMode']>(['disabled', 'none', 'vllm', 'deepseek']);
@@ -36,7 +37,10 @@ function baseUrl(value: string | undefined, current?: string): string {
   return text;
 }
 
-function endpointApiKey(body: Record<string, unknown>, current?: Endpoint): string {
+function endpointApiKey(
+  body: Record<string, unknown>,
+  current?: typeof ENTITY_FIELDS.endpoints,
+): string {
   const supplied = optionalString(body, 'apiKey');
   if (supplied !== undefined) return supplied;
   if (!current) return '';
@@ -45,32 +49,32 @@ function endpointApiKey(body: Record<string, unknown>, current?: Endpoint): stri
   return new URL(nextBaseUrl).origin === new URL(current.baseUrl).origin ? current.apiKey : '';
 }
 
+const GEN_PARAM_RANGES = [
+  ['temperature', 0, 2],
+  ['topP', 0, 1],
+  ['minP', 0, 1],
+  ['maxTokens', 1, Infinity],
+  ['frequencyPenalty', -2, 2],
+  ['presencePenalty', -2, 2],
+] as const;
+
 function genParams(value: unknown, current: GenParams = {}, replace = false): GenParams {
   if (value === undefined) return current;
   const b = objectBody(value);
   // PATCH merges parameters; the editor requests replacement for its complete form.
   const next: GenParams = replace ? {} : { ...current };
-  const temperature = optionalNumber(b, 'temperature');
-  const topP = optionalNumber(b, 'topP');
-  const minP = optionalNumber(b, 'minP');
-  const maxTokens = optionalNumber(b, 'maxTokens');
-  const frequencyPenalty = optionalNumber(b, 'frequencyPenalty');
-  const presencePenalty = optionalNumber(b, 'presencePenalty');
-  if (temperature != null && (temperature < 0 || temperature > 2))
-    throw new HttpError(400, 'temperature must be between 0 and 2');
-  if (topP != null && (topP < 0 || topP > 1))
-    throw new HttpError(400, 'topP must be between 0 and 1');
-  if (minP != null && (minP < 0 || minP > 1))
-    throw new HttpError(400, 'minP must be between 0 and 1');
-  if (maxTokens != null && (!Number.isInteger(maxTokens) || maxTokens < 1))
-    throw new HttpError(400, 'maxTokens must be a positive integer');
-  for (const [key, number] of [
-    ['frequencyPenalty', frequencyPenalty],
-    ['presencePenalty', presencePenalty],
-  ] as const) {
-    if (number != null && (number < -2 || number > 2)) {
-      throw new HttpError(400, `${key} must be between -2 and 2`);
+  const numbers = GEN_PARAM_RANGES.map(([key]) => optionalNumber(b, key));
+  for (let i = 0; i < GEN_PARAM_RANGES.length; i++) {
+    const [key, min, max] = GEN_PARAM_RANGES[i]!;
+    const value = numbers[i];
+    if (value === undefined) continue;
+    if (key === 'maxTokens') {
+      if (!Number.isInteger(value) || value < 1)
+        throw new HttpError(400, 'maxTokens must be a positive integer');
+    } else if (value < min || value > max) {
+      throw new HttpError(400, `${key} must be between ${min} and ${max}`);
     }
+    next[key] = value;
   }
   const reasoningEffort = b.reasoningEffort;
   if (reasoningEffort !== undefined) {
@@ -82,12 +86,6 @@ function genParams(value: unknown, current: GenParams = {}, replace = false): Ge
     }
     next.reasoningEffort = reasoningEffort as ReasoningEffort;
   }
-  if (temperature != null) next.temperature = temperature;
-  if (topP != null) next.topP = topP;
-  if (minP != null) next.minP = minP;
-  if (maxTokens != null) next.maxTokens = maxTokens;
-  if (frequencyPenalty != null) next.frequencyPenalty = frequencyPenalty;
-  if (presencePenalty != null) next.presencePenalty = presencePenalty;
   return next;
 }
 
@@ -103,21 +101,13 @@ defineEntityRoutes<Endpoint>({
   table: 'endpoints',
   toDto: toEndpoint,
   toPublic: publicEndpoint,
-  fields: [
-    nameField((cur) => cur.name),
-    { column: 'base_url', value: (b, cur) => baseUrl(optionalString(b, 'baseUrl'), cur?.baseUrl) },
-    { column: 'api_key', value: endpointApiKey },
-    nullableTextField('model', 'model', (cur) => cur.model),
-    {
-      column: 'gen_params_json',
-      value: (b, cur) =>
-        JSON.stringify(genParams(b.genParams, cur?.genParams, b.replaceGenParams === true)),
-    },
-    {
-      column: 'prefill_mode',
-      value: (b, cur) => prefillMode(b.prefillMode, cur?.prefillMode ?? 'none'),
-    },
-  ],
+  fields: entityFields(ENTITY_FIELDS.endpoints, {
+    baseUrl: (b, cur) => baseUrl(optionalString(b, 'baseUrl'), cur?.baseUrl),
+    apiKey: endpointApiKey,
+    genParams: (b, cur) =>
+      JSON.stringify(genParams(b.genParams, cur?.genParams, b.replaceGenParams === true)),
+    prefillMode: (b, cur) => prefillMode(b.prefillMode, cur?.prefillMode ?? 'none'),
+  }),
   settingsRef: 'activeEndpointId',
   // ON DELETE SET NULL clears conversation overrides; refetch them.
   invalidateOnDelete: ['conversations'],

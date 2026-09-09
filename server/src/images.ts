@@ -169,38 +169,6 @@ export function reserveMediaFile(extension: string): { id: number; path: string 
     RETURNING id, path`).get(extension, Date.now()) as { id: number; path: string };
 }
 
-export function saveImage(extension: string, data: Buffer): string {
-  let written: string | undefined;
-  let reservation: { id: number; path: string } | undefined;
-  try {
-    return transaction(() => {
-      reservation = reserveMediaFile(extension);
-      const { path } = reservation;
-      const file = join(IMAGES_DIR, basename(path));
-      // Exclusive creation also protects unexpected files left by an interrupted outer transaction.
-      const fd = openSync(file, 'wx');
-      written = file;
-      try {
-        writeFileSync(fd, data);
-      } finally {
-        closeSync(fd);
-      }
-      registerImage(path, data.length);
-      return path;
-    });
-  } catch (error) {
-    try {
-      if (written) unlinkSync(written);
-    } finally {
-      if (reservation) {
-        stmt('DELETE FROM media_assets WHERE id = ?').run(reservation.id);
-        invalidateMediaAsset(reservation.path);
-      }
-    }
-    throw error;
-  }
-}
-
 function registerImage(path: string, byteSize: number): void {
   const size = savedImageDimensions(path);
   const ext = extname(path).toLowerCase();
@@ -218,24 +186,45 @@ function registerImage(path: string, byteSize: number): void {
   invalidateMediaAsset(path);
 }
 
-/**
- * Copies must own separate files so deleting one message cannot break another.
- * Returns the new served path, or null if the source is invalid or missing.
- */
+export function saveImage(extension: string, data: Buffer): string {
+  return writeImage(extension, data);
+}
+
+/** Copies own separate files; invalid or missing sources return null. */
 export function copyImage(imagePath: string): string | null {
-  const file = imageFile(imagePath);
-  if (!file) return null;
+  return writeImage(extname(imagePath).toLowerCase(), imagePath);
+}
+
+function writeImage(extension: string, source: Buffer): string;
+function writeImage(extension: string, source: string): string | null;
+function writeImage(extension: string, source: Buffer | string): string | null {
+  const file = typeof source === 'string' ? imageFile(source) : null;
+  if (typeof source === 'string' && !file) return null;
   let written: string | undefined;
   let reservation: { id: number; path: string } | undefined;
   try {
     return transaction(() => {
-      reservation = reserveMediaFile(extname(imagePath).toLowerCase());
+      reservation = reserveMediaFile(extension);
       const { path } = reservation;
       const destination = join(IMAGES_DIR, basename(path));
-      copyFileSync(file, destination, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
-      written = destination;
-      registerImage(path, statSync(file).size);
-      const original = mediaAssetForPath(imagePath);
+      let byteSize: number;
+      if (typeof source === 'string') {
+        copyFileSync(file!, destination, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+        written = destination;
+        byteSize = statSync(file!).size;
+      } else {
+        // Exclusive creation protects files left by an interrupted outer transaction.
+        const fd = openSync(destination, 'wx');
+        written = destination;
+        try {
+          writeFileSync(fd, source);
+        } finally {
+          closeSync(fd);
+        }
+        byteSize = source.length;
+      }
+      registerImage(path, byteSize);
+      const original = typeof source === 'string' ? mediaAssetForPath(source) : null;
       if (original) {
         stmt(
           'UPDATE media_assets SET kind = ?, mime = ?, width = ?, height = ?, duration = ?, recipe_id = ? WHERE path = ?',
@@ -265,7 +254,7 @@ export function copyImage(imagePath: string): string | null {
         invalidateMediaAsset(reservation.path);
       }
     }
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if (typeof source === 'string' && (err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
 }

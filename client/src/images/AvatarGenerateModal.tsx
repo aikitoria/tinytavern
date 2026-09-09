@@ -141,8 +141,8 @@ export default function AvatarGenerateModal(props: {
       const blob = await (await fetch(url)).blob();
       const file = new File([blob], 'avatar.png', { type: blob.type || 'image/png' });
       // The avatar route enforces PNG — a non-PNG workflow output fails here.
-      if (props.kind === 'character') await api.uploadCharacterAvatar(props.id, file);
-      else await api.uploadPersonaAvatar(props.id, file);
+      if (props.kind === 'character') await api.characters.uploadAvatar(props.id, file);
+      else await api.personas.uploadAvatar(props.id, file);
       props.onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -154,7 +154,7 @@ export default function AvatarGenerateModal(props: {
 
   return (
     <Modal title="Generate avatar" onClose={props.onClose}>
-      <div class="avatar-gen form">
+      <div class="avatar-gen form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
         <label>Portrait prompt</label>
         <PromptGenerationStatus active={streaming()} content={text()} reasoning={reasoning()} />
         <textarea
@@ -164,17 +164,21 @@ export default function AvatarGenerateModal(props: {
           placeholder="The model is writing the portrait prompt…"
           onInput={(e) => setText(e.currentTarget.value)}
         />
-        <div class="avatar-gen-preview">
+        <div class="min-h-40 flex items-center gap-2 justify-center [&_img]:max-w-64 [&_img]:max-h-64 [&_img]:border [&_img]:border-solid [&_img]:border-line [&_img]:rounded-md">
           <Show
             when={previewUrl() ?? imageUrl()}
             fallback={
-              <div class="avatar-gen-placeholder">
+              <div class="flex items-center gap-2 text-dim">
                 <Show when={rendering()} fallback={streaming() ? 'Waiting for the prompt…' : null}>
                   <SamplerProgress
                     progress={progress()}
-                    stepsClass="avatar-gen-steps"
+                    stepsClass="text-dim text-sm"
                     fallback={
-                      <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
+                      <FontAwesomeIcon
+                        icon={faSpinner}
+                        size={12}
+                        class="spinner inline-block w-3 h-3 text-dim flex-none w-2.5 h-2.5 origin-center"
+                      />
                     }
                   />
                 </Show>
@@ -186,19 +190,25 @@ export default function AvatarGenerateModal(props: {
                 src={url()}
                 alt={previewUrl() ? 'Avatar rendering preview' : 'Generated avatar'}
                 classList={{ 'avatar-live-preview': previewUrl() != null }}
-                wrapperClass="avatar-image-crossfade"
+                wrapperClass="justify-items-center"
               />
             )}
           </Show>
           <Show when={rendering() && (previewUrl() || imageUrl())}>
             <SamplerProgress
               progress={progress()}
-              stepsClass="avatar-gen-steps"
-              fallback={<FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />}
+              stepsClass="text-dim text-sm"
+              fallback={
+                <FontAwesomeIcon
+                  icon={faSpinner}
+                  size={12}
+                  class="spinner inline-block w-3 h-3 text-dim flex-none w-2.5 h-2.5 origin-center"
+                />
+              }
             />
           </Show>
         </div>
-        <div class="form-actions">
+        <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
           <button class="primary-btn" disabled={!imageUrl() || busy()} onClick={() => void save()}>
             {saving() ? 'Saving…' : 'Use this avatar'}
           </button>

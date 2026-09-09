@@ -184,7 +184,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     <Portal>
       <div
         ref={overlay}
-        class="image-viewer"
+        class="image-viewer fixed inset-0 z-300 bg-black select-none overflow-hidden touch-none [&:focus]:outline-clear [&::backdrop]:bg-black [&_img]:absolute [&_img]:rounded-md [&_img]:cursor-grab [&.dragging_img]:cursor-grabbing [&:fullscreen]:w-screen [&:fullscreen]:h-dvh [&_img]:left-1/2 [&_img]:top-1/2 [&_img]:max-w-[92vw] [&_img]:max-h-[92dvh]"
         role="dialog"
         aria-modal="true"
         aria-label="Generated image viewer"

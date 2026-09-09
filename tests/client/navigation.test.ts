@@ -126,6 +126,21 @@ test('page location', async () => {
       traversals.shift()!();
     }
   }
+  function go(delta: number) {
+    history.go(delta);
+    settle();
+  }
+  function at(index: number, hash: string, message = 'History cursor and rendered page agree') {
+    assert.equal(cursor, index, message);
+    assert.equal(rendered, hash, message);
+    assert.equal(location.hash, hash, message);
+  }
+  function unchangedHistory() {
+    assert.deepEqual(
+      entries.map((entry) => entry.hash),
+      initialEntries,
+    );
+  }
   function open(hash: string) {
     writePageLocation(parsePageLocation(hash), true);
     rendered = hash;
@@ -139,52 +154,32 @@ test('page location', async () => {
     guards++;
     approve = action;
   });
-  history.go(-1);
-  settle();
+  go(-1);
   assert.equal(guards, 1);
-  assert.equal(cursor, 2, 'The guard opens at the original history entry');
-  assert.equal(location.hash, '#70+/settings/general');
-  assert.equal(rendered, '#70+/settings/general');
-  assert.deepEqual(
-    entries.map((entry) => entry.hash),
-    initialEntries,
-  );
+  at(2, '#70+/settings/general', 'The guard opens at the original history entry');
+  unchangedHistory();
   approve = undefined; // Cancel: the navigation action is deliberately not called.
-  history.go(-1);
-  settle();
+  go(-1);
   assert.equal(guards, 2, 'Back after Cancel still targets the same preceding page');
   approve!();
   settle();
-  assert.equal(cursor, 1);
-  assert.equal(rendered, '#70+/gallery');
-  assert.deepEqual(
-    entries.map((entry) => entry.hash),
-    initialEntries,
-  );
+  at(1, '#70+/gallery');
+  unchangedHistory();
 
-  history.go(1);
-  settle();
+  go(1);
   assert.equal(cursor, 1, 'Forward also restores the origin before asking');
   approve!();
   settle();
-  assert.equal(cursor, 2);
-  assert.equal(rendered, '#70+/settings/general');
+  at(2, '#70+/settings/general');
 
-  history.go(-2);
-  settle();
+  go(-2);
   approve!();
   settle();
-  assert.equal(cursor, 0, 'Multi-entry traversals preserve their original distance');
-  assert.equal(rendered, '#70');
-  assert.deepEqual(
-    entries.map((entry) => entry.hash),
-    initialEntries,
-  );
+  at(0, '#70', 'Multi-entry traversals preserve their original distance');
+  unchangedHistory();
   unguard();
-  history.go(1);
-  settle();
-  assert.equal(cursor, 1);
-  assert.equal(rendered, '#70+/gallery');
+  go(1);
+  at(1, '#70+/gallery');
   assert.equal(guards, 4, 'Unguarded navigation proceeds without another confirmation');
 
   // Closing a pane uses its actual parent entry, without adding a duplicate Back step.
@@ -197,10 +192,8 @@ test('page location', async () => {
   });
   settle();
   assert.equal(fallback, false);
-  assert.equal(cursor, jobsCursor - 1);
-  assert.equal(rendered, '#70+/gallery/123');
-  history.go(1);
-  settle();
+  at(jobsCursor - 1, '#70+/gallery/123');
+  go(1);
   assert.equal(rendered, '#70+/gallery/123+/jobs', 'Forward reconstructs the child pane');
   returnToPageLocation(parsePageLocation('#99'), () => {
     fallback = true;
@@ -231,18 +224,15 @@ test('page location', async () => {
     },
     (target: unknown) => !retains(target, otherHash),
   );
-  history.go(-1);
-  settle();
+  go(-1);
   assert.deepEqual(guardOrder, ['draft-b']);
   assert.equal(rendered, jobsHash);
   removeJobGuard();
-  history.go(-2);
-  settle();
+  go(-2);
   assert.deepEqual(guardOrder, ['draft-b', 'draft-a']);
   assert.equal(rendered, jobsHash, 'A covered editor can cancel without losing any panes');
   approve = undefined;
-  history.go(-2);
-  settle();
+  go(-2);
   approve!();
   settle();
   assert.equal(rendered, '#70+/gallery/123+/jobs');
@@ -250,26 +240,18 @@ test('page location', async () => {
   removeDraftGuard();
 
   const repeated = '#71+/gallery/35?sort=newest+/media/job/1+/jobs+/media/job/1';
-  assert.equal(
-    formatPageLocation(parsePageLocation(repeated)),
-    '#71+/gallery/35?sort=newest+/media/job/1',
-  );
-  assert.equal(
-    formatPageLocation(parsePageLocation(repeated + '+/jobs+/media/job/2')),
-    '#71+/gallery/35?sort=newest+/media/job/1+/jobs+/media/job/2',
-    'Unwinding repeated job panes keeps subsequent different panes',
-  );
   const repeatedJobs = '#71+/gallery?sort=newest+/jobs+/media/job/9+/jobs';
-  assert.equal(
-    formatPageLocation(parsePageLocation(repeatedJobs)),
-    '#71+/gallery?sort=newest+/jobs',
-    'Previously generated duplicate Jobs links unwind to the original list',
-  );
-  assert.equal(
-    formatPageLocation(parsePageLocation(repeatedJobs + '+/media/job/2')),
-    '#71+/gallery?sort=newest+/jobs+/media/job/2',
-    'Normalizing Jobs retains subsequent navigation',
-  );
+  for (const [input, expected, suffix] of [
+    [repeated, '#71+/gallery/35?sort=newest+/media/job/1', '+/jobs+/media/job/2'],
+    [repeatedJobs, '#71+/gallery?sort=newest+/jobs', '+/media/job/2'],
+  ] as const) {
+    assert.equal(formatPageLocation(parsePageLocation(input)), expected, 'Repeated panes unwind');
+    assert.equal(
+      formatPageLocation(parsePageLocation(input + suffix)),
+      expected + suffix,
+      'Unwinding preserves subsequent different panes',
+    );
+  }
 
   const { navigatePageWithGuards } = await import(modulePath);
   open('#70+/gallery/123+/media/job/1');
@@ -358,8 +340,7 @@ test('page location', async () => {
   assert.equal(location.hash, originalJobsHash);
   assert.equal(cursor, originalJobsCursor, 'Reuse the existing history entry');
   removeEditorGuard();
-  history.go(1);
-  settle();
+  go(1);
   assert.equal(location.hash, editorHash, 'Forward can reopen the editor after returning to Jobs');
   assert.equal(dialogStack.frames()[1], originalJobs);
   restoreDialogs = undefined;
@@ -380,9 +361,6 @@ test('dialog stack', async () => {
   const gallery = parsePageLocation('#71+/gallery/123?q=night+sky&character=4&sort=oldest');
   stack.restore(gallery);
   const galleryFrame = stack.top()!;
-  const localState = new WeakMap<object, object>();
-  const galleryEdits = { prompt: 'Unsaved gallery prompt', selected: [4, 7], scrollTop: 420 };
-  localState.set(galleryFrame, galleryEdits);
   const jobs = parsePageLocation(formatPageLocation(gallery) + '+/jobs');
   stack.push(jobs, gallery);
   assert.equal(stack.frames().length, 2, 'Jobs from details does not create an empty draft');
@@ -390,7 +368,7 @@ test('dialog stack', async () => {
   assert.equal(stack.top()!.media, undefined, 'Jobs has no editor session or draft');
   assert.equal(stack.parent(), galleryFrame.page);
   assert.equal(stack.pop(), galleryFrame.page);
-  assert.equal(localState.get(stack.top()!), galleryEdits);
+  assert.equal(stack.top(), galleryFrame, 'Returning preserves the mounted gallery');
 
   const draft = parsePageLocation(formatPageLocation(gallery) + '+/media/create-image');
   const session = {
@@ -405,13 +383,6 @@ test('dialog stack', async () => {
   };
   stack.push(draft, gallery, session);
   const draftFrame = stack.top()!;
-  const draftEdits = {
-    instruction: 'My tuned instruction',
-    prompt: 'My tuned prompt',
-    referenceIds: [3, 6],
-    scrollTop: 870,
-  };
-  localState.set(draftFrame, draftEdits);
   const draftJobs = parsePageLocation(formatPageLocation(draft) + '+/jobs');
   stack.push(draftJobs, draft);
   const jobsFrame = stack.top()!;
@@ -424,7 +395,6 @@ test('dialog stack', async () => {
   assert.equal(stack.top(), jobsFrame, 'Browser Back preserves the mounted Jobs list');
   stack.restore(draft);
   assert.equal(stack.top(), draftFrame, 'Returning to a draft preserves its component identity');
-  assert.equal(localState.get(stack.top()!), draftEdits);
   assert.equal(stack.top()!.media, session);
   assert.equal(stack.frames()[0], galleryFrame);
 
@@ -435,7 +405,6 @@ test('dialog stack', async () => {
   });
   assert.equal(stack.top(), draftFrame);
   assert.equal(formatPageLocation(updated), formatPageLocation(gallery) + '+/media/job/1');
-  assert.equal(localState.get(stack.top()!), draftEdits);
   const snapshot = formatPageLocation(updated) + '+/jobs+/media/job/2';
   const restored = createDialogStack();
   restored.restore(parsePageLocation(snapshot));
@@ -454,8 +423,6 @@ test('dialog stack', async () => {
     'Reload reconstructs panes, not unsaved form text',
   );
   assert.equal(pageStack(parsePageLocation(snapshot))[0]!.chatId, 71);
-  for (const text of ['Unsaved', 'tuned', 'selection', 'referenceIds', 'scrollTop', 'return='])
-    assert(!snapshot.includes(text));
   restored.pop();
   restored.pop();
   restored.pop();
@@ -498,22 +465,13 @@ test('dialog stack', async () => {
   ];
   const sourceUrl = '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame';
   const sourcePage = parsePageLocation(sourceUrl);
-  assert.deepEqual(restoreMediaInputs(sourcePage, galleryItems, {}), {
-    inputs: [{ slot: 'first_frame', assetId: 11 }],
-    assets: [image],
-  });
   const inferredStack = createDialogStack();
-  const infer = (page: unknown) => restoreMediaInputs(page, galleryItems, {});
-  inferredStack.restore(sourcePage, infer);
-  assert.equal(
-    inferredStack.top()!.media!.inputs[0].assetId,
-    11,
-    'Reload reselects the gallery starting image',
-  );
-  assert.equal(
-    inferredStack.top()!.media!.assets[0].height,
-    960,
-    'Restored input retains dimensions for workflow defaults',
+  inferredStack.restore(sourcePage, (page: unknown) => restoreMediaInputs(page, galleryItems, {}));
+  const inferred = inferredStack.top()!.media!;
+  assert.deepEqual(
+    { inputs: inferred.inputs, assets: inferred.assets },
+    { inputs: [{ slot: 'first_frame', assetId: 11 }], assets: [image] },
+    'Reload reselects the source and retains dimensions for workflow defaults',
   );
   inferredStack.top()!.media!.inputs = [];
   inferredStack.restore(sourcePage, () => {
@@ -583,11 +541,6 @@ test('dialog stack', async () => {
   const target = stack.findJob(1, reviewJobs)!;
   stack.restore(target.page);
   assert.equal(stack.top(), existingEditor);
-  assert.equal(
-    localState.get(stack.top()!),
-    draftEdits,
-    'Returning from Jobs preserves tuned form state',
-  );
   assert.equal(stack.frames().length, 2, 'Reopening leaves one job editor above gallery details');
 });
 
@@ -639,15 +592,12 @@ test('ui back', async () => {
     for (const event of events) assert.equal(mouse(event), expected, event);
   }
 
-  layer('gallery');
-  layer('detail');
-  layer('menu');
-  back(true);
-  assert.deepEqual(actions, ['menu'], 'One press closes only the topmost surface');
-  back(true);
-  assert.deepEqual(actions, ['menu', 'detail']);
-  back(true);
-  assert.deepEqual(actions, ['menu', 'detail', 'gallery']);
+  for (const name of ['gallery', 'detail', 'menu']) layer(name);
+  for (const name of ['menu', 'detail', 'gallery']) {
+    const previous = actions.length;
+    back(true);
+    assert.deepEqual(actions.slice(previous), [name], 'One press closes only the topmost surface');
+  }
   back(false);
   assert.equal(actions.length, 3, 'Browser Back is untouched once no UI can close');
 

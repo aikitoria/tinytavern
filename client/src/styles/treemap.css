@@ -1,162 +1,38 @@
 /* The map handles panning, so disable chat scrolling. */
 .chat.chat-map {
-  overflow: hidden;
   scrollbar-gutter: auto;
 }
 
 .chat-map .chat-inner {
-  max-width: none;
-  height: 100%;
-  padding: 0;
-}
-
-.treemap {
-  position: relative;
-  height: 100%;
-  overflow: hidden;
-  touch-action: none;
-  cursor: grab;
+  @apply max-w-none h-full p-0;
 }
 
 .treemap-panning {
   cursor: grabbing;
 }
 
-.treemap-content {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-  /* No will-change: world-sized compositor layers exceed GPU texture limits. */
-}
-
 /* Screen-space edges avoid world-sized layers. */
-.treemap-edges-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.treemap-card {
-  position: absolute;
-  width: 640px;
-  height: 240px;
-  overflow: hidden;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  cursor: pointer;
-}
 
 /* Low-zoom tiles clip instead of scrolling — wheel over them must zoom. */
 .treemap-card-mini {
   overflow: hidden;
 }
 
-.treemap-card.treemap-on-path {
-  border-color: var(--border);
-}
-
-.treemap-card.treemap-active-leaf {
-  border-color: var(--accent);
-}
-
-.treemap-card .msg {
-  height: 100%;
-  gap: var(--space-2);
-  padding: var(--space-2);
-}
-
-.treemap-card .msg > .msg-body {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  border-radius: 0;
-  overflow: hidden;
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-
-.treemap-card .msg > .msg-body > .msg-head {
-  position: static;
-  flex-shrink: 0;
-  margin: 0;
-  pointer-events: auto;
-}
-
 .treemap-card .msg > .msg-body > .msg-swipe {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
   scrollbar-color: var(--text-muted) transparent;
 }
 
-.treemap-card .msg.msg-full-bleed > .msg-body > .msg-swipe {
-  padding-top: 0;
-}
-
 /* Card clicks activate branches; per-message tools would fight map panning. */
-.treemap .msg-actions,
-.treemap .branch-nav,
-.treemap .msg-more-menu {
-  display: none;
-}
 
 /* Inverse-zoom font sizing keeps em-based tiles constant on screen;
    fixed slots clip overflow without relayout. */
-.treemap-mini {
-  height: 100%;
-  padding: 0.66em;
-  overflow: hidden;
-  line-height: 1.35;
-}
-
-.treemap-mini-snippet {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text-dim);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
 
 .treemap-on-path .treemap-mini-snippet {
   color: var(--text);
 }
 
-.treemap-toolbar {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  z-index: 2;
-  display: flex;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-emphasis);
-  border-radius: var(--radius-control-group);
-}
-
 .treemap-empty {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  margin: 0;
   transform: translate(-50%, -50%);
-}
-
-.treemap-zoom.icon-btn {
-  min-width: 5ch;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.treemap-card.treemap-search-dimmed {
-  opacity: 0.65;
 }
 
 ::highlight(map-search-text) {
@@ -165,27 +41,11 @@
   text-shadow: none;
 }
 
-.map-search-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: var(--composer-button-size);
-  padding-right: var(--space-1);
+/* Active leaves override the active path when a card has both states. */
+.treemap-card.treemap-on-path {
+  border-color: var(--border);
 }
 
-.map-search-controls .icon-btn {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-}
-
-.map-search-status {
-  color: var(--text-dim);
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.map-search input::-webkit-search-cancel-button {
-  display: none;
+.treemap-card.treemap-active-leaf {
+  border-color: var(--accent);
 }

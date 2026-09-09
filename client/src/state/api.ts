@@ -89,6 +89,31 @@ function mutationRequest<T>(
   return request<T>(method, url, body);
 }
 
+type GuardedMutation<T, B> = undefined extends B
+  ? (id: number, expected: MutationState, body?: B) => Promise<T>
+  : (id: number, expected: MutationState, body: B) => Promise<T>;
+
+/** Every tree mutation reads the same guards immediately before dispatch. */
+function mutation<T, B extends object | undefined = undefined>(
+  resource: 'messages' | 'conversations',
+  suffix = '',
+  method: 'POST' | 'PATCH' | 'DELETE' = 'POST',
+): GuardedMutation<T, B> {
+  const base = `/api/${resource}/`;
+  const tail = suffix ? `/${suffix}` : '';
+  return ((id: number, expected: MutationState, body?: B) =>
+    mutationRequest<T>(
+      method,
+      `${base}${id}${tail}`,
+      expected,
+      body ? { ...body } : undefined,
+    )) as GuardedMutation<T, B>;
+}
+
+type ContentBody = { content: string };
+type ImageIndexBody = { index: number };
+type ActiveLeafResult = { activeLeafId: number | null };
+
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let message = `${res.status}`;
   try {
@@ -210,6 +235,35 @@ const openAvatarRenderProgress = (
   signal?: AbortSignal,
 ) => openRenderProgress('/api/avatar/render-progress', jobId, onProgress, onPreview, signal);
 
+/** Resource methods share transport; DTOs and endpoint-specific transforms stay typed. */
+function resource<T>(name: string, preparePatch: (data: Partial<T>) => unknown = (data) => data) {
+  const url = `/api/${name}`;
+  return {
+    list: () => request<T[]>('GET', url),
+    create: (data: Partial<T>) => request<T>('POST', url, data),
+    patch: (id: number, data: Partial<T>) =>
+      request<T>('PATCH', `${url}/${id}`, preparePatch(data)),
+    remove: (id: number) => request<void>('DELETE', `${url}/${id}`),
+  };
+}
+function entity<T>(name: string, preparePatch?: (data: Partial<T>) => unknown) {
+  return {
+    ...resource<T>(name, preparePatch),
+    duplicate: (id: number) => request<T>('POST', `/api/${name}/${id}/duplicate`),
+  };
+}
+function avatarEntity<T>(name: string) {
+  return {
+    ...entity<T>(name),
+    uploadAvatar: (id: number, file: File) =>
+      request<T>('PUT', `/api/${name}/${id}/avatar`, undefined, {
+        rawBody: file,
+        contentType: file.type,
+      }),
+    deleteAvatar: (id: number) => request<T>('DELETE', `/api/${name}/${id}/avatar`),
+  };
+}
+
 export const api = {
   exportEntityPage: (type: TransferEntity) =>
     request<{ document: SettingsTransferDocument; snapshot: string }>(
@@ -223,18 +277,10 @@ export const api = {
       document: transferDocument(`page:${type}`, data),
       expectedSnapshot,
     }),
-  importPersona: async (data: unknown, targetId: number | null) =>
-    (
-      await request<Persona[]>('POST', '/api/personas/settings-import', {
-        document: transferDocument('entity:personas', data),
-        targetId,
-      })
-    )[0]!,
   mediaJobs: (before?: Pick<MediaJob, 'createdAt' | 'id'>) => {
     const query = before ? `?before=${encodeURIComponent(`${before.createdAt}:${before.id}`)}` : '';
     return request<MediaJob[]>('GET', `/api/media/jobs${query}`);
   },
-  activeMediaJobs: () => request<MediaJob[]>('GET', '/api/media/jobs/active'),
   mediaJob: (id: number) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
   createMediaJob: (draft: MediaJobDraft, requestKey: string) =>
     request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
@@ -366,12 +412,8 @@ export const api = {
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),
-  patchConversation: (id: number, patch: Partial<Conversation>, expected: MutationState) =>
-    mutationRequest<Conversation>('PATCH', `/api/conversations/${id}`, expected, {
-      ...patch,
-    }),
-  deleteConversation: (id: number, expected: MutationState) =>
-    mutationRequest<void>('DELETE', `/api/conversations/${id}`, expected),
+  patchConversation: mutation<Conversation, Partial<Conversation>>('conversations', '', 'PATCH'),
+  deleteConversation: mutation<void>('conversations', '', 'DELETE'),
   duplicateConversation: (id: number) =>
     request<Conversation>('POST', `/api/conversations/${id}/duplicate`),
   branchConversation: (messageId: number) =>
@@ -388,47 +430,19 @@ export const api = {
       messagePrefill: string | null;
       namePrefill: string | null;
     }>('GET', `/api/conversations/${id}/trace`),
-  send: (conversationId: number, content: string, expected: MutationState) =>
-    mutationRequest<{ userMessageId: number; assistantMessageId: number }>(
-      'POST',
-      `/api/conversations/${conversationId}/messages`,
-      expected,
-      { content },
-    ),
-  deleteTail: (conversationId: number, count: number, expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number | null; deletedSiblingRoots: number }>(
-      'POST',
-      `/api/conversations/${conversationId}/delete-tail`,
-      expected,
-      { count },
-    ),
-  toolGenerate: (
-    conversationId: number,
-    prompt: string,
-    label: string,
-    expected: MutationState,
-    image?: MediaImageConfig,
-  ) =>
-    mutationRequest<{ toolMessageId: number; activeLeafId: number }>(
-      'POST',
-      `/api/conversations/${conversationId}/tool`,
-      expected,
-      {
-        prompt,
-        label,
-        ...(image ? { image } : {}),
-      },
-    ),
-
-  moveMessage: (messageId: number, direction: 'up' | 'down', expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number | null }>(
-      'POST',
-      `/api/messages/${messageId}/move`,
-      expected,
-      {
-        direction,
-      },
-    ),
+  send: mutation<{ userMessageId: number; assistantMessageId: number }, ContentBody>(
+    'conversations',
+    'messages',
+  ),
+  deleteTail: mutation<ActiveLeafResult & { deletedSiblingRoots: number }, { count: number }>(
+    'conversations',
+    'delete-tail',
+  ),
+  toolGenerate: mutation<
+    { toolMessageId: number; activeLeafId: number },
+    { prompt: string; label: string; image?: MediaImageConfig }
+  >('conversations', 'tool'),
+  moveMessage: mutation<ActiveLeafResult, { direction: 'up' | 'down' }>('messages', 'move'),
   moveMessageRange: (
     messageIds: number[],
     direction: 'up' | 'down',
@@ -454,156 +468,61 @@ export const api = {
         messageIds,
       },
     ),
-  duplicateMessage: (messageId: number, expected: MutationState) =>
-    mutationRequest<{ messageId: number; activeLeafId: number }>(
-      'POST',
-      `/api/messages/${messageId}/duplicate`,
-      expected,
-    ),
-  renderImage: (messageId: number, expected: MutationState, currentConfig?: MediaImageConfig) =>
-    mutationRequest<{ rendering: boolean }>(
-      'POST',
-      `/api/messages/${messageId}/render-image`,
-      expected,
-      {
-        ...currentConfig,
-      },
-    ),
-  setActiveImage: (messageId: number, index: number, expected: MutationState) =>
-    mutationRequest<void>('POST', `/api/messages/${messageId}/active-image`, expected, {
-      index,
-    }),
-  deleteImage: (messageId: number, index: number, expected: MutationState) =>
-    mutationRequest<Message>('POST', `/api/messages/${messageId}/delete-image`, expected, {
-      index,
-    }),
-
-  editMessage: (messageId: number, content: string, expected: MutationState) =>
-    mutationRequest<unknown>('PATCH', `/api/messages/${messageId}`, expected, {
-      content,
-    }),
-  editBranch: (messageId: number, content: string, expected: MutationState) =>
-    mutationRequest<{ messageId: number }>(
-      'POST',
-      `/api/messages/${messageId}/edit-branch`,
-      expected,
-      {
-        content,
-      },
-    ),
-  activate: (messageId: number, expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number }>(
-      'POST',
-      `/api/messages/${messageId}/activate`,
-      expected,
-    ),
-  advance: (messageId: number, expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number; assistantMessageId: number | null }>(
-      'POST',
-      `/api/messages/${messageId}/advance`,
-      expected,
-    ),
-  regenerate: (
-    messageId: number,
-    instruction: string,
-    expected: MutationState,
-    image?: MediaImageConfig,
-  ) =>
-    mutationRequest<{ activeLeafId: number; assistantMessageId: number }>(
-      'POST',
-      `/api/messages/${messageId}/regenerate`,
-      expected,
-      { instruction, image },
-    ),
-  deleteMessage: (messageId: number, expected: MutationState) =>
-    mutationRequest<void>('DELETE', `/api/messages/${messageId}`, expected),
-  deleteSwipe: (messageId: number, expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number | null }>(
-      'DELETE',
-      `/api/messages/${messageId}/swipe`,
-      expected,
-    ),
-  resume: (messageId: number, expected: MutationState) =>
-    mutationRequest<{ assistantMessageId: number }>(
-      'POST',
-      `/api/messages/${messageId}/continue`,
-      expected,
-    ),
+  duplicateMessage: mutation<{ messageId: number; activeLeafId: number }>('messages', 'duplicate'),
+  renderImage: mutation<{ rendering: boolean }, MediaImageConfig | undefined>(
+    'messages',
+    'render-image',
+  ),
+  setActiveImage: mutation<void, ImageIndexBody>('messages', 'active-image'),
+  deleteImage: mutation<Message, ImageIndexBody>('messages', 'delete-image'),
+  editMessage: mutation<unknown, ContentBody>('messages', '', 'PATCH'),
+  editBranch: mutation<{ messageId: number }, ContentBody>('messages', 'edit-branch'),
+  activate: mutation<{ activeLeafId: number }>('messages', 'activate'),
+  advance: mutation<{ activeLeafId: number; assistantMessageId: number | null }>(
+    'messages',
+    'advance',
+  ),
+  regenerate: mutation<
+    { activeLeafId: number; assistantMessageId: number },
+    { instruction: string; image?: MediaImageConfig }
+  >('messages', 'regenerate'),
+  deleteMessage: mutation<void>('messages', '', 'DELETE'),
+  deleteSwipe: mutation<ActiveLeafResult>('messages', 'swipe', 'DELETE'),
+  resume: mutation<{ assistantMessageId: number }>('messages', 'continue'),
   stopGeneration: (messageId: number, expectedGenerationToken: number) =>
     request<{ stopped: boolean }>('POST', `/api/generations/${messageId}/stop`, {
       expectedGenerationToken,
     }),
 
-  characters: () => request<Character[]>('GET', '/api/characters'),
-  createCharacter: (data: Partial<Character>) =>
-    request<Character>('POST', '/api/characters', data),
-  patchCharacter: (id: number, data: Partial<Character>) =>
-    request<Character>('PATCH', `/api/characters/${id}`, data),
-  deleteCharacter: (id: number) => request<void>('DELETE', `/api/characters/${id}`),
-  duplicateCharacter: (id: number) => request<Character>('POST', `/api/characters/${id}/duplicate`),
-  uploadCharacterAvatar: (id: number, file: File) =>
-    request<Character>('PUT', `/api/characters/${id}/avatar`, undefined, {
-      rawBody: file,
-      contentType: file.type,
-    }),
-  deleteCharacterAvatar: (id: number) =>
-    request<Character>('DELETE', `/api/characters/${id}/avatar`),
-  importCard: (file: File) =>
-    request<Character>('POST', '/api/characters/import-card', undefined, {
-      rawBody: file,
-      contentType: 'application/octet-stream',
-    }),
-
-  characterFolders: () => request<CharacterFolder[]>('GET', '/api/character-folders'),
-  createCharacterFolder: (name: string) =>
-    request<CharacterFolder>('POST', '/api/character-folders', { name }),
-  patchCharacterFolder: (id: number, name: string) =>
-    request<CharacterFolder>('PATCH', `/api/character-folders/${id}`, { name }),
-  deleteCharacterFolder: (id: number) => request<void>('DELETE', `/api/character-folders/${id}`),
-
-  templates: () => request<Template[]>('GET', '/api/templates'),
-  createTemplate: (data: Partial<Template>) => request<Template>('POST', '/api/templates', data),
-  patchTemplate: (id: number, data: Partial<Template>) =>
-    request<Template>('PATCH', `/api/templates/${id}`, data),
-  deleteTemplate: (id: number) => request<void>('DELETE', `/api/templates/${id}`),
-  duplicateTemplate: (id: number) => request<Template>('POST', `/api/templates/${id}/duplicate`),
-
-  presets: () => request<Preset[]>('GET', '/api/presets'),
-  createPreset: (data: Partial<Preset>) => request<Preset>('POST', '/api/presets', data),
-  patchPreset: (id: number, data: Partial<Preset>) =>
-    request<Preset>('PATCH', `/api/presets/${id}`, data),
-  deletePreset: (id: number) => request<void>('DELETE', `/api/presets/${id}`),
-  duplicatePreset: (id: number) => request<Preset>('POST', `/api/presets/${id}/duplicate`),
-
-  personas: () => request<Persona[]>('GET', '/api/personas'),
-  createPersona: (data: Partial<Persona>) => request<Persona>('POST', '/api/personas', data),
-  patchPersona: (id: number, data: Partial<Persona>) =>
-    request<Persona>('PATCH', `/api/personas/${id}`, data),
-  deletePersona: (id: number) => request<void>('DELETE', `/api/personas/${id}`),
-  duplicatePersona: (id: number) => request<Persona>('POST', `/api/personas/${id}/duplicate`),
-  uploadPersonaAvatar: (id: number, file: File) =>
-    request<Persona>('PUT', `/api/personas/${id}/avatar`, undefined, {
-      rawBody: file,
-      contentType: file.type,
-    }),
-  deletePersonaAvatar: (id: number) => request<Persona>('DELETE', `/api/personas/${id}/avatar`),
-
+  characters: {
+    ...avatarEntity<Character>('characters'),
+    importCard: (file: File) =>
+      request<Character>('POST', '/api/characters/import-card', undefined, {
+        rawBody: file,
+        contentType: 'application/octet-stream',
+      }),
+  },
+  characterFolders: resource<CharacterFolder>('character-folders'),
+  templates: entity<Template>('templates'),
+  presets: entity<Preset>('presets'),
+  personas: {
+    ...avatarEntity<Persona>('personas'),
+    import: async (data: unknown, targetId: number | null) =>
+      (
+        await request<Persona[]>('POST', '/api/personas/settings-import', {
+          document: transferDocument('entity:personas', data),
+          targetId,
+        })
+      )[0]!,
+  },
+  // Replace genParams after dirty-field reduction so clearing its last entry persists.
+  endpoints: {
+    ...entity<Endpoint>('endpoints', prepareEndpointPatch),
+    models: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
+  },
   streamAvatarPrompt,
   renderAvatar,
   openAvatarRenderProgress,
-
-  endpoints: () => request<Endpoint[]>('GET', '/api/endpoints'),
-  createEndpoint: (data: Partial<Endpoint>) => request<Endpoint>('POST', '/api/endpoints', data),
-  patchEndpoint: (id: number, data: Partial<Endpoint>) =>
-    request<Endpoint>(
-      'PATCH',
-      `/api/endpoints/${id}`,
-      // Replace genParams after dirty-field reduction so clearing its last entry persists.
-      prepareEndpointPatch(data),
-    ),
-  deleteEndpoint: (id: number) => request<void>('DELETE', `/api/endpoints/${id}`),
-  duplicateEndpoint: (id: number) => request<Endpoint>('POST', `/api/endpoints/${id}/duplicate`),
-  fetchModels: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
 
   settings: () => request<Settings>('GET', '/api/settings'),
   putSettings: (

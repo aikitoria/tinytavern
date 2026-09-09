@@ -35,7 +35,6 @@ import {
 import type { BuiltPrompt } from '../prompt.ts';
 import { clearSettingReference, getSettings } from '../settingsStore.ts';
 import {
-  activeGenerationToken,
   chatCompletionOnce,
   hasActiveGeneration,
   hasActiveNonToolGeneration,
@@ -52,7 +51,6 @@ import {
   prepareActiveSwipe,
   prepareNextSwipe,
   discardSpeculativeSwipes,
-  nextUnreadSibling,
 } from '../speculation.ts';
 import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
 import {
@@ -310,27 +308,25 @@ route.post('/api/conversations/:id/duplicate', ({ params }) => {
   const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
     id,
   ) as unknown as MessageRow[];
-  const liveMessages = new Map(
-    mergeLiveBuffers(rows.map((row) => toMessage(row as unknown as Record<string, unknown>))).map(
-      (message) => [message.id, message],
-    ),
+  const liveMessages = mergeLiveBuffers(
+    rows.map((row) => toMessage(row as unknown as Record<string, unknown>)),
   );
   const sourceActivePath = getActivePath(id).map((message) => message.id);
   const newId = copyConversation(conv, ' (copy)', (newConvId, writtenImages) => {
     const idMap = new Map<number, number>();
-    for (const row of rows) {
-      const live = liveMessages.get(row.id)!;
-      idMap.set(row.id, insertCopiedMessage(newConvId, null, row, live, writtenImages));
+    for (const [index, live] of liveMessages.entries()) {
+      const row = rows[index]!;
+      idMap.set(live.id, insertCopiedMessage(newConvId, null, row, live, writtenImages));
     }
     // Remap links after all rows exist: moves and insertions can put older rows under newer ones.
-    for (const row of rows) {
-      const mappedParent = row.parent_id != null ? (idMap.get(row.parent_id) ?? null) : null;
+    for (const message of liveMessages) {
+      const mappedParent = message.parentId != null ? (idMap.get(message.parentId) ?? null) : null;
       const mappedChild =
-        row.active_child_id != null ? (idMap.get(row.active_child_id) ?? null) : null;
+        message.activeChildId != null ? (idMap.get(message.activeChildId) ?? null) : null;
       stmt('UPDATE messages SET parent_id = ?, active_child_id = ? WHERE id = ?').run(
         mappedParent,
         mappedChild,
-        idMap.get(row.id)!,
+        idMap.get(message.id)!,
       );
     }
     if (conv.activeLeafId != null) {
@@ -366,12 +362,12 @@ route.post('/api/messages/:id/branch-conversation', ({ params }) => {
     (message) =>
       stmt('SELECT * FROM messages WHERE id = ?').get(message.id) as unknown as MessageRow,
   );
-  const liveMessages = new Map(mergeLiveBuffers(path).map((message) => [message.id, message]));
+  const liveMessages = mergeLiveBuffers(path);
   const newId = copyConversation(conv, ' (branch)', (newConvId, writtenImages) => {
     let parentId: number | null = null;
 
-    for (const row of rows) {
-      const live = liveMessages.get(row.id)!;
+    for (const [index, live] of liveMessages.entries()) {
+      const row = rows[index]!;
       const copiedId = insertCopiedMessage(newConvId, parentId, row, live, writtenImages, 'normal');
       if (parentId != null) {
         stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(copiedId, parentId);

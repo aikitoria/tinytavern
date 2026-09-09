@@ -1,12 +1,45 @@
-import { mediaJobActive } from '@tinytavern/shared';
-import { cancelMediaJob, deleteMediaJob } from './mediaJobs.ts';
+import {
+  mediaJobActive,
+  newRequestId,
+  type MediaJobInput,
+  type MediaJobInputSnapshot,
+} from '@tinytavern/shared';
+import { cancelMediaJob, createMediaJob, deleteMediaJob, startMediaJob } from './mediaJobs.ts';
+import { transaction } from './db.ts';
 import {
   mediaJobRow,
   observeMediaJob,
   requireMediaJob,
   type MediaJobRow,
+  type MediaJobConfiguration,
 } from './mediaJobStore.ts';
 import { tickMediaWorker } from './mediaWorker.ts';
+
+/** Capture and start atomically; consumption schedules the worker and owns cleanup. */
+export function startTemporaryMediaJob(
+  configuration: MediaJobConfiguration,
+  inputs: MediaJobInput[],
+  prompt = '',
+  inputSnapshots?: MediaJobInputSnapshot[],
+): MediaJobRow {
+  return transaction(() => {
+    const draft = createMediaJob(
+      {
+        requestKey: newRequestId(),
+        operation: configuration.workflow.operation,
+        workflowId: configuration.workflow.id,
+        inputs,
+        prompt,
+        destination: 'gallery',
+      },
+      undefined,
+      JSON.stringify({ ...configuration, temporary: true }),
+      inputSnapshots,
+    );
+    startMediaJob(requireMediaJob(draft.id), {}, false);
+    return requireMediaJob(draft.id);
+  });
+}
 
 /** Keep the temporary result owned until consumption finishes, including asynchronous reads. */
 export async function consumeTemporaryMediaJob<T>(

@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
+// Model browser scroll clamping for both chat and prompt streaming.
+function scrollArea(clientHeight: number, scrollHeight: number) {
+  let top = 0;
+  return {
+    isConnected: true,
+    clientHeight,
+    scrollHeight,
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(value: number) {
+      top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
+    },
+  };
+}
+
 test('gallery layout', async () => {
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
   const { filterGallery, indexGallery, layoutGallery, visibleGalleryRows } =
@@ -179,16 +195,14 @@ test('media job cards', async () => {
   assert.equal(writing.label, 'Writing prompt…');
   assert(writing.text.endsWith('new prompt'));
   assert(writing.text.length <= 421);
-  assert.equal(
-    jobPromptExcerpt(
-      job(8, { state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' }),
-    ).text,
-    `Prompt ${long.slice(0, 413)}…`,
-  );
-  assert.equal(
-    jobPromptExcerpt(job(9, { instruction: 'Use this character' })).text,
-    'Use this character',
-  );
+  for (const [overrides, text] of [
+    [
+      { state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' },
+      `Prompt ${long.slice(0, 413)}…`,
+    ],
+    [{ instruction: 'Use this character' }, 'Use this character'],
+  ] as const)
+    assert.equal(jobPromptExcerpt(job(8, overrides)).text, text);
 
   const snapshot: MediaWorkflow = {
     id: 'render-workflow',
@@ -214,30 +228,15 @@ test('media job cards', async () => {
     workflowValues: { duration: 7 },
   });
   const localValues = { duration: 20 };
-  const locked = mediaWorkflowView(captured, other.id, [edited, other], localValues, true);
-  assert.equal(locked.id, snapshot.id, 'Locked selection follows the running variation');
-  assert.equal(
-    locked.workflow,
-    snapshot,
-    'Edited saved settings cannot replace the captured graph',
-  );
-  assert.deepEqual(
-    locked.values,
-    { duration: 7 },
-    'Locked values cannot come from a stale local draft',
-  );
-  assert.equal(compileMediaWorkflow(locked.workflow!.json).controls[0]!.value, 5);
-  assert.equal(
-    mediaWorkflowView(captured, other.id, [], localValues, true).workflow,
-    snapshot,
-    'Deleted workflows remain visible from the job snapshot',
-  );
-  assert.equal(mediaWorkflowView(captured, other.id, [other], localValues, false).workflow, other);
-  assert.equal(
-    mediaWorkflowView(captured, other.id, [other], localValues, false).values,
-    localValues,
-    'Unlocked edits retain their local values',
-  );
+  // Captured selection and values survive both editing and deleting the saved workflow.
+  for (const workflows of [[edited, other], []]) {
+    const locked = mediaWorkflowView(captured, other.id, workflows, localValues, true);
+    assert.deepEqual(locked, { id: snapshot.id, workflow: snapshot, values: { duration: 7 } });
+    assert.equal(locked.workflow, snapshot, 'Keep the captured graph identity');
+  }
+  const unlocked = mediaWorkflowView(captured, other.id, [other], localValues, false);
+  assert.equal(unlocked.workflow, other);
+  assert.equal(unlocked.values, localValues, 'Unlocked edits retain their local values');
   const defaulted = mediaWorkflowView(
     job(11, { workflowSnapshot: snapshot }),
     snapshot.id,
@@ -258,20 +257,7 @@ test('chat scroll', async () => {
   // Model native clamping when reparsing Markdown shrinks a message. Scroll events
   // and ResizeObserver callbacks may arrive in either order around the next render.
   function fixture() {
-    let top = 0;
-    let height = 1000;
-    const element = {
-      clientHeight: 200,
-      get scrollHeight() {
-        return height;
-      },
-      get scrollTop() {
-        return top;
-      },
-      set scrollTop(value: number) {
-        top = Math.max(0, Math.min(value, height - this.clientHeight));
-      },
-    };
+    const element = scrollArea(200, 1000);
     const scroll = createChatScroll(element);
     scroll.follow();
     scroll.onScroll();
@@ -279,8 +265,8 @@ test('chat scroll', async () => {
       element,
       scroll,
       resize(value: number) {
-        height = value;
-        element.scrollTop = top;
+        element.scrollHeight = value;
+        element.scrollTop = element.scrollTop;
       },
     };
   }
@@ -352,18 +338,7 @@ test('chat scroll', async () => {
 test('stream scroll', async () => {
   const { createStreamScroll } = await import('../../client/src/streamScroll.ts');
 
-  let top = 0;
-  const area = {
-    isConnected: true,
-    clientHeight: 100,
-    scrollHeight: 400,
-    get scrollTop() {
-      return top;
-    },
-    set scrollTop(value: number) {
-      top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
-    },
-  };
+  const area = scrollArea(100, 400);
   let element: typeof area | undefined;
   const frames = new Map<number, () => void>();
   let sequence = 0;
@@ -391,17 +366,17 @@ test('stream scroll', async () => {
   scroll.update('job-a', true);
   assert.equal(frames.size, 1, 'Token updates coalesce into one layout read/write per frame');
   paint();
-  assert.equal(top, 300);
+  assert.equal(area.scrollTop, 300);
   scroll.onScroll();
   area.scrollHeight = 600;
   scroll.update('job-a', true);
   paint();
-  assert.equal(top, 500, 'Actual prompt text follows each streamed chunk');
+  assert.equal(area.scrollTop, 500, 'Actual prompt text follows each streamed chunk');
   scroll.update('job-a', true);
   area.scrollTop = 200;
   scroll.onScroll();
   paint();
-  assert.equal(top, 200, 'Scrolling up cancels a queued jump to the bottom');
+  assert.equal(area.scrollTop, 200, 'Scrolling up cancels a queued jump to the bottom');
   area.scrollHeight = 800;
   scroll.update('job-a', true);
   assert.equal(frames.size, 0, 'Manual reading remains undisturbed as tokens arrive');
@@ -410,26 +385,26 @@ test('stream scroll', async () => {
   area.scrollHeight = 900;
   scroll.update('job-a', true);
   paint();
-  assert.equal(top, 800, 'Scrolling back to the bottom resumes following');
+  assert.equal(area.scrollTop, 800, 'Scrolling back to the bottom resumes following');
   area.scrollHeight = 1000;
   scroll.update(null, true);
   scroll.update(null, true);
   paint();
-  assert.equal(top, 900, 'The final completion snapshot is followed too');
+  assert.equal(area.scrollTop, 900, 'The final completion snapshot is followed too');
   area.scrollTop = 100;
   scroll.onScroll();
   scroll.update(null, true);
   assert.equal(frames.size, 0, 'Completed prompt editing retains the cursor position');
   scroll.update('job-b', true);
   paint();
-  assert.equal(top, 900, 'A new generation starts following again');
+  assert.equal(area.scrollTop, 900, 'A new generation starts following again');
   scroll.update('job-b', true);
   scroll.update('job-b', false);
   assert.equal(frames.size, 0, 'Covered panes and pickers cancel pending scrolling');
   area.scrollHeight = 1100;
   scroll.update('job-b', true);
   paint();
-  assert.equal(top, 1000, 'An uncovered pane catches up with the stream');
+  assert.equal(area.scrollTop, 1000, 'An uncovered pane catches up with the stream');
   scroll.update('job-b', true);
   scroll.dispose();
   assert.equal(frames.size, 0, 'Unmount releases pending animation callbacks');

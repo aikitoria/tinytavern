@@ -154,8 +154,8 @@ export function defineEntityTransfer<T extends { id: number }>(
         }
         throw error;
       }
-      for (const item of plan) {
-        const id = imported.find((row) => row.name === item.name)!.id;
+      for (const [index, item] of plan.entries()) {
+        const id = imported[index]!.id;
         if (item.avatar === null) deleteAvatarFiles('persona', id);
         else if (item.avatar !== undefined) deleteObsoleteAvatarFiles('persona', id);
       }

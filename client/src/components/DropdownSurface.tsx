@@ -227,7 +227,7 @@ export default function DropdownSurface(props: {
             positionNewSurface();
           }}
           id={props.id}
-          class={`dropdown-surface popover-surface popover-menu ${
+          class={`popover-surface popover-menu overflow-x-hidden overflow-y-auto fixed z-300 overscroll-contain [&_button:hover:not(:disabled)]:bg-hover [&_button.active]:bg-hover [&_button.highlighted:not([aria-selected=true])]:bg-hover [&_button[aria-selected=true]]:bg-raised [&_button[aria-checked=true]]:bg-raised ${
             position().up ? 'dropdown-up' : 'dropdown-down'
           } ${props.class ?? ''}`}
           role={props.role}

@@ -1,12 +1,9 @@
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { GENERAL_TRANSFER_FIELDS, transferObject } from '@tinytavern/shared';
-import MacroTextarea from '../MacroTextarea.tsx';
+import FormField, { type FormFieldProps } from '../FormFields.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import SettingsActions from '../SettingsActions.tsx';
 import { DEFAULT_SETTINGS } from '@tinytavern/shared';
-import SettingLabel from '../SettingField.tsx';
-import { faCheck } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from '../FontAwesomeIcon.tsx';
 import { Show, createSignal } from 'solid-js';
 import type { Settings } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
@@ -17,13 +14,7 @@ import { confirmAction } from '../../state/confirm.ts';
 import { createSettingsSubmission } from '../../state/settingsSubmission.ts';
 import { changedFields, sameValue } from '../../state/editorSync.ts';
 
-type SettingKey =
-  | 'autoExpandThinking'
-  | 'galleryThumbnailSize'
-  | 'backgroundSwipeGeneration'
-  | 'parallelBackgroundSwipeGeneration'
-  | 'titlePrompt'
-  | 'draftCompletionPrompt';
+type SettingKey = (typeof GENERAL_TRANSFER_FIELDS)[number];
 
 export default function GeneralTab() {
   const settingsValues = () =>
@@ -42,6 +33,18 @@ export default function GeneralTab() {
   const value = <K extends SettingKey>(key: K): Settings[K] => draft()[key] as Settings[K];
   const change = <K extends SettingKey>(key: K, value: Settings[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
+  const Field = (
+    props: Omit<FormFieldProps<Settings[SettingKey]>, 'value' | 'defaultValue' | 'onChange'> & {
+      name: SettingKey;
+    },
+  ) => (
+    <FormField
+      {...props}
+      value={value(props.name)}
+      defaultValue={DEFAULT_SETTINGS[props.name]}
+      onChange={(next) => change(props.name, next)}
+    />
+  );
   const submission = createSettingsSubmission({
     revision: () => state.settings.revision,
     isDirty: () => !sameValue(draft(), baseline) || password() !== '' || removePassword(),
@@ -97,165 +100,102 @@ export default function GeneralTab() {
   useSettingsGuard(submission);
 
   return (
-    <div class="form">
+    <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
       <section class="settings-section">
         <h3>Access</h3>
-        <SettingLabel
-          for="settings-access-password"
+        <FormField
+          label="Access password"
+          id="settings-access-password"
+          kind="password"
+          autocomplete="new-password"
           changed={password() !== '' || (state.settings.hasPassword && !removePassword())}
           onRevert={() => {
             setPassword('');
             setRemovePassword(state.settings.hasPassword);
           }}
-        >
-          Access password
-        </SettingLabel>
-        <input
-          id="settings-access-password"
-          type="password"
-          autocomplete="new-password"
           placeholder={
             state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
           }
           value={password()}
           disabled={removePassword()}
-          onInput={(event) => {
-            setPassword(event.currentTarget.value);
+          onChange={(next) => {
+            setPassword(next);
             setRemovePassword(false);
           }}
+          hint={
+            removePassword()
+              ? 'The access password will be removed when you save.'
+              : state.settings.hasPassword
+                ? 'A password is set. Leave this blank to keep it unchanged.'
+                : 'Optional. When set, all API, media, and WebSocket access requires a login session.'
+          }
         />
-        <p class="hint">
-          {removePassword()
-            ? 'The access password will be removed when you save.'
-            : state.settings.hasPassword
-              ? 'A password is set. Leave this blank to keep it unchanged.'
-              : 'Optional. When set, all API, media, and WebSocket access requires a login session.'}
-        </p>
       </section>
       <section class="settings-section">
         <h3>Messages</h3>
-        <SettingLabel
-          check
-          changed={value('autoExpandThinking') !== DEFAULT_SETTINGS.autoExpandThinking}
-          onRevert={() => change('autoExpandThinking', DEFAULT_SETTINGS.autoExpandThinking)}
-        >
-          <input
-            type="checkbox"
-            checked={value('autoExpandThinking')}
-            onChange={(e) => change('autoExpandThinking', e.currentTarget.checked)}
-          />
-          Auto-expand thinking while the model reasons (collapses once the reply starts)
-        </SettingLabel>
-
+        <Field
+          name="autoExpandThinking"
+          kind="check"
+          label="Auto-expand thinking while the model reasons (collapses once the reply starts)"
+        />
         <div class="form-stack field-group" role="group" aria-label="Background swipe generation">
-          <SettingLabel
-            check
-            changed={
-              value('backgroundSwipeGeneration') !== DEFAULT_SETTINGS.backgroundSwipeGeneration
-            }
-            onRevert={() =>
-              change('backgroundSwipeGeneration', DEFAULT_SETTINGS.backgroundSwipeGeneration)
-            }
-          >
-            <input
-              type="checkbox"
-              checked={value('backgroundSwipeGeneration')}
-              onChange={(e) => change('backgroundSwipeGeneration', e.currentTarget.checked)}
-            />
-            Background Swipe Generation (keep one unread assistant swipe prepared ahead)
-          </SettingLabel>
-
-          <SettingLabel
-            check
-            changed={
-              value('parallelBackgroundSwipeGeneration') !==
-              DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration
-            }
-            onRevert={() =>
-              change(
-                'parallelBackgroundSwipeGeneration',
-                DEFAULT_SETTINGS.parallelBackgroundSwipeGeneration,
-              )
-            }
-          >
-            <input
-              type="checkbox"
-              checked={value('parallelBackgroundSwipeGeneration')}
-              disabled={!value('backgroundSwipeGeneration')}
-              onChange={(e) => change('parallelBackgroundSwipeGeneration', e.currentTarget.checked)}
-            />
-            Generate the background swipe alongside the primary reply
-          </SettingLabel>
-          <p class="hint">
-            Allows two responses to generate at once. When off, the background swipe waits for the
-            primary reply to finish.
-          </p>
+          <Field
+            name="backgroundSwipeGeneration"
+            kind="check"
+            label="Background Swipe Generation (keep one unread assistant swipe prepared ahead)"
+          />
+          <Field
+            name="parallelBackgroundSwipeGeneration"
+            kind="check"
+            disabled={!value('backgroundSwipeGeneration')}
+            label="Generate the background swipe alongside the primary reply"
+            hint="Allows two responses to generate at once. When off, the background swipe waits for the primary reply to finish."
+          />
         </div>
       </section>
       <section class="settings-section">
         <h3>Thumbnails</h3>
-        <SettingLabel
-          for="gallery-thumbnail-size"
-          changed={value('galleryThumbnailSize') !== DEFAULT_SETTINGS.galleryThumbnailSize}
-          onRevert={() => change('galleryThumbnailSize', DEFAULT_SETTINGS.galleryThumbnailSize)}
-        >
-          Thumbnail size
-        </SettingLabel>
-        <input
+        <Field
+          name="galleryThumbnailSize"
+          label="Thumbnail size"
           id="gallery-thumbnail-size"
-          type="number"
+          kind="number"
           min="64"
           max="2048"
           step="1"
-          value={value('galleryThumbnailSize')}
-          onInput={(event) => change('galleryThumbnailSize', event.currentTarget.valueAsNumber)}
+          hint="Maximum width or height in pixels for image and video thumbnails in gallery, chat and media tools. Saving a new size regenerates media thumbnails in the background. Avatar thumbnails are 128 pixels. Originals stay unchanged."
         />
-        <p class="hint">
-          Maximum width or height in pixels for image and video thumbnails in gallery, chat and
-          media tools. Saving a new size regenerates media thumbnails in the background. Avatar
-          thumbnails are 128 pixels. Originals stay unchanged.
-        </p>
       </section>
       <section class="settings-section">
         <h3>Chat assistance prompts</h3>
         <div class="form-stack field-group" role="group" aria-label="Automatic chat titles">
-          <SettingLabel
-            changed={value('titlePrompt') !== DEFAULT_SETTINGS.titlePrompt}
-            onRevert={() => change('titlePrompt', DEFAULT_SETTINGS.titlePrompt)}
-          >
-            Automatic chat title
-            <MacroHelp />
-          </SettingLabel>
-          <MacroTextarea
-            value={value('titlePrompt')}
-            onText={(text) => change('titlePrompt', text)}
+          <Field
+            name="titlePrompt"
+            kind="macro"
             rows={5}
+            label={
+              <>
+                Automatic chat title
+                <MacroHelp />
+              </>
+            }
+            hint="Appended after the full chat context once the assistant answers your first message, including in character chats with greetings. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
           />
-          <p class="hint">
-            Appended after the full chat context once the assistant answers your first message,
-            including in character chats with greetings. Uses the chat template’s reasoning prefill
-            when prefills are enabled on the endpoint.
-          </p>
         </div>
         <div class="form-stack field-group" role="group" aria-label="Draft completion">
-          <SettingLabel
-            changed={value('draftCompletionPrompt') !== DEFAULT_SETTINGS.draftCompletionPrompt}
-            onRevert={() => change('draftCompletionPrompt', DEFAULT_SETTINGS.draftCompletionPrompt)}
-          >
-            Draft completion
-            <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
-          </SettingLabel>
-          <MacroTextarea
-            value={value('draftCompletionPrompt')}
-            onText={(text) => change('draftCompletionPrompt', text)}
-            keys={['draft']}
+          <Field
+            name="draftCompletionPrompt"
+            kind="macro"
             rows={7}
+            keys={['draft']}
+            label={
+              <>
+                Draft completion
+                <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
+              </>
+            }
+            hint="Appended to the current chat context for “Continue writing this message”. Include {{draft}} and ask for the full message, starting with an exact copy of the draft. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
           />
-          <p class="hint">
-            Appended to the current chat context for “Continue writing this message”. Include{' '}
-            {'{{draft}}'} and ask for the full message, starting with an exact copy of the draft.
-            Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint.
-          </p>
         </div>
       </section>
       <Show when={error()}>
@@ -279,10 +219,7 @@ export default function GeneralTab() {
         </button>
       </section>
 
-      <SettingsActions>
-        <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
-          {saving() ? 'Saving…' : 'Save'}
-        </button>
+      <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
         <SettingsTransferButtons
           type="page:general"
           onError={setError}
@@ -300,14 +237,6 @@ export default function GeneralTab() {
             }
           }}
         />
-        <button disabled={saving()} onClick={discard}>
-          Discard
-        </button>
-        <Show when={saved()}>
-          <span class="saved-flash">
-            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
-          </span>
-        </Show>
       </SettingsActions>
     </div>
   );

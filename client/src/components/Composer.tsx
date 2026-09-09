@@ -36,11 +36,9 @@ const BUILTIN_COMMANDS: ComposerCommand[] = [
       'Set the assistant speaker name for this conversation (empty resets to the character)',
     run: async (args) => {
       if (state.selectedId == null) throw new Error('no conversation selected');
-      await api.patchConversation(
-        state.selectedId,
-        { speakerName: args.trim() || null },
-        state.tree,
-      );
+      await api.patchConversation(state.selectedId, state.tree, {
+        speakerName: args.trim() || null,
+      });
     },
   },
   {
@@ -53,7 +51,7 @@ const BUILTIN_COMMANDS: ComposerCommand[] = [
         throw new Error('Usage: /del <positive count>');
       }
       if (state.selectedId == null) throw new Error('no conversation selected');
-      return navigateTree(() => api.deleteTail(state.selectedId!, count, state.tree));
+      return navigateTree(() => api.deleteTail(state.selectedId!, state.tree, { count }));
     },
   },
   {
@@ -158,7 +156,7 @@ export default function Composer() {
     if (streamingMessage() || draftCompletionActive()) return;
     setText('');
     queueMicrotask(resize);
-    const sent = await navigateTree(() => api.send(id, content, state.tree));
+    const sent = await navigateTree(() => api.send(id, state.tree, { content }));
     // Restore failed sends without clobbering text typed during the request.
     if (!sent && !text()) {
       setText(content);
@@ -269,24 +267,26 @@ export default function Composer() {
     <Show
       when={state.selectedId != null}
       fallback={
-        <div class="composer mobile-menu-only">
+        <div class="composer my-3 mx-auto p-1 flex relative bg-panel items-end border border-solid border-control-line gap-chat-gap max-w-composer [&_textarea]:shadow-clear [&_textarea]:flex-1 [&_textarea]:w-auto [&_textarea]:min-w-0 [&_textarea]:max-h-50 [&_textarea]:resize-none [&_textarea]:overflow-y-hidden [&_textarea]:bg-clear [&_textarea]:border-clear [&_textarea]:leading-6 [&_input[type=search]]:shadow-clear [&_input[type=search]]:flex-1 [&_input[type=search]]:w-auto [&_input[type=search]]:min-w-0 [&_input[type=search]]:max-h-50 [&_input[type=search]]:resize-none [&_input[type=search]]:overflow-y-hidden [&_input[type=search]]:bg-clear [&_input[type=search]]:border-clear [&_input[type=search]]:leading-6 [&_textarea:focus]:outline-clear [&_input[type=search]:focus]:outline-clear [&:empty]:display-none small-touch:w-auto small-touch:max-w-none small-touch:shrink-0 small-touch:m-0 small-touch:bg-panel small-touch:border-clear small-touch:rounded-none small-touch:[&_textarea]:bg-raised small-touch:[&_input[type=search]]:bg-raised w-[calc(100%_-_var(--space-6)_-_var(--space-6))] rounded-[calc(var(--composer-button-size)_/_2_+_var(--composer-shell-inset))] [&_textarea]:rounded-[calc(var(--composer-button-size)_/_2)] [&_input[type=search]]:rounded-[calc(var(--composer-button-size)_/_2)] small-touch:p-[4px_calc(4px_+_env(safe-area-inset-right))_calc(4px_+_env(safe-area-inset-bottom))_calc(4px_+_env(safe-area-inset-left))]">
           <MobileSidebarButton />
         </div>
       }
     >
-      <div class="composer">
+      <div class="composer my-3 mx-auto p-1 flex relative bg-panel items-end border border-solid border-control-line gap-chat-gap max-w-composer [&_textarea]:shadow-clear [&_textarea]:flex-1 [&_textarea]:w-auto [&_textarea]:min-w-0 [&_textarea]:max-h-50 [&_textarea]:resize-none [&_textarea]:overflow-y-hidden [&_textarea]:bg-clear [&_textarea]:border-clear [&_textarea]:leading-6 [&_input[type=search]]:shadow-clear [&_input[type=search]]:flex-1 [&_input[type=search]]:w-auto [&_input[type=search]]:min-w-0 [&_input[type=search]]:max-h-50 [&_input[type=search]]:resize-none [&_input[type=search]]:overflow-y-hidden [&_input[type=search]]:bg-clear [&_input[type=search]]:border-clear [&_input[type=search]]:leading-6 [&_textarea:focus]:outline-clear [&_input[type=search]:focus]:outline-clear small-touch:w-auto small-touch:max-w-none small-touch:shrink-0 small-touch:m-0 small-touch:bg-panel small-touch:border-clear small-touch:rounded-none small-touch:[&_textarea]:bg-raised small-touch:[&_input[type=search]]:bg-raised w-[calc(100%_-_var(--space-6)_-_var(--space-6))] rounded-[calc(var(--composer-button-size)_/_2_+_var(--composer-shell-inset))] [&_textarea]:rounded-[calc(var(--composer-button-size)_/_2)] [&_input[type=search]]:rounded-[calc(var(--composer-button-size)_/_2)] small-touch:p-[4px_calc(4px_+_env(safe-area-inset-right))_calc(4px_+_env(safe-area-inset-bottom))_calc(4px_+_env(safe-area-inset-left))]">
         <Show when={cmdMatches().length > 0}>
-          <div class="cmd-menu popover-surface popover-menu">
+          <div class="left-0 right-0 absolute popover-surface popover-menu [&_button:hover:not(:disabled)]:bg-hover [&_button.active]:bg-hover [&_button.highlighted:not([aria-selected=true])]:bg-hover [&_button[aria-selected=true]]:bg-raised [&_button[aria-checked=true]]:bg-raised small-touch:left-2 small-touch:right-2 bottom-[calc(100%_+_8px)]">
             <For each={cmdMatches()}>
               {(cmd, i) => (
                 <button
-                  class="cmd-item"
+                  class="items-baseline small-touch:flex-wrap small-touch:gap-y-0.5 small-touch:py-2 small-touch:px-3"
                   classList={{ active: i() === selIdx() }}
                   onClick={() => complete(cmd)}
                 >
-                  <span class="cmd-name">/{cmd.name}</span>
-                  <span class="cmd-params">{cmd.params}</span>
-                  <span class="cmd-desc">{cmd.description}</span>
+                  <span class="text-accent font-code font-semibold">/{cmd.name}</span>
+                  <span class="text-dim font-code text-sm">{cmd.params}</span>
+                  <span class="truncate text-dim text-caption small-touch:w-full small-touch:whitespace-normal small-touch:overflow-visible">
+                    {cmd.description}
+                  </span>
                 </button>
               )}
             </For>
@@ -294,10 +294,12 @@ export default function Composer() {
         </Show>
         <Show when={activeCmd()}>
           {(cmd) => (
-            <div class="cmd-menu cmd-hint popover-surface">
-              <span class="cmd-name">/{cmd().name}</span>
-              <span class="cmd-params">{cmd().params}</span>
-              <span class="cmd-desc">{cmd().description}</span>
+            <div class="left-0 right-0 absolute items-baseline py-2 px-3 flex gap-2 popover-surface small-touch:left-2 small-touch:right-2 small-touch:flex-wrap small-touch:gap-y-0.5 small-touch:py-2 small-touch:px-3 bottom-[calc(100%_+_8px)]">
+              <span class="text-accent font-code font-semibold">/{cmd().name}</span>
+              <span class="text-dim font-code text-sm">{cmd().params}</span>
+              <span class="truncate text-dim text-caption small-touch:w-full small-touch:whitespace-normal small-touch:overflow-visible">
+                {cmd().description}
+              </span>
             </div>
           )}
         </Show>
@@ -306,7 +308,7 @@ export default function Composer() {
           <button
             ref={toolsButton}
             type="button"
-            class="send-btn tools-btn"
+            class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn small-touch:text-base"
             title="Tools"
             aria-label="Composer tools"
             aria-haspopup="menu"
@@ -320,7 +322,7 @@ export default function Composer() {
             open={toolsOpen()}
             anchor={() => toolsButton}
             onClose={() => setToolsOpen(false)}
-            class="tools-menu"
+            class="[&_button]:whitespace-nowrap"
             role="menu"
             ariaLabel="Composer tools"
             placement="top"
@@ -379,14 +381,18 @@ export default function Composer() {
             <>
               <Show when={streamingMessage() && !draftCompletionActive() && parallelCommand()}>
                 <button
-                  class="send-btn"
+                  class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 small-touch:text-base"
                   title="Start another image generation"
                   onClick={() => void send()}
                 >
                   <FontAwesomeIcon icon={faPaperPlane} class="send-icon" />
                 </button>
               </Show>
-              <button class="send-btn stop-btn" title="Stop generating" onClick={stop}>
+              <button
+                class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 stop-btn small-touch:text-base"
+                title="Stop generating"
+                onClick={stop}
+              >
                 <FontAwesomeIcon icon={faStop} size={14} />
               </button>
             </>
@@ -394,7 +400,7 @@ export default function Composer() {
         >
           <Show when={text().trim() || resumable()}>
             <button
-              class="send-btn tools-btn resume-btn"
+              class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn resume-btn small-touch:text-base"
               title={
                 text().trim()
                   ? 'Continue writing this message'
@@ -406,7 +412,7 @@ export default function Composer() {
             </button>
           </Show>
           <button
-            class="send-btn"
+            class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 small-touch:text-base"
             title="Send"
             disabled={!text().trim()}
             onClick={() => void send()}

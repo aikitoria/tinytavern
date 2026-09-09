@@ -139,6 +139,15 @@ test('application HTTP and WebSocket contracts', async () => {
       await rejected.arrayBuffer();
     }
     assert.equal(status, expected);
+    if (expected === 101) {
+      while (!events.some((event) => event.t === 'mediaJobs')) {
+        await once(notifications, 'event', { signal: AbortSignal.timeout(2_000) });
+      }
+      assert.deepEqual(
+        events.slice(0, 2).map((event) => event.t),
+        ['hello', 'mediaJobs'],
+      );
+    }
     return {
       socket,
       events,

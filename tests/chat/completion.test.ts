@@ -1,39 +1,34 @@
+import { insertFixture, conversationFixture, messageFixture } from '../support/fixtures.ts';
+import { mockFetch, controlledStream, upstreamFrame } from '../support/streams.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
 
 databaseCase('server completion', async () => {
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { stmt } = await import('../../server/src/db.ts');
   const { chatCompletionOnce, streamChatCompletion } =
     await import('../../server/src/generation.ts');
   const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const endpointId = Number(
-    stmt(
-      'INSERT INTO endpoints (name, base_url, api_key, model, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('test', 'https://upstream.invalid/v1///', 'secret', 'test-model', Date.now())
-      .lastInsertRowid,
-  );
+  const endpointId = insertFixture('endpoints', {
+    name: 'test',
+    base_url: 'https://upstream.invalid/v1///',
+    api_key: 'secret',
+    model: 'test-model',
+    created_at: 1,
+  });
   putSettings({ ...getSettings(), activeEndpointId: endpointId });
 
   const originalFetch = globalThis.fetch;
   let reply = () => new Response();
   let wire: Record<string, unknown> = {};
-  globalThis.fetch = (async (
-    url: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ) => {
+  mockFetch((url, init) => {
     assert.equal(url, 'https://upstream.invalid/v1/chat/completions');
     assert.equal(init?.method, 'POST');
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret');
     assert(init?.signal);
     wire = JSON.parse(String(init?.body));
     return reply();
-  }) as unknown as typeof fetch;
+  });
   const messages = [{ role: 'user' as const, content: 'hello' }];
-  const frame = (delta: Record<string, unknown>) =>
-    `data: ${JSON.stringify({ choices: [{ delta }] })}\n`;
   try {
     reply = () => Response.json({ choices: [{ message: { content: 'one shot' } }] });
     assert.equal(await chatCompletionOnce(null, messages, 23), 'one shot');
@@ -42,7 +37,7 @@ databaseCase('server completion', async () => {
     // Unterminated final frames survive parsing; malformed frames are ignored.
     reply = () =>
       new Response(
-        `data: null\ndata: malformed\n${frame({ content: 'hé' })}${frame({ content: '🦊' }).trimEnd()}`,
+        `data: null\ndata: malformed\n${upstreamFrame({ content: 'hé' })}${upstreamFrame({ content: '🦊' }).trimEnd()}`,
       );
     const deltas: string[] = [];
     assert.equal(
@@ -62,14 +57,14 @@ databaseCase('server completion', async () => {
         /ended before a complete reply/,
       ],
     ] as const) {
-      reply = () => new Response(frame({ content: 'Prompt' }) + finish);
+      reply = () => new Response(upstreamFrame({ content: 'Prompt' }) + finish);
       const complete = streamChatCompletion(null, messages, 71, () => {}, undefined, {
         requireComplete: true,
       });
       if (error) await assert.rejects(complete, error);
       else assert.equal(await complete, 'Prompt');
     }
-    reply = () => new Response(frame({ content: 'hé' }) + frame({ content: '🦊' }));
+    reply = () => new Response(upstreamFrame({ content: 'hé' }) + upstreamFrame({ content: '🦊' }));
 
     stmt("UPDATE endpoints SET prefill_mode = 'vllm', gen_params_json = ? WHERE id = ?").run(
       JSON.stringify({ temperature: 0, maxTokens: 99, reasoningEffort: 'high' }),
@@ -109,7 +104,7 @@ databaseCase('server completion', async () => {
       [{ reasoning_content: 'thinking' }, /only reasoning/],
       [{}, /empty reply/],
     ] as const) {
-      reply = () => new Response(frame(delta));
+      reply = () => new Response(upstreamFrame(delta));
       await assert.rejects(
         streamChatCompletion(null, messages, 71, () => {}),
         diagnosis,
@@ -132,18 +127,9 @@ databaseCase('server completion', async () => {
       /Upstream error 429: busy/,
     );
 
-    let cancelled = false;
-    reply = () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode(frame({ content: 'first' })));
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }),
-      );
+    const consumer = controlledStream();
+    consumer.write(upstreamFrame({ content: 'first' }));
+    reply = () => new Response(consumer.body);
     const failure = new Error('consumer failure');
     await assert.rejects(
       streamChatCompletion(null, messages, 71, () => {
@@ -151,7 +137,7 @@ databaseCase('server completion', async () => {
       }),
       (error) => error === failure,
     );
-    assert.equal(cancelled, true);
+    assert.equal(consumer.cancelled, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -163,25 +149,19 @@ databaseCase('generation stream', async () => {
   const { setImmediate: flush } = await import('node:timers/promises');
 
   type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { stmt, toConversation } = await import('../../server/src/db.ts');
   const { startGeneration, stopAllGenerations, mergeLiveBuffers } =
     await import('../../server/src/generation.ts');
   const { getMessage } = await import('../../server/src/tree.ts');
   const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const endpointId = Number(
-    stmt(
-      "INSERT INTO endpoints (name, base_url, created_at) VALUES ('Test', 'http://test.invalid', 1)",
-    ).run().lastInsertRowid,
-  );
+  const endpointId = insertFixture('endpoints', {
+    name: 'Test',
+    base_url: 'http://test.invalid',
+    created_at: 1,
+  });
   putSettings({ ...getSettings(), activeEndpointId: endpointId });
-  const conversation = toConversation(
-    stmt(
-      "INSERT INTO conversations (title, created_at, updated_at) VALUES ('Stream', 1, 1) RETURNING *",
-    ).get()!,
-  );
+  const cid = conversationFixture({ title: 'Stream' });
+  const conversation = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(cid)!);
   const prompt: BuiltPrompt = {
     messages: [{ role: 'user', content: 'Hello' }],
     reasoningPrefill: null,
@@ -193,33 +173,17 @@ databaseCase('generation stream', async () => {
   };
   const requests: {
     signal: AbortSignal;
-    stream: ReadableStreamDefaultController<Uint8Array>;
+    stream: ReturnType<typeof controlledStream>;
     messages: { role: string; content: string }[];
   }[] = [];
   const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
-  const frame = (delta: object) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`;
-  function message() {
-    return Number(
-      stmt(
-        "INSERT INTO messages (conversation_id, role, content, status, created_at) VALUES (?, 'assistant', '', 'streaming', 1)",
-      ).run(conversation.id).lastInsertRowid,
-    );
-  }
-  globalThis.fetch = (async (
-    _: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ) => {
+  const message = () => messageFixture(cid, { content: '', status: 'streaming' });
+  mockFetch((_, init) => {
     const signal = init!.signal!;
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(stream) {
-          requests.push({ signal, stream, messages: JSON.parse(String(init!.body)).messages });
-          signal.addEventListener('abort', () => stream.error(signal.reason), { once: true });
-        },
-      }),
-    );
-  }) as unknown as typeof fetch;
+    const stream = controlledStream(signal);
+    requests.push({ signal, stream, messages: JSON.parse(String(init!.body)).messages });
+    return new Response(stream.body);
+  });
   jest.useFakeTimers();
   const timers = jest.spyOn(globalThis, 'setTimeout');
   try {
@@ -229,7 +193,7 @@ databaseCase('generation stream', async () => {
     const active = requests.at(-1)!;
     const timerCount = timers.mock.calls.length;
     for (let index = 0; index < 32; index++) {
-      active.stream.enqueue(encoder.encode(': heartbeat\n\n'));
+      active.stream.write(': heartbeat\n\n');
       await flush();
     }
     assert.equal(
@@ -237,10 +201,10 @@ databaseCase('generation stream', async () => {
       timerCount,
       'Network chunks do not allocate idle timers',
     );
-    active.stream.enqueue(encoder.encode('data: null\ndata: malformed\n'));
-    active.stream.enqueue(encoder.encode(frame({ content: 42, reasoning_content: {} })));
+    active.stream.write('data: null\ndata: malformed\n');
+    active.stream.write(upstreamFrame({ content: 42, reasoning_content: {} }));
     for (const content of [' H', 'a', 'l', ':', ' Hello']) {
-      active.stream.enqueue(encoder.encode(frame({ content })));
+      active.stream.write(upstreamFrame({ content }));
       await flush();
     }
     assert.equal(mergeLiveBuffers([getMessage(mid)!])[0]!.content, ' Hello');
@@ -248,10 +212,10 @@ databaseCase('generation stream', async () => {
       jest.advanceTimersByTime(90_000);
       assert(!active.signal.aborted, 'An active chat stream survives beyond two minutes');
       // Heartbeats count as activity even when they carry no model tokens.
-      active.stream.enqueue(encoder.encode(': heartbeat\n\n'));
+      active.stream.write(': heartbeat\n\n');
       await flush();
     }
-    active.stream.enqueue(encoder.encode(frame({ reasoning: 'Thought' })));
+    active.stream.write(upstreamFrame({ reasoning: 'Thought' }));
     active.stream.close();
     await flush();
     assert.equal(getMessage(mid)!.status, 'done');
@@ -265,7 +229,7 @@ databaseCase('generation stream', async () => {
     await flush();
     const stalled = requests.at(-1)!;
     jest.advanceTimersByTime(90_000);
-    stalled.stream.enqueue(encoder.encode(frame({ content: 'Ha' })));
+    stalled.stream.write(upstreamFrame({ content: 'Ha' }));
     await flush();
     jest.advanceTimersByTime(119_999);
     assert(!stalled.signal.aborted, 'Content renews the full inactivity window');
@@ -279,7 +243,7 @@ databaseCase('generation stream', async () => {
     const retry = requests.at(-1)!;
     assert.notEqual(retry, stalled);
     assert.deepEqual(retry.messages.at(-1), { role: 'assistant', content: 'Hal: Ha' });
-    retry.stream.enqueue(encoder.encode(frame({ content: 'ppy' })));
+    retry.stream.write(upstreamFrame({ content: 'ppy' }));
     retry.stream.close();
     await flush();
     assert.equal(getMessage(retryId)!.status, 'done');
@@ -287,11 +251,15 @@ databaseCase('generation stream', async () => {
 
     // A request that stalls before returning response headers has the same deadline.
     let waitingSignal!: AbortSignal;
-    globalThis.fetch = ((_: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-      new Promise((_, reject) => {
-        waitingSignal = init!.signal!;
-        waitingSignal.addEventListener('abort', () => reject(waitingSignal.reason), { once: true });
-      })) as unknown as typeof fetch;
+    mockFetch(
+      (_, init) =>
+        new Promise((_, reject) => {
+          waitingSignal = init!.signal!;
+          waitingSignal.addEventListener('abort', () => reject(waitingSignal.reason), {
+            once: true,
+          });
+        }),
+    );
     const waitingId = message();
     startGeneration(conversation, waitingId, undefined, { prompt, background: true });
     jest.advanceTimersByTime(120_000);
@@ -313,31 +281,20 @@ databaseCase('generation persistence', async () => {
   const { jest } = await import('bun:test');
 
   type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
-  const { db, stmt, toConversation } = await import('../../server/src/db.ts');
+  const { stmt, toConversation } = await import('../../server/src/db.ts');
   const { startGeneration, stopGeneration, stopAllGenerations, mergeLiveBuffers } =
     await import('../../server/src/generation.ts');
   const { getMessage } = await import('../../server/src/tree.ts');
   const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
   const { getConversationRevision } = await import('../../server/src/conversationRevision.ts');
-  const endpointId = Number(
-    stmt('INSERT INTO endpoints (name, base_url, model, created_at) VALUES (?, ?, ?, ?)').run(
-      'test',
-      'https://upstream.invalid/v1',
-      'test-model',
-      Date.now(),
-    ).lastInsertRowid,
-  );
+  const endpointId = insertFixture('endpoints', {
+    name: 'test',
+    base_url: 'https://upstream.invalid/v1',
+    model: 'test-model',
+    created_at: 1,
+  });
   putSettings({ ...getSettings(), activeEndpointId: endpointId });
-  const cid = Number(
-    stmt('INSERT INTO conversations (title, created_at, updated_at) VALUES (?, ?, ?)').run(
-      'Persistence',
-      Date.now(),
-      Date.now(),
-    ).lastInsertRowid,
-  );
+  const cid = conversationFixture({ title: 'Persistence' });
   const conversation = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(cid)!);
   const prompt: BuiltPrompt = {
     messages: [{ role: 'user', content: 'Hello' }],
@@ -348,41 +305,21 @@ databaseCase('generation persistence', async () => {
     charName: 'Assistant',
     userName: 'User',
   };
-  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const streams: ReturnType<typeof controlledStream>[] = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () =>
-    new Response(
-      new ReadableStream({
-        start(controller) {
-          streams.push(controller);
-        },
-      }),
-    )) as unknown as typeof fetch;
-  const encoder = new TextEncoder();
-  function append(
-    stream: ReadableStreamDefaultController<Uint8Array>,
-    content: string,
-    reasoning = '',
-  ) {
-    stream.enqueue(
-      encoder.encode(
-        `data: ${JSON.stringify({ choices: [{ delta: { content, reasoning_content: reasoning } }] })}\n\n`,
-      ),
-    );
+  mockFetch(() => {
+    const stream = controlledStream();
+    streams.push(stream);
+    return new Response(stream.body);
+  });
+  function append(stream: ReturnType<typeof controlledStream>, content: string, reasoning = '') {
+    stream.write(upstreamFrame({ content, reasoning_content: reasoning }));
   }
-  function message(role = 'assistant') {
-    return Number(
-      stmt(
-        "INSERT INTO messages (conversation_id, role, content, status, image_pending, created_at) VALUES (?, ?, '', 'streaming', 1, ?)",
-      ).run(cid, role, Date.now()).lastInsertRowid,
-    );
-  }
+  const message = (role = 'assistant') =>
+    messageFixture(cid, { role, content: '', status: 'streaming', image_pending: 1 });
   function begin(mid: number, resume?: { content: string; reasoning: string }) {
     startGeneration(conversation, mid, resume, { prompt, background: true });
     return streams.at(-1)!;
-  }
-  async function settle() {
-    await flush();
   }
   try {
     const mid = message();
@@ -399,7 +336,7 @@ databaseCase('generation persistence', async () => {
     const revision = getConversationRevision(cid);
     append(stream, ' reply ', ' more ');
     stream.close();
-    await settle();
+    await flush();
     assert.equal(getMessage(mid)!.content, 'First reply');
     assert.equal(getMessage(mid)!.reasoning, 'Think more');
     assert.equal(getMessage(mid)!.model, 'test-model');
@@ -410,7 +347,7 @@ databaseCase('generation persistence', async () => {
     stmt("UPDATE messages SET status = 'streaming' WHERE id = ?").run(mid);
     const old = begin(mid, { content: 'First reply', reasoning: 'Think more' });
     append(old, ' continued');
-    await settle();
+    await flush();
     assert.equal(getMessage(mid)!.content, 'First reply');
     stopGeneration(mid);
     assert.equal(getMessage(mid)!.content, 'First reply continued');
@@ -421,21 +358,21 @@ databaseCase('generation persistence', async () => {
     append(old, ' stale');
     old.close();
     append(next, ' successor');
-    await settle();
+    await flush();
     assert.equal(
       mergeLiveBuffers([getMessage(mid)!])[0]!.content,
       'First reply continued successor',
     );
     next.close();
-    await settle();
+    await flush();
     assert.equal(getMessage(mid)!.content, 'First reply continued successor');
 
     const failed = message();
     const failingStream = begin(failed);
     append(failingStream, 'Partial', 'Reason');
-    await settle();
+    await flush();
     failingStream.error(new Error('fatal test failure'));
-    await settle();
+    await flush();
     assert.equal(getMessage(failed)!.status, 'error');
     assert.equal(getMessage(failed)!.content, 'Partial');
     assert.equal(getMessage(failed)!.reasoning, 'Reason');
@@ -444,11 +381,11 @@ databaseCase('generation persistence', async () => {
     const deleted = message();
     const deletedStream = begin(deleted);
     append(deletedStream, 'Gone');
-    await settle();
+    await flush();
     stmt('DELETE FROM messages WHERE id = ?').run(deleted);
     const beforeDeleteFinal = getConversationRevision(cid);
     deletedStream.close();
-    await settle();
+    await flush();
     assert.equal(getMessage(deleted), undefined);
     assert.equal(getConversationRevision(cid), beforeDeleteFinal);
 
@@ -458,14 +395,14 @@ databaseCase('generation persistence', async () => {
       append(controller, role);
       return { id, controller, role };
     });
-    await settle();
+    await flush();
     stopAllGenerations();
     for (const { id, controller, role } of pending) {
       assert.equal(getMessage(id)!.content, role);
       assert.equal(getMessage(id)!.status, 'stopped');
       controller.close();
     }
-    await settle();
+    await flush();
   } finally {
     stopAllGenerations();
     globalThis.fetch = originalFetch;
@@ -474,14 +411,7 @@ databaseCase('generation persistence', async () => {
 });
 
 databaseCase('prompt reasoning', async () => {
-  const { jest } = await import('bun:test');
-
-  const { setImmediate: flush } = await import('node:timers/promises');
-
   type Endpoint = import('@tinytavern/shared').Endpoint;
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { streamEndpointCompletion } = await import('../../server/src/generation.ts');
   const { streamTextCompletion } = await import('../../client/src/state/api.ts');
   const endpoint: Endpoint = {
@@ -497,22 +427,24 @@ databaseCase('prompt reasoning', async () => {
     genParams: {},
   };
   const originalFetch = globalThis.fetch;
-  function upstream(delta: object, finishReason?: string) {
-    return `data: ${JSON.stringify({ choices: [{ delta, finish_reason: finishReason }] })}\n\n`;
-  }
   try {
     for (const field of ['reasoning_content', 'reasoning']) {
-      globalThis.fetch = (async () =>
-        new Response(
-          [
-            upstream({ [field]: 'Check the lighting. ' }),
-            upstream({ [field]: 'Choose the camera angle.' }),
-            upstream({ content: 'A bright scene', [field]: 'Do not append this to the preview' }),
-            upstream({ [field]: 'Late reasoning is not displayed' }),
-            upstream({}, 'stop'),
-            'data: [DONE]\n\n',
-          ].join(''),
-        )) as unknown as typeof fetch;
+      mockFetch(
+        () =>
+          new Response(
+            [
+              upstreamFrame({ [field]: 'Check the lighting. ' }),
+              upstreamFrame({ [field]: 'Choose the camera angle.' }),
+              upstreamFrame({
+                content: 'A bright scene',
+                [field]: 'Do not append this to the preview',
+              }),
+              upstreamFrame({ [field]: 'Late reasoning is not displayed' }),
+              upstreamFrame({}, 'stop'),
+              'data: [DONE]\n\n',
+            ].join(''),
+          ),
+      );
       const events: object[] = [];
       const prompt = await streamEndpointCompletion(
         endpoint,
@@ -535,10 +467,14 @@ databaseCase('prompt reasoning', async () => {
         { d: 'Photo: ' },
         { d: 'A bright scene' },
       ]);
-      globalThis.fetch = (async () =>
-        new Response(
-          [...events, { done: true }].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
-        )) as unknown as typeof fetch;
+      mockFetch(
+        () =>
+          new Response(
+            [...events, { done: true }]
+              .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+              .join(''),
+          ),
+      );
       let displayedReasoning = '';
       let visiblePrompt = '';
       const output = await streamTextCompletion(
@@ -559,10 +495,10 @@ databaseCase('prompt reasoning', async () => {
       assert.equal(visiblePrompt, prompt);
       assert.equal(displayedReasoning, '');
     }
-    globalThis.fetch = (async () =>
-      new Response(
-        upstream({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n',
-      )) as unknown as typeof fetch;
+    mockFetch(
+      () =>
+        new Response(upstreamFrame({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n'),
+    );
     let onlyReasoning = '';
     await assert.rejects(
       streamEndpointCompletion(
@@ -576,8 +512,7 @@ databaseCase('prompt reasoning', async () => {
       /only reasoning/,
     );
     assert.equal(onlyReasoning, 'No final prompt');
-    globalThis.fetch = (async () =>
-      new Response('data: {"r":"Still thinking"}\n\n')) as unknown as typeof fetch;
+    mockFetch(() => new Response('data: {"r":"Still thinking"}\n\n'));
     await assert.rejects(
       streamTextCompletion('/prompt', {}, () => assert.fail('No content arrived'), 'test prompt'),
       /ended before completion/,

@@ -1,9 +1,10 @@
+import { conversationFixture, insertFixture } from '../support/fixtures.ts';
+import { imageConfig } from '../support/imageConfig.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
 test('media input prompts', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
-
   type MediaJob = import('@tinytavern/shared').MediaJob;
   type MediaOperation = import('@tinytavern/shared').MediaOperation;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
@@ -25,15 +26,10 @@ test('media input prompts', async () => {
   const { requireMediaJob } = await import('../../server/src/mediaJobStore.ts');
   const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
   const { expandTemplate } = await import('../../server/src/prompt.ts');
-  const imageWorkflow: MediaWorkflow = {
-    id: 'image',
-    name: 'Image',
-    operation: 'image',
-    referenceCount: 0,
-    json: '{"1":{"inputs":{"prompt":"{{prompt}}"}}}',
-    galleryPromptPresetId: null,
-    chatPromptPresetId: null,
-  };
+  const imageWorkflow = imageConfig(
+    '{"1":{"inputs":{"prompt":"{{prompt}}"}}}',
+    'http://unused.invalid',
+  ).workflow;
   const operations: MediaOperation[] = ['image-edit', 'video-first', 'video-references'];
   const workflows: MediaWorkflow[] = operations.map((operation) => ({
     ...imageWorkflow,
@@ -59,11 +55,11 @@ test('media input prompts', async () => {
     '{{#if reference1_prompt}}REF1<{{reference1_prompt}}>{{#if reference3_prompt}}THIRD{{/if}}{{/if}}' +
     '{{#if reference2_prompt}}REF2<{{reference2_prompt}}>{{/if}}' +
     '{{#if reference3_prompt}}REF3<{{reference3_prompt}}>{{/if}}';
-  const endpointId = Number(
-    stmt(
-      "INSERT INTO endpoints(name, base_url, created_at) VALUES ('Test', 'http://unused.invalid', 1)",
-    ).run().lastInsertRowid,
-  );
+  const endpointId = insertFixture('endpoints', {
+    name: 'Test',
+    base_url: 'http://unused.invalid',
+    created_at: 1,
+  });
   const presets = operations.map((operation) => ({
     id: operation,
     name: operation,
@@ -101,7 +97,7 @@ test('media input prompts', async () => {
       defaults: { 'video-first': 'video-first', 'video-references': 'video-references' },
     },
   });
-  function image(name: string, prompt: string | null) {
+  function image(prompt: string | null) {
     const path = saveImage('.png', makePlaceholderPng());
     let recipeId: number | null = null;
     if (prompt !== null) {
@@ -113,19 +109,21 @@ test('media input prompts', async () => {
       stmt('UPDATE media_assets SET recipe_id = ? WHERE path = ?').run(recipeId, path);
       invalidateMediaAsset(path);
     }
-    const galleryId = Number(
-      stmt(
-        "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Test', ?, ?, 1, 1)",
-      ).run(prompt ?? '', path).lastInsertRowid,
-    );
+    const galleryId = insertFixture('gallery_items', {
+      character_name: 'Test',
+      prompt: prompt ?? '',
+      image: path,
+      created_at: 1,
+      updated_at: 1,
+    });
     return { id: mediaAssetForPath(path)!.id, path, recipeId, galleryId };
   }
   const original =
     '  A portrait\n\n\nwith {{instruction}} and {{#if reference2_prompt}}literal{{/if}}.  ';
-  const first = image('first', original);
-  const upload = image('upload', null);
-  const blank = image('blank', ' \n ');
-  const replacement = image('replacement', 'New source prompt');
+  const first = image(original);
+  const upload = image(null);
+  const blank = image(' \n ');
+  const replacement = image('New source prompt');
   function prepare(job: MediaJob) {
     const conversation =
       job.contextConversationId === null
@@ -145,16 +143,24 @@ test('media input prompts', async () => {
     cancelMediaJob(requireMediaJob(job.id));
     return context;
   }
-  const edit = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image-edit',
-    workflowId: 'image-edit',
-    inputs: [
-      { slot: 'reference1', assetId: first.id, prompt: 'Forged client prompt' },
-      { slot: 'reference2', assetId: upload.id },
-      { slot: 'reference3', assetId: blank.id },
-    ],
-  });
+  const job = (
+    operation: MediaOperation,
+    inputs: unknown[],
+    contextConversationId: number | null = null,
+  ) =>
+    createMediaJob({
+      requestKey: newRequestId(),
+      operation,
+      workflowId: operation,
+      inputs,
+      contextConversationId,
+    });
+  const firstFrame = (assetId: number) => job('video-first', [{ slot: 'first_frame', assetId }]);
+  const edit = job('image-edit', [
+    { slot: 'reference1', assetId: first.id, prompt: 'Forged client prompt' },
+    { slot: 'reference2', assetId: upload.id },
+    { slot: 'reference3', assetId: blank.id },
+  ]);
   assert.equal(
     edit.inputs[0]!.prompt,
     original,
@@ -179,7 +185,7 @@ test('media input prompts', async () => {
     unchanged.inputs,
     'Final generated prompt',
   );
-  const output = image('output', null);
+  const output = image(null);
   stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipeId, output.id);
   deleteMediaJob(requireMediaJob(edit.id));
   const rerun = createMediaJobFromAsset(output.id, { requestKey: newRequestId() });
@@ -200,12 +206,7 @@ test('media input prompts', async () => {
     'Replacing a slot captures its new image prompt',
   );
   assert.equal(changed.inputs[1]!.prompt, '');
-  const newSelection = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'video-first',
-    workflowId: 'video-first',
-    inputs: [{ slot: 'first_frame', assetId: first.id }],
-  });
+  const newSelection = firstFrame(first.id);
   assert.equal(newSelection.inputs[0]!.prompt, 'Changed later');
   assert.equal(prepare(newSelection).template.userMessage, 'FIRST<Changed later>');
   assert.equal(
@@ -217,34 +218,21 @@ test('media input prompts', async () => {
     '  Uploaded image description  ',
     upload.galleryId,
   );
-  const describedUpload = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'video-first',
-    workflowId: 'video-first',
-    inputs: [{ slot: 'first_frame', assetId: upload.id }],
-  });
+  const describedUpload = firstFrame(upload.id);
   assert.equal(
     prepare(describedUpload).template.userMessage,
     'FIRST<  Uploaded image description  >',
   );
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', upload.galleryId);
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', first.galleryId);
-  const cleared = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'video-first',
-    workflowId: 'video-first',
-    inputs: [{ slot: 'first_frame', assetId: first.id }],
-  });
+  const cleared = firstFrame(first.id);
   assert.equal(
     cleared.inputs[0]!.prompt,
     '',
     'Clearing a saved prompt does not restore recipe text',
   );
 
-  const conversationId = Number(
-    stmt("INSERT INTO conversations(title, created_at, updated_at) VALUES ('Test', 1, 1)").run()
-      .lastInsertRowid,
-  );
+  const conversationId = conversationFixture();
   for (const operation of ['video-first', 'video-references'] as const) {
     for (const contextConversationId of [null, conversationId]) {
       const inputs =
@@ -255,14 +243,7 @@ test('media input prompts', async () => {
               { slot: 'reference2', assetId: upload.id },
               { slot: 'reference3', assetId: blank.id },
             ];
-      const job = createMediaJob({
-        requestKey: newRequestId(),
-        operation,
-        workflowId: operation,
-        contextConversationId,
-        inputs,
-      });
-      const prepared = prepare(job);
+      const prepared = prepare(job(operation, inputs, contextConversationId));
       const body =
         operation === 'video-first' ? 'FIRST<New source prompt>' : 'REF1<New source prompt>';
       assert.equal(

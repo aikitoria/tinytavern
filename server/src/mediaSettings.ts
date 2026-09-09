@@ -11,16 +11,8 @@ import {
   type MediaPromptPreset,
 } from '@tinytavern/shared';
 import { HttpError } from './router.ts';
+import { requireObject as object, requireString as string } from './validation.ts';
 
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new HttpError(400, `${label} must be an object`);
-  return value as Record<string, unknown>;
-}
-function string(value: unknown, label: string): string {
-  if (typeof value !== 'string') throw new HttpError(400, `${label} must be a string`);
-  return value;
-}
 function id(value: unknown, label: string): string {
   const result = string(value, label);
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(result)) throw new HttpError(400, `Invalid ${label}`);
@@ -32,10 +24,8 @@ function operation(value: unknown): MediaOperation {
   return value as MediaOperation;
 }
 
-export function parseMediaRendering(value: unknown): MediaRenderingSettings | undefined {
-  if (value === undefined) return undefined;
-  const raw = object(value, 'mediaRendering');
-  const comfyUrl = string(raw.comfyUrl, 'Comfy URL').trim().replace(/\/+$/, '');
+export function parseComfyUrl(value: unknown): string {
+  const comfyUrl = string(value, 'Comfy URL').trim().replace(/\/+$/, '');
   let url: URL;
   try {
     url = new URL(comfyUrl);
@@ -50,41 +40,48 @@ export function parseMediaRendering(value: unknown): MediaRenderingSettings | un
     url.hash
   )
     throw new HttpError(400, 'Comfy URL must be HTTP(S) without credentials, query, or fragment');
+  return comfyUrl;
+}
+
+export function parseMediaWorkflow(entry: unknown, ids?: Set<string>): MediaWorkflow {
+  const item = object(entry, 'workflow');
+  const workflow: MediaWorkflow = {
+    id: id(item.id, 'workflow ID'),
+    name: string(item.name, 'workflow name').trim(),
+    operation: operation(item.operation),
+    referenceCount: item.referenceCount as MediaWorkflow['referenceCount'],
+    json: string(item.json, 'workflow JSON'),
+    galleryPromptPresetId:
+      item.galleryPromptPresetId == null
+        ? null
+        : id(item.galleryPromptPresetId, 'gallery prompt preset ID'),
+    chatPromptPresetId:
+      item.chatPromptPresetId == null ? null : id(item.chatPromptPresetId, 'chat prompt preset ID'),
+  };
+  if (!workflow.name || workflow.name.length > 200 || ids?.has(workflow.id))
+    throw new HttpError(400, 'Workflow names must be nonempty and IDs unique');
+  if (workflow.json.length > 2 * 1024 * 1024)
+    throw new HttpError(400, 'Workflow JSON is too large');
+  ids?.add(workflow.id);
+  try {
+    mediaInputSlots(workflow.operation, workflow.referenceCount);
+  } catch (err) {
+    throw new HttpError(400, String(err));
+  }
+  // Empty placeholders can be saved, but cannot be selected as defaults or rendered.
+  const invalid = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
+  if (invalid) throw new HttpError(400, `${workflow.name}: ${invalid}`);
+  return workflow;
+}
+
+export function parseMediaRendering(value: unknown): MediaRenderingSettings | undefined {
+  if (value === undefined) return undefined;
+  const raw = object(value, 'mediaRendering');
+  const comfyUrl = parseComfyUrl(raw.comfyUrl);
   if (!Array.isArray(raw.workflows) || raw.workflows.length > 500)
     throw new HttpError(400, 'Invalid workflows');
   const ids = new Set<string>();
-  const workflows = raw.workflows.map((entry): MediaWorkflow => {
-    const item = object(entry, 'workflow');
-    const workflow: MediaWorkflow = {
-      id: id(item.id, 'workflow ID'),
-      name: string(item.name, 'workflow name').trim(),
-      operation: operation(item.operation),
-      referenceCount: item.referenceCount as MediaWorkflow['referenceCount'],
-      json: string(item.json, 'workflow JSON'),
-      galleryPromptPresetId:
-        item.galleryPromptPresetId == null
-          ? null
-          : id(item.galleryPromptPresetId, 'gallery prompt preset ID'),
-      chatPromptPresetId:
-        item.chatPromptPresetId == null
-          ? null
-          : id(item.chatPromptPresetId, 'chat prompt preset ID'),
-    };
-    if (!workflow.name || workflow.name.length > 200 || ids.has(workflow.id))
-      throw new HttpError(400, 'Workflow names must be nonempty and IDs unique');
-    if (workflow.json.length > 2 * 1024 * 1024)
-      throw new HttpError(400, 'Workflow JSON is too large');
-    ids.add(workflow.id);
-    try {
-      mediaInputSlots(workflow.operation, workflow.referenceCount);
-    } catch (err) {
-      throw new HttpError(400, String(err));
-    }
-    // Empty placeholders can be saved, but cannot be selected as defaults or rendered.
-    const invalid = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
-    if (invalid) throw new HttpError(400, `${workflow.name}: ${invalid}`);
-    return workflow;
-  });
+  const workflows = raw.workflows.map((entry) => parseMediaWorkflow(entry, ids));
   const defaults = Object.fromEntries(
     Object.entries(object(raw.defaults, 'workflow defaults')).map(([key, selected]) => {
       const workflow = workflows.find((item) => item.id === selected);

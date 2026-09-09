@@ -32,7 +32,7 @@ export default function AvatarRow(props: {
     }
   };
   return (
-    <div class="avatar-row">
+    <div class="flex items-center gap-3 [&_.avatar]:size-14">
       <Avatar src={props.thumbnail} name={props.name} />
       <button onClick={() => input.click()}>Change avatar</button>
       <RevertButton changed={Boolean(props.src)} onRevert={() => void remove()} />

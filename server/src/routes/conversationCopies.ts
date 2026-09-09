@@ -1,24 +1,10 @@
-import type {
-  Conversation,
-  GenerationKind,
-  Message,
-  MessageStatus,
-  Role,
-} from '@tinytavern/shared';
+import type { Conversation, Message } from '@tinytavern/shared';
 import { stmt, transaction } from '../db.ts';
 import { copyImage, deleteImageFiles } from '../images.ts';
 
 export interface MessageRow {
-  id: number;
-  parent_id: number | null;
-  role: Role;
-  status: MessageStatus;
-  active_child_id: number | null;
   gen_meta_json: string | null;
-  created_at: number;
-  name: string | null;
-  generation_kind: GenerationKind;
-  render_recipe_id: string | null;
+  render_recipe_id: number | null;
 }
 
 /** Track files before SQL commit so any partial failure can remove every copy. */
@@ -48,7 +34,7 @@ export function insertCopiedMessage(
   row: MessageRow,
   live: Message,
   written: string[],
-  generationKind = row.generation_kind,
+  generationKind = live.generationKind,
 ): number {
   const { images, activeImage } = copyMessageImages(live, written);
   return Number(
@@ -61,14 +47,14 @@ export function insertCopiedMessage(
     ).run(
       conversationId,
       parentId,
-      row.role,
+      live.role,
       live.content,
       live.reasoning,
-      row.status === 'streaming' ? 'stopped' : row.status,
+      live.status === 'streaming' ? 'stopped' : live.status,
       live.model,
       row.gen_meta_json,
-      row.created_at,
-      row.name,
+      live.createdAt,
+      live.name,
       generationKind,
       JSON.stringify(images),
       activeImage,

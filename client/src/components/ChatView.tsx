@@ -117,7 +117,7 @@ export default function ChatView(props: { active?: boolean }) {
 
   return (
     <div
-      class="chat"
+      class="chat flex-1 [&.chat-map]:overflow-hidden [&:not(.chat-map)_.msg-user_.md>:is(p,_ul,_ol,_blockquote)]:max-w-[80ch] [&:not(.chat-map)_.msg-assistant_.md>:is(p,_ul,_ol,_blockquote)]:max-w-[80ch]"
       classList={{ 'chat-map': state.viewMode === 'map' }}
       ref={(el) => {
         scroller = el;
@@ -133,7 +133,10 @@ export default function ChatView(props: { active?: boolean }) {
         when={selectedConversation()}
         fallback={
           // Hide until booted to prevent a welcome-screen flash on reload.
-          <div class="chat-empty" classList={{ hidden: !state.booted }}>
+          <div
+            class="items-center p-5 text-center flex flex-col gap-3 justify-center h-full"
+            classList={{ hidden: !state.booted }}
+          >
             <h1>TinyTavern</h1>
             <p>Tiny but mighty.</p>
             <button class="primary-btn" onClick={() => void newConversation(null)}>
@@ -145,7 +148,10 @@ export default function ChatView(props: { active?: boolean }) {
           </div>
         }
       >
-        <div class="chat-inner" ref={(el) => resizeObserver.observe(el)}>
+        <div
+          class="chat-inner my-0 mx-auto flex flex-col max-w-chat gap-chat-inline p-chat-inline pt-4 pb-3 small-touch:gap-chat-inline small-touch:p-[calc(var(--space-2)_+_env(safe-area-inset-top))_var(--chat-inline-padding)_var(--space-3)]"
+          ref={(el) => resizeObserver.observe(el)}
+        >
           <Show
             when={state.viewMode === 'chat'}
             fallback={

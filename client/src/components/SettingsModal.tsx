@@ -14,7 +14,6 @@ import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 import Select from './Select.tsx';
 import { SettingsActionsContext } from './SettingsActions.tsx';
 import type { SelectHandle } from './Select.tsx';
-import '../styles/settings.css';
 import {
   createSettingsNavigation,
   SettingsGuardProvider,
@@ -154,12 +153,12 @@ export default function SettingsModal() {
     <>
       <Modal
         title="Settings"
-        class="settings-modal"
+        class="settings-modal narrow:[&_.modal-title]:display-none"
         fullscreen
         hideCloseButton
         onClose={leaveSettings}
         headerExtra={
-          <div class="page-header-actions">
+          <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear">
             <button
               type="button"
               class="page-back"
@@ -168,7 +167,7 @@ export default function SettingsModal() {
             >
               <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
             </button>
-            <div class="settings-section-picker">
+            <div class="display-none w-50 min-w-0 compact:block">
               <Select
                 ref={sectionPicker}
                 ariaLabel="Settings section"
@@ -185,13 +184,16 @@ export default function SettingsModal() {
         }
       >
         <SettingsActionsContext.Provider value={actionsTarget}>
-          <div class="settings-workspace">
-            <nav class="settings-nav" aria-label="Settings">
+          <div class="min-w-0 min-h-0 flex flex-1">
+            <nav
+              class="border-r border-r-solid border-r-subtle overflow-y-auto p-2 bg-chrome grow-0 shrink-0 basis-sidebar compact:display-none [&_[role=tablist]]:flex [&_[role=tablist]]:flex-col [&_[role=tablist]]:gap-1"
+              aria-label="Settings"
+            >
               <div role="tablist" aria-label="Settings sections" aria-orientation="vertical">
                 <For each={TABS}>
                   {(t, index) => (
                     <button
-                      class="settings-nav-item"
+                      class="settings-nav-item min-h-control border-transparent w-full text-dim bg-clear text-left [&.active]:text-foreground"
                       classList={{ active: tab() === t.key }}
                       id={`settings-tab-${t.key}`}
                       role="tab"
@@ -207,10 +209,10 @@ export default function SettingsModal() {
                 </For>
               </div>
             </nav>
-            <div class="settings-editor">
+            <div class="settings-editor flex flex-col min-w-0 min-h-0 flex-1">
               <div
                 ref={contentEl}
-                class="settings-content"
+                class="min-w-0 min-h-0 flex-1 overflow-y-auto [&:has(>.master-detail)]:flex [&:has(>.master-detail)]:overflow-hidden [&>.form]:w-full [&>.form]:min-h-full [&>.form]:p-4 [&_.form]:min-w-0 [&_.form>*]:shrink-0 [&_.form>*]:w-full [&_.form>*]:max-w-240 [&_.form>*]:mx-auto [&_.settings-section]:p-4 [&_.settings-section]:bg-chrome [&_.settings-section]:rounded-md [&_details.settings-section]:block [&_details.settings-section>summary]:cursor-pointer [&_details.settings-section[open]>summary]:mb-2 [&_.field-group]:bg-panel [&_.field-group]:border-subtle [&_.field-group>:is(label,_.setting-label):first-child]:mt-0 mobile:[&_.settings-section]:p-3"
                 id="settings-tab-panel"
                 role="tabpanel"
                 aria-label={activeTab().label}
@@ -222,7 +224,11 @@ export default function SettingsModal() {
                   <Dynamic component={activeTab().component} />
                 </SettingsGuardProvider>
               </div>
-              <div ref={setActionsTarget} class="settings-actions" aria-label="Settings actions" />
+              <div
+                ref={setActionsTarget}
+                class="settings-actions bg-canvas border-t border-t-solid border-t-subtle flex-none [&:empty]:display-none [&_.form-actions]:m-0"
+                aria-label="Settings actions"
+              />
             </div>
           </div>
         </SettingsActionsContext.Provider>

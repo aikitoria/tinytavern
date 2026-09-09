@@ -23,8 +23,11 @@ export default function PasswordGate() {
   };
 
   return (
-    <main class="password-gate">
-      <form class="password-card" onSubmit={(event) => void submit(event)}>
+    <main class="min-h-full p-5 grid place-items-center">
+      <form
+        class="password-card p-8 border border-solid border-line rounded-lg flex flex-col gap-3 bg-panel [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2 [&_img]:self-center [&_h1]:m-0 [&_h1]:text-center [&_h1]:text-2xl [&_p]:m-0 [&_p]:text-center [&>p]:text-dim [&_.password-error]:text-danger w-full max-w-95"
+        onSubmit={(event) => void submit(event)}
+      >
         <img src="/icon.svg" alt="" width="64" height="64" />
         <h1>TinyTavern</h1>
         <p>Enter the access password to continue.</p>

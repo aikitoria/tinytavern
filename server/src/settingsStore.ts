@@ -23,22 +23,13 @@ export function putSettings(settings: Settings): void {
   ).run('app', JSON.stringify(settings));
 }
 
-export type SettingsReferenceKey = Exclude<
-  keyof Settings,
-  | 'revision'
-  | 'autoExpandThinking'
-  | 'galleryThumbnailSize'
-  | 'titlePrompt'
-  | 'draftCompletionPrompt'
-  | 'backgroundSwipeGeneration'
-  | 'parallelBackgroundSwipeGeneration'
-  | 'hasPassword'
-  | 'imageGeneration'
-  | 'mediaRendering'
-  | 'galleryImagePrompts'
-  | 'galleryVideoPrompts'
-  | 'chatVideoPrompts'
->;
+export const SETTINGS_REFERENCE_TABLES = {
+  defaultPresetId: 'presets',
+  activeEndpointId: 'endpoints',
+  defaultPersonaId: 'personas',
+  defaultTemplateId: 'templates',
+} as const;
+export type SettingsReferenceKey = keyof typeof SETTINGS_REFERENCE_TABLES;
 
 export function clearSettingReference(key: SettingsReferenceKey, id: number): boolean {
   const settings = getSettings();

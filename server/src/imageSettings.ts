@@ -1,19 +1,7 @@
 import type { ImageGenerationSettings } from '@tinytavern/shared';
 import { imageRevisionTemplateError } from '@tinytavern/shared';
 import { HttpError } from './router.ts';
-
-function requireObject(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new HttpError(400, `${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requireString(value: unknown, label: string): void {
-  if (typeof value !== 'string') {
-    throw new HttpError(400, `${label} must be a string`);
-  }
-}
+import { requireObject, requireString } from './validation.ts';
 
 function validatePromptPreset(value: unknown): void {
   const preset = requireObject(value, 'prompt preset');

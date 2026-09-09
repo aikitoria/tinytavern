@@ -14,7 +14,7 @@ import {
 } from '@tinytavern/shared';
 import { IMAGES_DIR, stmt, toEndpoint, transaction } from './db.ts';
 import { streamEndpointCompletion } from './generation.ts';
-import { broadcastMediaProgress, broadcastConv } from './events.ts';
+import { broadcastMediaProgress } from './events.ts';
 import {
   mediaJobRow,
   mediaLive,
@@ -133,17 +133,6 @@ function flushProgress(id: number): void {
     reasoning: current.reasoning,
   });
   notifyMediaJobListeners(id);
-  const row = mediaJobRow(id);
-  if (row?.message_id !== null && row?.context_conversation_id != null) {
-    broadcastConv(row.context_conversation_id, {
-      t: 'imageProgress',
-      conversationId: row.context_conversation_id,
-      mid: row.message_id!,
-      value: current.progress?.value,
-      max: current.progress?.max,
-      preview: current.progress?.preview,
-    });
-  }
 }
 
 function publishProgress(id: number, progress: MediaJob['progress']): void {

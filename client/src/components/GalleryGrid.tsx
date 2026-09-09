@@ -34,7 +34,7 @@ function GalleryVideoPreview(props: { url: string }) {
   return (
     <video
       ref={player}
-      class="gallery-video-preview"
+      class="inset-0 block object-contain pointer-events-none opacity-0 size-full absolute [&.playing]:opacity-100 [&.playing~.gallery-video-badge]:opacity-0"
       classList={{ playing: playing() }}
       src={props.url}
       muted
@@ -71,7 +71,7 @@ function GalleryTile(props: {
   });
   return (
     <div
-      class="gallery-tile"
+      class="gallery-tile overflow-hidden h-full absolute bg-panel rounded-tight [&::after]:absolute [&::after]:inset-0 [&::after]:rounded-[inherit] [&::after]:pointer-events-none [&.selected::after]:border-2 [&.selected::after]:border-solid [&.selected::after]:border-accent [&:focus-within::after]:border-2 [&:focus-within::after]:border-solid [&:focus-within::after]:border-accent [&.selecting_.gallery-image-button]:cursor-pointer [&.selecting_.gallery-image-button:disabled]:opacity-45 [&.selecting_.gallery-image-button:disabled]:cursor-wait [&:hover_.gallery-tile-caption]:opacity-100 [&:focus-within_.gallery-tile-caption]:opacity-100 [&.selected_.gallery-selection-check]:border-accent [&.selected_.gallery-selection-check]:bg-accent"
       classList={{ selected: props.selected, selecting: props.selecting }}
       role="listitem"
       onPointerEnter={props.onPointerEnter}
@@ -80,7 +80,7 @@ function GalleryTile(props: {
     >
       <button
         type="button"
-        class="gallery-image-button"
+        class="gallery-image-button border-clear rounded-[inherit] cursor-zoom-in grid place-items-center size-full overflow-hidden relative p-0 text-muted bg-clear [&:hover:not(:disabled)]:bg-clear [&_img]:block [&_img]:object-contain [&_img]:size-full"
         data-gallery-id={props.cell.item.id}
         tabIndex={props.tabStop ? 0 : -1}
         aria-label={`${props.selecting ? (props.selected ? 'Deselect' : 'Select') : 'View'} ${kind()} ${props.cell.index + 1} of ${props.count}: ${props.cell.item.characterName}`}
@@ -107,12 +107,19 @@ function GalleryTile(props: {
           <GalleryVideoPreview url={props.cell.item.media!.url} />
         </Show>
         <Show when={video()}>
-          <span class="gallery-video-badge" title="Video" aria-hidden="true">
+          <span
+            class="gallery-video-badge pl-0.5 rounded-circle text-white pointer-events-none grid place-items-center absolute size-9.5 top-1/2 left-1/2"
+            title="Video"
+            aria-hidden="true"
+          >
             <FontAwesomeIcon icon={faPlay} size={18} />
           </span>
         </Show>
         <Show when={props.selecting}>
-          <span class="gallery-selection-check" aria-hidden="true">
+          <span
+            class="gallery-selection-check top-2 left-2 rounded-circle text-white grid place-items-center absolute size-5.5"
+            aria-hidden="true"
+          >
             <Show when={props.selected}>
               <Show
                 when={props.selectionNumber}
@@ -123,13 +130,16 @@ function GalleryTile(props: {
             </Show>
           </span>
         </Show>
-        <span class="gallery-tile-caption" aria-hidden="true">
+        <span
+          class="gallery-tile-caption bottom-0 left-0 right-0 text-white opacity-0 pointer-events-none truncate absolute text-xs text-left p-2 pt-5"
+          aria-hidden="true"
+        >
           {props.cell.item.characterName}
         </span>
       </button>
       <Show when={props.onInspect}>
         <button
-          class="gallery-inspect"
+          class="right-2 bottom-2 absolute"
           onClick={props.onInspect}
           aria-label={`View ${kind()} details`}
         >
@@ -384,7 +394,7 @@ export default function GalleryGrid(props: {
   return (
     <div
       ref={viewport}
-      class="gallery-browser-scroll"
+      class="gallery-browser-scroll flex-1 min-h-0 overflow-auto p-4 pt-3 mobile:overflow-visible mobile:py-2 mobile:px-3"
       classList={{ hidden: props.hidden }}
       tabIndex={-1}
       aria-label="Saved images and videos; use arrow keys to browse"
@@ -392,7 +402,7 @@ export default function GalleryGrid(props: {
     >
       <div
         ref={stage}
-        class="gallery-rows"
+        class="w-full relative"
         role="list"
         aria-label="Saved images and videos"
         style={{ height: `${layout().height}px` }}
@@ -400,7 +410,7 @@ export default function GalleryGrid(props: {
         <For each={renderedRows()}>
           {(row) => (
             <div
-              class="gallery-row"
+              class="left-0 right-0 absolute"
               role="presentation"
               style={{ top: `${row.top}px`, height: `${row.height}px` }}
             >

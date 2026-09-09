@@ -56,6 +56,23 @@ function requireMessage(id: number) {
   return msg;
 }
 
+function requireActiveBranch(message: ReturnType<typeof requireMessage>): void {
+  if (!getActivePath(message.conversationId).some((node) => node.id === message.id)) {
+    throw new HttpError(400, 'message is not on the active branch');
+  }
+}
+
+/** Selecting a prepared swipe exposes content but ordinary navigation preserves recency. */
+function revealSwipe(id: number, conversationId: number, wasUnread: boolean): number {
+  markSwipeRead(id);
+  if (wasUnread) touchConversation(conversationId);
+  const leaf = activateMessage(id);
+  broadcastTree(conversationId);
+  prepareNextSwipe(leaf);
+  invalidate('conversations');
+  return leaf;
+}
+
 function requireIdle(conversationId: number): void {
   cancelBackgroundSwipe(conversationId);
   if (hasActiveGeneration(conversationId)) {
@@ -195,12 +212,7 @@ route.post('/api/messages/:id/advance', ({ params, body }) => {
         }
       }
     }
-    markSwipeRead(nextId);
-    if (wasUnread) touchConversation(msg.conversationId);
-    const leaf = activateMessage(nextId);
-    broadcastTree(msg.conversationId);
-    prepareNextSwipe(leaf);
-    invalidate('conversations');
+    const leaf = revealSwipe(nextId, msg.conversationId, wasUnread);
     return { activeLeafId: leaf, assistantMessageId: null };
   }
 
@@ -287,9 +299,7 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
 route.patch('/api/messages/:id', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
-  if (typeof b.content !== 'string') throw new HttpError(400, 'content is required');
-  const content = b.content.trim();
-  if (!content) throw new HttpError(400, 'content is required');
+  const content = requiredString(b, 'content');
   requireBodyPrecondition(msg.conversationId, b);
   if (msg.status === 'streaming') throw new HttpError(409, 'message is still streaming');
   // Pending renders use a prompt snapshot; editing would mismatch image and description.
@@ -313,8 +323,7 @@ route.patch('/api/messages/:id', ({ params, body }) => {
 route.post('/api/messages/:id/edit-branch', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = objectBody(body);
-  const content = (typeof b.content === 'string' ? b.content : '').trim();
-  if (!content) throw new HttpError(400, 'content is required');
+  const content = requiredString(b, 'content');
   requireBodyPrecondition(msg.conversationId, b);
   requireIdle(msg.conversationId);
   const sibling = appendMessage(
@@ -356,12 +365,7 @@ route.post('/api/messages/:id/activate', ({ params, body }) => {
       promoteBackgroundGeneration(msg.id);
     } else requireIdle(msg.conversationId);
   }
-  markSwipeRead(msg.id);
-  if (wasUnread) touchConversation(msg.conversationId);
-  const leaf = activateMessage(msg.id);
-  broadcastTree(msg.conversationId);
-  prepareNextSwipe(leaf);
-  invalidate('conversations');
+  const leaf = revealSwipe(msg.id, msg.conversationId, wasUnread);
   return { activeLeafId: leaf };
 });
 
@@ -482,9 +486,7 @@ route.post('/api/messages/:id/move', ({ params, body }) => {
   }
   requireBodyPrecondition(msg.conversationId, body);
   requireIdle(msg.conversationId);
-  if (!getActivePath(msg.conversationId).some((m) => m.id === msg.id)) {
-    throw new HttpError(400, 'message is not on the active branch');
-  }
+  requireActiveBranch(msg);
   const target = direction === 'down' ? msg.id : msg.parentId;
   if (target == null) throw new HttpError(400, 'message is already at the top');
   // Reordering changes the context every prepared swipe was generated for.
@@ -550,9 +552,7 @@ route.post('/api/messages/:id/render-image', ({ params, body }) => {
   const msg = requireMessage(positiveId(params.id));
   const b = body == null ? {} : objectBody(body);
   requireBodyPrecondition(msg.conversationId, b);
-  if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
-    throw new HttpError(400, 'message is not on the active branch');
-  }
+  requireActiveBranch(msg);
   if (msg.imagePending) {
     throw new HttpError(409, 'an image render is already running for this message');
   }
@@ -570,66 +570,53 @@ route.post('/api/messages/:id/render-image', ({ params, body }) => {
   return { rendering: true, jobId: job.id };
 });
 
-route.post('/api/messages/:id/active-image', ({ params, body }) => {
-  const msg = requireMessage(positiveId(params.id));
-  const b = objectBody(body);
-  requireBodyPrecondition(msg.conversationId, b);
-  if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
-    throw new HttpError(400, 'message is not on the active branch');
-  }
-  const index = b.index;
-  if (
-    typeof index !== 'number' ||
-    !Number.isSafeInteger(index) ||
-    index < 0 ||
-    index >= msg.media.length
-  ) {
-    throw new HttpError(400, 'index out of range');
-  }
-  stmt('UPDATE messages SET active_image = ? WHERE id = ?').run(index, msg.id);
-  bumpConversationRevision(msg.conversationId);
-  markMessageDirty(msg.conversationId, msg.id);
-  broadcastTree(msg.conversationId);
-});
-
-/** Remove one image alternative, preserving the prompt and selecting the nearest survivor. */
-route.post('/api/messages/:id/delete-image', ({ params, body }) => {
-  const msg = requireMessage(positiveId(params.id));
-  const b = objectBody(body);
-  requireBodyPrecondition(msg.conversationId, b);
-  if (!getActivePath(msg.conversationId).some((active) => active.id === msg.id)) {
-    throw new HttpError(400, 'message is not on the active branch');
-  }
-  if (msg.imagePending) {
-    throw new HttpError(409, 'an image render is running for this message');
-  }
-  const index = b.index;
-  if (
-    typeof index !== 'number' ||
-    !Number.isSafeInteger(index) ||
-    index < 0 ||
-    index >= msg.media.length
-  ) {
-    throw new HttpError(400, 'index out of range');
-  }
-  const images = msg.media.map((asset) => asset.url);
-  const [removed] = images.splice(index, 1);
-  const activeImage = images.length > 0 ? Math.min(index, images.length - 1) : 0;
-  transaction(() => {
-    stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
-      JSON.stringify(images),
-      activeImage,
-      msg.id,
-    );
-    bumpConversationRevision(msg.conversationId);
-    touchConversation(msg.conversationId);
+/** Both image mutations address an alternative on the current branch. Deletion selects
+ * the nearest survivor and releases its file; selection alone preserves chat recency. */
+for (const action of ['active-image', 'delete-image'] as const) {
+  route.post(`/api/messages/:id/${action}`, ({ params, body }) => {
+    const msg = requireMessage(positiveId(params.id));
+    const b = objectBody(body);
+    requireBodyPrecondition(msg.conversationId, b);
+    requireActiveBranch(msg);
+    const deleting = action === 'delete-image';
+    if (deleting && msg.imagePending) {
+      throw new HttpError(409, 'an image render is running for this message');
+    }
+    const index = b.index;
+    if (
+      typeof index !== 'number' ||
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index >= msg.media.length
+    ) {
+      throw new HttpError(400, 'index out of range');
+    }
+    if (!deleting) {
+      stmt('UPDATE messages SET active_image = ? WHERE id = ?').run(index, msg.id);
+      bumpConversationRevision(msg.conversationId);
+      markMessageDirty(msg.conversationId, msg.id);
+      broadcastTree(msg.conversationId);
+      return;
+    }
+    const images = msg.media.map((asset) => asset.url);
+    const [removed] = images.splice(index, 1);
+    const activeImage = images.length > 0 ? Math.min(index, images.length - 1) : 0;
+    transaction(() => {
+      stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
+        JSON.stringify(images),
+        activeImage,
+        msg.id,
+      );
+      bumpConversationRevision(msg.conversationId);
+      touchConversation(msg.conversationId);
+    });
+    markMessageDirty(msg.conversationId, msg.id);
+    deleteImageFiles([removed!]);
+    broadcastTree(msg.conversationId);
+    invalidate('conversations');
+    return publicMessage(getMessage(msg.id));
   });
-  markMessageDirty(msg.conversationId, msg.id);
-  deleteImageFiles([removed!]);
-  broadcastTree(msg.conversationId);
-  invalidate('conversations');
-  return publicMessage(getMessage(msg.id));
-});
+}
 
 route.post('/api/generations/:id/stop', ({ params, body }) => {
   const mid = positiveId(params.id);

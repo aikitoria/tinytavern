@@ -41,14 +41,16 @@ export default function GallerySourceImages(props: {
             Retry
           </button>
         </Show>
-        <div class="gallery-source-images">
+        <div class="grid gap-2 grid-cols-1">
           <For each={inputs()?.images}>
             {(input) => (
               <Show
                 when={input.asset}
                 fallback={
-                  <div class="gallery-source-image gallery-source-deleted">
-                    <span class="gallery-source-placeholder">Deleted image</span>
+                  <div class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left text-muted cursor-zoom-in cursor-default [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm">
+                    <span class="h-20 border border-dashed border-line grid place-items-center w-full rounded-sm">
+                      Deleted image
+                    </span>
                     <span>{INPUT_LABELS[input.slot]}</span>
                   </div>
                 }
@@ -56,7 +58,7 @@ export default function GallerySourceImages(props: {
                 {(asset) => (
                   <button
                     type="button"
-                    class="gallery-source-image"
+                    class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left cursor-zoom-in [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm"
                     aria-label={`View ${INPUT_LABELS[input.slot].toLowerCase()}`}
                     onClick={() => props.onView(asset().url)}
                   >

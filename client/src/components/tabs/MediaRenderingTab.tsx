@@ -1,5 +1,4 @@
 import { nextCollectionId } from '@tinytavern/shared';
-import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { exportWorkflow, importWorkflow, transferObject } from '@tinytavern/shared';
 import { For, Show } from 'solid-js';
 import {
@@ -13,85 +12,51 @@ import {
   type MediaWorkflow,
 } from '@tinytavern/shared';
 import { state } from '../../state/store.ts';
-import SettingLabel, { createDefaultField } from '../SettingField.tsx';
-import Select from '../Select.tsx';
-import NamedCollectionToolbar, {
-  type NamedCollectionToolbarHandle,
-} from '../NamedCollectionToolbar.tsx';
-import { uniqueCollectionName } from '../../state/collectionNames.ts';
-import MacroTextarea from '../MacroTextarea.tsx';
+import FormField from '../FormFields.tsx';
+import { createNamedCollection } from '../NamedCollectionEditor.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import { mediaSettingsDraft } from './mediaSettingsDraft.tsx';
 
 export default function MediaRenderingTab() {
   const form = mediaSettingsDraft('mediaRendering');
-  const url = createDefaultField(() => DEFAULT_MEDIA_RENDERING.comfyUrl);
-  const timeout = createDefaultField(() => String(DEFAULT_MEDIA_RENDERING.jobTimeoutSeconds));
-  const avatar = createDefaultField(() => '');
-  const updateWorkflow = (id: string, patch: Partial<MediaWorkflow>) =>
-    form.setDraft((current) => ({
-      ...current,
-      workflows: current.workflows.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-    }));
   const Group = (props: {
     operation: MediaOperation;
     label: string;
     referenceCount: MediaWorkflow['referenceCount'];
   }) => {
-    let toolbar!: NamedCollectionToolbarHandle;
     const key = () => mediaWorkflowKey(props.operation, props.referenceCount);
-    const workflows = () =>
-      form
-        .draft()
-        .workflows.filter(
-          (item) =>
-            item.operation === props.operation && item.referenceCount === props.referenceCount,
-        );
-    const selected = () => form.draft().defaults[key()] ?? '';
-    const current = () => workflows().find((item) => item.id === selected());
-    const json = createDefaultField(() => '');
-    const select = (id: string) => {
-      form.setDraft((value) => ({ ...value, defaults: { ...value.defaults, [key()]: id } }));
-    };
-    const add = (duplicate = false) => {
-      const source = current();
-      const id = nextCollectionId(form.draft().workflows);
-      const baseName = duplicate && source ? `${source.name} (copy)` : 'New workflow';
-      const name = uniqueCollectionName(baseName, workflows());
-      form.setDraft((value) => ({
-        ...value,
-        defaults: { ...value.defaults, [key()]: id },
-        workflows: [
-          ...value.workflows,
-          {
-            id,
-            name,
-            operation: props.operation,
-            referenceCount: props.referenceCount,
-            json: source?.json ?? '',
-            galleryPromptPresetId: source?.galleryPromptPresetId ?? null,
-            chatPromptPresetId: source?.chatPromptPresetId ?? null,
-          },
-        ],
-      }));
-    };
-    const remove = () => {
-      const id = selected();
-      const choices = workflows();
-      const index = choices.findIndex((item) => item.id === id);
-      const next = choices[index + 1] ?? choices[index - 1];
-      form.setDraft((value) => {
-        const defaults = { ...value.defaults };
-        if (next) defaults[key()] = next.id;
-        else delete defaults[key()];
-        return {
-          ...value,
-          workflows: value.workflows.filter((item) => item.id !== id),
-          defaults,
-          avatarWorkflowId: value.avatarWorkflowId === id ? null : value.avatarWorkflowId,
-        };
-      });
-    };
+    const collection = createNamedCollection<MediaWorkflow>({
+      items: () => form.draft().workflows,
+      filter: (item) =>
+        item.operation === props.operation && item.referenceCount === props.referenceCount,
+      selected: () => form.draft().defaults[key()] ?? '',
+      identify: (item) => item.id,
+      newName: 'New workflow',
+      adjacentOnDelete: true,
+      create: (source, name) => ({
+        id: nextCollectionId(form.draft().workflows),
+        name,
+        operation: props.operation,
+        referenceCount: props.referenceCount,
+        json: source?.json ?? '',
+        galleryPromptPresetId: source?.galleryPromptPresetId ?? null,
+        chatPromptPresetId: source?.chatPromptPresetId ?? null,
+      }),
+      commit: (workflows, id, removed) =>
+        form.setDraft((value) => {
+          const defaults = { ...value.defaults };
+          if (id || !removed) defaults[key()] = id;
+          else delete defaults[key()];
+          return {
+            ...value,
+            workflows,
+            defaults,
+            avatarWorkflowId:
+              removed && value.avatarWorkflowId === removed.id ? null : value.avatarWorkflowId,
+          };
+        }),
+    });
+    const { current, patch } = collection;
     return (
       <div
         class="form-stack field-group"
@@ -104,31 +69,17 @@ export default function MediaRenderingTab() {
             ? ` · ${props.referenceCount} reference${props.referenceCount === 1 ? '' : 's'}`
             : ''}
         </label>
-        <NamedCollectionToolbar
-          ref={toolbar}
+        <collection.Toolbar
           ariaLabel={`${props.label} saved workflows`}
-          selected={selected()}
-          options={workflows().map((item) => ({ value: item.id, label: item.name }))}
-          buttonLabel={
-            current()?.name ?? (workflows().length ? 'Select a workflow' : 'No saved workflows')
-          }
-          hasSelection={!!current()}
-          name={current()?.name ?? ''}
           nameLabel="Workflow name"
-          onRename={(name) => updateWorkflow(selected(), { name })}
-          onSelect={select}
-          onNew={() => add()}
-          onDuplicate={() => add(true)}
-          onDelete={remove}
-        >
-          <SettingsTransferButtons
-            type={`workflow:${key()}`}
-            onError={form.setError}
-            disabledExport={!current()}
-            exportData={() => exportWorkflow(current()!, state.settings)}
-            importData={(data) => {
+          emptyLabel="No saved workflows"
+          unselectedLabel="Select a workflow"
+          transfer={{
+            type: `workflow:${key()}`,
+            onError: form.setError,
+            exportData: (workflow) => exportWorkflow(workflow!, state.settings),
+            importData: (data, previous) => {
               const source = transferObject(data);
-              const previous = current();
               const workflow = importWorkflow(
                 source,
                 previous ? [{ ...previous, name: String(source.name) }] : [],
@@ -139,32 +90,28 @@ export default function MediaRenderingTab() {
                 workflow.referenceCount !== props.referenceCount
               )
                 throw new Error('This workflow belongs to another operation');
-              form.setDraft((value) => ({
-                ...value,
-                workflows: previous
-                  ? value.workflows.map((item) => (item.id === previous.id ? workflow : item))
-                  : [...value.workflows, workflow],
-                defaults: { ...value.defaults, [key()]: workflow.id },
-              }));
-              toolbar.closeRename();
-            }}
-          />
-        </NamedCollectionToolbar>
+              return workflow;
+            },
+          }}
+        />
         <Show when={current()}>
-          <SettingLabel field={json}>
-            Workflow JSON
-            <Show when={props.operation !== 'image-describe'}>
-              <MacroHelp rows={[['{{prompt}}', 'Final prompt text']]} />
-            </Show>
-          </SettingLabel>
-          <MacroTextarea
-            ref={json.ref}
+          <FormField
+            label={
+              <>
+                Workflow JSON
+                <Show when={props.operation !== 'image-describe'}>
+                  <MacroHelp rows={[['{{prompt}}', 'Final prompt text']]} />
+                </Show>
+              </>
+            }
+            kind="macro"
             value={current()?.json ?? ''}
-            onText={(value) => {
-              if (current()?.json !== value) updateWorkflow(selected(), { json: value });
+            defaultValue=""
+            onChange={(value) => {
+              if (current()?.json !== value) patch({ json: value });
             }}
             rows={12}
-            class="mono"
+            mono
             keys={[
               'prompt',
               'seed',
@@ -184,25 +131,22 @@ export default function MediaRenderingTab() {
           >
             {(mode) => {
               const field = mode === 'chat' ? 'chatPromptPresetId' : 'galleryPromptPresetId';
-              const reset = createDefaultField(() => '');
               const presets = () =>
                 state.settings[
                   mediaPromptSettingsKey(props.operation, mode === 'chat')
                 ].presets.filter((item) => item.operation === props.operation);
               return (
                 <Show when={presets().length > 0}>
-                  <SettingLabel field={reset}>
-                    {mode === 'chat' ? 'Chat prompt preset' : 'Gallery prompt preset'}
-                  </SettingLabel>
-                  <Select
-                    ref={reset.ref}
+                  <FormField
+                    label={mode === 'chat' ? 'Chat prompt preset' : 'Gallery prompt preset'}
+                    defaultValue=""
                     ariaLabel={`${props.label} ${mode} prompt preset`}
                     value={current()?.[field] ?? ''}
                     options={[
                       { value: '', label: `Use ${mode} default` },
                       ...presets().map((item) => ({ value: item.id, label: item.name })),
                     ]}
-                    onChange={(value) => updateWorkflow(selected(), { [field]: value || null })}
+                    onChange={(value) => patch({ [field]: value || null })}
                   />
                 </Show>
               );
@@ -213,43 +157,35 @@ export default function MediaRenderingTab() {
     );
   };
   return (
-    <div class="form">
+    <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
       <section class="settings-section">
         <h3>Connection</h3>
-        <SettingLabel field={url}>ComfyUI URL</SettingLabel>
-        <input
-          ref={url.ref}
+        <FormField
+          label="ComfyUI URL"
           value={form.draft().comfyUrl}
-          onInput={(event) =>
-            form.setDraft((value) => ({ ...value, comfyUrl: event.currentTarget.value }))
-          }
+          defaultValue={DEFAULT_MEDIA_RENDERING.comfyUrl}
+          onChange={(comfyUrl) => form.setDraft((value) => ({ ...value, comfyUrl }))}
         />
-        <SettingLabel field={timeout}>Maximum job time (seconds)</SettingLabel>
-        <input
-          ref={timeout.ref}
-          type="number"
+        <FormField
+          label="Maximum job time (seconds)"
+          kind="number"
           min="0"
           max="86400"
           value={form.draft().jobTimeoutSeconds}
-          onInput={(event) =>
-            form.setDraft((value) => ({
-              ...value,
-              jobTimeoutSeconds: Number(event.currentTarget.value),
-            }))
+          defaultValue={DEFAULT_MEDIA_RENDERING.jobTimeoutSeconds}
+          onChange={(jobTimeoutSeconds) =>
+            form.setDraft((value) => ({ ...value, jobTimeoutSeconds: jobTimeoutSeconds || 0 }))
           }
+          hint="0 means no time limit. A limit of 60–86400 seconds applies from submission to completion, including queue time. Prompt preparation has a separate inactivity timeout."
         />
-        <p class="hint">
-          0 means no time limit. A limit of 60–86400 seconds applies from submission to completion,
-          including queue time. Prompt preparation has a separate inactivity timeout.
-        </p>
       </section>
       <section class="settings-section">
         <h3>Avatars</h3>
-        <SettingLabel field={avatar}>Avatar workflow</SettingLabel>
-        <Select
-          ref={avatar.ref}
+        <FormField
+          label="Avatar workflow"
           ariaLabel="Avatar image workflow"
           value={form.draft().avatarWorkflowId ?? ''}
+          defaultValue=""
           options={[
             { value: '', label: 'Same as Create image' },
             ...form
@@ -264,7 +200,7 @@ export default function MediaRenderingTab() {
       </section>
       <details class="settings-section">
         <summary>Workflow setup help</summary>
-        <ol class="workflow-setup-steps hint">
+        <ol class="pl-4 hint [&>li+li]:mt-3 [&_strong]:text-foreground [&_strong]:font-semibold [&_p]:m-0 [&_p]:mt-2">
           <li>
             <strong>Connect the prompt.</strong> Add a Text node from utilities → primitive, enter{' '}
             <code>{'{{prompt}}'}</code>, and connect it to the prompt input. TinyTavern replaces
@@ -284,8 +220,8 @@ export default function MediaRenderingTab() {
             <strong>Choose which settings appear in the tool.</strong> Connect a constant node to
             the setting you want to control, then rename it using one of these examples. Its current
             value becomes the default.
-            <div class="workflow-setup-table-scroll">
-              <table class="workflow-setup-table">
+            <div class="overflow-x-auto mt-2">
+              <table class="border-collapse w-full text-left text-size-inherit [&_th]:text-foreground [&_th]:font-semibold [&_:is(th,_td)]:py-1 [&_:is(th,_td)]:px-2 [&_:is(th,_td)]:align-top [&_:is(th,_td):first-child]:pl-0">
                 <thead>
                   <tr>
                     <th scope="col">Node</th>
@@ -293,42 +229,25 @@ export default function MediaRenderingTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>Int</td>
-                    <td>
-                      <code>Steps [input: min=1, max=100, step=1]</code>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Float</td>
-                    <td>
-                      <code>Guidance [input: min=0, max=20, step=0.1]</code>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Text</td>
-                    <td>
-                      <code>Style [input]</code>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Text (Multiline)</td>
-                    <td>
-                      <code>Negative prompt [input]</code>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Boolean</td>
-                    <td>
-                      <code>Enable upscale [input]</code>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Resolution Selector</td>
-                    <td>
-                      <code>Resolution [input]</code>
-                    </td>
-                  </tr>
+                  <For
+                    each={[
+                      ['Int', 'Steps [input: min=1, max=100, step=1]'],
+                      ['Float', 'Guidance [input: min=0, max=20, step=0.1]'],
+                      ['Text', 'Style [input]'],
+                      ['Text (Multiline)', 'Negative prompt [input]'],
+                      ['Boolean', 'Enable upscale [input]'],
+                      ['Resolution Selector', 'Resolution [input]'],
+                    ]}
+                  >
+                    {([node, title]) => (
+                      <tr>
+                        <td>{node}</td>
+                        <td>
+                          <code>{title}</code>
+                        </td>
+                      </tr>
+                    )}
+                  </For>
                 </tbody>
               </table>
             </div>

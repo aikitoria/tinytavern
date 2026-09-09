@@ -11,16 +11,13 @@ export default function PresetsTab() {
   const nameEl = createDefaultField(() => '');
   const contentEl = createDefaultField(() => '');
   const editor = createEntityEditor({
+    ...api.presets,
     items: () => state.presets,
     load: (preset) => {
       nameEl.value = preset?.name ?? '';
       contentEl.value = preset?.content ?? '';
     },
     data: () => ({ name: nameEl.value, content: contentEl.value }),
-    create: api.createPreset,
-    patch: api.patchPreset,
-    remove: api.deletePreset,
-    duplicate: api.duplicatePreset,
     deletePrompt: 'Delete this preset?',
     initialId: () => state.settings.defaultPresetId,
     emptySelection: 'new',

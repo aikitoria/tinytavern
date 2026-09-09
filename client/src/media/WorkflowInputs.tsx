@@ -16,7 +16,7 @@ export default function WorkflowInputs(props: {
         const value = () => props.values[control.key] ?? control.value;
         if (control.type === 'select') {
           return (
-            <div class="workflow-input">
+            <div class="workflow-input items-center grid min-w-0 gap-y-2 gap-x-3 [&>*]:min-w-0 narrow-panel:[&:not(.workflow-input-boolean)]:grid-cols-1 narrow-panel:[&:not(.workflow-input-boolean)]:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)] [&:where(.workflow-input-multiline)]:grid-cols-[minmax(0,_1fr)]">
               <label>{control.label}</label>
               <Select
                 ariaLabel={control.label}
@@ -30,7 +30,7 @@ export default function WorkflowInputs(props: {
         }
         if (control.type === 'boolean') {
           return (
-            <div class="workflow-input workflow-input-boolean">
+            <div class="workflow-input items-center grid min-w-0 workflow-input-boolean min-h-control gap-y-2 gap-x-3 [&>*]:min-w-0 narrow-panel:[&:not(.workflow-input-boolean)]:grid-cols-1 narrow-panel:[&:not(.workflow-input-boolean)]:gap-1 [&>input]:justify-self-start [&>input]:w-auto [&>input]:m-0 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)] [&:where(.workflow-input-multiline)]:grid-cols-[minmax(0,_1fr)]">
               <label for={id}>{control.label}</label>
               <input
                 id={id}
@@ -45,7 +45,7 @@ export default function WorkflowInputs(props: {
         if (control.type === 'string') {
           return (
             <div
-              class="workflow-input"
+              class="workflow-input items-center grid min-w-0 gap-y-2 gap-x-3 [&>*]:min-w-0 narrow-panel:[&:not(.workflow-input-boolean)]:grid-cols-1 narrow-panel:[&:not(.workflow-input-boolean)]:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)] [&:where(.workflow-input-multiline)]:grid-cols-[minmax(0,_1fr)]"
               classList={{ 'workflow-input-multiline': control.multiline }}
             >
               <label for={id}>{control.label}</label>
@@ -70,8 +70,8 @@ export default function WorkflowInputs(props: {
           );
         }
         return (
-          <div class="workflow-input">
-            <div class="setting-label">
+          <div class="workflow-input items-center grid min-w-0 gap-y-2 gap-x-3 [&>*]:min-w-0 narrow-panel:[&:not(.workflow-input-boolean)]:grid-cols-1 narrow-panel:[&:not(.workflow-input-boolean)]:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)] [&:where(.workflow-input-multiline)]:grid-cols-[minmax(0,_1fr)]">
+            <div class="setting-label flex items-center gap-2 min-h-6 mt-2 [&>label]:m-0 [&>label]:min-w-0">
               <label for={id}>{control.label}</label>
               <Show when={control.input === 'megapixels'}>
                 <ResolutionHelp />

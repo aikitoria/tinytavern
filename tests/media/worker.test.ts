@@ -1,3 +1,4 @@
+import { mockComfy } from '../support/comfy.ts';
 import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
@@ -23,14 +24,8 @@ test('media jobs', async () => {
   const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
   const { requireMediaJob, mediaJobRow, mediaJobDto, updateMediaJob, observeMediaJob } =
     await import('../../server/src/mediaJobStore.ts');
-  const {
-    createMediaJob,
-    createMediaJobFromAsset,
-    editMediaJob,
-    startMediaJob,
-    cancelMediaJob,
-    retryMediaRetrieval,
-  } = await import('../../server/src/mediaJobs.ts');
+  const { createMediaJob, createMediaJobFromAsset, editMediaJob, startMediaJob, cancelMediaJob } =
+    await import('../../server/src/mediaJobs.ts');
   const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
     await import('../../server/src/mediaWorker.ts');
   const { drainRemoteCleanup } = await import('../../server/src/mediaRemote.ts');
@@ -73,108 +68,32 @@ test('media jobs', async () => {
     },
   });
 
-  interface SubmittedJob {
-    id: string;
-    state: 'queued' | 'done' | 'cancelled';
-    prompt: Record<string, { inputs: Record<string, unknown> }>;
-    extra: Record<string, unknown>;
-    extraOutput: 'image' | 'video' | null;
-  }
-  const submitted = new Map<string, SubmittedJob>();
-  const uploads: { name: string; subfolder: string; data: Buffer }[] = [];
   const deleted = new Set<string>();
-  const deleteAttempts = new Map<string, number>();
-  let submitCount = 0;
-  let loseAcceptance = false;
   let holdQueue = false;
-  let failDownloads = false;
   let holdDownloads = false;
   let downloadAborted = false;
-  let failDeletion = false;
-  let extraOutput: SubmittedJob['extraOutput'] = null;
+  let extraOutput: 'image' | 'video' | null = null;
   let downloadCount = 0;
-  const cancellations: string[] = [];
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = (async (
-    input: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ) => {
-    const url = new URL(String(input));
-    assert.equal(url.origin, base, 'Tests never contact a live Comfy endpoint');
-    if (url.pathname === '/upload/image') {
-      const form = await new Response(init!.body).formData();
-      const image = form.get('image') as File;
-      const subfolder = String(form.get('subfolder'));
-      uploads.push({ name: image.name, subfolder, data: Buffer.from(await image.arrayBuffer()) });
-      return Response.json({ name: image.name, subfolder, type: 'input' });
-    }
-    if (url.pathname === '/prompt') {
-      const body = JSON.parse(String(init!.body));
-      submitCount++;
-      assert(!submitted.has(body.prompt_id), 'A Comfy prompt is submitted at most once');
-      submitted.set(body.prompt_id, {
-        id: body.prompt_id,
-        state: holdQueue ? 'queued' : 'done',
-        prompt: body.prompt,
-        extra: body.extra_data,
-        extraOutput,
-      });
-      if (loseAcceptance) {
-        loseAcceptance = false;
-        throw new TypeError('Connection lost after Comfy accepted the job');
-      }
-      return Response.json({ prompt_id: body.prompt_id });
-    }
-    if (url.pathname === '/queue') {
-      const queued = [...submitted.values()].filter((job) => job.state === 'queued');
-      return Response.json({ queue_running: [], queue_pending: queued.map((job) => [1, job.id]) });
-    }
-    if (url.pathname.startsWith('/history/')) {
-      const id = url.pathname.slice('/history/'.length);
-      const job = submitted.get(id);
-      if (!job || job.state === 'queued' || job.state === 'cancelled') {
-        return Response.json({});
-      }
-      const output = (filename: string, type = 'output') => ({ filename, subfolder: id, type });
-      return Response.json({
-        [id]: {
-          status: { completed: true, status_str: 'success' },
-          outputs: {
-            '9': { images: [output('first.png'), output('second.png')] },
-            metadata: { files: [output('trace.json', 'temp')] },
-            ...(job.extraOutput === 'image'
-              ? { '10': { images: [output('preview.png', 'temp')] } }
-              : job.extraOutput === 'video'
-                ? { '10': { videos: [output('extra.webm')] } }
-                : {}),
-          },
-        },
-      });
-    }
-    if (url.pathname.endsWith('/cancel')) {
-      const id = url.pathname.split('/')[3]!;
-      cancellations.push(id);
-      const job = submitted.get(id);
-      if (job) {
-        job.state = 'cancelled';
-      }
-      return Response.json({ cancelled: Boolean(job) });
-    }
-    if (url.pathname === '/view') {
-      const identity = url.searchParams.toString();
-      if (init?.method === 'DELETE') {
-        deleteAttempts.set(identity, (deleteAttempts.get(identity) ?? 0) + 1);
-        if (failDeletion) {
-          return new Response('retry', { status: 503 });
-        }
-        deleted.add(identity);
+  const comfy = mockComfy({
+    submit(_body, job) {
+      job.state = holdQueue ? 'queued' : 'done';
+      const output = (filename: string, type = 'output') => ({ filename, subfolder: job.id, type });
+      job.outputs = {
+        '9': { images: [output('first.png'), output('second.png')] },
+        metadata: { files: [output('trace.json', 'temp')] },
+        ...(extraOutput === 'image'
+          ? { '10': { images: [output('preview.png', 'temp')] } }
+          : extraOutput === 'video'
+            ? { '10': { videos: [output('extra.webm')] } }
+            : {}),
+      };
+    },
+    view(url, request) {
+      if (request.method === 'DELETE') {
+        deleted.add(url.searchParams.toString());
         return new Response(null, { status: 204 });
       }
       downloadCount++;
-      if (failDownloads && url.searchParams.get('filename') === 'second.png') {
-        return new Response('temporary failure', { status: 503 });
-      }
       if (holdDownloads) {
         return new Response(
           new ReadableStream({
@@ -185,9 +104,15 @@ test('media jobs', async () => {
         );
       }
       return new Response(raster, { headers: { 'content-type': 'image/png' } });
-    }
-    throw new Error(`Unexpected mock Comfy request: ${url.pathname}`);
-  }) as unknown as typeof fetch;
+    },
+  });
+  const { jobs: submitted, uploads, cancellations } = comfy;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input, init) => {
+    const request = new Request(String(input), init);
+    assert.equal(new URL(request.url).origin, base, 'Tests never contact a live Comfy endpoint');
+    return comfy.fetch(request);
+  }) as typeof fetch;
 
   async function waitFor(id: number, state: MediaJob['state']): Promise<MediaJob> {
     // Completion is transient: capture its notification before automatic deletion.
@@ -224,11 +149,9 @@ test('media jobs', async () => {
     const first = draft('idempotent');
     assert.equal(draft('idempotent').id, first.id);
     assert.throws(() => requireMediaJob(first.id, first.revision - 1), /changed/);
-    loseAcceptance = false;
-    failDeletion = false;
     startMediaJob(requireMediaJob(first.id), {}, false);
     const finished = await waitFor(first.id, 'succeeded');
-    assert.equal(submitCount, 1, 'Lost acceptance is reconciled without another submission');
+    assert.equal(submitted.size, 1, 'Lost acceptance is reconciled without another submission');
     assert.equal(finished.outputs.length, 2);
     for (const asset of finished.outputs) {
       assert.match(
@@ -252,7 +175,6 @@ test('media jobs', async () => {
       null,
     );
 
-    failDeletion = false;
     stmt("UPDATE media_remote_files SET retry_at = 0 WHERE state = 'pending'").run();
     await drainRemoteCleanup();
     assert(

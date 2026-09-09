@@ -1,40 +1,21 @@
+import { testApi } from '../support/http.ts';
+import { renderMediaFixture } from '../support/media.ts';
+import { insertFixture } from '../support/fixtures.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
 
 databaseCase('media files', async () => {
   const { execFile } = await import('node:child_process');
-
   const { promisify } = await import('node:util');
-
   const { readFileSync, readdirSync, unlinkSync, writeFileSync } = await import('node:fs');
-
   const { basename, join } = await import('node:path');
-
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { IMAGES_DIR, stmt } = await import('../../server/src/db.ts');
   const { downloadMedia, InvalidMediaOutput } = await import('../../server/src/mediaFiles.ts');
   const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
   const runFile = promisify(execFile);
 
   const sourcePath = join(IMAGES_DIR, 'source.webm');
-  await runFile('ffmpeg', [
-    '-v',
-    'error',
-    '-f',
-    'lavfi',
-    '-i',
-    'color=c=blue:s=64x48:r=5:d=0.6',
-    '-c:v',
-    'libaom-av1',
-    '-cpu-used',
-    '8',
-    '-threads',
-    '2',
-    '-y',
-    sourcePath,
-  ]);
+  await renderMediaFixture(sourcePath, 64, 48, true, 0.6, 2);
   const original = readFileSync(sourcePath);
   const matroskaPath = join(IMAGES_DIR, 'source.mkv');
   await runFile('ffmpeg', ['-v', 'error', '-i', sourcePath, '-c', 'copy', '-y', matroskaPath]);
@@ -135,24 +116,12 @@ databaseCase('media files', async () => {
 });
 
 databaseCase('media thumbnails', async () => {
-  const { execFile } = await import('node:child_process');
-
-  const { once } = await import('node:events');
-
   const { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } =
     await import('node:fs');
-
   const { basename, extname, join } = await import('node:path');
-
   const { setTimeout: sleep } = await import('node:timers/promises');
-
-  const { promisify } = await import('node:util');
-
   const { DEFAULT_SETTINGS, GENERAL_TRANSFER_FIELDS } = await import('@tinytavern/shared');
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
-  const { requireTestIsolation } = await import('../support/isolation.ts');
-
-  requireTestIsolation();
   const { IMAGES_DIR, AVATAR_DIR, stmt, toGalleryItem, mediaAssetForPath } =
     await import('../../server/src/db.ts');
   const { saveImage, deleteImageFiles, sweepOrphanedImages, rasterImageFormat } =
@@ -165,10 +134,8 @@ databaseCase('media thumbnails', async () => {
   const { publicAvatar } = await import('../../server/src/mediaUrls.ts');
   const { saveAvatar, deleteAvatarFiles, readAvatarFile } =
     await import('../../server/src/routes/avatarStore.ts');
-  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/gallery.ts');
   await import('../../server/src/routes/settings.ts');
-  const runFile = promisify(execFile);
 
   async function fixture(
     name: string,
@@ -177,19 +144,7 @@ databaseCase('media thumbnails', async () => {
     video = false,
   ): Promise<GalleryItem> {
     const file = join(IMAGES_DIR, name);
-    await runFile('ffmpeg', [
-      '-v',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      `color=c=blue:s=${width}x${height}:r=5:d=0.2`,
-      ...(video ? ['-c:v', 'libaom-av1', '-cpu-used', '8'] : ['-frames:v', '1']),
-      '-threads',
-      '1',
-      '-y',
-      file,
-    ]);
+    await renderMediaFixture(file, width, height, video);
     const path = saveImage(extname(name), readFileSync(file));
     unlinkSync(file);
     const result =
@@ -230,30 +185,18 @@ databaseCase('media thumbnails', async () => {
     assert.deepEqual(imageDimensions(data), { width, height });
     assert.equal(current.updatedAt, 1, 'Generating a thumbnail must not reorder the gallery');
   }
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    routes: apiRoutes(),
-    fetch: () => new Response(null, { status: 404 }),
-    idleTimeout: 0,
-  });
-  const address = { port: server.port };
-  const base = `http://127.0.0.1:${address.port}`;
-  async function resize(size: unknown, status = 200) {
-    const response = await fetch(`${base}/api/settings`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+  const { server, request } = await testApi();
+  const resize = (size: unknown, status = 200) =>
+    request(
+      'PUT',
+      '/api/settings',
+      {
         galleryThumbnailSize: size,
         expectedRevision: getSettings().revision,
-      }),
-    });
-    assert.equal(response.status, status, await response.text());
-  }
-  async function remove(id: number) {
-    const response = await fetch(`${base}/api/gallery/${id}`, { method: 'DELETE' });
-    assert.equal(response.status, 204, await response.text());
-  }
+      },
+      status,
+    );
+  const remove = (id: number) => request('DELETE', `/api/gallery/${id}`, undefined, 204);
   try {
     assert.equal(DEFAULT_SETTINGS.galleryThumbnailSize, 512);
     assert(GENERAL_TRANSFER_FIELDS.includes('galleryThumbnailSize'));
@@ -262,17 +205,11 @@ databaseCase('media thumbnails', async () => {
     const tiny = await fixture('tiny.jpg', 32, 20);
     const video = await fixture('video.webm', 1280, 720, true);
     const avatarOriginal = readFileSync(file(landscape.image));
-    const characterId = Number(
-      stmt("INSERT INTO characters(name, created_at) VALUES ('Avatar test', 1)").run()
-        .lastInsertRowid,
-    );
+    const characterId = insertFixture('characters', { name: 'Avatar test', created_at: 1 });
     const avatar = saveAvatar('character', characterId, avatarOriginal);
     assert.match(avatar, /^\/avatars\/character-\d+\.png\?v=\d+$/);
     stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(avatar, characterId);
-    const personaId = Number(
-      stmt("INSERT INTO personas(name, created_at) VALUES ('Persona test', 1)").run()
-        .lastInsertRowid,
-    );
+    const personaId = insertFixture('personas', { name: 'Persona test', created_at: 1 });
     const personaAvatar = saveAvatar('persona', personaId, avatarOriginal);
     stmt('UPDATE personas SET avatar = ? WHERE id = ?').run(personaAvatar, personaId);
     const originals = [landscape, portrait, tiny, video].map((gallery) =>

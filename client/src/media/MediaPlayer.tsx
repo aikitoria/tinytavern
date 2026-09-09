@@ -56,7 +56,10 @@ export default function MediaPlayer(props: {
         </div>
       }
     >
-      <div class={`media-player ${props.class ?? ''}`} style={{ '--media-video-ratio': ratio() }}>
+      <div
+        class={`relative aspect-video-media [&>video]:absolute [&>video]:inset-0 [&>video]:block [&>video]:object-contain [&>video]:size-full [&.media-result]:h-auto [&.media-result]:aspect-video-media [&.media-result]:w-[min(100%,_calc(100cqh_*_var(--media-video-ratio)))] ${props.class ?? ''}`}
+        style={{ '--media-video-ratio': ratio() }}
+      >
         <video
           ref={(element) => {
             player = element;

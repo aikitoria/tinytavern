@@ -2,6 +2,17 @@ import { HttpError } from './router.ts';
 
 export type JsonObject = Record<string, unknown>;
 
+export function requireObject(value: unknown, label: string): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new HttpError(400, `${label} must be an object`);
+  return value as JsonObject;
+}
+
+export function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') throw new HttpError(400, `${label} must be a string`);
+  return value;
+}
+
 export function objectBody(body: unknown): JsonObject {
   if (body == null) return {};
   if (typeof body !== 'object' || Array.isArray(body)) {

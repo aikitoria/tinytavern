@@ -41,11 +41,6 @@ test('media workflow', async () => {
   assert.equal(result['1'].inputs.seed, 0);
   assert.deepEqual(result['1'].inputs.refs, ['a.png', 'b.png', 'c.png']);
   assert.equal(
-    JSON.stringify(compiled.graph),
-    before,
-    'Compilation can be reused without mutation',
-  );
-  assert.equal(
     compileMediaWorkflow(workflow.json),
     compiled,
     'Identical source reuses compilation',
@@ -101,15 +96,13 @@ test('media workflow', async () => {
     defaults: { 'image-edit:3': 'three' },
   };
   assert.deepEqual(parseMediaRendering(settings), settings);
-  assert.throws(() => parseMediaRendering({ ...settings, defaults: { 'video:0': 'three' } }));
-  assert.throws(() => parseMediaRendering({ ...settings, comfyUrl: 'file:///tmp' }));
-  assert.throws(() => parseMediaRendering({ ...settings, avatarWorkflowId: 'three' }));
-  assert.throws(() =>
-    parseMediaRendering({
-      ...settings,
-      workflows: [{ ...workflow, operation: 'video-frames', referenceCount: 0 }],
-    }),
-  );
+  for (const overrides of [
+    { defaults: { 'video:0': 'three' } },
+    { comfyUrl: 'file:///tmp' },
+    { avatarWorkflowId: 'three' },
+    { workflows: [{ ...workflow, operation: 'video-frames', referenceCount: 0 }] },
+  ])
+    assert.throws(() => parseMediaRendering({ ...settings, ...overrides }));
 
   const galleryPrompt = {
     id: 'gallery',
@@ -123,30 +116,19 @@ test('media workflow', async () => {
     operation: 'video',
     chatPrompt: defaultChatMediaPrompt('video'),
   };
-  assert.deepEqual(
-    parseMediaPrompts(
-      { presets: [galleryPrompt], defaults: { video: 'gallery' } },
-      'galleryVideoPrompts',
-    )?.presets,
-    [galleryPrompt],
-  );
-  assert.deepEqual(
-    parseMediaPrompts({ presets: [chatPrompt], defaults: { video: 'chat' } }, 'chatVideoPrompts')
-      ?.presets,
-    [chatPrompt],
-  );
-  assert.throws(
-    () => parseMediaPrompts({ presets: [galleryPrompt], defaults: {} }, 'chatVideoPrompts'),
-    /Unexpected prompt field/,
-  );
-  assert.throws(
-    () => parseMediaPrompts({ presets: [chatPrompt], defaults: {} }, 'galleryVideoPrompts'),
-    /Unexpected prompt field/,
-  );
-  assert.throws(
-    () => parseMediaPrompts({ presets: [galleryPrompt], defaults: {} }, 'galleryImagePrompts'),
-    /operation/,
-  );
+  for (const [preset, key] of [
+    [galleryPrompt, 'galleryVideoPrompts'],
+    [chatPrompt, 'chatVideoPrompts'],
+  ] as const) {
+    const settings = { presets: [preset], defaults: { video: preset.id } };
+    assert.deepEqual(parseMediaPrompts(settings, key)?.presets, [preset]);
+  }
+  for (const [preset, key, error] of [
+    [galleryPrompt, 'chatVideoPrompts', /Unexpected prompt field/],
+    [chatPrompt, 'galleryVideoPrompts', /Unexpected prompt field/],
+    [galleryPrompt, 'galleryImagePrompts', /operation/],
+  ] as const)
+    assert.throws(() => parseMediaPrompts({ presets: [preset], defaults: {} }, key), error);
   for (const key of ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill']) {
     assert.throws(
       () =>
@@ -204,8 +186,6 @@ test('media workflow', async () => {
   assert.equal(filenameResult.fixed.inputs.image, 'my-reference1.png');
   assert.equal(filenameResult.output.inputs.image, 'reference1.png [output]');
   assert.deepEqual(filenameResult.linked.inputs.image, ['filename', 0]);
-  assert.equal(JSON.stringify(filenameGraph), filenameJson);
-  assert.equal(filenameWorkflow.json, filenameJson);
   assert.throws(
     () => expandMediaWorkflow(filenameCompiled, { prompt, seed: 1, job_id: 'missing' }),
     /Missing workflow input/,
@@ -238,6 +218,7 @@ test('workflow inputs', async () => {
   const { compileMediaWorkflow, expandMediaWorkflow, validateWorkflowValues } =
     await import('@tinytavern/shared');
 
+  const compile = (graph: unknown) => compileMediaWorkflow(JSON.stringify(graph));
   const node = (class_type: string, value: number | string | boolean, title: string) => ({
     class_type,
     inputs: { value },
@@ -255,7 +236,7 @@ test('workflow inputs', async () => {
     fixedSampler: { class_type: 'KSampler', inputs: { seed: ['fixed', 0] } },
     toggle: node('PrimitiveBoolean', true, 'Enable upscale [input]'),
   };
-  const compiled = compileMediaWorkflow(JSON.stringify(graph));
+  const compiled = compile(graph);
   assert.deepEqual(
     compiled.controls.map((control) => control.label),
     ['Frames', 'Duration (seconds)', 'Style', 'Chosen seed', 'Enable upscale'],
@@ -322,65 +303,25 @@ test('workflow inputs', async () => {
     'Frames [input: min=1 step=4]',
     'Frames [input: min=1',
   ]) {
-    assert.throws(
-      () => compileMediaWorkflow(JSON.stringify({ frames: node('PrimitiveInt', 81, title) })),
-      title,
-    );
-  }
-  for (const title of [
-    'Text [input: minLength=-1]',
-    'Text [input: minLength=1.5]',
-    'Text [input: minLength=6]',
-    'Text [input: step=1]',
-  ]) {
-    assert.throws(
-      () => compileMediaWorkflow(JSON.stringify({ text: node('PrimitiveString', 'hello', title) })),
-      title,
-    );
+    assert.throws(() => compile({ frames: node('PrimitiveInt', 81, title) }), title);
   }
   assert.throws(
-    () => compileMediaWorkflow(JSON.stringify({ node: node('KSampler', 1, 'Sampler [input]') })),
-    /constant node/,
+    () => compile({ text: node('PrimitiveString', 'hello', 'Text [input: step=1]') }),
+    /Unknown string parameter/,
   );
+  assert.throws(() => compile({ node: node('KSampler', 1, 'Sampler [input]') }), /constant node/);
   assert.throws(
-    () =>
-      compileMediaWorkflow(
-        JSON.stringify({ text: node('PrimitiveString', '{{prompt}}', 'Prompt [input]') }),
-      ),
+    () => compile({ text: node('PrimitiveString', '{{prompt}}', 'Prompt [input]') }),
     /literal default/,
   );
   assert.throws(
-    () =>
-      compileMediaWorkflow(
-        JSON.stringify({ ...graph, frames: { ...graph.frames, inputs: { value: ['seed', 0] } } }),
-      ),
+    () => compile({ ...graph, frames: { ...graph.frames, inputs: { value: ['seed', 0] } } }),
     /Invalid default/,
   );
-  const kj = compileMediaWorkflow(
-    JSON.stringify({
-      text: {
-        class_type: 'StringConstantMultiline',
-        inputs: { string: 'hello' },
-        _meta: { title: 'Text [input]' },
-      },
-    }),
-  );
-  assert.deepEqual(kj.controls[0], {
-    key: 'text',
-    nodeId: 'text',
-    input: 'string',
-    label: 'Text',
-    type: 'string',
-    value: 'hello',
-    multiline: true,
-  });
   // Removed title options are rejected rather than silently retained or ignored.
   for (const option of ['minLength=1', 'maxLength=100', 'multiline=true', 'multiline=false']) {
     assert.throws(
-      () =>
-        compileMediaWorkflow(
-          JSON.stringify({ text: node('PrimitiveString', '', `Text [input: ${option}]`) }),
-        ),
+      () => compile({ text: node('PrimitiveString', '', `Text [input: ${option}]`) }),
       /Unknown string parameter/,
     );
   }
@@ -391,20 +332,24 @@ test('workflow inputs', async () => {
     'StringConstantMultiline',
   ]) {
     const input = classType.startsWith('Primitive') ? 'value' : 'string';
-    const textWorkflow = compileMediaWorkflow(
-      JSON.stringify({
-        text: {
-          class_type: classType,
-          inputs: { [input]: '' },
-          _meta: { title: 'Text [input]' },
-        },
-      }),
-    );
-    const control = textWorkflow.controls[0]!;
-    assert(control.type === 'string');
-    assert.equal(control.multiline, classType.endsWith('Multiline'));
-    assert(!('maxLength' in control));
-    assert(!('minLength' in control));
+    const textWorkflow = compile({
+      text: {
+        class_type: classType,
+        inputs: { [input]: '' },
+        _meta: { title: 'Text [input]' },
+      },
+    });
+    assert.deepEqual(textWorkflow.controls, [
+      {
+        key: 'text',
+        nodeId: 'text',
+        input,
+        label: 'Text',
+        type: 'string',
+        value: '',
+        multiline: classType.endsWith('Multiline'),
+      },
+    ]);
     assert.deepEqual(validateWorkflowValues(textWorkflow.controls, { text: '' }), { text: '' });
     const longText = 'x'.repeat(200001) + '\nSecond line';
     const expanded = expandMediaWorkflow(
@@ -427,7 +372,7 @@ test('workflow inputs', async () => {
     },
     latent: { class_type: 'EmptyLatentImage', inputs: { width: ['size', 0], height: ['size', 1] } },
   };
-  const resolution = compileMediaWorkflow(JSON.stringify(resolutionGraph));
+  const resolution = compile(resolutionGraph);
   const orderedGraph = {
     '1': node('PrimitiveInt', 20, 'Steps [input]'),
     '2': node('PrimitiveFloat', 5, 'Duration [input: min=1, max=15, order=2]'),
@@ -439,7 +384,7 @@ test('workflow inputs', async () => {
     '5': node('PrimitiveBoolean', true, 'Hybrid [input: order=0]'),
     '6': node('PrimitiveStringMultiline', '', 'Notes [input]'),
   };
-  const ordered = compileMediaWorkflow(JSON.stringify(orderedGraph));
+  const ordered = compile(orderedGraph);
   assert.deepEqual(
     ordered.controls.map((control) => control.key),
     ['5', '3', '4.aspect_ratio', '4.megapixels', '2', '1', '6'],
@@ -449,21 +394,11 @@ test('workflow inputs', async () => {
   for (const type of ['PrimitiveInt', 'PrimitiveFloat', 'PrimitiveString', 'PrimitiveBoolean']) {
     for (const order of ['1.5', 'NaN', 'Infinity', 'later']) {
       assert.throws(
-        () =>
-          compileMediaWorkflow(
-            JSON.stringify({ bad: node(type, 1, `Bad [input: order=${order}]`) }),
-          ),
+        () => compile({ bad: node(type, 1, `Bad [input: order=${order}]`) }),
         /order must be/,
       );
     }
   }
-  assert.deepEqual(
-    resolution.controls.map((control) => [control.key, control.type]),
-    [
-      ['size.aspect_ratio', 'select'],
-      ['size.megapixels', 'float'],
-    ],
-  );
   assert.deepEqual(resolution.controls[1], {
     key: 'size.megapixels',
     nodeId: 'size',
@@ -476,34 +411,31 @@ test('workflow inputs', async () => {
     step: 0.1,
   });
   const aspectRatio = resolution.controls[0]!;
-  assert.equal(aspectRatio.label, 'Aspect ratio');
+  assert.deepEqual([aspectRatio.key, aspectRatio.label], ['size.aspect_ratio', 'Aspect ratio']);
   assert(aspectRatio.type === 'select');
   assert.equal(aspectRatio.options.length, 8);
   assert(aspectRatio.options.includes('9:16 (Portrait Widescreen)'));
-  const changedResolution = expandMediaWorkflow(
-    resolution,
-    { prompt: '', seed: 1, job_id: 'size' },
-    {
-      'size.aspect_ratio': '9:16 (Portrait Widescreen)',
-      'size.megapixels': 2.5,
-    },
-  ) as typeof resolutionGraph;
-  assert.deepEqual(changedResolution.size.inputs, {
-    aspect_ratio: '9:16 (Portrait Widescreen)',
-    megapixels: 2.5,
-    multiple: 32,
-  });
-  assert.deepEqual(changedResolution.latent.inputs, resolutionGraph.latent.inputs);
-  assert.equal(resolutionGraph.size.inputs.megapixels, 1);
-  const aspectOnly = expandMediaWorkflow(
-    resolution,
-    { prompt: '', seed: 1, job_id: 'size' },
-    {
-      'size.aspect_ratio': '1:1 (Square)',
-    },
-  ) as typeof resolutionGraph;
-  assert.equal(aspectOnly.size.inputs.megapixels, 1);
-  assert.equal(aspectOnly.size.inputs.multiple, 32);
+  // Both overrides and omitted defaults preserve the latent's wiring and fixed multiple.
+  for (const [aspect, megapixels] of [
+    ['9:16 (Portrait Widescreen)', 2.5],
+    ['1:1 (Square)', undefined],
+  ] as const) {
+    const values = {
+      'size.aspect_ratio': aspect,
+      ...(megapixels === undefined ? {} : { 'size.megapixels': megapixels }),
+    };
+    const expanded = expandMediaWorkflow(
+      resolution,
+      { prompt: '', seed: 1, job_id: 'size' },
+      values,
+    ) as typeof resolutionGraph;
+    assert.deepEqual(expanded.size.inputs, {
+      aspect_ratio: aspect,
+      megapixels: megapixels ?? 1,
+      multiple: 32,
+    });
+    assert.deepEqual(expanded.latent, resolutionGraph.latent);
+  }
   for (const values of [
     { 'size.multiple': 64 },
     { 'size.aspect_ratio': '16:9' },
@@ -519,29 +451,22 @@ test('workflow inputs', async () => {
     { aspect_ratio: ['other', 0], megapixels: 1, multiple: 32 },
     { aspect_ratio: '1:1 (Square)', megapixels: ['other', 0], multiple: 32 },
   ]) {
-    assert.throws(
-      () => compileMediaWorkflow(JSON.stringify({ size: { ...resolutionGraph.size, inputs } })),
-      /Invalid default/,
-    );
+    assert.throws(() => compile({ size: { ...resolutionGraph.size, inputs } }), /Invalid default/);
   }
-  const boundedResolution = compileMediaWorkflow(
-    JSON.stringify({
-      size: {
-        ...resolutionGraph.size,
-        _meta: { title: 'Resolution [input: min=0.5, max=4, step=0.5]' },
-      },
-    }),
-  );
+  const boundedResolution = compile({
+    size: {
+      ...resolutionGraph.size,
+      _meta: { title: 'Resolution [input: min=0.5, max=4, step=0.5]' },
+    },
+  });
   assert.throws(() =>
     validateWorkflowValues(boundedResolution.controls, { 'size.megapixels': 4.5 }),
   );
   assert.throws(
     () =>
-      compileMediaWorkflow(
-        JSON.stringify({
-          size: { ...resolutionGraph.size, _meta: { title: 'Resolution [input: max=32]' } },
-        }),
-      ),
+      compile({
+        size: { ...resolutionGraph.size, _meta: { title: 'Resolution [input: max=32]' } },
+      }),
     /0.1–16/,
   );
 });

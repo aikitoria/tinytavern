@@ -45,7 +45,7 @@ export default function NamedCollectionToolbar(props: {
   if (typeof props.ref === 'function') props.ref({ closeRename });
   return (
     <>
-      <div class="key-row prompt-preset-toolbar">
+      <div class="key-row flex items-center gap-2 flex-wrap [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-45 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0 small-touch:[&_.select-btn]:basis-[100%]">
         <Select
           ariaLabel={props.ariaLabel}
           value={props.selected}
@@ -86,7 +86,10 @@ export default function NamedCollectionToolbar(props: {
         </Show>
         {props.children}
       </div>
-      <div class="prompt-preset-rename" classList={{ hidden: !renaming() || !props.hasSelection }}>
+      <div
+        class="py-2 px-3 grid gap-1 grid-cols-1 [&>label]:mt-0"
+        classList={{ hidden: !renaming() || !props.hasSelection }}
+      >
         <SettingLabel
           for={inputId}
           changed={props.defaultName !== undefined && props.name !== props.defaultName}
@@ -97,7 +100,7 @@ export default function NamedCollectionToolbar(props: {
         >
           {props.nameLabel}
         </SettingLabel>
-        <div class="key-row">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <input
             id={inputId}
             ref={input}

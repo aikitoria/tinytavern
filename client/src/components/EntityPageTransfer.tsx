@@ -56,7 +56,7 @@ export default function EntityPageTransfer(props: {
             if (!saving()) setPending(undefined);
           }}
         >
-          <div class="form">
+          <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
             <p class="hint">
               Matching names update existing items. New names create items. Read-only defaults
               import as editable copies. Other items are kept.
@@ -76,7 +76,7 @@ export default function EntityPageTransfer(props: {
                 {error()}
               </p>
             </Show>
-            <div class="form-actions">
+            <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
               <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
                 Save import
               </button>

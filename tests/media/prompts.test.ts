@@ -1,3 +1,5 @@
+import { insertFixture, conversationFixture, messageFixture } from '../support/fixtures.ts';
+import { mockFetch, controlledStream, upstreamFrame } from '../support/streams.ts';
 import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
@@ -27,12 +29,15 @@ test('media prompts', async () => {
     await import('../../server/src/mediaWorker.ts');
   const { treeSnapshot } = await import('../../server/src/sync.ts');
 
-  const endpointId = Number(
-    stmt(`
-  INSERT INTO endpoints(name, base_url, api_key, model, prefill_mode, gen_params_json, created_at)
-  VALUES ('Captured', 'http://endpoint.invalid/v1', 'private-key', 'original-model', 'vllm', ?, 1)
-`).run(JSON.stringify({ temperature: 0.2, maxTokens: 1000 })).lastInsertRowid,
-  );
+  const endpointId = insertFixture('endpoints', {
+    name: 'Captured',
+    base_url: 'http://endpoint.invalid/v1',
+    api_key: 'private-key',
+    model: 'original-model',
+    prefill_mode: 'vllm',
+    gen_params_json: JSON.stringify({ temperature: 0.2, maxTokens: 1000 }),
+    created_at: 1,
+  });
   const workflow: MediaWorkflow = {
     id: 'video',
     name: 'Video',
@@ -42,12 +47,14 @@ test('media prompts', async () => {
     galleryPromptPresetId: 'formatted',
     chatPromptPresetId: 'formatted',
   };
-  const templateId = Number(
-    stmt(`
-    INSERT INTO templates(name, content, reasoning_prefill, message_prefill, prefix_names, created_at)
-    VALUES ('Chat', 'Original chat system context', 'Chat reasoning', 'Character reply: ', 1, 1)
-  `).run().lastInsertRowid,
-  );
+  const templateId = insertFixture('templates', {
+    name: 'Chat',
+    content: 'Original chat system context',
+    reasoning_prefill: 'Chat reasoning',
+    message_prefill: 'Character reply: ',
+    prefix_names: 1,
+    created_at: 1,
+  });
   putSettings({
     ...getSettings(),
     activeEndpointId: endpointId,
@@ -86,23 +93,14 @@ test('media prompts', async () => {
     },
   });
 
-  const conversationId = Number(
-    stmt(`
-  INSERT INTO conversations(title, created_at, updated_at) VALUES ('Context', 1, 1)
-`).run().lastInsertRowid,
-  );
-  const userId = Number(
-    stmt(`
-  INSERT INTO messages(conversation_id, role, content, created_at) VALUES (?, 'user', 'A sunset by the lake', 1)
-`).run(conversationId).lastInsertRowid,
-  );
-  stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(userId, conversationId);
-  const assistantId = Number(
-    stmt(`
-    INSERT INTO messages(conversation_id, parent_id, role, content, reasoning, created_at)
-    VALUES (?, ?, 'assistant', 'The lake reflects orange light.', 'Original assistant reasoning', 2)
-  `).run(conversationId, userId).lastInsertRowid,
-  );
+  const conversationId = conversationFixture({ title: 'Context' });
+  const userId = messageFixture(conversationId, { role: 'user', content: 'A sunset by the lake' });
+  const assistantId = messageFixture(conversationId, {
+    parent_id: userId,
+    content: 'The lake reflects orange light.',
+    reasoning: 'Original assistant reasoning',
+    created_at: 2,
+  });
   stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(assistantId, userId);
   stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(assistantId, conversationId);
 
@@ -113,63 +111,30 @@ test('media prompts', async () => {
   let pauseReasoning = false;
   let releaseContent: (() => void) | undefined;
   let releaseCompletion: (() => void) | undefined;
-  let requestAborted = false;
+  let requestSignal: AbortSignal | undefined;
 
-  globalThis.fetch = (async (
-    url: Parameters<typeof fetch>[0],
-    options?: Parameters<typeof fetch>[1],
-  ) => {
+  mockFetch((url, options) => {
     assert.equal(url, 'http://endpoint.invalid/v1/chat/completions');
     assert.equal(new Headers(options!.headers).get('authorization'), 'Bearer private-key');
     wire = JSON.parse(String(options!.body));
     const frames = [
-      `data: ${JSON.stringify({ choices: [{ delta: { content: 'A camera glides across the lake' } }] })}\n\n`,
-      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}\n\n`,
+      upstreamFrame({ content: 'A camera glides across the lake' }),
+      upstreamFrame({}, finishReason),
       'data: [DONE]\n\n',
     ];
+    if (!pauseReasoning && !holdStream) return new Response(frames.join(''));
+    requestSignal = options!.signal!;
+    const stream = controlledStream(requestSignal);
     if (pauseReasoning) {
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            const encoder = new TextEncoder();
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ choices: [{ delta: { reasoning: 'Considering camera movement' } }] })}\n\n`,
-              ),
-            );
-            releaseContent = () => controller.enqueue(encoder.encode(frames[0]));
-            releaseCompletion = () => {
-              controller.enqueue(encoder.encode(frames.slice(1).join('')));
-              controller.close();
-            };
-            options!.signal!.addEventListener(
-              'abort',
-              () => controller.error(new Error('Request aborted')),
-              { once: true },
-            );
-          },
-        }),
-      );
-    }
-    if (!holdStream) {
-      return new Response(frames.join(''));
-    }
-    return new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode(frames[0]));
-          options!.signal!.addEventListener(
-            'abort',
-            () => {
-              requestAborted = true;
-              controller.error(new Error('Request aborted'));
-            },
-            { once: true },
-          );
-        },
-      }),
-    );
-  }) as unknown as typeof fetch;
+      stream.write(upstreamFrame({ reasoning: 'Considering camera movement' }));
+      releaseContent = () => stream.write(frames[0]!);
+      releaseCompletion = () => {
+        stream.write(frames.slice(1).join(''));
+        stream.close();
+      };
+    } else stream.write(frames[0]!);
+    return new Response(stream.body);
+  });
 
   async function waitFor(id: number, state: MediaJob['state']) {
     const deadline = Date.now() + 3000;
@@ -338,7 +303,7 @@ test('media prompts', async () => {
     cancelMediaJob(streaming);
     tickMediaWorker();
     await sleep(30);
-    assert(requestAborted, 'Cancellation aborts the upstream prompt request');
+    assert(requestSignal?.aborted, 'Cancellation aborts the upstream prompt request');
     const cancelled = requireMediaJob(interrupted.id);
     assert.equal(cancelled.state, 'cancelled');
     assert.equal(cancelled.prompt, liveMessage.content);

@@ -9,13 +9,11 @@ import SettingsActions from '../components/SettingsActions.tsx';
 import type { MediaImageConfig } from '@tinytavern/shared';
 import SettingLabel, { createDefaultField } from '../components/SettingField.tsx';
 import {
-  faCheck,
   faChevronLeft,
   faChevronRight,
   faImages as faImagesSolid,
   faRotateRight,
   faSpinner,
-  faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
@@ -34,7 +32,6 @@ import {
   applyGalleryItem,
   applyMediaJob,
   applySettings,
-  imageProgress,
   mediaJobsByMessage,
   navigateTree,
   openModal,
@@ -47,17 +44,13 @@ import MediaPlayer from '../media/MediaPlayer.tsx';
 import MediaActions from '../media/MediaActions.tsx';
 import { openMediaTool, openMediaRerun } from '../media/navigation.ts';
 import MacroHelp from '../components/MacroHelp.tsx';
-import MacroTextarea from '../components/MacroTextarea.tsx';
 import Markdown from '../components/Markdown.tsx';
-import NamedCollectionToolbar, {
-  type NamedCollectionToolbarHandle,
-} from '../components/NamedCollectionToolbar.tsx';
-import { uniqueCollectionName } from '../state/collectionNames.ts';
+import { createNamedCollection } from '../components/NamedCollectionEditor.tsx';
+import FormField, { createFormFields } from '../components/FormFields.tsx';
 import { createSettingsSubmission } from '../state/settingsSubmission.ts';
 import { useSettingsGuard } from '../components/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
-import './imageGeneration.css';
 
 interface ImagePromptPreset {
   name: string;
@@ -271,13 +264,11 @@ async function generate(
     return false;
   }
   return navigateTree(() =>
-    api.toolGenerate(
-      state.selectedId!,
-      composePrompt(kind, instruction, presetName),
-      'Image prompt',
-      state.tree,
-      activeImageRenderConfig(),
-    ),
+    api.toolGenerate(state.selectedId!, state.tree, {
+      prompt: composePrompt(kind, instruction, presetName),
+      label: 'Image prompt',
+      image: activeImageRenderConfig(),
+    }),
   );
 }
 
@@ -332,11 +323,12 @@ function PromptPresetEditor(props: {
   contextExtraKeys?: string[];
   ref?: PromptPresetEditorHandle | ((handle: PromptPresetEditorHandle) => void);
 }) {
-  const [presets, setPresets] = createSignal<ImagePromptPreset[]>([]);
+  type Preset = ImagePromptPreset & { id: string };
+  let sequence = 0;
+  const [presets, setPresets] = createSignal<Preset[]>([]);
   /** Index into presets(); -1 = built-in Default. */
   const [selected, setSelected] = createSignal(-1);
   const [name, setName] = createSignal('');
-  let toolbar!: NamedCollectionToolbarHandle;
   const promptEl = createDefaultField(() => props.defaultPrompt);
   const contextEl = createDefaultField(() => props.defaultContext ?? '');
 
@@ -345,6 +337,7 @@ function PromptPresetEditor(props: {
     return presets().map((preset, i) => {
       if (i !== idx) return preset;
       return {
+        ...preset,
         name: name().trim() || preset.name,
         prompt: promptEl.value,
         ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
@@ -356,7 +349,7 @@ function PromptPresetEditor(props: {
 
   const showPreset = (idx: number) => {
     setSelected(idx);
-    toolbar.closeRename();
+    collection.closeRename();
     const preset = presets()[idx];
     setName(preset?.name ?? '');
     promptEl.value = preset?.prompt ?? props.defaultPrompt;
@@ -367,128 +360,96 @@ function PromptPresetEditor(props: {
     }
   };
 
-  const pick = (idx: number) => {
-    stash();
-    showPreset(idx);
-  };
-
-  const add = () => {
-    const startingPrompt = promptEl.value;
-    const startingContext = props.defaultContext === undefined ? undefined : contextEl.value;
-    stash();
-    setPresets((list) => {
-      return [
-        ...list,
-        {
-          name: numberedName('Preset', list),
-          prompt: startingPrompt,
-          ...(startingContext === undefined ? {} : { context: startingContext }),
-        },
-      ];
-    });
-    showPreset(presets().length - 1);
-  };
-
-  const duplicate = () => {
-    const idx = selected();
-    if (idx === -1) return;
-    stash();
-    const source = presets()[idx]!;
-    const name = uniqueCollectionName(`${source.name} (copy)`, presets());
-    setPresets((list) => [...list, { ...source, name }]);
-    showPreset(presets().length - 1);
-  };
-
-  const remove = () => {
-    const idx = selected();
-    if (idx === -1) return;
-    setPresets((list) => list.filter((_, i) => i !== idx));
-    showPreset(-1);
-  };
+  const collection = createNamedCollection<Preset>({
+    items: currentPresets,
+    selected: () => presets()[selected()]?.id ?? '',
+    identify: (item) => item.id,
+    newName: () => numberedName('Preset', currentPresets()),
+    defaultLabel: 'Default',
+    commit: (items, id) => {
+      setPresets(items);
+      showPreset(items.findIndex((item) => item.id === id));
+    },
+    create: (_source, name) => ({
+      id: String(++sequence),
+      name,
+      prompt: promptEl.value,
+      ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
+    }),
+  });
 
   const handle: PromptPresetEditorHandle = {
     get value() {
       const current = currentPresets();
-      return { presets: current, active: current[selected()]?.name ?? '' };
+      return {
+        presets: current.map(({ id, ...preset }) => preset),
+        active: current[selected()]?.name ?? '',
+      };
     },
     set value(next: ImagePromptPresetSet) {
-      setPresets(next.presets);
+      setPresets(next.presets.map((preset) => ({ ...preset, id: String(++sequence) })));
       showPreset(next.presets.findIndex((preset) => preset.name === next.active));
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);
 
   return (
-    <div class="form-stack field-group prompt-preset-editor">
+    <div class="form-stack field-group prompt-preset-editor [&+.prompt-preset-editor]:mt-2 [&_.macro-box]:w-full [&_.macro-box]:isolate [&_.macro-overlay]:z-0 [&_textarea]:z-1">
       <SettingLabel>{props.label}</SettingLabel>
-      <NamedCollectionToolbar
-        ref={toolbar}
+      <collection.Toolbar
         ariaLabel="Prompt preset"
-        selected={String(selected())}
-        options={[
-          { value: '-1', label: 'Default' },
-          ...presets().map((preset, i) => ({
-            value: String(i),
-            label: preset.name || `Preset ${i + 1}`,
-          })),
-        ]}
-        hasSelection={selected() !== -1}
-        name={name()}
         nameLabel="Preset name"
-        defaultName={selected() < 0 ? '' : numberedName('Preset', presets(), selected())}
+        name={name()}
         onRename={setName}
+        defaultName={selected() < 0 ? '' : numberedName('Preset', presets(), selected())}
         onFinishRename={stash}
-        onSelect={(value) => pick(Number(value))}
-        onNew={add}
-        onDuplicate={duplicate}
-        onDelete={remove}
-      >
-        <SettingsTransferButtons
-          type={`image-prompt:${props.transferKey}`}
-          onError={props.onError}
-          exportData={() => ({
+        transfer={{
+          type: `image-prompt:${props.transferKey}`,
+          onError: props.onError,
+          allowDefaultExport: true,
+          exportData: () => ({
             name: selected() === -1 ? 'Default (imported)' : currentPresets()[selected()]!.name,
             prompt: promptEl.value,
             ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
-          })}
-          importData={(data) => {
+          }),
+          importData: (data, previous) => {
             const source = transferObject(data);
-            const parsed = importImagePromptSet(
+            const imported = importImagePromptSet(
               { presets: [source], active: source.name },
               { presets: [], active: '' },
               props.defaultContext !== undefined,
-            );
-            const imported = parsed.presets[0]!;
-            const index = selected();
-            const list = currentPresets();
-            if (list.some((item, i) => i !== index && item.name === imported.name))
+            ).presets[0]!;
+            if (
+              currentPresets().some(
+                (item) => item.id !== previous?.id && item.name === imported.name,
+              )
+            )
               throw new Error('A preset with this name already exists');
-            if (index === -1) list.push(imported);
-            else list[index] = imported;
-            setPresets(list);
-            showPreset(index === -1 ? list.length - 1 : index);
-          }}
-        />
-      </NamedCollectionToolbar>
-      <SettingLabel field={promptEl}>
-        {props.promptLabel ??
-          (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')}
-      </SettingLabel>
-      <MacroTextarea
-        ref={promptEl.ref}
+            return { ...imported, id: previous?.id ?? String(++sequence) };
+          },
+        }}
+      />
+      <FormField
+        field={promptEl}
+        kind="macro"
+        readOnly={selected() === -1}
+        label={
+          props.promptLabel ??
+          (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')
+        }
         extraKeys={props.extraKeys}
-        classList={{ 'prompt-default': selected() === -1 }}
       />
       <Show when={props.defaultContext !== undefined}>
-        <SettingLabel field={contextEl}>{props.contextLabel ?? 'Context'}</SettingLabel>
-        <MacroTextarea
-          ref={contextEl.ref}
+        <FormField
+          field={contextEl}
+          kind="macro"
+          readOnly={selected() === -1}
+          label={props.contextLabel ?? 'Context'}
           extraKeys={props.contextExtraKeys}
-          classList={{ 'prompt-default': selected() === -1 }}
         />
       </Show>
       <Show when={selected() === -1}>
-        <span class="prompt-preset-status">Built-in default · create a preset to customize</span>
+        <span class="text-dim text-caption">Built-in default · create a preset to customize</span>
       </Show>
     </div>
   );
@@ -506,9 +467,11 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
   let errorEl: HTMLParagraphElement | undefined;
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
-  const revisionContextEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_CONTEXT);
-  const revisionOriginalEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL);
-  const revisionEl = createDefaultField(() => DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE);
+  const revision = createFormFields({
+    promptRevisionContext: DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
+    promptRevisionOriginal: DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
+    promptRevisionTemplate: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
+  });
   let baseline = '';
 
   const showError = (message: string) => {
@@ -518,12 +481,8 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
 
   const draft = () => ({
     imageGeneration: {
-      promptRevisionContext:
-        props.mode === 'chat' ? revisionContextEl.value : baseSettings.promptRevisionContext,
-      promptRevisionOriginal:
-        props.mode === 'chat' ? revisionOriginalEl.value : baseSettings.promptRevisionOriginal,
-      promptRevisionTemplate:
-        props.mode === 'chat' ? revisionEl.value : baseSettings.promptRevisionTemplate,
+      ...baseSettings,
+      ...(props.mode === 'chat' ? revision.value() : {}),
       promptPresets: {
         ...baseSettings.promptPresets,
         ...Object.fromEntries(promptEditors.map(({ kind }) => [kind, editors[kind].value])),
@@ -533,11 +492,7 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
 
   const load = () => {
     baseSettings = settings();
-    if (props.mode === 'chat') {
-      revisionEl.value = baseSettings.promptRevisionTemplate;
-      revisionContextEl.value = baseSettings.promptRevisionContext;
-      revisionOriginalEl.value = baseSettings.promptRevisionOriginal;
-    }
+    if (props.mode === 'chat') revision.load(baseSettings);
     for (const { kind } of promptEditors) editors[kind].value = baseSettings.promptPresets[kind];
     baseline = JSON.stringify(draft());
   };
@@ -659,40 +614,50 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
             preceding assistant message. This setting applies to every chat.
           </p>
           <div class="form-stack field-group" role="group" aria-label="Image revision messages">
-            <SettingLabel field={revisionContextEl}>Context message</SettingLabel>
-            <MacroTextarea ref={revisionContextEl.ref} keys={['instruction', 'prompt']} rows={3} />
-            <p class="hint">
-              Inserted before the original prompt when the chat does not end with a user turn. Leave
-              empty to omit it.
-            </p>
-            <SettingLabel field={revisionOriginalEl}>Original prompt message</SettingLabel>
-            <MacroTextarea ref={revisionOriginalEl.ref} keys={['instruction', 'prompt']} rows={4} />
-            <p class="hint">Sent as the assistant turn being revised. Include {'{{prompt}}'}.</p>
-            <SettingLabel field={revisionEl} for="image-revision-template">
-              Revision instruction{' '}
-              <MacroHelp
-                rows={[
-                  ['{{instruction}}', 'The requested change'],
-                  ['{{prompt}}', 'The original image prompt'],
-                ]}
-              />
-            </SettingLabel>
-            <MacroTextarea
-              ref={(el) => {
-                revisionEl.ref(el);
-                el.id = 'image-revision-template';
-              }}
-              keys={['instruction', 'prompt']}
-              rows={10}
-            />
+            <For
+              each={
+                [
+                  [
+                    'promptRevisionContext',
+                    'Context message',
+                    3,
+                    'Inserted before the original prompt when the chat does not end with a user turn. Leave empty to omit it.',
+                  ],
+                  [
+                    'promptRevisionOriginal',
+                    'Original prompt message',
+                    4,
+                    'Sent as the assistant turn being revised. Include {{prompt}}.',
+                  ],
+                  ['promptRevisionTemplate', 'Revision instruction', 10, ''],
+                ] as const
+              }
+            >
+              {([key, label, rows, hint]) => (
+                <FormField
+                  kind="macro"
+                  field={revision.fields[key]}
+                  label={label}
+                  rows={rows}
+                  keys={['instruction', 'prompt']}
+                  hint={hint}
+                  id={key === 'promptRevisionTemplate' ? 'image-revision-template' : undefined}
+                  help={
+                    key === 'promptRevisionTemplate'
+                      ? [
+                          ['{{instruction}}', 'The requested change'],
+                          ['{{prompt}}', 'The original image prompt'],
+                        ]
+                      : undefined
+                  }
+                />
+              )}
+            </For>
           </div>
         </section>
       </Show>
 
-      <SettingsActions>
-        <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
-          {saving() ? 'Saving…' : 'Save'}
-        </button>
+      <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
         <SettingsTransferButtons
           type={`page:${props.mode === 'chat' ? 'chatImagePrompts' : 'avatarPrompts'}`}
           onError={showError}
@@ -700,13 +665,7 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
             presets: Object.fromEntries(
               promptEditors.map(({ kind }) => [kind, editors[kind].value]),
             ),
-            ...(props.mode === 'chat'
-              ? {
-                  promptRevisionContext: revisionContextEl.value,
-                  promptRevisionOriginal: revisionOriginalEl.value,
-                  promptRevisionTemplate: revisionEl.value,
-                }
-              : {}),
+            ...(props.mode === 'chat' ? revision.value() : {}),
           })}
           importData={(data) => {
             const source = transferObject(data);
@@ -717,29 +676,12 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
                 kind,
                 value: importImagePromptSet(presets[kind], editors[kind].value, kind === 'avatar'),
               }));
-            const revisionKeys = [
-              'promptRevisionContext',
-              'promptRevisionOriginal',
-              'promptRevisionTemplate',
-            ] as const;
             if (props.mode === 'chat')
-              for (const key of revisionKeys) transferString(source[key], key);
+              for (const key of Object.keys(revision.fields)) transferString(source[key], key);
             for (const item of incoming) editors[item.kind].value = item.value;
-            if (props.mode === 'chat') {
-              revisionContextEl.value = source.promptRevisionContext as string;
-              revisionOriginalEl.value = source.promptRevisionOriginal as string;
-              revisionEl.value = source.promptRevisionTemplate as string;
-            }
+            if (props.mode === 'chat') revision.load(source as ReturnType<typeof revision.value>);
           }}
         />
-        <button disabled={saving()} onClick={discard}>
-          Discard
-        </button>
-        <Show when={saved()}>
-          <span class="saved-flash">
-            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
-          </span>
-        </Show>
       </SettingsActions>
     </>
   );
@@ -812,7 +754,7 @@ async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
       );
     } else {
       if (!imageOnActivePath(message)) return;
-      await navigateTree(() => api.setActiveImage(message.id, index, state.tree));
+      await navigateTree(() => api.setActiveImage(message.id, state.tree, { index }));
     }
   } finally {
     imageSwipeBusy.delete(message.id);
@@ -837,11 +779,9 @@ export const imageMessage = {
   canDeleteSwipe: (message: Message) =>
     message.media.length > 1 && !message.imagePending && imageOnActivePath(message),
   deleteSwipe: (message: Message) =>
-    api.deleteImage(
-      message.id,
-      Math.min(message.activeImage, message.media.length - 1),
-      state.tree,
-    ),
+    api.deleteImage(message.id, state.tree, {
+      index: Math.min(message.activeImage, message.media.length - 1),
+    }),
   create: (message: () => Message, ctx: { streaming: () => boolean; inMap?: () => boolean }) => {
     const [showPrompt, setShowPrompt] = createSignal(false);
     const [viewerOpen, setViewerOpen] = createSignal(false);
@@ -852,7 +792,7 @@ export const imageMessage = {
     const currentImage = () => currentAsset()?.url;
     const currentVideo = () => (currentAsset()?.kind === 'video' ? currentAsset() : undefined);
     const mediaJob = () => mediaJobsByMessage().get(message().id);
-    const renderProgress = () => mediaJob()?.progress ?? imageProgress()[message().id];
+    const renderProgress = () => mediaJob()?.progress;
     const livePreview = () => (message().imagePending ? renderProgress()?.preview : undefined);
     const displayedImage = () =>
       livePreview() ?? (currentVideo() ? currentVideo()?.thumbnail : currentImage());
@@ -890,7 +830,7 @@ export const imageMessage = {
     const Header = () => (
       <Show when={promptCollapsed()}>
         <button
-          class="reasoning-chip icon-btn"
+          class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
           classList={{ 'icon-btn-active': showPrompt() }}
           title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
           aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
@@ -936,8 +876,12 @@ export const imageMessage = {
           </button>
         </Show>
         <Show when={message().imagePending && !ctx.streaming()}>
-          <span class="msg-image-pending">
-            <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
+          <span class="msg-image-pending inline-flex items-center gap-2 whitespace-nowrap text-dim text-caption tabular-nums [&_.img-progress]:w-16">
+            <FontAwesomeIcon
+              icon={faSpinner}
+              size={10}
+              class="spinner inline-block flex-none origin-center size-2.5"
+            />
             <SamplerProgress
               progress={renderProgress()}
               stepsLabel="Step"
@@ -946,7 +890,7 @@ export const imageMessage = {
           </span>
         </Show>
         <Show when={media().length > 0}>
-          <span class="msg-actions">
+          <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
             <Show when={currentAsset()}>
               {(asset) => (
                 <MediaActions compact asset={asset()} conversationId={message().conversationId} />
@@ -963,7 +907,7 @@ export const imageMessage = {
               <FontAwesomeIcon icon={savedItem() != null ? faImagesSolid : faImages} />
             </button>
           </span>
-          <span class="branch-nav">
+          <span class="branch-nav gap-0 inline-flex items-center text-dim text-caption touch:[&_.icon-btn]:opacity-0 touch:[&_.icon-btn]:pointer-events-none touch:[&_.icon-btn]:w-5 touch:[&_.icon-btn]:min-w-5 touch:[&_.icon-btn]:h-7 [&_.icon-btn]:w-4.5 [&_.icon-btn]:min-w-4.5 [&_.icon-btn]:h-6 [&_.icon-btn]:text-sm [&_.icon-btn]:opacity-0 [&_.icon-btn]:pointer-events-none [&:focus-within_.icon-btn]:opacity-100 [&:focus-within_.icon-btn]:pointer-events-auto [&:focus-within_.branch-count]:opacity-100 [&:focus-within_.branch-count]:pointer-events-auto">
             <button
               class="icon-btn"
               title="Previous image"
@@ -974,7 +918,7 @@ export const imageMessage = {
               <FontAwesomeIcon icon={faChevronLeft} size={12} />
             </button>
             <span
-              class="branch-count"
+              class="branch-count px-0.5 min-w-0 whitespace-nowrap text-center touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none"
               aria-label={`Image ${activeImage() + 1} of ${media().length}`}
             >
               {activeImage() + 1}/{media().length}
@@ -1021,11 +965,11 @@ export const imageMessage = {
           fallback={
             <Show when={displayedImage()}>
               <CrossfadeImage
-                class="msg-image"
+                class="msg-image block cursor-zoom-in w-full"
                 classList={{ 'msg-image-live': livePreview() != null }}
                 src={displayedImage()!}
                 alt={livePreview() ? 'Image rendering preview' : 'Generated image'}
-                wrapperClass="msg-image-crossfade"
+                wrapperClass="msg-image-crossfade w-full"
                 onClick={() => {
                   if (!livePreview() && !currentVideo() && !ctx.inMap?.()) {
                     setViewerOpen(true);
@@ -1039,11 +983,15 @@ export const imageMessage = {
           }
         >
           {(asset) => (
-            <MediaPlayer asset={asset()} class="msg-image" active={state.modal === null} />
+            <MediaPlayer
+              asset={asset()}
+              class="msg-image block cursor-zoom-in w-full"
+              active={state.modal === null}
+            />
           )}
         </Show>
         <Show when={message().genMeta?.imageError && !message().imagePending}>
-          <div class="msg-error">
+          <div class="text-danger border border-solid border-danger py-2 px-3 mt-2 text-sm rounded-sm">
             Image render failed: {message().genMeta!.imageError}{' '}
             <Show when={canRender()}>
               <button onClick={() => void swipeImage(message(), 1)}>Retry</button>

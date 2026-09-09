@@ -1,6 +1,6 @@
 import type { MediaImageConfig } from '@tinytavern/shared';
 import { imageRenderConfiguration } from '../mediaRecipes.ts';
-import { characterChatName } from '@tinytavern/shared';
+import { characterChatName, expandPromptSlots } from '@tinytavern/shared';
 import { parseImageConfig, renderToBuffer } from '../comfy.ts';
 import { streamChatCompletion } from '../generation.ts';
 import { getPersona } from '../prompt.ts';
@@ -26,15 +26,6 @@ const AVATAR_PROMPT_MAX_TOKENS = 2048;
 
 /** One in-flight prompt stream per entity — a double open 409s. */
 const streaming = new Set<string>();
-
-/** Unknown or unsupported macros remain unchanged. */
-function expandAvatarMacros(template: string, vars: Record<string, string>): string {
-  return template.replaceAll(
-    /\{\{(name|char|user|description|personality|scenario|firstMessage)\}\}/gi,
-    (match, key: string) =>
-      Object.hasOwn(vars, key.toLowerCase()) ? vars[key.toLowerCase()]! : match,
-  );
-}
 
 function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
   const id = positiveId(ctx.params.id);
@@ -73,8 +64,8 @@ function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
             scenario: '',
             firstmessage: '',
           };
-    const system = expandAvatarMacros(prompt, vars);
-    const user = expandAvatarMacros(context, vars);
+    const system = expandPromptSlots(prompt, vars);
+    const user = expandPromptSlots(context, vars);
     if (!user.trim()) throw new HttpError(400, 'context must produce non-empty text');
     // SSE from here on — failures mid-stream go out as error events, not HTTP.
     return streamResponse(

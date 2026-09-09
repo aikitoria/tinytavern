@@ -20,6 +20,7 @@ export default function PersonasTab() {
   const descriptionEl = createDefaultField(() => '');
 
   const editor = createEntityEditor({
+    ...api.personas,
     items: () => state.personas,
     load: (persona: (Persona & { avatarData?: string | null }) | undefined) => {
       setAvatarData(persona?.avatarData);
@@ -32,13 +33,14 @@ export default function PersonasTab() {
       ...(avatarData() === undefined ? {} : { avatarData: avatarData() }),
     }),
     create: (data) =>
-      data.avatarData === undefined ? api.createPersona(data) : api.importPersona(data, null),
+      data.avatarData === undefined ? api.personas.create(data) : api.personas.import(data, null),
     patch: (id, data) =>
       data.avatarData === undefined
-        ? api.patchPersona(id, data)
-        : api.importPersona({ name: nameEl.value, description: descriptionEl.value, ...data }, id),
-    remove: api.deletePersona,
-    duplicate: api.duplicatePersona,
+        ? api.personas.patch(id, data)
+        : api.personas.import(
+            { name: nameEl.value, description: descriptionEl.value, ...data },
+            id,
+          ),
     deletePrompt: 'Delete this persona?',
     initialId: () => state.settings.defaultPersonaId,
     activate: (id) => selectSettingsEntity('defaultPersonaId', id),
@@ -64,7 +66,7 @@ export default function PersonasTab() {
       <section class="settings-section">
         <h3>Basics</h3>
         <Show when={avatarData() !== undefined}>
-          <div class="avatar-row">
+          <div class="flex items-center gap-3 [&_.avatar]:size-14">
             <Avatar src={avatarData()} name={nameEl.value || '?'} />
             <span class="hint">
               {avatarData() === null
@@ -78,8 +80,8 @@ export default function PersonasTab() {
             src={editor.selected()?.avatar}
             thumbnail={editor.selected()?.avatarThumbnail}
             name={editor.selected()?.name ?? '?'}
-            upload={(file) => api.uploadPersonaAvatar(editor.selectedId() as number, file)}
-            remove={() => api.deletePersonaAvatar(editor.selectedId() as number)}
+            upload={(file) => api.personas.uploadAvatar(editor.selectedId() as number, file)}
+            remove={() => api.personas.deleteAvatar(editor.selectedId() as number)}
             generate={avatarGenerationAvailable() ? () => setAvatarGen(true) : undefined}
             onDone={editor.flashSaved}
             onError={editor.setStatus}

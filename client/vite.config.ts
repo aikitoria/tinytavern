@@ -1,10 +1,37 @@
 import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
+import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     solid(),
+    {
+      name: 'precompress-static-assets',
+      apply: 'build',
+      enforce: 'post',
+      generateBundle: {
+        order: 'post',
+        handler(_options, bundle) {
+          for (const output of Object.values(bundle)) {
+            if (!/\.(?:js|css)$/.test(output.fileName)) continue;
+            const source = output.type === 'chunk' ? output.code : output.source;
+            const data = typeof source === 'string' ? Buffer.from(source) : source;
+            const compressed = {
+              br: brotliCompressSync(data, {
+                params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
+              }),
+              zst: Bun.zstdCompressSync(data, { level: 19 }),
+              gz: gzipSync(data, { level: 9 }),
+            };
+            for (const [extension, source] of Object.entries(compressed))
+              this.emitFile({ type: 'asset', fileName: `${output.fileName}.${extension}`, source });
+          }
+        },
+      },
+    },
     {
       name: 'watch-shared-source',
       configureServer(server) {

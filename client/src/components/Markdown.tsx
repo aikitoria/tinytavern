@@ -93,7 +93,7 @@ markdownRenderer.html = (token) => {
   return Renderer.prototype.html.call(markdownRenderer, token);
 };
 markdownRenderer.image = ({ text }) =>
-  `<span class="markdown-media-omitted">${escapeHtml(text.trim() || 'Media omitted')}</span>`;
+  `<span class="text-muted italic text-[0.9em]">${escapeHtml(text.trim() || 'Media omitted')}</span>`;
 
 /** Hide angle-bracket model instructions, preserving code and multiline text. */
 function hideAngleInstructions(src: string): string {
@@ -318,7 +318,12 @@ export default function Markdown(props: {
 
   return (
     <>
-      <div class="md" ref={container} innerHTML={html()} onClick={codeAction} />
+      <div
+        class="md wrap-break-word text-prose [&>:first-child]:mt-2 [&>:last-child]:mb-2 [&_pre]:overflow-x-hidden [&_pre]:wrap-anywhere [&_pre]:text-sm [&_pre]:leading-body [&_pre]:bg-code [&_pre]:rounded-sm [&_pre]:whitespace-pre-wrap [&_pre]:p-3.5 [&_pre]:pt-3 [&_.code-block-wrap]:relative [&_.code-block-wrap]:overflow-hidden [&_.code-block-wrap]:bg-code [&_.code-block-wrap]:rounded-sm [&_.code-block-wrap_pre]:m-0 [&_.code-block-wrap_pre]:pr-18 [&_.code-block-wrap_pre]:bg-clear [&_.code-block-wrap_pre]:border-clear [&_.code-block-wrap_pre]:rounded-none [&_pre_code.hljs]:block [&_pre_code.hljs]:p-0 [&_pre_code.hljs]:overflow-visible [&_pre_code.hljs]:text-inherit [&_pre_code.hljs]:bg-clear [&_pre_code]:block [&_pre_code]:[white-space:inherit] [&_.code-actions]:absolute [&_.code-actions]:z-1 [&_.code-actions]:top-1.5 [&_.code-actions]:right-1.5 [&_.code-actions]:flex [&_.code-actions]:gap-1 [&_.code-actions_.icon-btn]:w-6 [&_.code-actions_.icon-btn]:min-w-6 [&_.code-actions_.icon-btn]:min-h-0 [&_.code-copy-btn.copied]:text-success [&_.hljs-doctag]:text-accent-hot [&_.hljs-keyword]:text-accent-hot [&_.hljs-meta_.hljs-keyword]:text-accent-hot [&_.hljs-template-tag]:text-accent-hot [&_.hljs-template-variable]:text-accent-hot [&_.hljs-type]:text-accent-hot [&_.hljs-variable.language_]:text-accent-hot [&_.hljs-title]:text-user [&_.hljs-title.class_]:text-user [&_.hljs-title.class_.inherited__]:text-user [&_.hljs-title.function_]:text-user [&_.hljs-attr]:text-accent [&_.hljs-attribute]:text-accent [&_.hljs-literal]:text-accent [&_.hljs-meta]:text-accent [&_.hljs-number]:text-accent [&_.hljs-operator]:text-accent [&_.hljs-variable]:text-accent [&_.hljs-selector-attr]:text-accent [&_.hljs-selector-class]:text-accent [&_.hljs-selector-id]:text-accent [&_.hljs-built_in]:text-accent [&_.hljs-symbol]:text-accent [&_.hljs-bullet]:text-accent [&_.hljs-regexp]:text-secondary [&_.hljs-string]:text-secondary [&_.hljs-meta_.hljs-string]:text-secondary [&_.hljs-name]:text-secondary [&_.hljs-quote]:text-secondary [&_.hljs-selector-tag]:text-secondary [&_.hljs-selector-pseudo]:text-secondary [&_.hljs-comment]:text-muted [&_.hljs-code]:text-muted [&_.hljs-formula]:text-muted [&_.hljs-subst]:text-inherit [&_.hljs-emphasis]:text-inherit [&_.hljs-strong]:text-inherit [&_.hljs-section]:text-user [&_.hljs-addition]:text-success [&_.hljs-deletion]:text-danger [&_code]:font-code [&_:not(pre)>code]:py-0 [&_:not(pre)>code]:px-1 [&_em]:text-emphasis-text [&_strong]:text-strong [&_.quoted]:text-quote [&_.quoted_em]:text-inherit [&_.quoted_strong]:text-inherit [&_blockquote]:border-l-3 [&_blockquote]:border-l-solid [&_blockquote]:border-l-accent [&_blockquote]:pl-3 [&_blockquote]:text-dim [&_table]:border-collapse [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full [&_th]:border [&_th]:border-solid [&_th]:border-line [&_th]:py-1 [&_th]:px-3 [&_td]:border [&_td]:border-solid [&_td]:border-line [&_td]:py-1 [&_td]:px-3 touch:[&_.code-actions_.icon-btn]:min-w-9 touch:[&_.code-actions_.icon-btn]:size-9 touch:[&_.code-block-wrap_pre]:pr-24 [&_p]:m-[0.6em_0] [&_.code-block-wrap]:m-[0.8em_0] [&_code]:text-[0.92em] [&_:not(pre)>code]:rounded-[4px] [&_blockquote]:m-[0.6em_0]"
+        ref={container}
+        innerHTML={html()}
+        onClick={codeAction}
+      />
       <DropdownSurface
         open={menuAnchor() !== undefined}
         anchor={menuAnchor}

@@ -1,18 +1,13 @@
+import { testApi } from '../support/http.ts';
+import { renderMediaFixture } from '../support/media.ts';
+import { conversationFixture, insertFixture } from '../support/fixtures.ts';
 import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
 test('media source images', async () => {
-  const { once } = await import('node:events');
-
-  const { execFile } = await import('node:child_process');
-
-  const { promisify } = await import('node:util');
-
   const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
-
   const { basename, join } = await import('node:path');
-
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
   type MediaAssetInput = import('@tinytavern/shared').MediaAssetInput;
   type MediaJob = import('@tinytavern/shared').MediaJob;
@@ -31,16 +26,17 @@ test('media source images', async () => {
   const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
   const { updateMediaJob } = await import('../../server/src/mediaJobStore.ts');
   const { finishMediaJob } = await import('../../server/src/mediaJobResults.ts');
-  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/mediaJobs.ts');
   await import('../../server/src/routes/gallery.ts');
 
-  function gallery(path: string): number {
-    return Number(
-      stmt(`INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at)
-    VALUES ('Test', 'Saved prompt', ?, 1, 1)`).run(path).lastInsertRowid,
-    );
-  }
+  const gallery = (image: string) =>
+    insertFixture('gallery_items', {
+      character_name: 'Test',
+      prompt: 'Saved prompt',
+      image,
+      created_at: 1,
+      updated_at: 1,
+    });
   const png = makePlaceholderPng();
   const first = saveImage('.png', png);
   const reference = saveImage('.png', png);
@@ -49,22 +45,7 @@ test('media source images', async () => {
   const firstGallery = gallery(first);
   const referenceGallery = gallery(reference);
   const videoPath = join(IMAGES_DIR, 'fixture.webm');
-  await promisify(execFile)('ffmpeg', [
-    '-v',
-    'error',
-    '-f',
-    'lavfi',
-    '-i',
-    'color=c=blue:s=32x24:r=5:d=0.2',
-    '-c:v',
-    'libaom-av1',
-    '-cpu-used',
-    '8',
-    '-threads',
-    '1',
-    '-y',
-    videoPath,
-  ]);
+  await renderMediaFixture(videoPath, 32, 24, true);
   const videoBytes = readFileSync(videoPath);
   const workflows: MediaWorkflow[] = [
     {
@@ -110,32 +91,10 @@ test('media source images', async () => {
     return { asset: mediaAssetForPath(path)!, galleryId: gallery(path) };
   });
 
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    routes: apiRoutes(),
-    fetch: () => new Response(null, { status: 404 }),
-    idleTimeout: 0,
-  });
-  const address = { port: server.port };
-  const base = `http://127.0.0.1:${address.port}`;
-  async function request(method: string, path: string, body?: unknown) {
-    const response = await fetch(`${base}${path}`, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    assert(
-      response.ok,
-      `${method} ${path}: ${response.status} ${response.ok ? '' : await response.text()}`,
-    );
-    return response.status === 204 ? undefined : response.json();
-  }
+  const { server, base, request } = await testApi();
   try {
     const { appendMessage } = await import('../../server/src/tree.ts');
-    stmt(
-      "INSERT INTO conversations(id, title, created_at, updated_at) VALUES (1, 'Video chat', 1, 1)",
-    ).run();
+    conversationFixture({ id: 1, title: 'Video chat' });
     const message = appendMessage(1, 'tool', 'Saved prompt', null);
     stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(
       JSON.stringify([results[0]!.asset.url]),

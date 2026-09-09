@@ -1,13 +1,5 @@
-.modal-backdrop[hidden] {
-  display: none;
-}
-
 /* Shared shell for full-screen workspaces such as Gallery and Settings. */
 .modal-backdrop.fullscreen-backdrop {
-  display: block;
-  padding: 0;
-  background: var(--bg);
-  backdrop-filter: none;
   /* Full viewport bounds are independent of the editor's changing contents. */
   contain: strict;
 }
@@ -17,28 +9,8 @@
   content-visibility: hidden;
 }
 
-.modal.fullscreen-page {
-  /* Fill the fixed backdrop directly; fullscreen pages must never be recentered. */
-  position: absolute;
-  inset: 0;
-  width: auto;
-  height: auto;
-  max-height: none;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: var(--bg);
-  box-shadow: none;
-  animation: none;
-}
-
 .fullscreen-page .modal-head {
-  flex: none;
-  min-height: var(--bar-h);
-  padding: var(--space-1) var(--space-4);
-  background: var(--bg-chrome);
-  border-color: var(--border-subtle);
+  @apply flex-none min-h-bar py-1 px-4 bg-chrome border-subtle;
 }
 
 .fullscreen-page .modal-title {
@@ -46,88 +18,24 @@
 }
 
 .fullscreen-page .modal-body {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-.page-header-actions {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-  gap: var(--space-2);
-}
-
-.page-header-actions > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  min-height: var(--control-height);
-  height: var(--control-height);
-}
-
-.page-header-actions .page-back {
-  margin-right: auto;
-  border-color: transparent;
-  background: transparent;
+  @apply flex flex-col flex-1 min-h-0 p-0 overflow-hidden bg-canvas;
 }
 
 /* Shared editor sidebar beside a gallery or media preview. */
-.detail-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  width: var(--detail-panel-width, 450px);
-  flex: none;
-  min-height: 0;
-  padding: var(--space-4);
-  overflow-y: auto;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border-subtle);
-}
-
-.detail-panel > * {
-  flex-shrink: 0;
-}
-
-.detail-panel textarea {
-  display: block;
-  width: 100%;
-  min-height: 80px;
-  resize: vertical;
-}
-
-.detail-panel .hint,
-.detail-panel .notice {
-  margin: 0;
-  font-size: 12px;
-}
 
 @media (max-width: 767px) {
   .detail-panel {
-    width: 100%;
-    overflow: visible;
     border-left: 0;
     border-top: 1px solid var(--border-subtle);
   }
 
   /* Mobile pages scroll as a whole, including their header. */
-  .modal.fullscreen-page {
-    display: block;
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    overflow-y: auto;
+
+  .modal.fullscreen-page:where(:not(.settings-modal)) {
     overflow-anchor: none;
   }
 
-  .fullscreen-page .modal-body {
-    display: block;
-    overflow: visible;
+  .fullscreen-page:where(:not(.settings-modal)) .modal-body {
+    @apply block overflow-visible;
   }
 }

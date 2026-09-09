@@ -1,5 +1,4 @@
 import { nextCollectionId } from '@tinytavern/shared';
-import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { importPromptCollection, transferObject } from '@tinytavern/shared';
 import { For, Show } from 'solid-js';
 import {
@@ -11,16 +10,11 @@ import {
   mediaPromptSettingsKey,
   type MediaOperation,
   type MediaPromptPreset,
-  type MediaPromptSettings,
   type StandalonePromptTemplate,
 } from '@tinytavern/shared';
-import SettingLabel, { createDefaultField, type DefaultField } from '../SettingField.tsx';
+import FormField from '../FormFields.tsx';
 import MacroHelp from '../MacroHelp.tsx';
-import MacroTextarea from '../MacroTextarea.tsx';
-import NamedCollectionToolbar, {
-  type NamedCollectionToolbarHandle,
-} from '../NamedCollectionToolbar.tsx';
-import { uniqueCollectionName } from '../../state/collectionNames.ts';
+import { createNamedCollection } from '../NamedCollectionEditor.tsx';
 import { mediaSettingsDraft } from './mediaSettingsDraft.tsx';
 
 const FIELDS: [keyof StandalonePromptTemplate, string][] = [
@@ -30,16 +24,9 @@ const FIELDS: [keyof StandalonePromptTemplate, string][] = [
   ['messagePrefill', 'Assistant prefill'],
 ];
 
-function MediaPromptFields(props: {
-  mode: 'chat' | 'gallery';
-  kind: 'image' | 'video';
-  value: MediaPromptSettings;
-  onError: (error: string) => void;
-  onChange: (update: (value: MediaPromptSettings) => MediaPromptSettings) => void;
-}) {
-  const form = { draft: () => props.value, setDraft: props.onChange };
+function MediaPromptsPage(props: { kind: 'image' | 'video'; mode: 'chat' | 'gallery' }) {
+  const form = mediaSettingsDraft(mediaPromptSettingsKey(props.kind, props.mode === 'chat'));
   const Group = (group: { operation: MediaOperation; label: string }) => {
-    let toolbar!: NamedCollectionToolbarHandle;
     const selected = () => form.draft().defaults[group.operation] ?? '';
     const defaults = defaultMediaPrompt(group.operation);
     const inputSlots = mediaInputSlots(
@@ -71,71 +58,40 @@ function MediaPromptFields(props: {
         'Include this block only when the macro has a nonempty value. Works with any available macro.',
       ],
     ];
-    const fields = Object.fromEntries(
-      FIELDS.map(([key]) => [key, createDefaultField(() => defaults[key])]),
-    ) as Record<keyof StandalonePromptTemplate, DefaultField<string>>;
-    const chatPrompt = createDefaultField(() => defaultChatMediaPrompt(group.operation));
-    const presets = () => form.draft().presets.filter((item) => item.operation === group.operation);
-    const current = () => presets().find((item) => item.id === selected());
-    const chatText = () => {
+    const collection = createNamedCollection<MediaPromptPreset>({
+      items: () => form.draft().presets,
+      filter: (item) => item.operation === group.operation,
+      selected,
+      identify: (item) => item.id,
+      newName: 'New preset',
+      defaultLabel: 'Default',
+      create: (source, name) => ({
+        ...(props.mode === 'chat'
+          ? { chatPrompt: defaultChatMediaPrompt(group.operation) }
+          : defaults),
+        ...source,
+        id: nextCollectionId(form.draft().presets),
+        name,
+        operation: group.operation,
+      }),
+      commit: (presets, id, removed) =>
+        form.setDraft((value) => {
+          const defaults = Object.fromEntries(
+            Object.entries(value.defaults).filter(([, preset]) => preset !== removed?.id),
+          );
+          if (id) defaults[group.operation] = id;
+          else delete defaults[group.operation];
+          return { ...value, presets, defaults };
+        }),
+    });
+    const { current, patch } = collection;
+    const value = (key: keyof StandalonePromptTemplate | 'chatPrompt') => {
       const preset = current();
-      return preset && 'chatPrompt' in preset
-        ? preset.chatPrompt
-        : defaultChatMediaPrompt(group.operation);
-    };
-    const galleryValue = (key: keyof StandalonePromptTemplate) => {
-      const preset = current();
+      if (key === 'chatPrompt')
+        return preset && 'chatPrompt' in preset
+          ? preset.chatPrompt
+          : defaultChatMediaPrompt(group.operation);
       return preset && 'systemPrompt' in preset ? preset[key] : defaults[key];
-    };
-    const patch = (changes: Partial<MediaPromptPreset>) =>
-      form.setDraft((value) => ({
-        ...value,
-        presets: value.presets.map((item) =>
-          item.id === selected() ? { ...item, ...changes } : item,
-        ),
-      }));
-    const add = (copy = false) => {
-      const id = nextCollectionId(form.draft().presets);
-      const source = current();
-      const baseName = copy && source ? `${source.name} (copy)` : 'New preset';
-      const name = uniqueCollectionName(baseName, presets());
-      form.setDraft((value) => ({
-        ...value,
-        defaults: { ...value.defaults, [group.operation]: id },
-        presets: [
-          ...value.presets,
-          {
-            ...(props.mode === 'chat'
-              ? { chatPrompt: defaultChatMediaPrompt(group.operation) }
-              : defaults),
-            ...source,
-            id,
-            name,
-            operation: group.operation,
-          },
-        ],
-      }));
-    };
-    const remove = () => {
-      const id = selected();
-      form.setDraft((value) => ({
-        ...value,
-        presets: value.presets.filter((item) => item.id !== id),
-        defaults: Object.fromEntries(
-          Object.entries(value.defaults).filter(([, preset]) => preset !== id),
-        ),
-      }));
-    };
-    const select = (id: string) => {
-      form.setDraft((value) => {
-        const defaults = { ...value.defaults };
-        if (id) {
-          defaults[group.operation] = id;
-        } else {
-          delete defaults[group.operation];
-        }
-        return { ...value, defaults };
-      });
     };
     return (
       <section class="settings-section">
@@ -146,28 +102,14 @@ function MediaPromptFields(props: {
           aria-label={`${group.label} preset editor`}
         >
           <label>Saved presets</label>
-          <NamedCollectionToolbar
-            ref={toolbar}
+          <collection.Toolbar
             ariaLabel={`${group.label} saved prompt presets`}
-            selected={selected()}
-            options={[
-              { value: '', label: 'Default' },
-              ...presets().map((item) => ({ value: item.id, label: item.name })),
-            ]}
-            hasSelection={!!current()}
-            name={current()?.name ?? ''}
             nameLabel="Preset name"
-            onRename={(name) => patch({ name })}
-            onSelect={select}
-            onNew={() => add()}
-            onDuplicate={() => add(true)}
-            onDelete={remove}
-          >
-            <SettingsTransferButtons
-              type={`media-prompt:${props.mode}:${group.operation}`}
-              onError={props.onError}
-              exportData={() => {
-                const preset = current();
+            transfer={{
+              type: `media-prompt:${props.mode}:${group.operation}`,
+              onError: form.setError,
+              allowDefaultExport: true,
+              exportData: (preset) => {
                 if (preset) {
                   const { id, ...value } = preset;
                   return value;
@@ -179,13 +121,12 @@ function MediaPromptFields(props: {
                     ? { chatPrompt: defaultChatMediaPrompt(group.operation) }
                     : defaults),
                 };
-              }}
-              importData={(data) => {
+              },
+              importData: (data, previous) => {
                 const source = transferObject(data);
                 if (source.operation !== group.operation)
                   throw new Error('This preset belongs to another operation');
-                const previous = current();
-                const imported = importPromptCollection(
+                return importPromptCollection(
                   { presets: [source], defaults: {} },
                   {
                     presets: previous ? [{ ...previous, name: String(source.name) }] : [],
@@ -194,78 +135,58 @@ function MediaPromptFields(props: {
                   props.mode === 'chat',
                   props.kind === 'video',
                 ).presets[0]!;
-                form.setDraft((value) => ({
-                  ...value,
-                  presets: previous
-                    ? value.presets.map((item) => (item.id === previous.id ? imported : item))
-                    : [...value.presets, imported],
-                  defaults: { ...value.defaults, [group.operation]: imported.id },
-                }));
-                toolbar.closeRename();
-              }}
-            />
-          </NamedCollectionToolbar>
-          <Show when={props.mode === 'chat'}>
-            <SettingLabel field={current() ? chatPrompt : undefined}>
-              Chat steering template{' '}
-              <MacroHelp
-                rows={[
-                  ['{{instruction}}', 'Your generation instruction'],
-                  ['{{prompt}}', 'The original prompt when revising'],
-                  ['{{char}} / {{user}}', 'Character and persona names'],
-                  ...inputMacroHelp,
-                ]}
-              />
-            </SettingLabel>
-            <MacroTextarea
-              readOnly={!current()}
-              ref={chatPrompt.ref}
-              value={chatText()}
-              rows={12}
-              template
-              keys={macroKeys}
-              onText={(value) => {
-                if (current() && chatText() !== value) {
-                  patch({ chatPrompt: value });
-                }
-              }}
-            />
-            <p class="hint">
-              Appended after the chat history. The chat's system prompt and reasoning prefill are
-              retained. Put all media formatting instructions here.
-            </p>
-          </Show>
-          <Show when={props.mode === 'gallery'}>
-            <For each={FIELDS}>
-              {([key, label]) => (
-                <>
-                  <SettingLabel field={current() ? fields[key] : undefined}>
+              },
+            }}
+          />
+          <For
+            each={
+              props.mode === 'chat' ? [['chatPrompt', 'Chat steering template'] as const] : FIELDS
+            }
+          >
+            {([key, label]) => (
+              <FormField
+                label={
+                  <>
                     {label}{' '}
                     <MacroHelp
                       rows={[
                         ['{{instruction}}', 'Your generation instruction'],
                         ['{{prompt}}', 'The original prompt when revising'],
+                        ...(props.mode === 'chat'
+                          ? [
+                              ['{{char}} / {{user}}', 'Character and persona names'] as [
+                                string,
+                                string,
+                              ],
+                            ]
+                          : []),
                         ...inputMacroHelp,
                       ]}
                     />
-                  </SettingLabel>
-                  <MacroTextarea
-                    readOnly={!current()}
-                    ref={fields[key].ref}
-                    value={galleryValue(key)}
-                    rows={key.endsWith('Prefill') ? 3 : 7}
-                    template
-                    keys={macroKeys}
-                    onText={(value) => {
-                      if (current() && galleryValue(key) !== value) patch({ [key]: value });
-                    }}
-                  />
-                </>
-              )}
-            </For>
-          </Show>
+                  </>
+                }
+                kind="macro"
+                readOnly={!current()}
+                value={value(key)}
+                defaultValue={
+                  key === 'chatPrompt' ? defaultChatMediaPrompt(group.operation) : defaults[key]
+                }
+                rows={key === 'chatPrompt' ? 12 : key.endsWith('Prefill') ? 3 : 7}
+                template
+                keys={macroKeys}
+                onChange={(text) => {
+                  if (current() && value(key) !== text) patch({ [key]: text });
+                }}
+                hint={
+                  key === 'chatPrompt'
+                    ? "Appended after the chat history. The chat's system prompt and reasoning prefill are retained. Put all media formatting instructions here."
+                    : undefined
+                }
+              />
+            )}
+          </For>
           <Show when={!current()}>
-            <span class="prompt-preset-status">
+            <span class="text-dim text-caption">
               Built-in default · create a preset to customize
             </span>
           </Show>
@@ -274,25 +195,10 @@ function MediaPromptFields(props: {
     );
   };
   return (
-    <For each={MEDIA_OPERATIONS.filter((item) => item.kind === props.kind)}>
-      {(operation) => <Group operation={operation.id} label={operation.label} />}
-    </For>
-  );
-}
-
-function MediaPromptsPage(props: { kind: 'image' | 'video'; mode: 'chat' | 'gallery' }) {
-  const form = mediaSettingsDraft(
-    mediaPromptSettingsKey(props.kind === 'image' ? 'image' : 'video', props.mode === 'chat'),
-  );
-  return (
-    <div class="form">
-      <MediaPromptFields
-        kind={props.kind}
-        mode={props.mode}
-        value={form.draft()}
-        onChange={form.setDraft}
-        onError={form.setError}
-      />
+    <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
+      <For each={MEDIA_OPERATIONS.filter((item) => item.kind === props.kind)}>
+        {(operation) => <Group operation={operation.id} label={operation.label} />}
+      </For>
       <form.Actions />
     </div>
   );

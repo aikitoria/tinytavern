@@ -76,20 +76,17 @@
 
 html,
 body {
-  margin: 0;
-  height: 100%;
+  @apply m-0 h-full;
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
+  @apply bg-canvas text-foreground overscroll-none;
   font:
     15px/1.55 'IBM Plex Sans Variable',
     system-ui,
     'Segoe UI',
     Roboto,
     sans-serif;
-  overscroll-behavior: none;
   accent-color: var(--accent);
 }
 
@@ -103,12 +100,7 @@ body {
   font-weight: inherit;
   font-style: inherit;
   line-height: 20px;
-  color: inherit;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  padding: 6px var(--space-2);
-  cursor: pointer;
+  @apply text-inherit bg-raised border border-solid border-line rounded-sm py-1.5 px-2 cursor-pointer;
   transition:
     color 0.14s ease,
     background 0.14s ease,
@@ -129,19 +121,13 @@ button:focus-visible,
 }
 
 button:disabled {
-  opacity: 0.45;
-  cursor: default;
+  @apply opacity-45 cursor-default;
 }
 
 :where(input, select, textarea) {
   font: inherit;
   font-weight: 400;
-  color: var(--text-field);
-  background: var(--bg);
-  border: 1px solid var(--border-control-surface);
-  border-radius: var(--radius-control);
-  padding: var(--control-pad-y) var(--space-3);
-  width: 100%;
+  @apply text-field bg-canvas border border-solid border-control-line rounded-sm py-control-y px-3 w-full;
   box-shadow: none;
 }
 

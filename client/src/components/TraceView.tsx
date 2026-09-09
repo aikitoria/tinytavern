@@ -27,12 +27,16 @@ function TraceMessage(props: { role: string; label?: string; content: string }) 
     }
   };
   return (
-    <section class="trace-msg">
-      <div class="trace-head">
-        <span class={`trace-role role-color-${props.role}`}>{label()}</span>
+    <section class="bg-message rounded-md overflow-hidden relative py-2 px-3">
+      <div class="min-h-5 pr-7 flex items-center gap-2">
+        <span
+          class={`trace-role text-small-label font-semibold uppercase flex-1 tracking-wider role-color-${props.role}`}
+        >
+          {label()}
+        </span>
         <button
           type="button"
-          class="icon-btn trace-copy"
+          class="icon-btn [&.icon-btn]:absolute [&.icon-btn]:top-1 [&.icon-btn]:right-1 [&.icon-btn]:min-w-7 [&.icon-btn]:size-7"
           title={copied() ? 'Copied' : 'Copy message'}
           aria-label={copied() ? 'Copied' : `Copy ${label()}`}
           onClick={() => void copy()}
@@ -40,7 +44,9 @@ function TraceMessage(props: { role: string; label?: string; content: string }) 
           <FontAwesomeIcon icon={copied() ? faCheck : faCopy} size={13} />
         </button>
       </div>
-      <pre class="trace-content">{props.content}</pre>
+      <pre class="trace-content text-prose whitespace-pre-wrap wrap-break-word p-0 font-code text-caption font-normal m-0 mt-1">
+        {props.content}
+      </pre>
     </section>
   );
 }
@@ -57,7 +63,7 @@ export default function TraceView() {
   );
 
   return (
-    <div class="trace">
+    <div class="trace flex flex-col gap-3">
       <Show when={trace()} fallback={<p class="hint">Loading…</p>}>
         {(t) => (
           <>

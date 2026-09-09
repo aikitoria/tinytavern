@@ -35,7 +35,7 @@ export default function MediaCharacterPicker(props: {
         disabled={props.disabled}
         onClick={() => setOpen(!open())}
       >
-        <span class="select-label">{label()}</span>
+        <span class="select-label truncate">{label()}</span>
         <FontAwesomeIcon icon={faChevronDown} size={10} />
       </button>
       <DropdownSurface
@@ -44,7 +44,7 @@ export default function MediaCharacterPicker(props: {
         onClose={() => setOpen(false)}
         role="menu"
         ariaLabel="Associated characters"
-        class="gallery-character-menu"
+        class="[&_.avatar]:shrink-0 [&_.avatar]:text-tiny [&_.avatar]:size-5.5"
         matchAnchorWidth
         minWidth={230}
         maxHeight={360}

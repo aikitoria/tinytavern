@@ -95,10 +95,16 @@ export default function Select(props: {
       setOpen(false);
       return;
     }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
+      if (!props.options.length) return;
       const dir = event.key === 'ArrowDown' ? 1 : -1;
-      const next = (highlighted() + dir + props.options.length) % props.options.length;
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? props.options.length - 1
+            : (highlighted() + dir + props.options.length) % props.options.length;
       setHighlighted(next);
       menu?.children[next]?.scrollIntoView({ block: 'nearest' });
     } else if (event.key === 'Enter' || event.key === ' ') {
@@ -124,8 +130,8 @@ export default function Select(props: {
         onClick={() => (open() ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
       >
-        <span class="select-label">{label()}</span>
-        <span class="select-caret">
+        <span class="select-label truncate">{label()}</span>
+        <span class="select-caret text-dim text-tiny shrink-0">
           <FontAwesomeIcon icon={faChevronDown} size={10} />
         </span>
       </button>

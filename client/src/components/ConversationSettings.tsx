@@ -1,7 +1,7 @@
 import { useDialogNavigationGuard } from '../state/dialogContext.ts';
-import SettingLabel, { createDefaultField } from './SettingField.tsx';
-import { faCheck } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from './FontAwesomeIcon.tsx';
+import { createDefaultField } from './SettingField.tsx';
+import FormField from './FormFields.tsx';
+import SettingsActions from './SettingsActions.tsx';
 import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import { characterChatName, type Conversation } from '@tinytavern/shared';
@@ -15,42 +15,33 @@ import {
   toast,
 } from '../state/store.ts';
 import { createSavedFlash, download, errorMessage, numberOrNull } from '../util.ts';
-import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
+import { changedFields, mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import Avatar from './Avatar.tsx';
 import Modal from './Modal.tsx';
 import MacroHelp from './MacroHelp.tsx';
-import MacroTextarea from './MacroTextarea.tsx';
-import Select from './Select.tsx';
 import {
   createSettingsNavigation,
   SettingsNavigationPrompt,
   type SettingsSectionActions,
 } from './SettingsGuard.tsx';
 
-interface Draft {
-  title: string;
-  personaId: number | null;
-  endpointId: number | null;
-  speakerName: string | null;
-  scenarioOverride: string | null;
-}
-
-function snapshot(conv: Conversation): Draft {
-  return {
-    title: conv.title,
-    personaId: conv.personaId,
-    endpointId: conv.endpointId,
-    speakerName: conv.speakerName,
-    scenarioOverride: conv.scenarioOverride,
-  };
-}
+type Draft = Pick<
+  Conversation,
+  'title' | 'personaId' | 'endpointId' | 'speakerName' | 'scenarioOverride'
+>;
+const snapshot = (conv: Conversation): Draft => ({
+  title: conv.title,
+  personaId: conv.personaId,
+  endpointId: conv.endpointId,
+  speakerName: conv.speakerName,
+  scenarioOverride: conv.scenarioOverride,
+});
 
 function Editor(props: {
   conv: Conversation;
   register: (actions: SettingsSectionActions) => () => void;
   navigate: (action: () => void) => void;
 }) {
-  let scenarioEl: HTMLTextAreaElement | undefined;
   const titleField = createDefaultField(() => 'New chat');
   const speakerField = createDefaultField(() => '');
   const personaField = createDefaultField(() => '');
@@ -69,11 +60,6 @@ function Editor(props: {
       : undefined;
 
   const inheritedScenario = () => character()?.scenario ?? '';
-
-  createEffect(() => {
-    const value = draft.scenarioOverride;
-    if (value != null && scenarioEl && scenarioEl.value !== value) scenarioEl.value = value;
-  });
 
   createEffect(() => {
     const latest = snapshot(props.conv);
@@ -97,16 +83,12 @@ function Editor(props: {
       return false;
     }
     // Patch only changed fields to preserve concurrent auto-titles and remote edits.
-    const dirty = Object.fromEntries(
-      (Object.keys(base) as (keyof Draft)[])
-        .filter((key) => draft[key] !== base[key])
-        .map((key) => [key, draft[key]]),
-    );
+    const dirty = changedFields(base, draft);
     try {
       const updated = await api.patchConversation(
         props.conv.id,
-        dirty,
         state.tree.conversationId === props.conv.id ? state.tree : props.conv,
+        dirty,
       );
       base = snapshot(updated);
       setDraft(reconcile({ ...base }));
@@ -141,23 +123,24 @@ function Editor(props: {
   };
 
   return (
-    <div class="form">
-      <SettingLabel field={titleField}>Title</SettingLabel>
-      <input
-        ref={titleField.ref}
+    <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
+      <FormField
+        label="Title"
+        field={titleField}
         value={draft.title}
-        onChange={(e) => setDraft('title', e.currentTarget.value)}
+        inputEvent="change"
+        onChange={(next) => setDraft('title', next)}
       />
 
       <label>Character</label>
-      <div class="conversation-character-value">
+      <div class="min-h-10 py-control-y px-3 text-foreground bg-canvas border border-solid border-line flex items-center gap-2 rounded-sm [&_.avatar]:text-xs [&_.avatar]:size-6">
         <Avatar src={character()?.avatarThumbnail} name={character()?.name ?? 'Assistant'} />
-        <span class="conversation-character-name">{character()?.name ?? 'Assistant'}</span>
+        <span class="truncate min-w-0">{character()?.name ?? 'Assistant'}</span>
         <Show when={character()}>
           {(current) => (
             <button
               type="button"
-              class="conversation-character-edit"
+              class="conversation-character-edit flex-none p-0 ml-auto text-dim text-sm bg-clear border-clear [&:hover]:bg-clear [&:hover]:text-foreground"
               onClick={() => openCharacterSettings(current().id)}
             >
               Edit character
@@ -166,71 +149,56 @@ function Editor(props: {
         </Show>
       </div>
 
-      <SettingLabel field={speakerField}>
-        Speaker name (assistant replies; empty = character's name, also set via /char)
-      </SettingLabel>
-      <input
-        ref={speakerField.ref}
+      <FormField
+        field={speakerField}
+        inputEvent="change"
+        label="Speaker name (assistant replies; empty = character's name, also set via /char)"
         value={draft.speakerName ?? ''}
-        onChange={(e) => setDraft('speakerName', e.currentTarget.value.trim() || null)}
         placeholder={characterChatName(character())}
+        onChange={(next) => setDraft('speakerName', next.trim() || null)}
       />
-
-      <SettingLabel field={personaField}>Persona</SettingLabel>
-      <Select
-        ref={personaField.ref}
+      <FormField
+        label="Persona"
+        field={personaField}
         value={draft.personaId?.toString() ?? ''}
         ariaLabel="Conversation persona"
-        onChange={(v) => setDraft('personaId', numberOrNull(v))}
+        onChange={(next) => setDraft('personaId', numberOrNull(next))}
         options={[
           { value: '', label: '— none —' },
           ...state.personas.map((p) => ({ value: String(p.id), label: p.name })),
         ]}
       />
-
-      <SettingLabel field={endpointField}>
-        Endpoint (overrides the global active endpoint for this conversation)
-      </SettingLabel>
-      <Select
-        ref={endpointField.ref}
+      <FormField
+        field={endpointField}
         value={draft.endpointId?.toString() ?? ''}
+        label="Endpoint (overrides the global active endpoint for this conversation)"
         ariaLabel="Conversation endpoint"
-        onChange={(v) => setDraft('endpointId', numberOrNull(v))}
+        onChange={(next) => setDraft('endpointId', numberOrNull(next))}
         options={[
           { value: '', label: '— global default —' },
           ...state.endpoints.map((ep) => ({ value: String(ep.id), label: ep.name })),
         ]}
       />
-
-      <SettingLabel
-        check
-        changed={draft.scenarioOverride !== null}
-        onRevert={() => setDraft('scenarioOverride', null)}
-      >
-        <input
-          type="checkbox"
-          checked={draft.scenarioOverride !== null}
-          onChange={(e) =>
-            setDraft('scenarioOverride', e.currentTarget.checked ? inheritedScenario() : null)
-          }
-        />
-        <span>Override the character scenario for this conversation</span>
-      </SettingLabel>
-
+      <FormField
+        kind="check"
+        label={<span>Override the character scenario for this conversation</span>}
+        value={draft.scenarioOverride !== null}
+        defaultValue={false}
+        onChange={(next) => setDraft('scenarioOverride', next ? inheritedScenario() : null)}
+      />
       <Show when={draft.scenarioOverride !== null}>
-        <SettingLabel
+        <FormField
+          kind="macro"
+          label={
+            <>
+              Conversation scenario <MacroHelp />
+            </>
+          }
           changed={draft.scenarioOverride !== null}
           onRevert={() => setDraft('scenarioOverride', null)}
-        >
-          Conversation scenario <MacroHelp />
-        </SettingLabel>
-        <MacroTextarea
-          ref={(el) => {
-            scenarioEl = el;
-            el.value = draft.scenarioOverride ?? '';
-          }}
+          value={draft.scenarioOverride ?? ''}
           placeholder="Leave empty to omit the scenario from this conversation"
-          onText={(text) => setDraft('scenarioOverride', text)}
+          onChange={(text: string) => setDraft('scenarioOverride', text)}
         />
       </Show>
 
@@ -239,10 +207,7 @@ function Editor(props: {
           {error()}
         </p>
       </Show>
-      <div class="form-actions">
-        <button class="primary-btn" onClick={() => void save()}>
-          Save
-        </button>
+      <SettingsActions inline save={save} saved={saved()}>
         <button onClick={discard}>Discard</button>
         <button onClick={duplicateChat}>Duplicate chat</button>
         <button
@@ -251,12 +216,7 @@ function Editor(props: {
         >
           Export JSON
         </button>
-        <Show when={saved()}>
-          <span class="saved-flash">
-            <FontAwesomeIcon icon={faCheck} size={12} /> Saved
-          </span>
-        </Show>
-      </div>
+      </SettingsActions>
     </div>
   );
 }

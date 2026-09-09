@@ -11,11 +11,16 @@ const subscriberCounts = new Map<number, number>();
 const GLOBAL_TOPIC = 'global';
 const topic = (id: number) => `conversation:${id}`;
 let server: Server<SocketState> | undefined;
+let onConnect: ((ws: ClientSocket) => void) | undefined;
 let onSubscribe: ((ws: ClientSocket, conversationId: number) => void) | null = null;
 let onUnsubscribe: ((conversationId: number) => void) | null = null;
 
-export function bindWebSocketServer(value: Server<SocketState>): void {
+export function bindWebSocketServer(
+  value: Server<SocketState>,
+  connected?: typeof onConnect,
+): void {
   server = value;
+  onConnect = connected;
 }
 export function setSubscribeHandler(fn: (ws: ClientSocket, conversationId: number) => void): void {
   onSubscribe = fn;
@@ -56,6 +61,7 @@ export const websocket: WebSocketHandler<SocketState> = {
     clients.add(ws);
     ws.subscribe(GLOBAL_TOPIC);
     ws.send(JSON.stringify({ t: 'hello' } satisfies ServerEvent));
+    onConnect?.(ws);
   },
   message(ws, data) {
     let parsed: unknown;

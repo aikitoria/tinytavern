@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Message, MediaJobInputSnapshot } from '@tinytavern/shared';
 import { IMAGES_DIR, stmt, toMediaAsset, transaction } from './db.ts';
-import { createMediaJob, createMediaJobFromRecipe, startMediaJob } from './mediaJobs.ts';
+import { createMediaJobFromRecipe, startMediaJob } from './mediaJobs.ts';
 import {
   mediaLive,
   requireMediaJob,
@@ -14,7 +14,7 @@ import {
 import { tickMediaWorker } from './mediaWorker.ts';
 import { getMediaRecipe, messageRecipeId } from './mediaRecipes.ts';
 import { HttpError } from './router.ts';
-import { consumeTemporaryMediaJob } from './temporaryMediaJob.ts';
+import { consumeTemporaryMediaJob, startTemporaryMediaJob } from './temporaryMediaJob.ts';
 
 export interface ImageRenderRequest {
   configuration: MediaJobConfiguration;
@@ -56,36 +56,11 @@ export function startMessageImageRender(
   return result;
 }
 
-/** Interactive image callers use the same workflow snapshots and background worker. */
-function startImageMediaJob(request: ImageRenderRequest): MediaJobRow {
-  request.signal?.throwIfAborted();
-  const configuration: MediaJobConfiguration = {
-    ...request.configuration,
-    temporary: true,
-  };
-  return transaction(() => {
-    const draft = createMediaJob(
-      {
-        requestKey: newRequestId(),
-        operation: configuration.workflow.operation,
-        workflowId: configuration.workflow.id,
-        prompt: request.prompt,
-        inputs: request.inputs,
-        destination: 'gallery',
-      },
-      undefined,
-      JSON.stringify(configuration),
-      request.inputs,
-    );
-    startMediaJob(requireMediaJob(draft.id), {}, false);
-    return requireMediaJob(draft.id);
-  });
-}
-
 /** Only the avatar preview needs raster bytes; the temporary asset is released after reading. */
 export async function renderImageBuffer(request: ImageRenderRequest) {
+  request.signal?.throwIfAborted();
   return consumeTemporaryMediaJob(
-    startImageMediaJob(request),
+    startTemporaryMediaJob(request.configuration, request.inputs, request.prompt, request.inputs),
     {
       signal: request.signal,
       onProgress: (row) => {

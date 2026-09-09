@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
+import { testApi } from '../support/http.ts';
+import { conversationFixture, messageFixture } from '../support/fixtures.ts';
 
 test('deep tree delete', async () => {
-  const { once } = await import('node:events');
-
   const { existsSync } = await import('node:fs');
 
   const { basename, join } = await import('node:path');
@@ -17,24 +17,9 @@ test('deep tree delete', async () => {
     await import('../../server/src/tree.ts');
   const { saveImage } = await import('../../server/src/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/conversations.ts');
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    routes: apiRoutes(),
-    fetch: () => new Response(null, { status: 404 }),
-    idleTimeout: 0,
-  });
-  const address = { port: server.port };
-  const base = `http://127.0.0.1:${address.port}`;
-
-  function conversation(): number {
-    return Number(
-      stmt("INSERT INTO conversations(title,created_at,updated_at) VALUES ('Deep',1,1)").run()
-        .lastInsertRowid,
-    );
-  }
+  const { server, request: send } = await testApi();
+  const conversation = () => conversationFixture({ title: 'Deep' });
   function chain(
     cid: number,
     depth: number,
@@ -44,12 +29,7 @@ test('deep tree delete', async () => {
     return transaction(() => {
       const ids: number[] = [];
       for (let i = 0; i < depth; i++) {
-        ids.push(
-          Number(
-            stmt(`INSERT INTO messages(conversation_id,role,content,created_at)
-        VALUES (?,'assistant','deepdeletiontoken',1)`).run(cid).lastInsertRowid,
-          ),
-        );
+        ids.push(messageFixture(cid, { content: 'deepdeletiontoken' }));
       }
       if (reverseIds) ids.reverse();
       for (let i = 0; i < ids.length; i++) {
@@ -68,16 +48,8 @@ test('deep tree delete', async () => {
   function remaining(cid: number): number {
     return Number(stmt('SELECT count(*) AS n FROM messages WHERE conversation_id=?').get(cid)!.n);
   }
-  async function request(method: string, path: string, body?: unknown) {
-    const response = await fetch(base + path, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
-    assert(response.status === 200 || response.status === 204, `${response.status}: ${text}`);
-    return text ? JSON.parse(text) : undefined;
-  }
+  const request = (method: string, path: string, body?: unknown) =>
+    send(method, path, body, method === 'DELETE' && path !== '/api/conversations' ? 204 : 200);
 
   try {
     // Reverse numeric order models trees changed by rotations, without assuming ID topology.
@@ -224,15 +196,8 @@ test('online backup preserves committed state and refuses replacement', async ()
   const roundTrip = stmt('SELECT ? AS bytes').get(binary)!.bytes;
   assert(roundTrip instanceof Uint8Array);
   assert.deepEqual([...roundTrip], [...binary]);
-  const cid = Number(
-    stmt("INSERT INTO conversations(title,created_at,updated_at) VALUES ('Backup',1,1)").run()
-      .lastInsertRowid,
-  );
-  const mid = Number(
-    stmt(
-      "INSERT INTO messages(conversation_id,role,content,created_at) VALUES (?,'user','backupftsprobe',1)",
-    ).run(cid).lastInsertRowid,
-  );
+  const cid = conversationFixture({ title: 'Backup' });
+  const mid = messageFixture(cid, { role: 'user', content: 'backupftsprobe' });
   const target = join(DATA_DIR, 'backup.db');
   const run = () =>
     spawnSync(process.execPath, ['server/src/backup.ts', target], { encoding: 'utf8' });

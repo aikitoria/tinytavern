@@ -134,6 +134,11 @@ export default function VideoPreview(props: { preview: MediaVideoPreview; active
   });
 
   return (
-    <canvas ref={canvas} class="media-result" role="img" aria-label="Generation video preview" />
+    <canvas
+      ref={canvas}
+      class="media-result block object-contain w-full max-h-[100cqh]"
+      role="img"
+      aria-label="Generation video preview"
+    />
   );
 }

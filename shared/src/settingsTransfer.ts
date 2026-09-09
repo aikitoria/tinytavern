@@ -1,3 +1,4 @@
+import { ENTITY_FIELDS } from './entityFields.ts';
 import { nextCollectionId } from './numericIds.ts';
 import type { Settings, MediaPromptPreset, MediaWorkflow } from './index.ts';
 import {
@@ -52,20 +53,10 @@ export function namedItem<T extends { name: string }>(
 }
 
 export const ENTITY_TRANSFER_FIELDS = {
-  presets: ['name', 'content'],
-  templates: [
-    'name',
-    'content',
-    'userPrologue',
-    'reasoningPrefill',
-    'messagePrefill',
-    'prefixNames',
-    'usesPersonas',
-    'steerTemplate',
-    'speakerHandoffTemplate',
-  ],
+  presets: Object.keys(ENTITY_FIELDS.presets),
+  templates: Object.keys(ENTITY_FIELDS.templates),
   endpoints: ['name', 'baseUrl', 'model', 'genParams', 'prefillMode'],
-  personas: ['name', 'description', 'avatarData'],
+  personas: [...Object.keys(ENTITY_FIELDS.personas), 'avatarData'],
 } as const;
 export type TransferEntity = keyof typeof ENTITY_TRANSFER_FIELDS;
 
@@ -284,7 +275,10 @@ export function importRendering(value: unknown, settings: Settings): Settings['m
 
 export function importImagePromptSet(
   value: unknown,
-  current: { presets: { name: string; prompt: string; context?: string }[]; active: string },
+  current: {
+    presets: { name: string; prompt: string; context?: string }[];
+    active: string;
+  },
   avatar: boolean,
 ) {
   const source = transferObject(value);

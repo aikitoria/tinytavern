@@ -112,8 +112,15 @@ export default function MacroTextarea(props: {
   };
 
   return (
-    <div class="macro-box" classList={props.classList}>
-      <div class={`macro-overlay ${props.class ?? ''}`} ref={overlay} aria-hidden="true">
+    <div
+      class="macro-box [&_textarea]:block [&_textarea]:relative [&_textarea]:bg-clear [&_textarea::-webkit-scrollbar]:w-2.5 [&_textarea::-webkit-scrollbar-thumb]:bg-hover [&_textarea::-webkit-scrollbar-track]:bg-clear [&_textarea::-webkit-scrollbar-corner]:bg-clear"
+      classList={props.classList}
+    >
+      <div
+        class={`macro-overlay overflow-hidden wrap-break-word absolute inset-0 border border-solid border-transparent rounded-sm py-control-y px-3 whitespace-pre-wrap text-transparent pointer-events-none [&_mark]:text-transparent ${props.class ?? ''}`}
+        ref={overlay}
+        aria-hidden="true"
+      >
         <For
           each={segments(
             text(),

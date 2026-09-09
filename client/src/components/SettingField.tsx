@@ -114,7 +114,7 @@ export function RevertButton(props: {
     <Show when={props.changed}>
       <button
         type="button"
-        class="icon-btn setting-revert"
+        class="icon-btn [&.icon-btn]:min-w-6 [&.icon-btn]:p-0 [&.icon-btn]:flex-none [&.icon-btn]:text-muted [&.icon-btn]:size-6 [&.icon-btn:hover]:text-foreground"
         title="Revert to default"
         aria-label="Revert to default"
         aria-describedby={props.describedBy}
@@ -137,7 +137,10 @@ export default function SettingLabel(props: {
 }) {
   const id = createUniqueId();
   return (
-    <div class="setting-label" classList={{ 'setting-check': props.check }}>
+    <div
+      class="setting-label flex items-center gap-2 min-h-6 mt-2 [&>label]:m-0 [&>label]:min-w-0"
+      classList={{ 'setting-check': props.check }}
+    >
       <label id={id} for={props.for ?? props.field?.id()} classList={{ 'check-row': props.check }}>
         {props.children}
       </label>

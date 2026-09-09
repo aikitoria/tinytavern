@@ -10,7 +10,6 @@ import { errorMessage } from '../util.ts';
 import MediaJobList from './MediaJobList.tsx';
 import { groupMediaJobs } from './jobCards.ts';
 import { openMediaTool } from './navigation.ts';
-import './media.css';
 
 export default function MediaJobsModal() {
   const active = useDialogActive();
@@ -59,14 +58,14 @@ export default function MediaJobsModal() {
       class="media-tools-modal"
       onClose={back}
       headerExtra={
-        <div class="page-header-actions">
+        <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear">
           <button class="page-back" onClick={back}>
             <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
           </button>
         </div>
       }
     >
-      <div class="media-workspace">
+      <div class="media-workspace flex flex-col flex-1 min-h-0 overflow-hidden mobile:overflow-visible [&>.notice]:m-4">
         <Show when={error()}>
           <p class="notice notice-error" role="alert">
             {error()}

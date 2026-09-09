@@ -46,10 +46,7 @@ export function mediaSettingsDraft<K extends 'mediaRendering' | MediaPromptSetti
           {error()}
         </p>
       </Show>
-      <SettingsActions>
-        <button class="primary-btn" disabled={saving()} onClick={() => void save()}>
-          {saving() ? 'Saving…' : 'Save'}
-        </button>
+      <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
         <SettingsTransferButtons
           type={`page:${key}`}
           onError={setError}
@@ -78,12 +75,6 @@ export function mediaSettingsDraft<K extends 'mediaRendering' | MediaPromptSetti
             setError('');
           }}
         />
-        <button disabled={saving()} onClick={discard}>
-          Discard
-        </button>
-        <Show when={saved()}>
-          <span class="saved-flash">Saved</span>
-        </Show>
       </SettingsActions>
     </>
   );

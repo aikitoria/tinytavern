@@ -14,6 +14,7 @@ import { confirmAction } from '../../state/confirm.ts';
 import Avatar from '../Avatar.tsx';
 import AvatarRow from '../AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
+import FormField, { createFormFields } from '../FormFields.tsx';
 import TemplateFields, { type TemplateFieldsHandle } from '../TemplateFields.tsx';
 import MacroHelp from '../MacroHelp.tsx';
 import MacroTextarea from '../MacroTextarea.tsx';
@@ -30,62 +31,50 @@ export default function CharactersTab() {
   const folderNameField = createDefaultField(() => '');
   const [folderError, setFolderError] = createSignal('');
   const [folderSaving, setFolderSaving] = createSignal(false);
-  const nameEl = createDefaultField(() => '');
-  const chatNameEl = createDefaultField(() => '');
-  const folderEl = createDefaultField(() => '');
-  const personalityEl = createDefaultField(() => '');
-  const scenarioEl = createDefaultField(() => '');
-  const examplesEl = createDefaultField(() => '');
-  const firstMessageEl = createDefaultField(() => '');
-  const presetEl = createDefaultField(() => '');
-  const customEl = createDefaultField(() => '');
-  const templateEl = createDefaultField(() => '');
-  const disableBackgroundSwipeEl = createDefaultField(() => false);
+  const form = createFormFields({
+    name: '',
+    chatName: '',
+    folderId: '',
+    personality: '',
+    scenario: '',
+    examples: '',
+    firstMessage: '',
+    presetId: '',
+    customPrompt: '',
+    templateId: '',
+    disableBackgroundSwipeGeneration: false,
+  });
   let templateFields!: TemplateFieldsHandle;
   let cardInput!: HTMLInputElement;
 
   const editor = createEntityEditor({
+    ...api.characters,
     items: () => state.characters,
     load: (character) => {
-      nameEl.value = character?.name ?? '';
-      chatNameEl.value = character?.chatName ?? '';
-      folderEl.value = String(character?.folderId ?? '');
-      personalityEl.value = character?.personality ?? '';
-      scenarioEl.value = character?.scenario ?? '';
-      examplesEl.value = character?.examples ?? '';
-      firstMessageEl.value = character?.firstMessage ?? '';
-      presetEl.value =
-        character?.customPrompt != null ? 'custom' : String(character?.presetId ?? '');
-      customEl.value = character?.customPrompt ?? '';
-      disableBackgroundSwipeEl.value = character?.disableBackgroundSwipeGeneration ?? false;
-      templateEl.value =
-        character?.customTemplate != null ? 'custom' : String(character?.templateId ?? '');
+      form.load({
+        ...character,
+        folderId: String(character?.folderId ?? ''),
+        presetId: character?.customPrompt != null ? 'custom' : String(character?.presetId ?? ''),
+        templateId:
+          character?.customTemplate != null ? 'custom' : String(character?.templateId ?? ''),
+      });
       templateFields.value = character?.customTemplate;
       setCustomPrompt(character?.customPrompt != null);
       setCustomTemplate(character?.customTemplate != null);
     },
     data: () => {
-      const promptChoice = presetEl.value;
-      const templateChoice = templateEl.value;
+      const promptChoice = form.fields.presetId.value;
+      const templateChoice = form.fields.templateId.value;
       return {
-        name: nameEl.value,
-        chatName: chatNameEl.value.trim() || null,
-        folderId: folderEl.value ? Number(folderEl.value) : null,
-        personality: personalityEl.value,
-        scenario: scenarioEl.value,
-        examples: examplesEl.value,
-        firstMessage: firstMessageEl.value,
+        ...form.value(),
+        chatName: form.fields.chatName.value.trim() || null,
+        folderId: form.fields.folderId.value ? Number(form.fields.folderId.value) : null,
         presetId: promptChoice && promptChoice !== 'custom' ? Number(promptChoice) : null,
-        customPrompt: promptChoice === 'custom' ? customEl.value : null,
+        customPrompt: promptChoice === 'custom' ? form.fields.customPrompt.value : null,
         templateId: templateChoice && templateChoice !== 'custom' ? Number(templateChoice) : null,
-        disableBackgroundSwipeGeneration: disableBackgroundSwipeEl.value,
         customTemplate: templateChoice === 'custom' ? templateFields.value : null,
       };
     },
-    create: api.createCharacter,
-    patch: api.patchCharacter,
-    remove: api.deleteCharacter,
-    duplicate: api.duplicateCharacter,
     deletePrompt: 'Delete this character?',
   });
 
@@ -115,8 +104,8 @@ export default function CharactersTab() {
     setFolderSaving(true);
     setFolderError('');
     try {
-      if (dialog.id == null) await api.createCharacterFolder(name);
-      else await api.patchCharacterFolder(dialog.id, name);
+      if (dialog.id == null) await api.characterFolders.create({ name });
+      else await api.characterFolders.patch(dialog.id, { name });
       setFolderDialog(null);
     } catch (err) {
       setFolderError(errorMessage(err));
@@ -136,7 +125,7 @@ export default function CharactersTab() {
     )
       return;
     try {
-      await api.deleteCharacterFolder(id);
+      await api.characterFolders.remove(id);
     } catch (err) {
       editor.setStatus(errorMessage(err));
     }
@@ -166,7 +155,7 @@ export default function CharactersTab() {
         'info',
       );
       try {
-        imported.push(await api.importCard(file));
+        imported.push(await api.characters.importCard(file));
       } catch (err) {
         failed.push(`${file.name}: ${errorMessage(err)}`);
       }
@@ -219,9 +208,9 @@ export default function CharactersTab() {
           </>
         }
         listSearch={
-          <div class="entity-list-search">
+          <div class="mb-2 [&_.search-input]:min-h-control">
             <input
-              class="search-input"
+              class="search-input flex-1 min-w-0"
               placeholder="Search characters…"
               value={characterQuery()}
               onInput={(event) => setCharacterQuery(event.currentTarget.value)}
@@ -249,14 +238,14 @@ export default function CharactersTab() {
                           if (!searchActive()) toggleFolder(folder.id);
                         }}
                       >
-                        <span class="tree-disclosure">
+                        <span class="w-2.5 text-center text-muted grow-0 shrink-0 basis-2.5">
                           {searchActive() || !collapsedFolders().has(folder.id) ? (
                             <FontAwesomeIcon icon={faChevronDown} size={10} />
                           ) : (
                             <FontAwesomeIcon icon={faChevronRight} size={12} />
                           )}
                         </span>
-                        <span class="character-folder-name">{folder.name}</span>
+                        <span class="text-ellipsis overflow-hidden">{folder.name}</span>
                       </button>
                       <button
                         class="character-folder-action"
@@ -291,7 +280,7 @@ export default function CharactersTab() {
               {(character) => <CharacterButton character={character} />}
             </For>
             <Show when={searchActive() && matchingCharacterCount() === 0}>
-              <p class="hint search-empty">No matches.</p>
+              <p class="hint py-1 px-2">No matches.</p>
             </Show>
           </>
         }
@@ -308,8 +297,8 @@ export default function CharactersTab() {
               src={editor.selected()?.avatar}
               thumbnail={editor.selected()?.avatarThumbnail}
               name={editor.selected()?.name ?? '?'}
-              upload={(file) => api.uploadCharacterAvatar(editor.selectedId() as number, file)}
-              remove={() => api.deleteCharacterAvatar(editor.selectedId() as number)}
+              upload={(file) => api.characters.uploadAvatar(editor.selectedId() as number, file)}
+              remove={() => api.characters.deleteAvatar(editor.selectedId() as number)}
               generate={avatarGenerationAvailable() ? () => setAvatarGen(true) : undefined}
               onDone={editor.flashSaved}
               onError={editor.setStatus}
@@ -323,17 +312,16 @@ export default function CharactersTab() {
             </Show>
           </Show>
 
-          <SettingLabel field={nameEl}>Name</SettingLabel>
-          <input ref={nameEl.ref} placeholder="Character name" />
-          <SettingLabel field={chatNameEl}>Chat name override</SettingLabel>
-          <input ref={chatNameEl.ref} placeholder="Use the character name" />
-          <p class="hint">
-            Used for {'{{char}}'} and message speaker names. The main name stays in character lists
-            and other UI.
-          </p>
-          <SettingLabel field={folderEl}>Folder</SettingLabel>
-          <Select
-            ref={folderEl.ref}
+          <FormField field={form.fields.name} label="Name" placeholder="Character name" />
+          <FormField
+            field={form.fields.chatName}
+            label="Chat name override"
+            placeholder="Use the character name"
+            hint="Used for {{char}} and message speaker names. The main name stays in character lists and other UI."
+          />
+          <FormField
+            field={form.fields.folderId}
+            label="Folder"
             ariaLabel="Character folder"
             options={[
               { value: '', label: 'No folder' },
@@ -347,36 +335,41 @@ export default function CharactersTab() {
 
         <section class="settings-section">
           <h3>Roleplay</h3>
-          <SettingLabel field={personalityEl}>
-            Personality <MacroHelp />
-          </SettingLabel>
-          <MacroTextarea ref={personalityEl.ref} placeholder="Who is {{char}}?" />
-          <SettingLabel field={scenarioEl}>
-            Scenario <MacroHelp />
-          </SettingLabel>
-          <MacroTextarea ref={scenarioEl.ref} placeholder="Setting / situation (optional)" />
-          <SettingLabel field={examplesEl}>
-            Example conversations <MacroHelp />
-          </SettingLabel>
-          <MacroTextarea
-            ref={examplesEl.ref}
-            placeholder="Example dialogue between {{user}} and {{char}} (optional; separate with <START>)"
-          />
-          <SettingLabel field={firstMessageEl}>
-            First message <MacroHelp />
-          </SettingLabel>
-          <MacroTextarea
-            ref={firstMessageEl.ref}
-            placeholder="Greeting sent when a chat starts (optional)"
-          />
+          <For
+            each={
+              [
+                ['personality', 'Personality', 'Who is {{char}}?'],
+                ['scenario', 'Scenario', 'Setting / situation (optional)'],
+                [
+                  'examples',
+                  'Example conversations',
+                  'Example dialogue between {{user}} and {{char}} (optional; separate with <START>)',
+                ],
+                ['firstMessage', 'First message', 'Greeting sent when a chat starts (optional)'],
+              ] as const
+            }
+          >
+            {([key, label, placeholder]) => (
+              <FormField
+                kind="macro"
+                field={form.fields[key]}
+                label={
+                  <>
+                    {label} <MacroHelp />
+                  </>
+                }
+                placeholder={placeholder}
+              />
+            )}
+          </For>
         </section>
 
         <section class="settings-section">
           <h3>Prompting</h3>
           <div class="form-stack field-group" role="group" aria-label="System prompt settings">
-            <SettingLabel field={presetEl}>System prompt</SettingLabel>
+            <SettingLabel field={form.fields.presetId}>System prompt</SettingLabel>
             <Select
-              ref={presetEl.ref}
+              ref={form.fields.presetId.ref}
               ariaLabel="Character system prompt"
               onChange={(value) => setCustomPrompt(value === 'custom')}
               options={[
@@ -386,20 +379,20 @@ export default function CharactersTab() {
               ]}
             />
             <Show when={customPrompt()}>
-              <SettingLabel field={customEl}>
+              <SettingLabel field={form.fields.customPrompt}>
                 Custom prompt text <MacroHelp />
               </SettingLabel>
             </Show>
             <MacroTextarea
-              ref={customEl.ref}
+              ref={form.fields.customPrompt.ref}
               classList={{ hidden: !customPrompt() }}
               placeholder="Custom system prompt for this character"
             />
           </div>
           <div class="form-stack field-group" role="group" aria-label="Prompt template settings">
-            <SettingLabel field={templateEl}>Prompt template</SettingLabel>
+            <SettingLabel field={form.fields.templateId}>Prompt template</SettingLabel>
             <Select
-              ref={templateEl.ref}
+              ref={form.fields.templateId.ref}
               ariaLabel="Character prompt template"
               onChange={(value) => {
                 const custom = value === 'custom';
@@ -424,22 +417,26 @@ export default function CharactersTab() {
 
         <section class="settings-section">
           <h3>Generation</h3>
-          <SettingLabel field={disableBackgroundSwipeEl} check>
-            <input type="checkbox" ref={disableBackgroundSwipeEl.ref} />
-            Disable background swipe generation
-          </SettingLabel>
-          <p class="hint">Overrides the global setting for all chats with this character.</p>
+          <FormField
+            kind="check"
+            field={form.fields.disableBackgroundSwipeGeneration}
+            label="Disable background swipe generation"
+            hint="Overrides the global setting for all chats with this character."
+          />
         </section>
       </EntityEditorPane>
       <Show when={folderDialog()}>
         {(dialog) => (
           <Modal
             title={dialog().id == null ? 'Create folder' : 'Rename folder'}
-            class="confirm-modal"
-            backdropClass="confirm-backdrop"
+            class="confirm-modal [&.confirm-modal]:h-auto [&.confirm-modal]:w-full [&.confirm-modal]:max-w-107.5 [&.confirm-modal]:max-h-[min(80dvh,_520px)] [&_.modal-body]:p-5 small-touch:[&.confirm-modal]:border small-touch:[&.confirm-modal]:border-solid small-touch:[&.confirm-modal]:border-line small-touch:[&.confirm-modal]:rounded-lg small-touch:[&.confirm-modal]:pt-0"
+            backdropClass="confirm-backdrop z-400 small-touch:[&.confirm-backdrop]:p-4"
             onClose={() => setFolderDialog(null)}
           >
-            <form class="form folder-dialog-form" onSubmit={saveFolder}>
+            <form
+              class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2 [&>label]:font-medium [&>label]:mt-0 [&>label]:text-foreground"
+              onSubmit={saveFolder}
+            >
               <SettingLabel field={folderNameField} for="folder-name">
                 Folder name
               </SettingLabel>
@@ -455,7 +452,7 @@ export default function CharactersTab() {
                   {folderError()}
                 </p>
               </Show>
-              <div class="form-actions confirm-actions">
+              <div class="form-actions flex items-center gap-2 flex-wrap mt-4 mt-5">
                 <button
                   class="primary-btn"
                   type="submit"

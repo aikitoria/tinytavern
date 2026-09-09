@@ -1,6 +1,5 @@
 import { setMediaCharacters } from './mediaCharacters.ts';
 import {
-  DEFAULT_MEDIA_RENDERING,
   nextCollectionId,
   namedItem,
   mediaInputSlots,
@@ -13,7 +12,8 @@ import {
 import { invalidateMediaAsset, mediaAssetForPath, stmt } from './db.ts';
 import { copyImage, saveImage } from './images.ts';
 import { HttpError } from './router.ts';
-import { parseMediaRendering } from './mediaSettings.ts';
+import { parseMediaWorkflow } from './mediaSettings.ts';
+import { requireString } from './validation.ts';
 import { getSettings } from './settingsStore.ts';
 import type { MediaJobConfiguration } from './mediaJobStore.ts';
 import type { MediaRecipeInput } from './mediaRecipes.ts';
@@ -109,13 +109,11 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 function text(value: unknown, label: string, max = 200_000): string {
-  if (typeof value !== 'string') {
-    throw new HttpError(400, `Image recipe ${label} must be a string`);
-  }
-  if (value.length > max) {
+  const result = requireString(value, `Image recipe ${label}`);
+  if (result.length > max) {
     throw new HttpError(400, `Image recipe ${label} is too long`);
   }
-  return value;
+  return result;
 }
 
 export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe> {
@@ -132,14 +130,11 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
     if (!id || id.length > 200 || recipes.has(id)) {
       throw new HttpError(400, 'Image recipe IDs must be nonempty and unique');
     }
-    const rendering = parseMediaRendering({
-      ...DEFAULT_MEDIA_RENDERING,
-      defaults: {},
-      workflows: [
-        { ...object(source.workflow), galleryPromptPresetId: null, chatPromptPresetId: null },
-      ],
-    })!;
-    const workflow = rendering.workflows[0]!;
+    const workflow = parseMediaWorkflow({
+      ...object(source.workflow),
+      galleryPromptPresetId: null,
+      chatPromptPresetId: null,
+    });
     if (
       workflow.operation === 'image-describe' ||
       workflow.operation.startsWith('video') ||

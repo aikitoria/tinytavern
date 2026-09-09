@@ -167,7 +167,7 @@ export default function Sidebar() {
 
     return (
       <div
-        class="conv-item"
+        class="conv-item gap-0 cursor-pointer select-none border border-solid border-transparent flex items-center p-2 rounded-sm [&:hover_.conv-actions]:max-w-18 [&:hover_.conv-actions]:ml-1 [&:hover_.conv-actions]:opacity-100 [&:hover_.conv-actions]:visible [&:hover_.conv-actions]:pointer-events-auto [&:focus-within_.conv-actions]:max-w-18 [&:focus-within_.conv-actions]:ml-1 [&:focus-within_.conv-actions]:opacity-100 [&:focus-within_.conv-actions]:visible [&:focus-within_.conv-actions]:pointer-events-auto [&.search-result]:items-start [&.search-result]:py-3 [&.search-result_.conv-select]:shadow-clear [&.search-result_.conv-select]:items-start [&.search-result_.avatar]:mt-0.5 [&.search-result_.conv-snippet]:overflow-hidden [&.search-result_.conv-snippet]:wrap-anywhere [&.search-result_.conv-snippet]:text-ellipsis [&.search-result_.conv-snippet]:whitespace-normal mobile-touch:[&_.conv-actions]:display-none"
         classList={{
           active: props.conv.id === state.selectedId,
           'search-result': props.expanded,
@@ -175,7 +175,7 @@ export default function Sidebar() {
         onClick={() => selectConversation(props.conv.id)}
       >
         <button
-          class="conv-select"
+          class="conv-select text-inherit bg-clear flex items-center flex-1 min-w-0 gap-2 overflow-hidden p-0 border-clear text-left shadow-clear [&:hover:not(:disabled)]:bg-clear [&:hover:not(:disabled)]:border-transparent rounded-[calc(var(--radius-control)_-_2px)]"
           aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
         >
           <Show when={!props.grouped}>
@@ -186,14 +186,17 @@ export default function Sidebar() {
               {(character) => <Avatar src={character().avatarThumbnail} name={character().name} />}
             </Show>
           </Show>
-          <span class="conv-body">
-            <span class="conv-title">{props.conv.title}</span>
+          <span class="flex flex-col flex-1 min-w-0">
+            <span class="text-body-small truncate">{props.conv.title}</span>
             <Show when={props.snippet}>
-              <span class="conv-snippet">{props.snippet}</span>
+              <span class="conv-snippet truncate text-dim text-xs">{props.snippet}</span>
             </Show>
           </span>
         </button>
-        <span class="conv-actions" aria-label={`Actions for ${props.conv.title}`}>
+        <span
+          class="conv-actions flex-none max-w-0 ml-0 opacity-0 invisible pointer-events-none inline-flex overflow-hidden"
+          aria-label={`Actions for ${props.conv.title}`}
+        >
           <button
             class="icon-btn conv-delete"
             title="Delete"
@@ -206,7 +209,7 @@ export default function Sidebar() {
         <button
           ref={menuButton}
           type="button"
-          class="icon-btn conv-menu-btn"
+          class="icon-btn display-none mobile-touch:inline-flex mobile-touch:ml-1"
           title="Conversation actions"
           aria-label={`Actions for ${props.conv.title}`}
           aria-haspopup="menu"
@@ -225,19 +228,25 @@ export default function Sidebar() {
   };
 
   return (
-    <aside class="sidebar" classList={{ open: state.sidebarOpen }}>
-      <div class="sidebar-head" ref={sidebarHead}>
-        <span class="brand">
-          <span class="brand-name">TinyTavern</span>
+    <aside
+      class="sidebar w-sidebar border-r border-r-solid border-r-subtle flex flex-col relative bg-chrome shrink-0 [&_.avatar]:text-sm [&_.avatar]:size-6.5 small-touch:fixed small-touch:z-60 small-touch:[&.open]:shadow-clear small-touch:inset-[0_auto_0_0] small-touch:w-[min(85vw,_var(--sidebar-w))] small-touch:pt-[env(safe-area-inset-top)]"
+      classList={{ open: state.sidebarOpen }}
+    >
+      <div
+        class="py-1 px-2 min-h-bar border-b border-b-solid border-b-subtle flex items-center flex-none justify-between"
+        ref={sidebarHead}
+      >
+        <span class="flex items-center min-w-0 gap-2 font-semibold text-heading leading-tight small-touch:text-mobile-title">
+          <span class="truncate">TinyTavern</span>
           <span
-            class="conn-dot"
+            class="rounded-circle bg-danger shrink-0 size-2 [&.ok]:bg-success"
             classList={{ ok: state.connected }}
             title={state.connected ? 'Connected' : 'Disconnected'}
             role="status"
             aria-label={state.connected ? 'Connected' : 'Disconnected'}
           />
         </span>
-        <span class="sidebar-head-actions">
+        <span class="flex items-center flex-none">
           <button
             ref={newChatButton}
             type="button"
@@ -287,7 +296,7 @@ export default function Sidebar() {
         dismissRoot={() => newChatButton}
         focusTarget={() => newChatButton}
         onClose={closeNewChatMenu}
-        class="new-chat-menu"
+        class="[&_.new-chat-folder-toggle]:text-muted [&_.new-chat-folder-toggle]:text-xs [&_.new-chat-folder-toggle]:font-semibold [&_.new-chat-folder-toggle]:tracking-wide [&_.new-chat-folder-child]:pl-[calc(var(--space-3)_+_22px)]"
         role="dialog"
         ariaLabel="Choose a character for a new chat"
         placement="bottom"
@@ -296,9 +305,9 @@ export default function Sidebar() {
         maxHeight={() => window.innerHeight * 0.5}
         anchorInset={8}
       >
-        <div class="new-chat-search">
+        <div class="sticky top-0 z-1 bg-raised border-b border-b-solid border-b-line p-2">
           <input
-            class="search-input"
+            class="search-input flex-1 min-w-0"
             placeholder="Search characters…"
             value={newChatQuery()}
             onInput={(event) => setNewChatQuery(event.currentTarget.value)}
@@ -321,7 +330,7 @@ export default function Sidebar() {
                     if (!searchActive()) toggleCharacterFolder(folder.id);
                   }}
                 >
-                  <span class="tree-disclosure">
+                  <span class="w-2.5 text-center text-muted grow-0 shrink-0 basis-2.5">
                     {searchActive() || !collapsedCharacterFolders().has(folder.id) ? (
                       <FontAwesomeIcon icon={faChevronDown} size={10} />
                     ) : (
@@ -352,11 +361,11 @@ export default function Sidebar() {
           )}
         </For>
         <Show when={searchActive() && matchingCharacterCount() === 0}>
-          <p class="hint search-empty">No matches.</p>
+          <p class="hint py-1 px-2">No matches.</p>
         </Show>
       </DropdownSurface>
 
-      <nav class="conv-list">
+      <nav class="flex-1 min-h-0 overflow-y-auto p-2">
         <Show
           when={results()}
           fallback={
@@ -366,8 +375,8 @@ export default function Sidebar() {
             >
               <For each={convGroups()}>
                 {(group) => (
-                  <section class="conv-group">
-                    <div class="conv-group-head">
+                  <section class="conv-group [&:first-child_.conv-group-head]:mt-0 [&_.conv-item]:ml-3 [&_.conv-item]:pl-5 [&_.conv-item]:relative [&_.conv-item::before]:absolute [&_.conv-item::before]:left-1.5 [&_.conv-item::before]:h-2 [&_.conv-item::before]:top-[calc(50%_-_7px)] [&_.conv-item::before]:w-[7px]">
+                    <div class="conv-group-head select-none flex items-center gap-2 mt-2 p-2 pb-1">
                       <Show
                         when={group.character}
                         fallback={<span class="avatar avatar-fallback">A</span>}
@@ -376,7 +385,9 @@ export default function Sidebar() {
                           <Avatar src={character().avatarThumbnail} name={character().name} />
                         )}
                       </Show>
-                      <span class="conv-group-name">{group.character?.name ?? 'No character'}</span>
+                      <span class="truncate text-dim text-xs font-semibold">
+                        {group.character?.name ?? 'No character'}
+                      </span>
                     </div>
                     <For each={group.conversations}>
                       {(conv) => <ConvItem conv={conv} grouped />}
@@ -390,7 +401,7 @@ export default function Sidebar() {
           {(found) => (
             <>
               <Show when={found().length === 0}>
-                <p class="hint search-empty">No matches.</p>
+                <p class="hint py-1 px-2">No matches.</p>
               </Show>
               <For each={found()}>
                 {(r) => <ConvItem conv={r.conversation} snippet={r.snippet} expanded />}
@@ -399,10 +410,10 @@ export default function Sidebar() {
           )}
         </Show>
       </nav>
-      <footer class="sidebar-footer">
-        <div class="search-wrap">
+      <footer class="border-t border-t-solid border-t-subtle flex items-center flex-none gap-2 [&_.search-input]:h-8 [&_.search-input]:py-1 [&_.search-input]:px-2 p-[var(--space-2)_var(--space-2)_calc(var(--space-2)_+_env(safe-area-inset-bottom))]">
+        <div class="flex flex-1 min-w-0 p-0">
           <input
-            class="search-input"
+            class="search-input flex-1 min-w-0"
             placeholder="Search…"
             aria-label="Search conversations"
             value={query()}
@@ -411,7 +422,7 @@ export default function Sidebar() {
         </div>
         <button
           type="button"
-          class="icon-btn sidebar-group-toggle"
+          class="icon-btn text-control border-transparent bg-clear size-8 [&:hover]:text-foreground [&:hover]:bg-raised [&:hover]:border-transparent"
           classList={{ 'icon-btn-active': state.groupByCharacter }}
           title="Group by character"
           aria-label="Group by character"
@@ -425,7 +436,7 @@ export default function Sidebar() {
         open={conversationMenu() != null}
         anchor={() => conversationMenuButton}
         onClose={() => setConversationMenu(null)}
-        class="conv-actions-menu"
+        class="[&_.danger]:text-danger"
         role="menu"
         ariaLabel={`Actions for ${conversationMenu()?.title ?? 'conversation'}`}
         placement="auto"

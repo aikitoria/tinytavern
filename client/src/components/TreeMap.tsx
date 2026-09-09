@@ -24,7 +24,6 @@ import {
   mapSearchTarget,
   setMapSearchTarget,
 } from './mapSearch.ts';
-import '../styles/treemap.css';
 
 // Fixed card slots keep layout independent of content and zoom.
 const CARD_W = 640;
@@ -594,7 +593,7 @@ export default function TreeMap() {
   return (
     <div
       ref={root}
-      class="treemap"
+      class="treemap cursor-grab overflow-hidden h-full relative touch-none [&_.msg-actions]:display-none [&_.branch-nav]:display-none [&_.msg-more-menu]:display-none"
       onMouseDown={onMouseDown}
       // Direct listeners allow preventDefault; Solid delegates wheel/touch passively.
       on:wheel={onWheel}
@@ -603,12 +602,16 @@ export default function TreeMap() {
       on:touchend={onTouchEnd}
       on:touchcancel={onTouchEnd}
     >
-      <canvas ref={edgesCanvas} class="treemap-edges-canvas" aria-hidden="true" />
-      <div ref={content} class="treemap-content">
+      <canvas
+        ref={edgesCanvas}
+        class="inset-0 pointer-events-none size-full absolute"
+        aria-hidden="true"
+      />
+      <div ref={content} class="top-0 left-0 origin-top-left absolute">
         <For each={visibleMessages()}>
           {(message) => (
             <div
-              class="treemap-card"
+              class="treemap-card w-160 h-60 border border-solid border-line rounded-md cursor-pointer overflow-hidden absolute bg-panel [&_.msg]:h-full [&_.msg]:gap-2 [&_.msg]:p-2 [&_.msg>.msg-body]:flex [&_.msg>.msg-body]:flex-col [&_.msg>.msg-body]:h-full [&_.msg>.msg-body]:min-h-0 [&_.msg>.msg-body]:rounded-none [&_.msg>.msg-body]:overflow-hidden [&_.msg>.msg-body]:p-0 [&_.msg>.msg-body]:border-clear [&_.msg>.msg-body]:bg-clear [&_.msg>.msg-body>.msg-head]:static [&_.msg>.msg-body>.msg-head]:shrink-0 [&_.msg>.msg-body>.msg-head]:m-0 [&_.msg>.msg-body>.msg-head]:pointer-events-auto [&_.msg>.msg-body>.msg-swipe]:flex-1 [&_.msg>.msg-body>.msg-swipe]:min-h-0 [&_.msg>.msg-body>.msg-swipe]:overflow-auto [&_.msg>.msg-body>.msg-swipe]:overscroll-contain [&_.msg.msg-full-bleed>.msg-body>.msg-swipe]:pt-0 [&.treemap-search-dimmed]:opacity-65"
               data-message-id={message.id}
               classList={{
                 'treemap-card-mini': view().scale < MINI_SCALE,
@@ -632,10 +635,12 @@ export default function TreeMap() {
                 fallback={
                   // Inverse scaling keeps text readable without changing the card layout.
                   <div
-                    class="treemap-mini"
+                    class="overflow-hidden h-full leading-snippet p-[0.66em]"
                     style={{ 'font-size': `${Math.min(12 / view().scale, 240)}px` }}
                   >
-                    <span class="treemap-mini-snippet">{snippet(message, mapSearchQuery())}</span>
+                    <span class="treemap-mini-snippet text-dim line-clamp-2">
+                      {snippet(message, mapSearchQuery())}
+                    </span>
                   </div>
                 }
               >
@@ -646,9 +651,9 @@ export default function TreeMap() {
         </For>
       </div>
       <Show when={ordered().length === 0}>
-        <p class="treemap-empty hint">No messages yet.</p>
+        <p class="treemap-empty absolute m-0 hint top-1/2 left-1/2">No messages yet.</p>
       </Show>
-      <div class="treemap-toolbar">
+      <div class="treemap-toolbar top-3 right-3 z-2 p-1 border border-solid border-emphasis flex gap-1 absolute bg-panel rounded-group">
         <button class="icon-btn" title="Zoom in" aria-label="Zoom in" onClick={() => zoomStep(1.3)}>
           <FontAwesomeIcon icon={faPlus} size={12} />
         </button>
@@ -661,7 +666,7 @@ export default function TreeMap() {
           <FontAwesomeIcon icon={faMinus} size={12} />
         </button>
         <button
-          class="icon-btn treemap-zoom"
+          class="icon-btn [&.icon-btn]:text-xs [&.icon-btn]:tabular-nums [&.icon-btn]:min-w-[5ch]"
           title="Reset zoom to 100%"
           aria-label="Reset zoom to 100%"
           onClick={resetZoom}

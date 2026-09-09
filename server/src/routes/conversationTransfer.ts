@@ -17,7 +17,7 @@ import { mergeLiveBuffers } from '../generation.ts';
 import { deleteImageFiles, rasterImageFormat } from '../images.ts';
 import { HttpError, route } from '../router.ts';
 import { getPathToMessage } from '../tree.ts';
-import { positiveId } from '../validation.ts';
+import { positiveId, requireObject as object, requireString } from '../validation.ts';
 import { parseImageConfig } from '../comfy.ts';
 import { mediaPromptBuffers } from '../mediaJobStore.ts';
 import {
@@ -110,17 +110,10 @@ interface MessageRow {
   render_recipe_id: number | null;
 }
 
-function object(value: unknown, label: string): JsonObject {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new HttpError(400, `${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
 function string(value: unknown, label: string, max?: number): string {
-  if (typeof value !== 'string') throw new HttpError(400, `${label} must be a string`);
-  if (max != null && value.length > max) throw new HttpError(400, `${label} is too long`);
-  return value;
+  const text = requireString(value, label);
+  if (max != null && text.length > max) throw new HttpError(400, `${label} is too long`);
+  return text;
 }
 
 function nullableString(value: unknown, label: string): string | null {

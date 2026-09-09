@@ -145,6 +145,11 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
 
   // Pointer capture survives streaming resize/autoscroll that can cancel mobile touch events.
   const onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'touch' && (e.target as Element).closest('video')) {
+      // Native playback can consume clicks; reveal tools without capturing the player's gesture.
+      setTouchedId(props.message.id);
+      return;
+    }
     if (e.pointerType !== 'touch' || !swipeable() || pointerId != null) return;
     pointerX = e.clientX;
     pointerY = e.clientY;
@@ -222,7 +227,9 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
   });
 
   const saveEdit = async (edit: typeof api.editMessage) => {
-    const saved = await navigateTree(() => edit(props.message.id, editArea!.value, state.tree));
+    const saved = await navigateTree(() =>
+      edit(props.message.id, state.tree, { content: editArea!.value }),
+    );
     if (saved) setEditing(false);
   };
 
@@ -267,7 +274,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     void navigateTree(() => api.duplicateMessage(props.message.id, state.tree));
   const branchToConversation = () => void navigateTree(() => branchConversation(props.message.id));
   const move = (direction: 'up' | 'down') =>
-    void navigateTree(() => api.moveMessage(props.message.id, direction, state.tree));
+    void navigateTree(() => api.moveMessage(props.message.id, state.tree, { direction }));
 
   const [steerOpen, setSteerOpen] = createSignal(false);
   let steerArea: HTMLTextAreaElement | undefined;
@@ -279,12 +286,10 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
     const instruction = steerArea?.value.trim() ?? '';
     if (!instruction) return;
     const ok = await navigateTree(() =>
-      api.regenerate(
-        props.message.id,
+      api.regenerate(props.message.id, state.tree, {
         instruction,
-        state.tree,
-        imageBehavior()?.currentImageConfig?.(props.message),
-      ),
+        image: imageBehavior()?.currentImageConfig?.(props.message),
+      }),
     );
     if (ok) setSteerOpen(false);
   };
@@ -311,7 +316,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         element.addEventListener('click', revealImageControlsOnFirstTap, true);
         onCleanup(() => element.removeEventListener('click', revealImageControlsOnFirstTap, true));
       }}
-      class="msg"
+      class="msg items-start flex gap-chat-gap touch:[&.touched_.msg-actions]:opacity-100 touch:[&.touched_.msg-actions]:pointer-events-auto touch:[&.touched_.branch-nav_.icon-btn]:opacity-100 touch:[&.touched_.branch-nav_.icon-btn]:pointer-events-auto touch:[&.touched_.branch-count]:opacity-100 touch:[&.touched_.branch-count]:pointer-events-auto touch:[&:focus-within_.msg-actions]:opacity-100 touch:[&:focus-within_.msg-actions]:pointer-events-auto touch:[&:focus-within_.branch-nav_.icon-btn]:opacity-100 touch:[&:focus-within_.branch-nav_.icon-btn]:pointer-events-auto touch:[&:focus-within_.branch-count]:opacity-100 touch:[&:focus-within_.branch-count]:pointer-events-auto touch:[&.msg-menu-open_.msg-actions]:opacity-100 touch:[&.msg-menu-open_.msg-actions]:pointer-events-auto touch:[&.msg-menu-open_.branch-nav_.icon-btn]:opacity-100 touch:[&.msg-menu-open_.branch-nav_.icon-btn]:pointer-events-auto touch:[&.msg-menu-open_.branch-count]:opacity-100 touch:[&.msg-menu-open_.branch-count]:pointer-events-auto small-touch:[&>.avatar]:display-none [&:where(.msg-user)>.msg-body]:py-2 [&:where(.msg-user)>.msg-body]:px-3 [&:where(.msg-user)>.msg-body]:rounded-md [&:where(.msg-assistant)>.msg-body]:py-2 [&:where(.msg-assistant)>.msg-body]:px-3 [&:where(.msg-assistant)>.msg-body]:rounded-md [&:where(.msg-user)>.msg-body]:bg-user-message [&:where(.msg-assistant)>.msg-body]:bg-message [&:where(.msg-user)_.msg-head]:mb-0 [&:where(.msg-assistant)_.msg-head]:mb-0 [&:where(.msg-user)_.md>:first-child]:mt-1 [&:where(.msg-assistant)_.md>:first-child]:mt-1 [&:where(.msg-user)_.md_em]:text-dim [&:where(.msg-assistant)_.md_em]:text-dim [&:where(.msg-user)_.md>:last-child]:mb-0 [&:where(.msg-assistant)_.md>:last-child]:mb-0 [&:where(.msg-user)>.avatar]:shadow-clear [&:where(.msg-assistant)>.avatar]:shadow-clear [&:where(.msg-user)_.msg-name]:text-user [&:where(.msg-assistant)_.msg-name]:text-assistant [&:where(.msg-tool)_.msg-body]:bg-panel [&:where(.msg-tool)_.msg-body]:border [&:where(.msg-tool)_.msg-body]:border-solid [&:where(.msg-tool)_.msg-body]:border-transparent [&:where(.msg-tool)_.msg-body]:rounded-md [&:where(.msg-tool)_.msg-body]:p-3 [&:where(.msg-tool)_.msg-name]:text-dim [&:where(.msg-tool).msg-full-bleed_.msg-body]:relative [&:where(.msg-tool).msg-full-bleed_.msg-body]:p-0 [&:where(.msg-tool).msg-full-bleed_.msg-body]:overflow-hidden [&:where(.msg-tool).msg-full-bleed_.msg-body]:bg-clear [&:where(.msg-tool).msg-full-bleed_.msg-body]:border-clear [&:where(.msg-tool).msg-full-bleed_.msg-body]:rounded-md [&:where(.msg-tool).msg-full-bleed_.msg-head]:absolute [&:where(.msg-tool).msg-full-bleed_.msg-head]:z-3 [&:where(.msg-tool).msg-full-bleed_.msg-head]:top-2 [&:where(.msg-tool).msg-full-bleed_.msg-head]:right-2 [&:where(.msg-tool).msg-full-bleed_.msg-head]:left-2 [&:where(.msg-tool).msg-full-bleed_.msg-head]:m-0 [&:where(.msg-tool).msg-full-bleed_.msg-head]:pointer-events-none [&:where(.msg-tool).msg-full-bleed_.msg-swipe:has(>.reasoning-text,>.msg-content)]:pt-11 [&:where(.msg-tool).msg-full-bleed_.msg-swipe:has(>.reasoning-text,>.msg-content)]:bg-panel [&:where(.msg-tool).msg-full-bleed_.reasoning-text]:m-[0_var(--space-3)_var(--space-2)] [&:where(.msg-tool).msg-full-bleed_.msg-content]:p-[0_var(--space-3)_var(--space-3)] [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:pointer-events-auto [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:inline-flex [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:items-center [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:gap-1 [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:relative [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:isolate [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:p-0.5 [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:text-white [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:border [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:border-solid [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:border-transparent [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar]:rounded-full [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar_.icon-btn]:rounded-full [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:inset-[-1px] [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:absolute [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:-z-1 [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:border [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:border-solid [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:border-control-line [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:rounded-[inherit] [&:where(.msg-tool).msg-full-bleed_.msg-overlay-toolbar::before]:opacity-0 [&:where(.msg-tool).msg-hide-name.msg-full-bleed_.msg-tools-left]:opacity-0 [&:where(.msg-tool).msg-hide-name.msg-full-bleed_.msg-tools-left]:pointer-events-none [&:where(.msg-tool).msg-hide-name.msg-full-bleed:hover_.msg-tools-left]:opacity-100 [&:where(.msg-tool).msg-hide-name.msg-full-bleed:hover_.msg-tools-left]:pointer-events-auto [&:where(.msg-tool).msg-hide-name.msg-full-bleed:focus-within_.msg-tools-left]:opacity-100 [&:where(.msg-tool).msg-hide-name.msg-full-bleed:focus-within_.msg-tools-left]:pointer-events-auto [&:where(.msg-tool).msg-hide-name.msg-full-bleed.msg-streaming_.msg-tools-left]:opacity-100 [&:where(.msg-tool).msg-hide-name.msg-full-bleed.msg-streaming_.msg-tools-left]:pointer-events-auto [&:hover_.msg-actions]:opacity-100 [&:hover_.msg-actions]:pointer-events-auto [&:focus-within_.msg-actions]:opacity-100 [&:focus-within_.msg-actions]:pointer-events-auto [&.msg-menu-open_.msg-actions]:opacity-100 [&.msg-menu-open_.msg-actions]:pointer-events-auto [&:hover_.branch-nav_.icon-btn]:opacity-100 [&:hover_.branch-nav_.icon-btn]:pointer-events-auto [&:hover_.branch-count]:opacity-100 [&:hover_.branch-count]:pointer-events-auto [&:focus-within_.branch-nav_.icon-btn]:opacity-100 [&:focus-within_.branch-nav_.icon-btn]:pointer-events-auto [&:focus-within_.branch-count]:opacity-100 [&:focus-within_.branch-count]:pointer-events-auto [&.msg-menu-open_.branch-nav_.icon-btn]:opacity-100 [&.msg-menu-open_.branch-nav_.icon-btn]:pointer-events-auto [&.msg-menu-open_.branch-count]:opacity-100 [&.msg-menu-open_.branch-count]:pointer-events-auto [&:where(.msg-tool).msg-full-bleed_.msg-tools-top_.branch-nav]:text-inherit [&:where(.msg-tool).msg-full-bleed_.msg-tools-top_.msg-image-pending]:text-inherit [&:where(.msg-tool).msg-full-bleed_.msg-tools-top]:gap-0 [&:where(.msg-tool).msg-full-bleed_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:min-w-0 [&:where(.msg-tool).msg-full-bleed_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:max-w-0 [&:where(.msg-tool).msg-full-bleed_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:overflow-hidden [&:where(.msg-tool).msg-full-bleed:is(:hover,_:focus-within,_.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:max-w-none [&:where(.msg-tool).msg-full-bleed:is(:hover,_:focus-within,_.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:overflow-visible [&:where(.msg-tool).msg-full-bleed:is(:hover,_:focus-within,_.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav):not(:first-child)]:ml-1 [&:where(.msg-tool).msg-full-bleed:is(:hover,_:focus-within,_.msg-menu-open)_.msg-image-pending]:border-r-control-line [&:where(.msg-tool).msg-hide-name_.msg-tools-left:empty]:display-none [&:where(.msg-tool).msg-full-bleed_.msg-tools-top:empty]:display-none [&:where(.msg-tool).msg-full-bleed:hover_.msg-overlay-toolbar::before]:opacity-100 [&:where(.msg-tool).msg-full-bleed:focus-within_.msg-overlay-toolbar::before]:opacity-100 [&:where(.msg-tool).msg-full-bleed.msg-menu-open_.msg-tools-top::before]:opacity-100 [&:where(.msg-tool).msg-full-bleed_.msg-tools-top:has(.msg-image-pending)::before]:opacity-100 [&:where(.msg-tool).msg-hide-name.msg-full-bleed.msg-streaming_.msg-tools-left::before]:opacity-100 touch:[&:where(.msg-tool).msg-full-bleed:not(.touched):not(:focus-within):not(.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:max-w-0 touch:[&:where(.msg-tool).msg-full-bleed:not(.touched):not(:focus-within):not(.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:overflow-hidden touch:[&:where(.msg-tool).msg-full-bleed:not(.touched):not(:focus-within):not(.msg-menu-open)_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:ml-0 touch:[&:where(.msg-tool).msg-full-bleed:not(.touched):not(:focus-within):not(.msg-menu-open)_.msg-image-pending]:border-r-transparent touch:[&:where(.msg-tool).msg-full-bleed.touched_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:max-w-none touch:[&:where(.msg-tool).msg-full-bleed.touched_.msg-tools-top>:is(.msg-actions,_.branch-nav)]:overflow-visible touch:[&:where(.msg-tool).msg-full-bleed.touched_.msg-tools-top>:is(.msg-actions,_.branch-nav):not(:first-child)]:ml-1 touch:[&:where(.msg-tool).msg-full-bleed.touched_.msg-image-pending]:border-r-control-line touch:[&:where(.msg-tool).msg-full-bleed.touched_.msg-overlay-toolbar::before]:opacity-100 touch:[&:where(.msg-tool).msg-hide-name.msg-full-bleed.touched_.msg-tools-left]:opacity-100 touch:[&:where(.msg-tool).msg-hide-name.msg-full-bleed.touched_.msg-tools-left]:pointer-events-auto [&:where(.msg-tool)_.msg-content]:text-dim [&:where(.msg-tool)_.md>:last-child]:mb-0"
       classList={{
         'msg-user': isUser(),
         'msg-assistant': isAssistant(),
@@ -339,7 +344,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             <Show
               when={!isTool()}
               fallback={
-                <span class="avatar avatar-fallback tool-avatar">
+                <span class="avatar avatar-fallback tool-avatar text-secondary">
                   {imageView()?.RailIcon?.() ?? <FontAwesomeIcon icon={faGear} />}
                 </span>
               }
@@ -350,7 +355,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         >
           <button
             type="button"
-            class="msg-range-toggle icon-btn"
+            class="min-w-chat-rail bg-raised border-line text-dim icon-btn size-chat-rail [&.active]:text-accent-text [&.active]:bg-accent [&.active]:border-accent"
             classList={{ active: messageIsSelected(props.message.id) }}
             aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
             aria-pressed={messageIsSelected(props.message.id)}
@@ -363,7 +368,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         </Show>
       </Show>
       <div
-        class="msg-body"
+        class="msg-body flex-1 min-w-0"
         classList={{
           'swipe-in-next': enterAs === 'descendant' && enterDir === 1,
           'swipe-in-prev': enterAs === 'descendant' && enterDir === -1,
@@ -378,15 +383,17 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             : undefined
         }
       >
-        <div class="msg-head">
+        <div class="msg-head mb-0.5 flex items-center gap-2">
           <Show
             when={!props.inMap && isAssistant() && selectedCharacter()}
-            fallback={<span class="msg-name">{name()}</span>}
+            fallback={
+              <span class="msg-name truncate min-w-0 font-semibold text-label">{name()}</span>
+            }
           >
             {(character) => (
               <button
                 type="button"
-                class="msg-name msg-character-link"
+                class="msg-name truncate min-w-0 msg-character-link rounded-none p-0 bg-clear border-clear text-left font-semibold text-label leading-inherit [&:hover]:bg-clear"
                 title={`Character settings: ${character().name}`}
                 aria-label={`Open character settings for ${character().name}`}
                 onClick={(event) => {
@@ -399,17 +406,23 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             )}
           </Show>
           <Show when={props.message.status === 'stopped'}>
-            <span class="msg-chip">stopped</span>
+            <span class="border border-solid border-line rounded-full py-0 px-2 flex-none text-dim text-xs">
+              stopped
+            </span>
           </Show>
           <Show
             when={streaming() && !isTool() && !props.message.content && !props.message.reasoning}
           >
-            <FontAwesomeIcon icon={faSpinner} size={12} class="spinner spinner-wait" />
+            <FontAwesomeIcon
+              icon={faSpinner}
+              size={12}
+              class="spinner inline-block w-3 h-3 text-dim flex-none w-2.5 h-2.5 origin-center"
+            />
           </Show>
-          <span class="msg-tools-left msg-overlay-toolbar">
+          <span class="msg-tools-left inline-flex items-center gap-1 msg-overlay-toolbar">
             <Show when={props.message.reasoning && !(isTool() && streaming())}>
               <button
-                class="reasoning-chip icon-btn"
+                class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
                 classList={{ 'icon-btn-active': reasoningOpen() }}
                 title={reasoningOpen() ? 'Hide thinking' : 'Show thinking'}
                 aria-label={reasoningOpen() ? 'Hide thinking' : 'Show thinking'}
@@ -418,17 +431,21 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
               >
                 <FontAwesomeIcon icon={faLightbulb} size={15} />
                 <Show when={streaming() && !props.message.content}>
-                  <FontAwesomeIcon icon={faSpinner} size={10} class="spinner" />
+                  <FontAwesomeIcon
+                    icon={faSpinner}
+                    size={10}
+                    class="spinner inline-block flex-none origin-center size-2.5"
+                  />
                 </Show>
               </button>
             </Show>
             {imageView()?.Header?.()}
           </span>
-          <span class="msg-tools-top msg-overlay-toolbar">
+          <span class="msg-tools-top inline-flex items-center gap-2 ml-auto msg-overlay-toolbar">
             <Show when={!messageSelectionActive()}>
               {imageView()?.HeaderTools?.()}
               <Show when={siblings().length > 1 || (isAssistant() && !editing())}>
-                <span class="branch-nav">
+                <span class="branch-nav gap-0 inline-flex items-center text-dim text-caption touch:[&_.icon-btn]:opacity-0 touch:[&_.icon-btn]:pointer-events-none touch:[&_.icon-btn]:w-5 touch:[&_.icon-btn]:min-w-5 touch:[&_.icon-btn]:h-7 [&_.icon-btn]:w-4.5 [&_.icon-btn]:min-w-4.5 [&_.icon-btn]:h-6 [&_.icon-btn]:text-sm [&_.icon-btn]:opacity-0 [&_.icon-btn]:pointer-events-none [&:focus-within_.icon-btn]:opacity-100 [&:focus-within_.icon-btn]:pointer-events-auto [&:focus-within_.branch-count]:opacity-100 [&:focus-within_.branch-count]:pointer-events-auto">
                   <button
                     class="icon-btn"
                     title="Previous swipe"
@@ -445,7 +462,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     <FontAwesomeIcon icon={faChevronLeft} size={12} />
                   </button>
                   <span
-                    class="branch-count"
+                    class="branch-count px-0.5 min-w-0 whitespace-nowrap text-center touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none"
                     aria-label={`Swipe ${siblingIndex() + 1} of ${siblings().length}`}
                   >
                     {siblingIndex() + 1}/{siblings().length}
@@ -475,8 +492,8 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 </span>
               </Show>
               <Show when={!streaming() && !editing()}>
-                <span class="msg-actions">
-                  <span class="msg-more-wrap">
+                <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
+                  <span class="inline-flex">
                     <button
                       ref={moreButton}
                       type="button"
@@ -494,7 +511,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       open={menuOpen()}
                       anchor={() => moreButton}
                       onClose={closeMenu}
-                      class="msg-more-menu"
+                      class="msg-more-menu [&_button]:whitespace-nowrap [&_.danger]:text-danger"
                       role="menu"
                       ariaLabel="Message actions"
                       placement="auto"
@@ -512,13 +529,13 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       <MenuItem disabled={props.message.imagePending} action={startEdit}>
                         Edit
                       </MenuItem>
-                      <div class="menu-separator" role="separator" />
+                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
                       <Show when={isAssistant() || (isTool() && imageBehavior() != null)}>
                         <MenuItem action={openSteer}>Regenerate</MenuItem>
                       </Show>
                       <MenuItem action={duplicate}>Duplicate</MenuItem>
                       <MenuItem action={branchToConversation}>Branch chat</MenuItem>
-                      <div class="menu-separator" role="separator" />
+                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
                       <MenuItem action={() => startMessageSelection(props.message.id)}>
                         Select range
                       </MenuItem>
@@ -528,7 +545,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                       <Show when={canMoveDown()}>
                         <MenuItem action={() => move('down')}>Move down</MenuItem>
                       </Show>
-                      <div class="menu-separator" role="separator" />
+                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
                       <Show
                         when={
                           imageBehavior()?.canDeleteSwipe?.(props.message) || siblings().length > 1
@@ -573,13 +590,15 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
             reasoning={props.message.reasoning}
           />
           <Show when={props.message.reasoning && reasoningOpen() && !(isTool() && streaming())}>
-            <div class="reasoning-text">{props.message.reasoning}</div>
+            <div class="reasoning-text py-2 px-3 whitespace-pre-wrap bg-thinking text-dim text-sm rounded-sm m-0 mt-1 mb-2">
+              {props.message.reasoning}
+            </div>
           </Show>
 
           <Show
             when={!editing()}
             fallback={
-              <div class="msg-edit">
+              <div class="[&_textarea]:min-h-17.5 [&_textarea]:overflow-y-hidden">
                 <textarea
                   ref={editArea}
                   onInput={(e) => {
@@ -602,7 +621,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                     }
                   }}
                 />
-                <div class="msg-edit-actions">
+                <div class="flex gap-2 flex-wrap mt-2">
                   <Show when={!isTool()}>
                     <button class="primary-btn" onClick={() => void saveEdit(api.editBranch)}>
                       {isUser() ? 'Send as branch' : 'Save as branch'}
@@ -633,13 +652,15 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
           </Show>
 
           <Show when={props.message.status === 'error'}>
-            <div class="msg-error">{props.message.genMeta?.error ?? 'Generation failed'}</div>
+            <div class="text-danger border border-solid border-danger py-2 px-3 mt-2 text-sm rounded-sm">
+              {props.message.genMeta?.error ?? 'Generation failed'}
+            </div>
           </Show>
         </div>
       </div>
       <Show when={steerOpen()}>
         <Modal title="Regenerate with instruction" onClose={() => setSteerOpen(false)}>
-          <div class="form">
+          <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
             <label>Instruction (steers only this regeneration — never enters history)</label>
             <textarea
               ref={steerArea}
@@ -655,7 +676,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
                 }
               }}
             />
-            <div class="form-actions">
+            <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
               <button class="primary-btn" onClick={() => void confirmSteer()}>
                 Regenerate
               </button>

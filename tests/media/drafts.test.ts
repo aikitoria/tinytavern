@@ -1,17 +1,13 @@
+import { conversationFixture } from '../support/fixtures.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
 test('media drafts', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
-
-  const { existsSync, writeFileSync } = await import('node:fs');
-
+  const { existsSync } = await import('node:fs');
   const { basename, join } = await import('node:path');
-
   const { spawnSync } = await import('node:child_process');
-
   const { requireTestIsolation } = await import('../support/isolation.ts');
-
   const { imageConfig } = await import('../support/imageConfig.ts');
 
   requireTestIsolation();
@@ -35,7 +31,39 @@ test('media drafts', async () => {
   const { appendMessage } = await import('../../server/src/tree.ts');
   const { saveImage, deleteImageFiles, sweepOrphanedImages } =
     await import('../../server/src/images.ts');
-
+  function job(body: Parameters<typeof createMediaJob>[0] = {}, source?: number) {
+    return createMediaJob(
+      { requestKey: newRequestId(), operation: 'image', ...body },
+      source === undefined ? undefined : requireMediaJob(source),
+    );
+  }
+  const count = (table: string) => stmt(`SELECT count(*) AS n FROM ${table}`).get()!.n;
+  const onDisk = (path: string) => existsSync(join(IMAGES_DIR, basename(path)));
+  function discard(id: number, options: Parameters<typeof discardMediaDraft>[1] = {}) {
+    const row = requireMediaJob(id);
+    return discardMediaDraft(row, {
+      expectedDraftRevision: mediaDraft(row.draft_id!).revision,
+      ...options,
+    });
+  }
+  function persistedDraft(id: number) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        `
+      const { mediaDraft } = await import('./server/src/mediaJobStore.ts');
+      const { db } = await import('./server/src/db.ts');
+      process.stdout.write(JSON.stringify(mediaDraft(${id})));
+      db.close(true);
+    `,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout) as ReturnType<typeof mediaDraft>;
+  }
+  const start = (id: number) => startMediaJob(requireMediaJob(id), {}, false);
   const workflow = imageConfig(
     '{"output":{"inputs":{"text":"{{prompt}}","seed":{{seed}}}}}',
     'http://unused.invalid',
@@ -48,27 +76,18 @@ test('media drafts', async () => {
       defaults: { 'image:0': workflow.id },
     },
   });
-  stmt(
-    "INSERT INTO conversations(id, title, created_at, updated_at) VALUES (1, 'Draft test', 1, 1)",
-  ).run();
+  conversationFixture({ id: 1, title: 'Draft test' });
   const original = appendMessage(1, 'user', 'Conversation context', null);
   const chatBefore = stmt('SELECT * FROM conversations WHERE id = 1').get()!;
-  const unused = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image',
+  const unused = job({
     prompt: 'Typed but never generated',
     reviewBeforeSave: true,
   });
-  discardMediaDraft(requireMediaJob(unused.id), {
-    expectedDraftRevision: unused.draft!.revision,
-    onlyUnstarted: true,
-  });
+  discard(unused.id, { onlyUnstarted: true });
   assert.equal(stmt('SELECT id FROM media_jobs WHERE id = ?').get(unused.id), null);
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(unused.draft!.id), null);
 
-  const first = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image',
+  const first = job({
     prompt: 'First prompt',
     instruction: 'First instruction',
     contextConversationId: 1,
@@ -82,22 +101,14 @@ test('media drafts', async () => {
     'Unrelated recipe',
     { id: first.id },
   );
-  startMediaJob(requireMediaJob(first.id), {}, false);
+  start(first.id);
   assert.throws(
-    () =>
-      discardMediaDraft(requireMediaJob(first.id), {
-        expectedDraftRevision: mediaDraft(first.draft!.id).revision,
-        onlyUnstarted: true,
-      }),
+    () => discard(first.id, { onlyUnstarted: true }),
     { status: 409 },
     'Leaving an unused draft cannot discard work started by another client',
   );
   assert.equal(requireMediaJob(first.id).state, 'submitting');
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM messages').get()!.n,
-    1,
-    'Rendering a draft never inserts a chat placeholder',
-  );
+  assert.equal(count('messages'), 1, 'Rendering a draft never inserts a chat placeholder');
   assert.equal(
     stmt('SELECT active_leaf_id FROM conversations WHERE id = 1').get()!.active_leaf_id,
     original.id,
@@ -126,8 +137,6 @@ test('media drafts', async () => {
     return outputs;
   }
   const firstAssets = result(first.id, 2);
-  assert.equal(typeof first.id, 'number');
-  assert.equal(typeof first.draft!.id, 'number');
   const storedRecipe = requireMediaJob(first.id).recipe_id!;
   assert.notEqual(storedRecipe, decoy);
   assert.equal(
@@ -143,28 +152,23 @@ test('media drafts', async () => {
   const firstResultDetails = getMediaAssetResultDetails(firstAssets[0]!);
   assert.equal(firstResultDetails.seed, requireMediaJob(first.id).seed);
   assert.equal(firstResultDetails.instruction, 'First instruction');
-  const second = createMediaJob(
-    { requestKey: newRequestId(), prompt: 'Second prompt', instruction: 'Second instruction' },
-    requireMediaJob(first.id),
-  );
+  const second = job({ prompt: 'Second prompt', instruction: 'Second instruction' }, first.id);
+  const accept = (assetId: number, options: Parameters<typeof acceptMediaVariation>[1] = {}) =>
+    acceptMediaVariation(requireMediaJob(second.id), {
+      assetId,
+      expectedDraftRevision: mediaDraft(first.draft!.id).revision,
+      ...options,
+    });
   assert.equal(second.draft!.id, first.draft!.id, 'Variations belong to the same saved draft');
   assert.throws(
-    () =>
-      discardMediaDraft(requireMediaJob(second.id), {
-        expectedDraftRevision: mediaDraft(first.draft!.id).revision,
-        onlyUnstarted: true,
-      }),
+    () => discard(second.id, { onlyUnstarted: true }),
     { status: 409 },
     'An unused variation must not discard an earlier generated result',
   );
   assert.equal(requireMediaJob(first.id).state, 'succeeded');
-  startMediaJob(requireMediaJob(second.id), {}, false);
+  start(second.id);
   assert.throws(
-    () =>
-      acceptMediaVariation(requireMediaJob(second.id), {
-        assetId: firstAssets[0],
-        expectedDraftRevision: mediaDraft(first.draft!.id).revision,
-      }),
+    () => accept(firstAssets[0]!),
     { status: 409 },
     'Acceptance waits for running work to finish or be cancelled',
   );
@@ -184,20 +188,16 @@ test('media drafts', async () => {
     'Stale selection cannot overwrite a newer choice',
   );
   const { initMediaWorker, stopMediaWorker } = await import('../../server/src/mediaWorker.ts');
-  const oldSaved = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image',
+  const oldSaved = job({
     prompt: 'Saved before upgrade',
   });
   updateMediaJob(oldSaved.id, { state: 'succeeded' });
-  const oldAccepted = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image',
+  const oldAccepted = job({
     reviewBeforeSave: true,
   });
   updateMediaJob(oldAccepted.id, { state: 'succeeded' });
   stmt("UPDATE media_drafts SET state = 'accepted' WHERE id = ?").run(oldAccepted.draft!.id);
-  const failed = createMediaJob({ requestKey: newRequestId(), operation: 'image' });
+  const failed = job();
   finishMediaJob(failed.id, 'failed', 'A failed job stays available for retry');
   initMediaWorker();
   stopMediaWorker();
@@ -214,26 +214,11 @@ test('media drafts', async () => {
   sweepOrphanedImages();
   const beforeAccept = mediaJobDto(requireMediaJob(first.id)).outputs;
   assert.equal(beforeAccept.length, 2, 'Drafts keep every output through orphan cleanup');
-  assert.equal(stmt('SELECT count(*) AS n FROM gallery_items').get()!.n, 0);
-  const persisted = spawnSync(
-    process.execPath,
-    [
-      '-e',
-      `
-  const { Database } = await import('bun:sqlite');
-  const db = new Database(process.env.DB_PATH, { readonly: true });
-  const row = db.prepare('SELECT selected_asset_id FROM media_drafts WHERE id = ?').get(${JSON.stringify(first.draft!.id)});
-  process.stdout.write(String(row.selected_asset_id));
-  db.close(true);
-`,
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(persisted.status, 0, persisted.stderr);
+  assert.equal(count('gallery_items'), 0);
   assert.equal(
-    persisted.stdout,
-    String(firstAssets[0]),
-    'A separate connection recovers the saved selection',
+    persistedDraft(first.draft!.id).selectedAssetId,
+    firstAssets[0],
+    'A fresh process recovers the unsaved selection',
   );
   const request = {
     assetId: firstAssets[0],
@@ -241,12 +226,10 @@ test('media drafts', async () => {
     expectedActiveLeafId: original.id,
     expectedMutationRevision: Number(chatBefore.mutation_revision),
   };
-  assert.throws(
-    () =>
-      acceptMediaVariation(requireMediaJob(second.id), { ...request, expectedActiveLeafId: null }),
-    { status: 409 },
-  );
-  const accepted = acceptMediaVariation(requireMediaJob(second.id), request);
+  assert.throws(() => accept(firstAssets[0]!, { ...request, expectedActiveLeafId: null }), {
+    status: 409,
+  });
+  const accepted = accept(firstAssets[0]!, request);
   assert.equal(accepted.id, first.id);
   assert.equal(accepted.draft!.state, 'open');
   assert.deepEqual(accepted.draft!.savedAssetIds, [firstAssets[0]]);
@@ -254,11 +237,7 @@ test('media drafts', async () => {
     accepted.outputs.map((asset) => asset.id),
     firstAssets,
   );
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM messages').get()!.n,
-    2,
-    'Only acceptance inserts a message',
-  );
+  assert.equal(count('messages'), 2, 'Only acceptance inserts a message');
   assert.equal(
     stmt('SELECT content FROM messages WHERE id = ?').get(accepted.messageId!)!.content,
     'First prompt',
@@ -268,21 +247,17 @@ test('media drafts', async () => {
     2,
     'Saving keeps every variation open',
   );
-  assert.ok(existsSync(join(IMAGES_DIR, basename(beforeAccept[1]!.url))));
-  const repeated = acceptMediaVariation(requireMediaJob(second.id), {
+  assert.ok(onDisk(beforeAccept[1]!.url));
+  const repeated = accept(firstAssets[0]!, {
     ...request,
     expectedDraftRevision: accepted.draft!.revision,
   });
   assert.equal(repeated.draft!.revision, accepted.draft!.revision);
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM messages').get()!.n,
-    2,
-    'Saving an already-owned output is idempotent',
-  );
+  assert.equal(count('messages'), 2, 'Saving an already-owned output is idempotent');
   const afterFirst = stmt('SELECT * FROM conversations WHERE id = 1').get()!;
   assert.throws(
     () =>
-      acceptMediaVariation(requireMediaJob(second.id), {
+      accept(secondAssets[0]!, {
         ...request,
         assetId: secondAssets[0],
         expectedDraftRevision: accepted.draft!.revision,
@@ -290,38 +265,23 @@ test('media drafts', async () => {
     { status: 409 },
     'A second save still checks the current chat branch',
   );
-  const acceptedSecond = acceptMediaVariation(requireMediaJob(second.id), {
-    assetId: secondAssets[0],
+  const acceptedSecond = accept(secondAssets[0]!, {
     expectedDraftRevision: accepted.draft!.revision,
     expectedActiveLeafId: Number(afterFirst.active_leaf_id),
     expectedMutationRevision: Number(afterFirst.mutation_revision),
   });
-  assert.equal(stmt('SELECT count(*) AS n FROM messages').get()!.n, 3);
+  assert.equal(count('messages'), 3);
   assert.equal(
     stmt('SELECT content FROM messages WHERE id = ?').get(acceptedSecond.messageId!)!.content,
     'Second prompt',
   );
   assert.deepEqual(acceptedSecond.draft!.savedAssetIds, [firstAssets[0], secondAssets[0]]);
-  const recovered = spawnSync(
-    process.execPath,
-    [
-      '-e',
-      `
-  const { mediaDraft } = await import('./server/src/mediaJobStore.ts');
-  const { db } = await import('./server/src/db.ts');
-  process.stdout.write(JSON.stringify(mediaDraft(${JSON.stringify(first.draft!.id)}).savedAssetIds));
-  db.close(true);
-`,
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(recovered.status, 0, recovered.stderr);
   assert.deepEqual(
-    JSON.parse(recovered.stdout),
+    persistedDraft(first.draft!.id).savedAssetIds,
     acceptedSecond.draft!.savedAssetIds,
     'Saved selections survive restart through destination ownership',
   );
-  discardMediaDraft(requireMediaJob(second.id), {
+  discard(second.id, {
     expectedDraftRevision: acceptedSecond.draft!.revision,
   });
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(first.draft!.id), null);
@@ -331,15 +291,8 @@ test('media drafts', async () => {
     'Original text, workflow and seed survive finishing and removing the job',
   );
   assert.equal(stmt("SELECT owner_id FROM media_owners WHERE owner_type = 'job'").get(), null);
-  assert.ok(
-    existsSync(join(IMAGES_DIR, basename(beforeAccept[0]!.url))),
-    'Finishing keeps saved chat output',
-  );
-  assert.equal(
-    existsSync(join(IMAGES_DIR, basename(beforeAccept[1]!.url))),
-    false,
-    'Finishing deletes unsaved outputs',
-  );
+  assert.ok(onDisk(beforeAccept[0]!.url), 'Finishing keeps saved chat output');
+  assert.equal(onDisk(beforeAccept[1]!.url), false, 'Finishing deletes unsaved outputs');
   assert.ok(
     stmt('SELECT id FROM media_assets WHERE id = ?').get(secondAssets[0]!),
     'Finishing keeps other saved variations',
@@ -354,57 +307,37 @@ test('media drafts', async () => {
   assert.equal(acceptedRerun.prompt, 'First prompt');
   deleteMediaJob(requireMediaJob(acceptedRerun.id));
 
-  const galleryDraft = createMediaJob({
-    requestKey: newRequestId(),
-    operation: 'image',
+  const galleryDraft = job({
     prompt: 'Gallery choice',
     reviewBeforeSave: true,
   });
-  startMediaJob(requireMediaJob(galleryDraft.id), {}, false);
+  start(galleryDraft.id);
   const galleryAssets = result(galleryDraft.id, 2);
-  const saved = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
-    assetId: galleryAssets[1],
-    expectedDraftRevision: mediaDraft(galleryDraft.draft!.id).revision,
-  });
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM gallery_items').get()!.n,
-    1,
-    'Gallery receives only the accepted result',
-  );
-  assert.equal(
-    stmt('SELECT image FROM gallery_items').get()!.image,
-    saved.outputs.find((asset) => asset.id === galleryAssets[1])!.url,
-  );
-  assert.equal(requireMediaJob(saved.id).state, 'succeeded');
-  assert.deepEqual(saved.draft!.savedAssetIds, [galleryAssets[1]]);
-  const gallerySavedAgain = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
-    assetId: galleryAssets[1],
+  let saved = mediaJobDto(requireMediaJob(galleryDraft.id));
+  for (const [assetId, expectedCount, savedIds, reason] of [
+    [galleryAssets[1], 1, [galleryAssets[1]], 'Gallery receives only the accepted result'],
+    [galleryAssets[1], 1, [galleryAssets[1]], 'Repeated gallery save cannot create a duplicate'],
+    [galleryAssets[0], 2, galleryAssets, 'Multiple outputs of one generation can be saved'],
+  ] as const) {
+    saved = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
+      assetId,
+      expectedDraftRevision: saved.draft!.revision,
+    });
+    assert.equal(count('gallery_items'), expectedCount, reason);
+    assert.deepEqual(saved.draft!.savedAssetIds, savedIds);
+    assert.equal(requireMediaJob(saved.id).state, 'succeeded');
+    if (expectedCount === 1)
+      assert.equal(
+        stmt('SELECT image FROM gallery_items').get()!.image,
+        saved.outputs.find((asset) => asset.id === galleryAssets[1])!.url,
+      );
+  }
+  discard(galleryDraft.id, {
     expectedDraftRevision: saved.draft!.revision,
-  });
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM gallery_items').get()!.n,
-    1,
-    'Repeated gallery save cannot create a duplicate',
-  );
-  const gallerySavedBoth = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
-    assetId: galleryAssets[0],
-    expectedDraftRevision: gallerySavedAgain.draft!.revision,
-  });
-  assert.equal(
-    stmt('SELECT count(*) AS n FROM gallery_items').get()!.n,
-    2,
-    'Multiple outputs of one generation can be saved',
-  );
-  assert.deepEqual(gallerySavedBoth.draft!.savedAssetIds, galleryAssets);
-  discardMediaDraft(requireMediaJob(galleryDraft.id), {
-    expectedDraftRevision: gallerySavedBoth.draft!.revision,
   });
   assert.throws(() => requireMediaJob(saved.id), { status: 404 });
   for (const asset of saved.outputs)
-    assert.ok(
-      existsSync(join(IMAGES_DIR, basename(asset.url))),
-      'Every saved gallery output survives finishing',
-    );
+    assert.ok(onDisk(asset.url), 'Every saved gallery output survives finishing');
 
   const inputPath = saveImage('.png', makePlaceholderPng());
   const input = mediaAssetForPath(inputPath)!;
@@ -420,17 +353,16 @@ test('media drafts', async () => {
     ...getSettings(),
     mediaRendering: { ...getSettings().mediaRendering, workflows: [workflow, editWorkflow] },
   });
-  const discarded = createMediaJob({
-    requestKey: newRequestId(),
+  const discarded = job({
     operation: 'image-edit',
     workflowId: editWorkflow.id,
     prompt: 'Discard this',
     reviewBeforeSave: true,
     inputs: [{ assetId: input.id, slot: 'reference1' }],
   });
-  startMediaJob(requireMediaJob(discarded.id), {}, false);
+  start(discarded.id);
   stmt("DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = 'test-input'").run();
-  discardMediaDraft(requireMediaJob(discarded.id), {
+  discard(discarded.id, {
     expectedDraftRevision: mediaDraft(discarded.draft!.id).revision,
   });
   deleteImageFiles([inputPath]);

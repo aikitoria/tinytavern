@@ -50,14 +50,17 @@ export default function App() {
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
       <div
-        class="app"
+        class="app isolate flex h-full small-touch:[&:where(.sidebar-open)_.header]:visible narrow:[&:where(.sidebar-open)_.header-view-btn]:display-none narrow:[&:where(.sidebar-open)_.header>.icon-btn]:display-none narrow:[&:where(.sidebar-open)_.header]:px-2"
         classList={{ 'sidebar-open': state.sidebarOpen, 'workspace-covered': workspaceCovered() }}
       >
         <Show when={!bootGone()}>
-          <div class="boot-screen" classList={{ 'boot-done': !booting() }}>
+          <div
+            class="boot-screen fixed inset-0 z-200 bg-canvas items-center gap-4 flex flex-col justify-center [&.boot-done]:opacity-0 [&.boot-done]:pointer-events-none"
+            classList={{ 'boot-done': !booting() }}
+          >
             <img src="/icon.svg" alt="" width="72" height="72" />
-            <span class="boot-name">TinyTavern</span>
-            <span class="boot-dots">
+            <span class="text-intro font-bold">TinyTavern</span>
+            <span class="boot-dots flex gap-2 [&_i]:rounded-circle [&_i]:bg-accent [&_i]:size-2 [&_i:nth-child(2)]:bg-accent-hot [&_i:nth-child(3)]:bg-secondary">
               <i />
               <i />
               <i />
@@ -68,11 +71,11 @@ export default function App() {
         <Show when={state.sidebarOpen}>
           <div
             ref={(element) => registerUiBack(element, () => setState('sidebarOpen', false))}
-            class="backdrop"
+            class="backdrop display-none small-touch:block small-touch:fixed small-touch:inset-0 small-touch:z-50"
             onClick={() => setState('sidebarOpen', false)}
           />
         </Show>
-        <main class="main">
+        <main class="main bg-canvas flex flex-col flex-1 min-w-0 relative">
           <Header />
           <ChatView active={!workspaceCovered()} />
           <Show

@@ -12,6 +12,7 @@ import { subscribedConversationIds } from '../events.ts';
 import { broadcastTree } from '../sync.ts';
 import {
   objectBody,
+  optionalBoolean,
   optionalNullableId,
   optionalNullableString,
   optionalString,
@@ -21,6 +22,8 @@ import {
 import type { JsonObject } from '../validation.ts';
 import { optionalName, requireReference, rowById, rows } from './entityUtils.ts';
 import type { EntityTable } from './entityUtils.ts';
+
+const entityColumn = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
 export interface EntityField<T> {
   column: string;
@@ -46,47 +49,44 @@ export interface EntityConfig<T extends { id: number }> {
   onDuplicate?: (sourceId: number, newId: number) => void;
 }
 
-export function nameField<T>(get: (cur: T) => string): EntityField<T> {
-  return {
-    column: 'name',
-    value: (b, cur) =>
-      cur === undefined
-        ? requiredString(b, 'name')
-        : optionalName(optionalString(b, 'name'), get(cur)),
-  };
+/** Resolve scalar validation and SQL names once; exceptional fields retain route validators. */
+export function entityFields<T extends { name: string }>(
+  defaults: T,
+  overrides: Partial<Record<keyof T, EntityField<T>['value']>> = {},
+): EntityField<T>[] {
+  return Object.entries(defaults).map(([key, fallback]) => {
+    const boolean = typeof fallback === 'boolean';
+    const parse = boolean
+      ? optionalBoolean
+      : fallback === null
+        ? optionalNullableString
+        : optionalString;
+    return {
+      column: key === 'genParams' ? 'gen_params_json' : entityColumn(key),
+      value:
+        overrides[key as keyof T] ??
+        ((body, current) => {
+          if (key === 'name')
+            return current === undefined
+              ? requiredString(body, key)
+              : optionalName(optionalString(body, key), current.name);
+          const requested = parse(body, key);
+          const value =
+            requested === undefined ? (current?.[key as keyof T] ?? fallback) : requested;
+          return boolean ? Number(value) : (value as string | null);
+        }),
+    };
+  });
 }
 
-export function textField<T>(key: string, column: string, get: (cur: T) => string): EntityField<T> {
-  return { column, value: (b, cur) => optionalString(b, key) ?? (cur ? get(cur) : '') };
-}
-
-export function nullableTextField<T>(
-  key: string,
-  column: string,
-  get: (cur: T) => string | null,
-): EntityField<T> {
-  return {
-    column,
-    value: (b, cur) => {
-      const value = optionalNullableString(b, key);
-      return value === undefined ? (cur ? get(cur) : null) : value;
-    },
-  };
-}
-
-export function refIdField<T>(
-  key: string,
-  column: string,
-  refTable: EntityTable,
-  get: (cur: T) => number | null,
-): EntityField<T> {
-  return {
-    column,
-    value: (b, cur) => {
-      const value = optionalNullableId(b, key);
-      requireReference(refTable, value, key);
-      return value === undefined ? (cur ? get(cur) : null) : value;
-    },
+export function referenceValue<T>(
+  key: keyof T & string,
+  table: EntityTable,
+): EntityField<T>['value'] {
+  return (body, current) => {
+    const value = optionalNullableId(body, key);
+    requireReference(table, value, key);
+    return value === undefined ? ((current?.[key] as number | null) ?? null) : value;
   };
 }
 

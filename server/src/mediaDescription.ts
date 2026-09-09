@@ -1,11 +1,8 @@
-import { newRequestId } from '@tinytavern/shared';
 import { mediaWorkflowKey, type ImageDescriptionProgress } from '@tinytavern/shared';
-import { createMediaJob, startMediaJob } from './mediaJobs.ts';
-import { mediaLive, requireMediaJob } from './mediaJobStore.ts';
-import { consumeTemporaryMediaJob } from './temporaryMediaJob.ts';
+import { mediaLive } from './mediaJobStore.ts';
+import { consumeTemporaryMediaJob, startTemporaryMediaJob } from './temporaryMediaJob.ts';
 import { getSettings } from './settingsStore.ts';
 import { HttpError } from './router.ts';
-import { transaction } from './db.ts';
 
 export function descriptionWorkflow(workflowId?: string) {
   const settings = getSettings().mediaRendering;
@@ -31,22 +28,8 @@ export async function describeImage(
   onProgress: (update: ImageDescriptionProgress) => void,
 ): Promise<string> {
   signal.throwIfAborted();
-  const job = transaction(() => {
-    const draft = createMediaJob(
-      {
-        requestKey: newRequestId(),
-        operation: 'image-describe',
-        workflowId: configuration.workflow.id,
-        inputs: [{ slot: 'source', assetId }],
-      },
-      undefined,
-      JSON.stringify(configuration),
-    );
-    startMediaJob(requireMediaJob(draft.id), {}, false);
-    return requireMediaJob(draft.id);
-  });
   return consumeTemporaryMediaJob(
-    job,
+    startTemporaryMediaJob(configuration, [{ slot: 'source', assetId }]),
     {
       signal,
       onProgress: (row) => {

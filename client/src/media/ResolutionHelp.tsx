@@ -25,11 +25,11 @@ export default function ResolutionHelp() {
   let trigger: HTMLButtonElement | undefined;
 
   return (
-    <span class="macro-help">
+    <span class="align-text-bottom ml-2 inline-flex relative">
       <button
         ref={trigger}
         type="button"
-        class="icon-btn help-btn"
+        class="icon-btn [&.icon-btn]:p-0 [&.icon-btn]:flex-none [&.icon-btn]:text-muted [&.icon-btn]:text-size-inherit [&.icon-btn]:w-4.5 [&.icon-btn]:min-w-4.5 [&.icon-btn]:h-4.5 [&.icon-btn:hover]:text-foreground"
         title="Resolution sizes"
         aria-label="Resolution sizes"
         aria-haspopup="dialog"
@@ -43,14 +43,16 @@ export default function ResolutionHelp() {
         anchor={() => trigger}
         focusTarget={() => trigger}
         onClose={() => setOpen(false)}
-        class="help-card"
+        class="z-150 p-3 items-baseline grid gap-y-2 gap-x-3 max-w-[calc(100vw_-_16px)] grid-cols-[max-content_1fr]"
         role="dialog"
         ariaLabel="Resolution sizes"
         minWidth={360}
         gap={8}
       >
-        <div class="help-title">Resolution sizes</div>
-        <table class="resolution-help-table">
+        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">
+          Resolution sizes
+        </div>
+        <table class="border-collapse tabular-nums w-full text-caption text-left col-span-full [&_:is(th,_td)]:py-1 [&_:is(th,_td)]:px-2 [&_td]:text-dim [&_td]:whitespace-nowrap">
           <thead>
             <tr>
               <th scope="col">Megapixels</th>

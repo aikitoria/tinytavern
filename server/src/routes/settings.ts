@@ -5,9 +5,14 @@ import {
   mediaPromptSettingsKey,
 } from '@tinytavern/shared';
 import { route, HttpError } from '../router.ts';
-import { getSettings, putSettings } from '../settingsStore.ts';
+import {
+  getSettings,
+  putSettings,
+  SETTINGS_REFERENCE_TABLES,
+  type SettingsReferenceKey,
+} from '../settingsStore.ts';
 import { disconnectAllForAuthChange, invalidate } from '../events.ts';
-import { requireReference, type EntityTable } from './entityUtils.ts';
+import { requireReference } from './entityUtils.ts';
 import {
   objectBody,
   optionalBoolean,
@@ -25,7 +30,7 @@ import { parseMediaRendering, parseMediaPrompts } from '../mediaSettings.ts';
 
 route.get('/api/settings', () => getSettings());
 
-route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
+route.put('/api/settings', ({ req, headers, body }) => {
   const b = objectBody(body);
   const current = getSettings();
   const expectedRevision = optionalNumber(b, 'expectedRevision');
@@ -33,22 +38,15 @@ route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
     invalidate('settings');
     throw new HttpError(409, 'global settings changed on another device; review and retry');
   }
-  const ids = {
-    defaultPresetId: optionalNullableId(b, 'defaultPresetId'),
-    activeEndpointId: optionalNullableId(b, 'activeEndpointId'),
-    defaultPersonaId: optionalNullableId(b, 'defaultPersonaId'),
-    defaultTemplateId: optionalNullableId(b, 'defaultTemplateId'),
-  };
-  const tables: Record<keyof typeof ids, EntityTable> = {
-    defaultPresetId: 'presets',
-    activeEndpointId: 'endpoints',
-    defaultPersonaId: 'personas',
-    defaultTemplateId: 'templates',
-  };
-  for (const key of Object.keys(ids) as (keyof typeof ids)[]) {
-    requireReference(tables[key], ids[key], key);
+  const next: Settings = { ...DEFAULT_SETTINGS, ...current, revision: current.revision + 1 };
+  const referenceKeys = Object.keys(SETTINGS_REFERENCE_TABLES) as SettingsReferenceKey[];
+  const ids = Object.fromEntries(
+    referenceKeys.map((key) => [key, optionalNullableId(b, key)]),
+  ) as Record<SettingsReferenceKey, number | null | undefined>;
+  for (const key of referenceKeys) {
+    requireReference(SETTINGS_REFERENCE_TABLES[key], ids[key], key);
+    if (ids[key] !== undefined) next[key] = ids[key];
   }
-  const promptSettings: Partial<Pick<Settings, 'titlePrompt' | 'draftCompletionPrompt'>> = {};
   for (const key of ['titlePrompt', 'draftCompletionPrompt'] as const) {
     const value = optionalString(b, key);
     if (value === undefined) continue;
@@ -62,7 +60,7 @@ route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
         'The title instruction uses the full chat context; remove the standalone message macros.',
       );
     }
-    promptSettings[key] = value;
+    next[key] = value;
   }
   const galleryThumbnailSize = optionalNumber(b, 'galleryThumbnailSize');
   if (
@@ -73,9 +71,15 @@ route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
   ) {
     throw new HttpError(400, 'Thumbnail size must be a whole number between 64 and 2048 pixels');
   }
-  const autoExpandThinking = optionalBoolean(b, 'autoExpandThinking');
-  const backgroundSwipeGeneration = optionalBoolean(b, 'backgroundSwipeGeneration');
-  const parallelBackgroundSwipeGeneration = optionalBoolean(b, 'parallelBackgroundSwipeGeneration');
+  if (galleryThumbnailSize !== undefined) next.galleryThumbnailSize = galleryThumbnailSize;
+  for (const key of [
+    'autoExpandThinking',
+    'backgroundSwipeGeneration',
+    'parallelBackgroundSwipeGeneration',
+  ] as const) {
+    const value = optionalBoolean(b, key);
+    if (value !== undefined) next[key] = value;
+  }
   const accessPassword = b.accessPassword;
   if (accessPassword !== undefined) {
     try {
@@ -94,25 +98,11 @@ route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
       parseMediaPrompts(b[key], key),
     ]),
   );
-  const next: Settings = {
-    ...DEFAULT_SETTINGS,
-    ...current,
-    ...promptSettings,
-    ...Object.fromEntries(Object.entries(ids).filter(([, value]) => value !== undefined)),
-    ...(autoExpandThinking === undefined ? {} : { autoExpandThinking }),
-    ...(galleryThumbnailSize === undefined ? {} : { galleryThumbnailSize }),
-    ...(backgroundSwipeGeneration === undefined ? {} : { backgroundSwipeGeneration }),
-    ...(parallelBackgroundSwipeGeneration === undefined
-      ? {}
-      : { parallelBackgroundSwipeGeneration }),
-    ...(accessPassword === undefined ? {} : { hasPassword: accessPassword !== null }),
-    ...(imageGeneration === undefined
-      ? {}
-      : { imageGeneration: { ...current.imageGeneration, ...imageGeneration } }),
-    ...(mediaRendering === undefined ? {} : { mediaRendering }),
-    ...mediaPrompts,
-    revision: current.revision + 1,
-  };
+  if (accessPassword !== undefined) next.hasPassword = accessPassword !== null;
+  if (imageGeneration !== undefined)
+    next.imageGeneration = { ...current.imageGeneration, ...imageGeneration };
+  if (mediaRendering !== undefined) next.mediaRendering = mediaRendering;
+  Object.assign(next, mediaPrompts);
   next.mediaRendering = {
     ...next.mediaRendering,
     workflows: next.mediaRendering.workflows.map((workflow) => {

@@ -1,6 +1,5 @@
 import type { MediaImageConfig } from '@tinytavern/shared';
-import { DEFAULT_MEDIA_RENDERING } from '@tinytavern/shared';
-import { parseMediaRendering } from './mediaSettings.ts';
+import { parseMediaWorkflow, parseComfyUrl } from './mediaSettings.ts';
 import { stmt } from './db.ts';
 import { getMessage, markMessageDirty } from './tree.ts';
 import { broadcastTree } from './sync.ts';
@@ -16,17 +15,12 @@ export function parseImageConfig(raw: unknown): MediaImageConfig {
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
-  const rendering = parseMediaRendering({
-    ...DEFAULT_MEDIA_RENDERING,
-    comfyUrl: obj.comfyUrl,
-    workflows: [obj.workflow],
-    defaults: {},
-  })!;
-  const workflow = rendering.workflows[0]!;
+  const comfyUrl = parseComfyUrl(obj.comfyUrl);
+  const workflow = parseMediaWorkflow(obj.workflow);
   if (workflow.operation !== 'image' || !workflow.json.trim()) {
     throw new Error('Choose a configured Create image workflow');
   }
-  return { workflow, comfyUrl: rendering.comfyUrl };
+  return { workflow, comfyUrl };
 }
 
 /** Fire-and-forget; failures surface as genMeta.imageError. */

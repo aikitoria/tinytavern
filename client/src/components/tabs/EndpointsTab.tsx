@@ -1,83 +1,89 @@
-import SettingLabel, { createDefaultField } from '../SettingField.tsx';
-import { Show, createSignal } from 'solid-js';
+import SettingLabel from '../SettingField.tsx';
+import { For, Show, createSignal } from 'solid-js';
 import type { Endpoint, GenParams } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { selectSettingsEntity } from '../../state/settingsSelection.ts';
 import { state } from '../../state/store.ts';
 import { createEntityEditor, errorMessage } from '../../util.ts';
 import EntityEditorPane from '../EntityEditorPane.tsx';
+import FormField, { createFormFields } from '../FormFields.tsx';
 import Select from '../Select.tsx';
 
 export default function EndpointsTab() {
   const [model, setModel] = createSignal('');
   const [keyCleared, setKeyCleared] = createSignal(false);
   const [editingExisting, setEditingExisting] = createSignal(false);
-  const nameEl = createDefaultField(() => '');
-  const urlEl = createDefaultField(() => '');
-  const keyEl = createDefaultField(() => '');
-  const tempEl = createDefaultField(() => '');
-  const topPEl = createDefaultField(() => '');
-  const minPEl = createDefaultField(() => '');
-  const maxTokEl = createDefaultField(() => '');
-  const freqEl = createDefaultField(() => '');
-  const presEl = createDefaultField(() => '');
-  const effortEl = createDefaultField(() => '');
-  const prefillEl = createDefaultField(() => 'none');
+  const form = createFormFields({
+    name: '',
+    baseUrl: '',
+    apiKey: '',
+    temperature: '',
+    topP: '',
+    minP: '',
+    maxTokens: '',
+    frequencyPenalty: '',
+    presencePenalty: '',
+    reasoningEffort: '',
+    prefillMode: 'none',
+  });
+  const keyEl = form.fields.apiKey;
+  const sampling = [
+    ['temperature', 'Temperature', '0.05', 0, 2],
+    ['topP', 'Top P', '0.05', 0, 1],
+    ['minP', 'Min P', '0.01', 0, 1],
+    ['maxTokens', 'Max tokens', '1', 1, undefined],
+    ['frequencyPenalty', 'Freq. penalty', '0.05', -2, 2],
+    ['presencePenalty', 'Pres. penalty', '0.05', -2, 2],
+  ] as const;
 
   const editor = createEntityEditor({
+    ...api.endpoints,
     items: () => state.endpoints,
     load: (endpoint) => {
       setEditingExisting(endpoint != null);
-      nameEl.value = endpoint?.name ?? '';
-      urlEl.value = endpoint?.baseUrl ?? '';
-      keyEl.value = '';
       setKeyCleared(false);
       setModel(endpoint?.model ?? '');
-      tempEl.value = String(endpoint?.genParams.temperature ?? '');
-      topPEl.value = String(endpoint?.genParams.topP ?? '');
-      minPEl.value = String(endpoint?.genParams.minP ?? '');
-      maxTokEl.value = String(endpoint?.genParams.maxTokens ?? '');
-      freqEl.value = String(endpoint?.genParams.frequencyPenalty ?? '');
-      presEl.value = String(endpoint?.genParams.presencePenalty ?? '');
-      effortEl.value = endpoint?.genParams.reasoningEffort ?? '';
-      prefillEl.value = endpoint?.prefillMode ?? 'none';
+      form.load({
+        name: endpoint?.name ?? '',
+        baseUrl: endpoint?.baseUrl ?? '',
+        apiKey: '',
+        prefillMode: endpoint?.prefillMode ?? 'none',
+        reasoningEffort: endpoint?.genParams.reasoningEffort ?? '',
+        ...Object.fromEntries(
+          sampling.map(([key]) => [key, String(endpoint?.genParams[key] ?? '')]),
+        ),
+      });
     },
     data: () => {
-      const genParams: GenParams = {};
-      if (tempEl.value !== '') genParams.temperature = Number(tempEl.value);
-      if (topPEl.value !== '') genParams.topP = Number(topPEl.value);
-      if (minPEl.value !== '') genParams.minP = Number(minPEl.value);
-      if (maxTokEl.value !== '') genParams.maxTokens = Number(maxTokEl.value);
-      if (freqEl.value !== '') genParams.frequencyPenalty = Number(freqEl.value);
-      if (presEl.value !== '') genParams.presencePenalty = Number(presEl.value);
-      if (effortEl.value !== '') {
-        genParams.reasoningEffort = effortEl.value as GenParams['reasoningEffort'];
-      }
+      const { name, baseUrl, apiKey, prefillMode, reasoningEffort, ...numeric } = form.value();
+      const genParams: GenParams = Object.fromEntries(
+        Object.entries(numeric)
+          .filter(([, value]) => value !== '')
+          .map(([key, value]) => [key, Number(value)]),
+      );
+      if (reasoningEffort)
+        genParams.reasoningEffort = reasoningEffort as GenParams['reasoningEffort'];
       return {
-        name: nameEl.value,
-        baseUrl: urlEl.value,
-        // An empty field preserves the stored key unless explicitly cleared.
-        ...(!editingExisting() || keyEl.value !== '' || keyCleared()
-          ? { apiKey: keyEl.value }
-          : {}),
+        name,
+        baseUrl,
         model: model() || null,
         genParams,
-        prefillMode: prefillEl.value as Endpoint['prefillMode'],
+        prefillMode: prefillMode as Endpoint['prefillMode'],
+        // An empty field preserves the stored key unless explicitly cleared.
+        ...(!editingExisting() || apiKey !== '' || keyCleared() ? { apiKey } : {}),
       };
     },
     create: async (data) => {
-      const endpoint = await api.createEndpoint(data);
+      const endpoint = await api.endpoints.create(data);
       setEditingExisting(true);
       setKeyCleared(false);
       return endpoint;
     },
     patch: async (id, data) => {
-      const endpoint = await api.patchEndpoint(id, data);
+      const endpoint = await api.endpoints.patch(id, data);
       setKeyCleared(false);
       return endpoint;
     },
-    remove: api.deleteEndpoint,
-    duplicate: api.duplicateEndpoint,
     deletePrompt: 'Delete this endpoint?',
     initialId: () => state.settings.activeEndpointId,
     emptySelection: 'new',
@@ -89,7 +95,7 @@ export default function EndpointsTab() {
     if (typeof id !== 'number') return;
     editor.setStatus('Fetching models…', 'info');
     try {
-      const models = await api.fetchModels(id);
+      const models = await api.endpoints.models(id);
       editor.setStatus(`${models.length} models available.`, 'success');
       if (!model() && models.length > 0) setModel(models[0]!);
     } catch (err) {
@@ -110,11 +116,13 @@ export default function EndpointsTab() {
     >
       <section class="settings-section">
         <h3>Connection</h3>
-        <SettingLabel field={nameEl}>Name</SettingLabel>
-        <input ref={nameEl.ref} placeholder="Local llama.cpp" />
-        <SettingLabel field={urlEl}>Base URL</SettingLabel>
-        <p class="hint">OpenAI-compatible URL through the `/v1` segment.</p>
-        <input ref={urlEl.ref} placeholder="http://192.168.1.10:8080/v1" />
+        <FormField field={form.fields.name} label="Name" placeholder="Local llama.cpp" />
+        <FormField
+          field={form.fields.baseUrl}
+          label="Base URL"
+          placeholder="http://192.168.1.10:8080/v1"
+          hint="OpenAI-compatible URL through the `/v1` segment."
+        />
         <SettingLabel
           field={keyEl}
           changed={keyEl.changed() || (Boolean(editor.selected()?.hasApiKey) && !keyCleared())}
@@ -126,7 +134,7 @@ export default function EndpointsTab() {
           API key
         </SettingLabel>
         <p class="hint">Optional. Stored server-side and never returned to the browser.</p>
-        <div class="key-row">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <input
             ref={keyEl.ref}
             placeholder={
@@ -143,7 +151,7 @@ export default function EndpointsTab() {
           Model
         </SettingLabel>
         <p class="hint">Optional; leave blank to use the endpoint default.</p>
-        <div class="key-row">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <Show
             when={models().length > 0}
             fallback={
@@ -176,54 +184,44 @@ export default function EndpointsTab() {
       <section class="settings-section">
         <h3>Advanced generation</h3>
         <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
-        <div class="param-grid field-group" role="group" aria-label="Sampling parameters">
+        <div
+          class="grid gap-3 mt-2 field-group grid-cols-[repeat(auto-fit,_minmax(140px,_1fr))]"
+          role="group"
+          aria-label="Sampling parameters"
+        >
+          <For each={sampling}>
+            {([key, label, step, min, max]) => (
+              <div>
+                <FormField
+                  field={form.fields[key]}
+                  label={label}
+                  kind="number"
+                  step={step}
+                  min={min}
+                  max={max}
+                />
+              </div>
+            )}
+          </For>
           <div>
-            <SettingLabel field={tempEl}>Temperature</SettingLabel>
-            <input ref={tempEl.ref} type="number" step="0.05" min="0" max="2" />
-          </div>
-          <div>
-            <SettingLabel field={topPEl}>Top P</SettingLabel>
-            <input ref={topPEl.ref} type="number" step="0.05" min="0" max="1" />
-          </div>
-          <div>
-            <SettingLabel field={minPEl}>Min P</SettingLabel>
-            <input ref={minPEl.ref} type="number" step="0.01" min="0" max="1" />
-          </div>
-          <div>
-            <SettingLabel field={maxTokEl}>Max tokens</SettingLabel>
-            <input ref={maxTokEl.ref} type="number" step="1" min="1" />
-          </div>
-          <div>
-            <SettingLabel field={freqEl}>Freq. penalty</SettingLabel>
-            <input ref={freqEl.ref} type="number" step="0.05" min="-2" max="2" />
-          </div>
-          <div>
-            <SettingLabel field={presEl}>Pres. penalty</SettingLabel>
-            <input ref={presEl.ref} type="number" step="0.05" min="-2" max="2" />
-          </div>
-          <div>
-            <SettingLabel field={effortEl}>Reasoning effort</SettingLabel>
-            <Select
-              ref={effortEl.ref}
-              ariaLabel="Reasoning effort"
+            <FormField
+              field={form.fields.reasoningEffort}
+              label="Reasoning effort"
               options={[
                 { value: '', label: '— omit —' },
-                { value: 'none', label: 'none' },
-                { value: 'minimal', label: 'minimal' },
-                { value: 'low', label: 'low' },
-                { value: 'medium', label: 'medium' },
-                { value: 'high', label: 'high' },
-                { value: 'max', label: 'max' },
+                ...['none', 'minimal', 'low', 'medium', 'high', 'max'].map((value) => ({
+                  value,
+                  label: value,
+                })),
               ]}
             />
           </div>
         </div>
 
-        <SettingLabel field={prefillEl}>Prefill support</SettingLabel>
-        <p class="hint">Used by resume, speaker-name, and template prefills.</p>
-        <Select
-          ref={prefillEl.ref}
-          ariaLabel="Prefill support"
+        <FormField
+          field={form.fields.prefillMode}
+          label="Prefill support"
+          hint="Used by resume, speaker-name, and template prefills."
           options={[
             { value: 'disabled', label: 'Disabled (do not send prefills)' },
             { value: 'none', label: 'Generic (trailing assistant message)' },

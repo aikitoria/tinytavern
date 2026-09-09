@@ -7,7 +7,7 @@ export default function MobileSidebarButton() {
   return (
     <Show when={isMobileLayout()}>
       <button
-        class="send-btn tools-btn mobile-sidebar-btn"
+        class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn text-xl small-touch:text-base"
         title="Conversations"
         aria-label="Open conversations"
         onClick={toggleSidebar}

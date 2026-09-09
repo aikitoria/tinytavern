@@ -70,7 +70,6 @@ import {
   MEDIA_JOB_STATUS as STATUS_LABELS,
   MEDIA_INPUT_LABELS as INPUT_LABELS,
 } from './jobCards.ts';
-import './media.css';
 
 interface ToolDraft extends MediaJobDraft {
   workflowValues: MediaWorkflowValues;
@@ -455,50 +454,54 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     return saved;
   };
 
-  const run = async (
-    action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval',
-    autoRender = false,
-  ) => {
-    if (busy()) {
-      return;
-    }
+  const perform = async (action: () => Promise<void>, recover?: () => void | Promise<unknown>) => {
+    if (busy()) return;
     setBusy(true);
     setError('');
     try {
-      const current =
-        action === 'cancel'
-          ? runningJob()!
-          : action === 'retry-retrieval'
-            ? job()!
-            : await saveDraft();
-      const conversation =
-        current.contextConversationId === state.tree.conversationId
-          ? state.tree
-          : state.conversations.find((item) => item.id === current.contextConversationId);
-      if (action === 'render' || action === 'prepare') {
-        setShowLivePreview(true);
-      }
-      const result = await api.mediaJobAction(current, action, {
-        autoRender,
-        expectedActiveLeafId: conversation?.activeLeafId,
-        expectedMutationRevision: conversation?.mutationRevision,
-      });
-      applyMediaJob(result);
-      if (action !== 'cancel') {
-        loadJob(result);
-      }
+      await action();
     } catch (err) {
       setError(errorMessage(err));
-      if (jobId()) {
-        void api
-          .mediaJob(jobId()!)
-          .then(applyMediaJob)
-          .catch(() => {});
-      }
+      await Promise.resolve(recover?.()).catch(() => {});
     } finally {
       setBusy(false);
     }
   };
+
+  const run = (action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval', autoRender = false) =>
+    perform(
+      async () => {
+        const current =
+          action === 'cancel'
+            ? runningJob()!
+            : action === 'retry-retrieval'
+              ? job()!
+              : await saveDraft();
+        const conversation =
+          current.contextConversationId === state.tree.conversationId
+            ? state.tree
+            : state.conversations.find((item) => item.id === current.contextConversationId);
+        if (action === 'render' || action === 'prepare') {
+          setShowLivePreview(true);
+        }
+        const result = await api.mediaJobAction(current, action, {
+          autoRender,
+          expectedActiveLeafId: conversation?.activeLeafId,
+          expectedMutationRevision: conversation?.mutationRevision,
+        });
+        applyMediaJob(result);
+        if (action !== 'cancel') {
+          loadJob(result);
+        }
+      },
+      () => {
+        if (jobId())
+          void api
+            .mediaJob(jobId()!)
+            .then(applyMediaJob)
+            .catch(() => {});
+      },
+    );
 
   const saveOnLeave = async () => {
     if (!jobId()) return;
@@ -532,19 +535,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       });
   });
 
-  const back = async () => {
-    if (busy()) return;
-    setBusy(true);
-    setError('');
-    try {
+  const back = () =>
+    perform(async () => {
       await saveOnLeave();
       leaveMediaTool();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const chooseOperation = (value: string) => {
     const operation = value as MediaOperation;
@@ -613,21 +608,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       }),
     );
   };
-  const rerun = async () => {
-    if (!job() || busy()) {
-      return;
-    }
-    setBusy(true);
-    try {
+  const rerun = () => {
+    if (!job()) return;
+    return perform(async () => {
       const next = await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true });
       applyMediaJob(next);
       setJobId(next.id);
       loadJob(next);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
   const jobGroups = createMemo(() => groupMediaJobs(Object.values(state.mediaJobs)));
   const chooseCandidate = async (index: number) => {
@@ -640,17 +628,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       setShowLivePreview(false);
       return;
     }
-    setBusy(true);
-    setError('');
-    try {
+    await perform(async () => {
       applyMediaJob(await api.selectMediaVariation(job()!, candidate.asset.id, review()!.revision));
       setShowLivePreview(false);
-    } catch (err) {
-      setError(errorMessage(err));
-      await refreshVariations().catch(() => {});
-    } finally {
-      setBusy(false);
-    }
+    }, refreshVariations);
   };
   const savedAssetIds = () => review()?.savedAssetIds ?? [];
   const selectedSaved = () => Boolean(selected() && savedAssetIds().includes(selected()!.asset.id));
@@ -665,9 +646,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     if (!selected() || selectedSaved() || !reviewing() || busy() || active()) {
       return;
     }
-    setBusy(true);
-    setError('');
-    try {
+    await perform(async () => {
       const conversation =
         job()!.contextConversationId === state.tree.conversationId
           ? state.tree
@@ -683,27 +662,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           conversation ?? state.tree,
         ),
       );
-    } catch (err) {
-      setError(errorMessage(err));
-      await refreshVariations().catch(() => {});
-    } finally {
-      setBusy(false);
-    }
+    }, refreshVariations);
   };
-  const discard = async () => {
-    if (!reviewing() || busy()) {
-      return;
-    }
-    setBusy(true);
-    try {
+  const discard = () => {
+    if (!reviewing()) return;
+    return perform(async () => {
       await api.discardMediaDraft(job()!, review()!.revision);
       leaveMediaTool();
-    } catch (err) {
-      setError(errorMessage(err));
-      await refreshVariations().catch(() => {});
-    } finally {
-      setBusy(false);
-    }
+    }, refreshVariations);
   };
 
   const runningCount = () => jobGroups().filter((group) => mediaJobActive(group.job.state)).length;
@@ -717,7 +683,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         class="media-tools-modal"
         onClose={() => void back()}
         headerExtra={
-          <div class="page-header-actions">
+          <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear">
             <button class="page-back" onClick={() => void back()} disabled={busy()}>
               <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
             </button>
@@ -727,22 +693,25 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           </div>
         }
       >
-        <div class="media-workspace">
+        <div class="media-workspace flex flex-col flex-1 min-h-0 overflow-hidden mobile:overflow-visible [&>.notice]:m-4">
           <Show when={error()}>
             <p class="notice notice-error" role="alert">
               {error()}
             </p>
           </Show>
-          <div class="gallery-detail media-tool-layout">
-            <section class="gallery-detail-stage media-results" aria-label="Media preview">
-              <div class="media-preview-content">
+          <div class="gallery-detail min-w-0 min-h-0 flex flex-1 media-tool-layout mobile:flex-col mobile:overflow-visible">
+            <section
+              class="gallery-detail-stage items-center flex flex-col min-w-0 min-h-0 flex-1 justify-center relative overflow-hidden gap-gallery-image p-gallery-image mobile:flex-none mobile:min-h-55 mobile:h-[calc(100dvh_-_60px)]"
+              aria-label="Media preview"
+            >
+              <div class="media-preview-content grid place-items-center flex-1 min-h-0 overflow-hidden w-full">
                 <Show
                   when={hasResults()}
                   fallback={
                     <Show
                       when={sourcePreview()}
                       fallback={
-                        <div class="media-empty-preview">
+                        <div class="m-auto p-4 text-center">
                           <h3>
                             {draft.operation.startsWith('video')
                               ? 'Video preview'
@@ -757,7 +726,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       }
                     >
                       {(asset) => (
-                        <img class="media-result" src={asset().url} alt={sourcePreviewLabel()} />
+                        <img
+                          class="media-result block object-contain w-full max-h-[100cqh]"
+                          src={asset().url}
+                          alt={sourcePreviewLabel()}
+                        />
                       )}
                     </Show>
                   }
@@ -771,7 +744,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             when={candidate.asset.kind === 'video'}
                             fallback={
                               <img
-                                class="media-result"
+                                class="media-result block object-contain w-full max-h-[100cqh]"
                                 src={candidate.asset.url}
                                 alt="Generated image"
                               />
@@ -782,7 +755,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                                 videoPlayer = player;
                               }}
                               asset={candidate.asset}
-                              class="media-result"
+                              class="media-result block object-contain w-full max-h-[100cqh]"
                               active={paneActive() && picker() === null}
                               autoPlay
                               loop
@@ -795,7 +768,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     <Show
                       when={videoPreview()}
                       fallback={
-                        <img class="media-result" src={preview()} alt="Generation preview" />
+                        <img
+                          class="media-result block object-contain w-full max-h-[100cqh]"
+                          src={preview()}
+                          alt="Generation preview"
+                        />
                       }
                     >
                       {(video) => (
@@ -809,12 +786,15 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 </Show>
               </div>
               <Show when={selected() || (!hasResults() && sourcePreview())}>
-                <div class="media-preview-footer">
+                <div class="flex items-center flex-none gap-2 flex-wrap justify-center w-full">
                   <Show when={!hasResults() && sourcePreview()}>
                     <span class="hint">{sourcePreviewLabel()}</span>
                   </Show>
                   <Show when={candidates().length > 1}>
-                    <div class="media-variation-nav" aria-label="Variations">
+                    <div
+                      class="whitespace-nowrap flex items-center gap-2 justify-center text-sm"
+                      aria-label="Variations"
+                    >
                       <button
                         class="icon-btn"
                         aria-label="Previous variation"
@@ -838,7 +818,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </Show>
                   <Show when={!videoPreview() && !preview() && selected()}>
                     {(candidate) => (
-                      <div class="media-preview-actions">
+                      <div class="flex flex-wrap justify-center gap-2 flex-none p-0 [&_button]:inline-flex [&_button]:items-center [&_button]:justify-center [&_button]:gap-1 [&_button]:h-control [&_button]:py-1 [&_button]:px-2 [&_button]:text-dim [&_button]:bg-clear [&_button]:border-transparent [&_button]:text-xs">
                         <button
                           type="button"
                           onClick={() =>
@@ -871,16 +851,22 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 </div>
               </Show>
             </section>
-            <aside class="detail-panel media-tool-form" aria-label="Media controls">
-              <div class="media-tool-fields">
-                <dl class="media-tool-context" aria-label="Context and destination">
+            <aside
+              class="detail-panel media-tool-form flex flex-col gap-4 flex-none min-h-0 p-4 overflow-y-auto bg-panel border-l border-l-solid border-l-subtle [&>*]:shrink-0 [&_textarea]:block [&_textarea]:w-full [&_textarea]:min-h-20 [&_textarea]:resize-y [&_.hint]:m-0 [&_.hint]:text-xs [&_.notice]:m-0 [&_.notice]:text-xs mobile:w-full mobile:overflow-visible [&.media-tool-form]:gap-0 [&.media-tool-form]:min-w-0 [&.media-tool-form]:p-0 [&.media-tool-form]:overflow-hidden mobile:[&.media-tool-form]:overflow-visible [&>.media-tool-fields]:flex [&>.media-tool-fields]:flex-col [&>.media-tool-fields]:min-h-0 [&>.media-tool-fields]:gap-2 [&>.media-tool-fields]:p-3 [&>.media-tool-fields]:overflow-y-auto [&>.media-tool-fields]:flex-auto [&_.field-group]:p-2 [&_.field-group_label]:text-sm [&_.field-group_label]:font-semibold [&_.field-group_label]:mt-2 [&_.field-group_label]:text-foreground [&_.workflow-inputs_label]:m-0 [&_.key-row]:flex-wrap [&_.form-actions]:flex-wrap [&_.form-actions>.primary-btn]:flex-1 [&_[role=status]]:m-0 mobile:[&>.media-tool-fields]:flex-none mobile:[&>.media-tool-fields]:overflow-visible w-[var(--detail-panel-width,_450px)]"
+              aria-label="Media controls"
+            >
+              <div class="media-tool-fields [&>*]:shrink-0 [&>textarea]:min-h-16 [&>#media-prompt]:shrink-0 [&>#media-prompt]:min-h-45 [&>#media-prompt]:flex-auto [&>.media-prompt-thinking]:shrink-0 [&>.media-prompt-thinking]:min-h-45 [&>.media-prompt-thinking]:flex-auto [&>label]:text-sm [&>label]:font-semibold [&>label]:mt-2 [&>label]:text-foreground mobile:[&>#media-prompt]:flex-none mobile:[&>.media-prompt-thinking]:flex-none">
+                <dl
+                  class="grid m-0 text-sm gap-y-1 gap-x-3 [&_dt]:text-dim [&_dd]:m-0 [&_dd]:wrap-anywhere grid-cols-[auto_minmax(0,_1fr)_auto_auto]"
+                  aria-label="Context and destination"
+                >
                   <dt>Context</dt>
                   <dd>{usesChatContext() ? `Chat: ${chatTitle()}` : 'Standalone'}</dd>
                   <dt>Destination</dt>
                   <dd>{draft.destination === 'chat' ? 'This chat' : 'Gallery'}</dd>
                 </dl>
                 <Show when={operationChoices().length > 1}>
-                  <div class="media-tool-field">
+                  <div class="items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)]">
                     <label>Operation</label>
                     <Select
                       ariaLabel="Media operation"
@@ -895,9 +881,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </div>
                 </Show>
                 <Show when={operationHasReferences(draft.operation)}>
-                  <div class="media-tool-field">
+                  <div class="items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)]">
                     <label>Reference images</label>
-                    <div class="key-row">
+                    <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                       <Select
                         ariaLabel="Reference count"
                         value={String(referenceCount())}
@@ -917,11 +903,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 <For each={slots()}>
                   {(slot) => (
                     <div
-                      class="media-reference-row field-group"
+                      class="flex items-center gap-3 field-group [&_.key-row]:flex-wrap"
                       role="group"
                       aria-labelledby={`media-input-${slot}`}
                     >
-                      <div class="media-reference-thumbnail">
+                      <div class="h-12 border border-solid border-line bg-canvas grid place-items-center overflow-hidden text-dim rounded-sm grow-0 shrink-0 basis-12 [&_img]:min-h-0 [&_img]:object-contain [&_img]:size-full">
                         <Show
                           when={inputForSlot(slot)}
                           fallback={<FontAwesomeIcon icon={faImage} size={24} />}
@@ -937,11 +923,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           )}
                         </Show>
                       </div>
-                      <div class="form-stack media-reference-controls">
-                        <span class="media-reference-label" id={`media-input-${slot}`}>
+                      <div class="form-stack flex-row items-center flex-1 min-w-0 flex-wrap [&_.media-reference-label]:mr-auto">
+                        <span
+                          class="media-reference-label m-0 text-sm font-semibold text-foreground"
+                          id={`media-input-${slot}`}
+                        >
                           {INPUT_LABELS[slot]}
                         </span>
-                        <div class="key-row">
+                        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                           <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>
                             {inputForSlot(slot) ? 'Replace' : 'Choose image'}
                           </button>
@@ -985,7 +974,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </div>
                   )}
                 </For>
-                <div class="media-tool-field">
+                <div class="items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)]">
                   <label>Workflow</label>
                   <Select
                     ariaLabel="Saved media workflow"
@@ -1004,7 +993,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 </div>
                 <Show when={workflowControls().controls.length > 0}>
                   <div
-                    class="workflow-inputs field-group"
+                    class="items-start grid gap-2 field-group [&_.setting-label]:m-0 [&_.setting-label]:min-h-6 [&_.workflow-input>label]:min-h-6"
                     role="group"
                     aria-label="Workflow inputs"
                   >
@@ -1026,7 +1015,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     Add a workflow for this operation in Settings → Media rendering.
                   </p>
                 </Show>
-                <div class="media-tool-field">
+                <div class="items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)]">
                   <label>Prompt preset</label>
                   <Select
                     ariaLabel="Media prompt preset"
@@ -1041,9 +1030,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     onChange={(value) => setDraft('presetId', value || null)}
                   />
                 </div>
-                <div class="media-instruction-heading">
+                <div class="mt-1 flex items-center flex-wrap justify-between gap-y-1 gap-x-2 [&>label]:m-0 [&>label]:text-sm [&>label]:font-semibold">
                   <label for="media-instruction">Instruction</label>
-                  <div class="key-row">
+                  <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                     <button
                       disabled={
                         busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
@@ -1075,7 +1064,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   readOnly={busy() || frozen()}
                   onInput={(event) => updateInstruction(event.currentTarget.value)}
                 />
-                <div class="media-prompt-heading">
+                <div class="flex items-center gap-2 flex-wrap justify-between mt-2 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&_label]:m-0">
                   <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
                   <Show when={preparingPrompt()}>
                     <PromptGenerationStatus active={paneActive()} content={currentPrompt()} />
@@ -1096,7 +1085,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     />
                   }
                 >
-                  <div class="media-prompt-thinking">
+                  <div class="media-prompt-thinking p-3 border border-solid border-control-line bg-thinking flex rounded-sm [&_.prompt-generation-status]:flex-1 [&_.prompt-generation-status]:min-h-0 [&_.prompt-generation-reasoning]:flex-1 [&_.prompt-generation-reasoning]:min-h-0 [&_.prompt-generation-reasoning]:max-h-none [&_.prompt-generation-reasoning]:p-0 [&_.prompt-generation-reasoning]:border-clear [&_.prompt-generation-reasoning]:bg-clear h-[11rem]">
                     <PromptGenerationStatus
                       active={paneActive()}
                       content=""
@@ -1106,7 +1095,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </div>
                 </Show>
               </div>
-              <div class="media-tool-footer">
+              <div class="py-2 px-3 border-t border-t-solid border-t-subtle flex flex-col flex-none gap-2 bg-panel mobile:sticky mobile:bottom-0 mobile:z-2 [&_.form-actions]:mt-0 [&_.media-render-heading]:mt-0 mobile:pb-[max(var(--space-2),_env(safe-area-inset-bottom))]">
                 <Show when={runningJob() ?? job()}>
                   {(current) => (
                     <Show
@@ -1114,15 +1103,15 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         current().state !== 'draft' || current().error || savedAssetIds().length
                       }
                     >
-                      <div class="form-stack media-rendering">
+                      <div class="form-stack media-rendering leading-4 gap-1">
                         <Show when={current().state !== 'draft' || savedAssetIds().length}>
-                          <div class="media-render-heading">
-                            <p class="media-render-status" role="status">
+                          <div class="media-render-heading flex items-center min-w-0 gap-3 justify-between mt-2">
+                            <p class="text-sm font-semibold mt-2 text-foreground" role="status">
                               <Show when={current().state !== 'draft'}>
                                 {STATUS_LABELS[current().state]}
                               </Show>
                               <Show when={savedAssetIds().length}>
-                                <span class="media-saved-count">
+                                <span class="text-dim text-xs font-normal">
                                   {current().state !== 'draft' ? ' · ' : ''}
                                   {savedAssetIds().length} saved
                                 </span>
@@ -1136,7 +1125,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                               }
                             >
                               {(node) => (
-                                <span class="media-current-node" title={node().name}>
+                                <span class="truncate min-w-0 text-dim text-xs" title={node().name}>
                                   {node().name}
                                 </span>
                               )}
@@ -1154,19 +1143,19 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           <p class="notice notice-error">{current().error}</p>
                         </Show>
                         <Show when={active() && current().state !== 'preparing'}>
-                          <div class="media-render-progress">
-                            <div class="media-progress-row media-graph-progress">
+                          <div class="flex flex-wrap gap-y-1 gap-x-4 [&:not(:has(.img-progress))]:display-none [&>.media-progress-row]:grow [&>.media-progress-row]:shrink [&>.media-progress-row]:basis-37.5 [&>.media-progress-row]:gap-2 [&>.media-progress-row]:grid-cols-[minmax(24px,_1fr)_auto]">
+                            <div class="media-progress-row items-center tabular-nums grid gap-3 text-xs media-graph-progress [&:empty]:display-none [&_.img-progress]:w-full grid-cols-[minmax(0,_1fr)_12ch]">
                               <SamplerProgress
                                 progress={current().progress?.graph}
                                 stepsLabel="Nodes"
-                                stepsClass="media-progress-count"
+                                stepsClass="text-right whitespace-nowrap text-dim"
                               />
                             </div>
-                            <div class="media-progress-row">
+                            <div class="media-progress-row items-center tabular-nums grid gap-3 text-xs [&:empty]:display-none [&_.img-progress]:w-full grid-cols-[minmax(0,_1fr)_12ch]">
                               <SamplerProgress
                                 progress={current().progress}
                                 stepsLabel="Steps"
-                                stepsClass="media-progress-count"
+                                stepsClass="text-right whitespace-nowrap text-dim"
                               />
                             </div>
                           </div>
@@ -1175,7 +1164,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </Show>
                   )}
                 </Show>
-                <div class="form-actions">
+                <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
                   <Show when={!frozen()}>
                     <button
                       class="primary-btn"

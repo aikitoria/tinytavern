@@ -97,38 +97,28 @@ const server = Bun.serve({
       return;
     const parsedUrl = new URL(req.url);
     const path = parsedUrl.pathname + parsedUrl.search;
-    let status = 200,
-      mime = 'application/json';
+    let status = 200;
+    let mime = 'application/json';
     const reply = (body?: string | Buffer) =>
       new Response(body ?? null, { status, headers: { 'content-type': mime } });
     if (req.method === 'GET' && path === '/control/comfy-cancelled') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ ids: comfyCancelled }));
     }
     if (req.method === 'GET' && (path === '/v1/models' || path === '/alt/v1/models')) {
       lastModelAuthorization = req.headers.get('authorization') ?? null;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ data: [{ id: 'mock-large' }, { id: 'mock-small' }] }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/fail-next')) {
       const count = Number(new URL(path, 'http://mock').searchParams.get('count'));
       failuresRemaining = Number.isSafeInteger(count) && count > 0 ? count : 0;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ failuresRemaining }));
     }
     if (req.method === 'POST' && path === '/control/terminal-without-newline') {
       terminalWithoutNewline = true;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ terminalWithoutNewline }));
     }
     if (req.method === 'POST' && path === '/control/reasoning-only') {
       reasoningOnly = true;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ reasoningOnly }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/token-delay-next')) {
@@ -138,58 +128,38 @@ const server = Bun.serve({
         return reply();
       }
       nextTokenMs = ms;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ nextTokenMs }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/completion-next')) {
       nextCompletionContent = new URL(path, 'http://mock').searchParams.get('content');
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ ok: true }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/die-after-content')) {
       dieAfterContent = new URL(path, 'http://mock').searchParams.get('content');
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ dieAfterContent }));
     }
     if (req.method === 'GET' && path === '/control/last-workflow') {
-      status = 200;
-      mime = 'application/json';
       return reply(
         JSON.stringify({ workflow: lastComfyWorkflow, previewMethod: lastComfyPreviewMethod }),
       );
     }
     if (req.method === 'GET' && path === '/control/last-model-authorization') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ authorization: lastModelAuthorization }));
     }
     if (req.method === 'GET' && path === '/control/last-completion') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ completion: lastCompletion }));
     }
     if (req.method === 'GET' && path === '/control/completions') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ completions: completionLog }));
     }
     if (req.method === 'POST' && path === '/control/clear-completions') {
       completionLog.length = 0;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ cleared: true }));
     }
     if (req.method === 'GET' && path === '/control/comfy-deleted') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ deleted: comfyDeleted }));
     }
     if (req.method === 'GET' && path === '/control/comfy-history-count') {
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ count: comfyHistoryRequests }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/comfy-fail-next')) {
@@ -198,8 +168,6 @@ const server = Bun.serve({
       const n = Number.isSafeInteger(count) && count > 0 ? count : 0;
       if (url.searchParams.get('stage') === 'render') comfyFailRenders = n;
       else comfyFailPrompts = n;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ comfyFailPrompts, comfyFailRenders }));
     }
     if (req.method === 'POST' && path?.startsWith('/control/comfy-output-next')) {
@@ -209,8 +177,6 @@ const server = Bun.serve({
         return reply('unknown output kind');
       }
       nextComfyOutput = kind;
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ nextComfyOutput }));
     }
     if (req.method === 'POST' && path === '/prompt') {
@@ -225,7 +191,6 @@ const server = Bun.serve({
         parsed = JSON.parse(body) as typeof parsed;
       } catch {
         status = 400;
-        mime = 'application/json';
         return reply(JSON.stringify({ error: 'invalid JSON' }));
       }
       lastComfyWorkflow = parsed.prompt;
@@ -233,7 +198,6 @@ const server = Bun.serve({
       if (comfyFailPrompts > 0) {
         comfyFailPrompts--;
         status = 400;
-        mime = 'application/json';
         return reply(JSON.stringify({ error: 'mock comfy submission failure' }));
       }
       // Match Comfy's required UUID submission-ID protocol.
@@ -261,14 +225,10 @@ const server = Bun.serve({
           );
         }
       }, 100);
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ prompt_id: promptId }));
     }
     if (req.method === 'GET' && path === '/queue') {
       const queued = [...comfyJobs].filter(([, job]) => Date.now() < job.readyAt);
-      status = 200;
-      mime = 'application/json';
       return reply(
         JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }),
       );
@@ -281,16 +241,12 @@ const server = Bun.serve({
         comfyJobs.delete(id);
         comfyCancelled.push(id);
       }
-      status = 200;
-      mime = 'application/json';
       return reply(JSON.stringify({ cancelled }));
     }
     if (req.method === 'GET' && path?.startsWith('/history/')) {
       comfyHistoryRequests++;
       const promptId = path.slice('/history/'.length);
       const job = comfyJobs.get(promptId);
-      status = 200;
-      mime = 'application/json';
       if (job == null || Date.now() < job.readyAt) {
         return reply('{}');
       }
@@ -346,11 +302,8 @@ const server = Bun.serve({
       if (req.method === 'DELETE') {
         // Record deletion only: later jobs reuse these output files.
         comfyDeleted.push({ filename: output.filename, subfolder: '', type: 'output' });
-        status = 200;
-        mime = 'application/json';
         return reply(JSON.stringify({ deleted: true }));
       }
-      status = 200;
       mime = output.type;
       return reply(output.data);
     }
@@ -371,7 +324,6 @@ const server = Bun.serve({
         parsed = JSON.parse(body) as typeof parsed;
       } catch {
         status = 400;
-        mime = 'application/json';
         return reply(JSON.stringify({ error: 'invalid JSON' }));
       }
       const firstNonSystem = parsed.messages.findIndex((message) => message.role !== 'system');
@@ -393,7 +345,6 @@ const server = Bun.serve({
         );
       if (invalidShape) {
         status = 400;
-        mime = 'application/json';
         return reply(
           JSON.stringify({ error: 'User and assistant messages must alternate and be non-empty' }),
         );
@@ -417,8 +368,6 @@ const server = Bun.serve({
       completionLog.push(lastCompletion);
       // Auto-title and other non-streaming calls must not consume streaming failure controls.
       if (parsed.stream === false) {
-        status = 200;
-        mime = 'application/json';
         return reply(
           JSON.stringify({
             choices: [
@@ -437,7 +386,6 @@ const server = Bun.serve({
       if (failuresRemaining > 0) {
         failuresRemaining--;
         status = 503;
-        mime = 'application/json';
         return reply(JSON.stringify({ error: 'controlled mock failure' }));
       }
       const tokenMs = nextTokenMs ?? TOKEN_MS;

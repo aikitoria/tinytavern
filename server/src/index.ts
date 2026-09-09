@@ -8,6 +8,7 @@ import { apiRoutes, apiError } from './router.ts';
 import {
   websocket,
   bindWebSocketServer,
+  sendTo,
   setSubscribeHandler,
   setUnsubscribeHandler,
   type SocketState,
@@ -23,6 +24,7 @@ import {
 import { isRequestAuthenticated } from './auth.ts';
 import { sweepOrphanedImages } from './images.ts';
 import { initMediaWorker, stopMediaWorker } from './mediaWorker.ts';
+import { activeMediaJobs } from './mediaJobStore.ts';
 import { initMediaThumbnails, stopMediaThumbnails } from './mediaThumbnails.ts';
 import './routes/conversations.ts';
 import './routes/messages.ts';
@@ -176,7 +178,8 @@ const server = Bun.serve({
     return apiError(500, 'internal server error');
   },
 });
-bindWebSocketServer(server);
+// Seed job identities before this socket can receive progress, including on reconnect.
+bindWebSocketServer(server, (ws) => sendTo(ws, { t: 'mediaJobs', jobs: activeMediaJobs() }));
 console.log(`tinytavern server listening on http://0.0.0.0:${server.port}`);
 console.log(`IP allowlist: ${configuredIpAllowlist()}`);
 

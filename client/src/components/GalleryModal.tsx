@@ -44,7 +44,6 @@ import GalleryDetail from './GalleryDetail.tsx';
 import GalleryGrid from './GalleryGrid.tsx';
 import Modal from './Modal.tsx';
 import Select from './Select.tsx';
-import '../styles/gallery.css';
 
 function readPreference(key: string): string | null {
   try {
@@ -88,7 +87,7 @@ function CharacterPicker(props: {
       <button
         ref={button}
         type="button"
-        class="select-btn gallery-character-picker"
+        class="select-btn [&_.avatar]:shrink-0 [&_.avatar]:text-tiny [&_.avatar]:w-5 [&_.avatar]:h-5 tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-35"
         aria-label="Filter gallery by character"
         aria-haspopup="menu"
         aria-expanded={open()}
@@ -105,14 +104,16 @@ function CharacterPicker(props: {
             />
           )}
         </Show>
-        <span class="gallery-character-label">{selected()?.name ?? 'All characters'}</span>
+        <span class="flex-1 min-w-0 text-left truncate">
+          {selected()?.name ?? 'All characters'}
+        </span>
         <FontAwesomeIcon icon={faChevronDown} size={10} />
       </button>
       <DropdownSurface
         open={open()}
         anchor={() => button}
         onClose={() => setOpen(false)}
-        class="gallery-character-menu"
+        class="[&_.avatar]:shrink-0 [&_.avatar]:text-tiny [&_.avatar]:size-5.5"
         role="menu"
         ariaLabel="Gallery character filter"
         matchAnchorWidth
@@ -128,7 +129,7 @@ function CharacterPicker(props: {
           onClick={() => pick('all')}
         >
           <FontAwesomeIcon icon={faImages} size={16} /> <span>All characters</span>
-          <span class="gallery-filter-count">{props.total}</span>
+          <span class="ml-auto text-muted text-xs tabular-nums">{props.total}</span>
         </button>
         <For each={props.options}>
           {(option) => (
@@ -145,7 +146,7 @@ function CharacterPicker(props: {
                 name={option.name}
               />
               <span>{option.name}</span>
-              <span class="gallery-filter-count">{option.count}</span>
+              <span class="ml-auto text-muted text-xs tabular-nums">{option.count}</span>
             </button>
           )}
         </For>
@@ -461,7 +462,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       title={props.picker ? 'Choose reference images' : 'Gallery'}
       hideCloseButton
       fullscreen
-      class={`gallery-modal ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
+      class={`gallery-modal mobile:[&_.modal-head]:gap-2 small:[&_.modal-title]:display-none ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
       onClose={() => {
         if (bulkDeleting()) return;
         if (detailId() != null) closeDetail();
@@ -469,7 +470,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
         else leave();
       }}
       headerExtra={
-        <div class="page-header-actions gallery-head-actions">
+        <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear small:gap-1">
           <Show when={props.picker}>
             <button
               class="page-back"
@@ -477,7 +478,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             >
               <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
             </button>
-            <span class="gallery-count">
+            <span class="whitespace-nowrap text-dim text-caption tabular-nums">
               {pickedItems().length} / {props.picker!.maximum} selected
             </span>
             <Show when={detailItem()}>
@@ -510,7 +511,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                       <button type="button" class="page-back gallery-back" onClick={leave}>
                         <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
                       </button>
-                      <span class="gallery-count">
+                      <span class="whitespace-nowrap text-dim text-caption tabular-nums">
                         {filtered().length} {filtered().length === 1 ? 'image' : 'images'}
                       </span>
                       <button
@@ -530,7 +531,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                     </>
                   }
                 >
-                  <span class="gallery-count" aria-live="polite">
+                  <span
+                    class="whitespace-nowrap text-dim text-caption tabular-nums"
+                    aria-live="polite"
+                  >
                     {selectedItems().length} selected
                   </span>
                   <button
@@ -568,10 +572,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
               >
                 <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
               </button>
-              <span class="gallery-count">
+              <span class="whitespace-nowrap text-dim text-caption tabular-nums">
                 {detailIndex() >= 0 ? `${detailIndex() + 1} / ${filtered().length}` : 'Saved image'}
               </span>
-              <div class="gallery-detail-nav">
+              <div class="flex gap-1">
                 <button
                   type="button"
                   class="icon-btn"
@@ -657,7 +661,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       }
     >
       <div
-        class="gallery-workspace"
+        class="flex flex-col relative flex-1 min-h-0 mobile:block mobile:overflow-visible"
         onDragEnter={(event) => {
           if (!event.dataTransfer?.types.includes('Files')) return;
           event.preventDefault();
@@ -696,7 +700,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           }}
         />
         <Show when={dragging()}>
-          <div class="gallery-drop-overlay">
+          <div class="flex flex-col items-center justify-center gap-3 absolute inset-3 z-5 pointer-events-none bg-panel border-2 border-dashed border-accent text-foreground [&_span]:text-dim [&_span]:text-sm rounded-[var(--radius-md)]">
             <FontAwesomeIcon icon={faUpload} size={26} />
             <strong>
               {uploadProgress()
@@ -710,14 +714,21 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
         </Show>
         <Show when={uploadProgress()}>
           {(progress) => (
-            <div class="gallery-upload-progress" role="status">
-              <FontAwesomeIcon icon={faSpinner} size={12} class="spinner" />
+            <div class="flex items-center gap-2 py-2 px-4 text-dim text-xs" role="status">
+              <FontAwesomeIcon
+                icon={faSpinner}
+                size={12}
+                class="spinner inline-block flex-none origin-center size-2.5"
+              />
               Uploading {progress().done} / {progress().total}
             </div>
           )}
         </Show>
-        <div class="gallery-toolbar" classList={{ hidden: detailItem() != null }}>
-          <div class="gallery-search">
+        <div
+          class="grid items-center gap-2 flex-none min-h-bar py-1 px-4 bg-chrome border-b border-b-solid border-b-subtle mobile:flex mobile:flex-wrap grid-cols-[minmax(160px,_1fr)_minmax(150px,_230px)_132px_170px] tablet:grid-cols-[minmax(0,_1fr)_minmax(0,_1fr)_132px]"
+          classList={{ hidden: detailItem() != null }}
+        >
+          <div class="gallery-search flex items-center gap-2 min-w-0 pl-3 bg-canvas border border-solid border-control-line rounded-sm text-control [&:focus-within]:border-accent [&:focus-within]:-outline-offset-1 [&_input]:shadow-clear [&_input]:outline-clear [&_input]:text-sm [&_input]:leading-5 [&_input]:w-full [&_input]:min-w-0 [&_input]:border-clear [&_input]:bg-clear [&_input]:p-1.5 [&_input]:pr-3 [&_input]:pl-0 [&_input:focus]:outline-clear tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-45">
             <FontAwesomeIcon icon={faMagnifyingGlass} size={14} />
             <input
               ref={searchInput}
@@ -738,7 +749,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             onChange={setCharacterKey}
           />
           <Select
-            class="gallery-sort"
+            class="tablet:col-start-3 tablet:row-start-1 mobile:grow-0 mobile:shrink-0 mobile:basis-33"
             ariaLabel="Sort gallery"
             value={sort()}
             disabled={bulkDeleting()}
@@ -751,7 +762,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
               savePreference('sort', value);
             }}
           />
-          <label class="gallery-size-control">
+          <label class="flex items-center gap-2 text-dim text-xs whitespace-nowrap mobile:min-w-0 mobile:max-w-60 mobile:grow mobile:shrink mobile:basis-42.5 [&_input]:shadow-clear [&_input]:w-full [&_input]:min-w-0 [&_input]:h-6 [&_input]:p-0 [&_input]:border-clear [&_input]:bg-clear">
             Image size
             <input
               type="range"
@@ -782,7 +793,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           selectionOrder={props.picker ? pickedIds() : undefined}
         />
         <Show when={!detailItem() && filtered().length === 0}>
-          <div class="gallery-empty">
+          <div class="flex items-center justify-center flex-col gap-2 flex-1 p-4 text-dim text-center text-sm [&>svg]:mb-2 [&>svg]:text-muted [&_strong]:text-foreground [&_strong]:text-lg">
             <FontAwesomeIcon icon={faImages} size={34} />
             <strong>{state.gallery.length ? 'No matching images' : 'No saved images yet'}</strong>
             <span>
@@ -799,7 +810,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
         </Show>
         <Show when={detailItem() && detailId()} keyed>
           {(id) => (
-            <div id="gallery-detail-content" class="gallery-detail-content">
+            <div
+              id="gallery-detail-content"
+              class="gallery-detail-content flex flex-1 min-h-0 mobile:block"
+            >
               <GalleryDetail
                 readOnly={props.picker !== undefined}
                 active={props.active}
