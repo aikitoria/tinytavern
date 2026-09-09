@@ -42,6 +42,7 @@ export default function DropdownSurface(props: {
   anchorInset?: number;
   keyboardNavigation?: boolean;
   autoFocus?: boolean;
+  initialFocus?: () => HTMLElement | undefined;
   ref?: (element: HTMLDivElement) => void;
 }) {
   const paneActive = useDialogActive();
@@ -132,6 +133,11 @@ export default function DropdownSurface(props: {
   };
 
   const focusInitialItem = () => {
+    const initial = props.initialFocus?.();
+    if (initial) {
+      initial.focus({ preventScroll: true });
+      return;
+    }
     const selected = surface?.querySelector<HTMLElement>(
       '[role="menuitemradio"][aria-checked="true"], [role="menuitemcheckbox"][aria-checked="true"], [role="menuitem"][aria-current="true"]',
     );

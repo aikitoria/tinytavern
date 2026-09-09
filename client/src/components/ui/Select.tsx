@@ -1,6 +1,14 @@
 import { faCheck, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import { For, Show, createEffect, createSignal, createUniqueId, type JSX } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
 
 export interface SelectOption {
@@ -30,14 +38,29 @@ export default function Select(props: {
   menuMinWidth?: number;
   menuClass?: string;
   showCheck?: boolean;
+  searchPlaceholder?: string;
 }) {
   const id = createUniqueId();
   const listboxId = `select-listbox-${id}`;
   const [current, setCurrent] = createSignal(props.value ?? '');
   const [open, setOpen] = createSignal(false);
   const [highlighted, setHighlighted] = createSignal(0);
+  const [query, setQuery] = createSignal('');
+  const options = createMemo(() => {
+    const needle = query().trim().toLowerCase();
+    return needle
+      ? props.options.filter(
+          (option) =>
+            option.label.toLowerCase().includes(needle) ||
+            option.value.toLowerCase().includes(needle),
+        )
+      : props.options;
+  });
   let button!: HTMLButtonElement;
   let menu: HTMLDivElement | undefined;
+  let search: HTMLInputElement | undefined;
+  const activeDescendant = () =>
+    open() && options()[highlighted()] ? `select-option-${id}-${highlighted()}` : undefined;
 
   createEffect(() => {
     if (props.value !== undefined) setCurrent(props.value);
@@ -66,6 +89,7 @@ export default function Select(props: {
 
   const openMenu = () => {
     if (props.disabled) return;
+    setQuery('');
     setHighlighted(
       Math.max(
         0,
@@ -84,6 +108,8 @@ export default function Select(props: {
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing) return;
+    const searching = event.currentTarget === search;
     if (!open()) {
       if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
         event.preventDefault();
@@ -92,24 +118,26 @@ export default function Select(props: {
       return;
     }
     if (event.key === 'Escape' || event.key === 'Tab') {
+      if (searching) button.focus({ preventScroll: true });
       setOpen(false);
       return;
     }
+    if (searching && [' ', 'Home', 'End'].includes(event.key)) return;
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
-      if (!props.options.length) return;
+      if (!options().length) return;
       const dir = event.key === 'ArrowDown' ? 1 : -1;
       const next =
         event.key === 'Home'
           ? 0
           : event.key === 'End'
-            ? props.options.length - 1
-            : (highlighted() + dir + props.options.length) % props.options.length;
+            ? options().length - 1
+            : (highlighted() + dir + options().length) % options().length;
       setHighlighted(next);
       menu?.children[next]?.scrollIntoView({ block: 'nearest' });
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      const option = props.options[highlighted()];
+      const option = options()[highlighted()];
       if (option) pick(option.value);
     }
   };
@@ -120,12 +148,12 @@ export default function Select(props: {
         type="button"
         class={`select-btn ${props.class ?? ''}`}
         ref={button}
-        role="combobox"
+        role={props.searchPlaceholder ? undefined : 'combobox'}
         aria-label={props.ariaLabel}
-        aria-haspopup="listbox"
+        aria-haspopup={props.searchPlaceholder ? 'dialog' : 'listbox'}
         aria-expanded={open()}
-        aria-controls={listboxId}
-        aria-activedescendant={open() ? `select-option-${id}-${highlighted()}` : undefined}
+        aria-controls={props.searchPlaceholder ? `select-popup-${id}` : listboxId}
+        aria-activedescendant={props.searchPlaceholder ? undefined : activeDescendant()}
         disabled={props.disabled}
         onClick={() => (open() ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
@@ -139,41 +167,74 @@ export default function Select(props: {
         open={open()}
         anchor={() => button}
         onClose={() => setOpen(false)}
-        id={listboxId}
+        id={`select-popup-${id}`}
         class={`select-menu ${props.menuClass ?? ''}`}
-        role="listbox"
+        role={props.searchPlaceholder ? 'dialog' : undefined}
         ariaLabel={props.ariaLabel}
         matchAnchorWidth
         minWidth={props.menuMinWidth}
         maxHeight={320}
-        ref={(element) => (menu = element)}
+        autoFocus={!!props.searchPlaceholder}
+        initialFocus={() => search}
       >
-        <For each={props.options}>
-          {(option, i) => (
-            <button
-              type="button"
-              class="select-option"
-              id={`select-option-${id}-${i()}`}
-              role="option"
-              tabIndex={-1}
-              aria-selected={option.value === current()}
-              classList={{
-                highlighted: i() === highlighted(),
-                selected: option.value === current(),
-                active: props.showCheck && option.value === current(),
+        <Show when={props.searchPlaceholder}>
+          <div class="sticky top-0 z-1 bg-panel p-1">
+            <input
+              ref={search}
+              type="search"
+              class="w-full min-w-0"
+              placeholder={props.searchPlaceholder}
+              aria-label={props.searchPlaceholder}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={open()}
+              aria-controls={listboxId}
+              aria-activedescendant={activeDescendant()}
+              value={query()}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value);
+                setHighlighted(0);
+                if (menu?.parentElement) menu.parentElement.scrollTop = 0;
               }}
-              onPointerEnter={() => setHighlighted(i())}
-              onClick={() => pick(option.value)}
-            >
-              <span>{option.label}</span>
-              <Show when={props.showCheck}>
-                <span class="menu-check" aria-hidden="true">
-                  {option.value === current() ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
-                </span>
-              </Show>
-            </button>
-          )}
-        </For>
+              onKeyDown={onKeyDown}
+            />
+          </div>
+        </Show>
+        <div ref={menu} id={listboxId} role="listbox" aria-label={props.ariaLabel}>
+          <For each={options()}>
+            {(option, i) => (
+              <button
+                type="button"
+                class="select-option"
+                id={`select-option-${id}-${i()}`}
+                role="option"
+                tabIndex={-1}
+                aria-selected={option.value === current()}
+                classList={{
+                  highlighted: i() === highlighted(),
+                  selected: option.value === current(),
+                  active: props.showCheck && option.value === current(),
+                }}
+                onPointerEnter={() => setHighlighted(i())}
+                onClick={() => pick(option.value)}
+              >
+                <span>{option.label}</span>
+                <Show when={props.showCheck}>
+                  <span class="menu-check" aria-hidden="true">
+                    {option.value === current() ? (
+                      <FontAwesomeIcon icon={faCheck} size={12} />
+                    ) : null}
+                  </span>
+                </Show>
+              </button>
+            )}
+          </For>
+        </div>
+        <Show when={!options().length}>
+          <p class="m-0 p-2 text-dim text-sm" role="status">
+            No matching options.
+          </p>
+        </Show>
       </DropdownSurface>
     </>
   );

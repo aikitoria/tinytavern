@@ -10,6 +10,8 @@ export type NoticeKind = 'error' | 'warning' | 'info' | 'success';
 
 interface EntityEditorOptions<T extends { id: number }, D extends Record<string, unknown>> {
   items: () => readonly T[];
+  /** Settings relevant to remote-conflict detection, excluding cached metadata. */
+  snapshot?: (item: T) => unknown;
   load: (item: T | undefined) => void;
   data: () => D;
   create: (data: D) => Promise<T>;
@@ -57,6 +59,8 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   let loadedItem = '';
   let remoteConflict = false;
   let activationSequence = 0;
+  const snapshot = (item: T | undefined) =>
+    JSON.stringify(item == null ? null : options.snapshot ? options.snapshot(item) : item);
 
   const captureBaseline = () => {
     baseline = structuredClone(options.data());
@@ -64,7 +68,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   const load = (item: T | undefined) => {
     options.load(item);
     captureBaseline();
-    loadedItem = JSON.stringify(item ?? null);
+    loadedItem = snapshot(item);
     remoteConflict = false;
   };
 
@@ -143,7 +147,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     const id = selectedId();
     if (id === 'new') return;
     const item = selected();
-    const serialized = JSON.stringify(item ?? null);
+    const serialized = snapshot(item);
     untrack(() => {
       if (serialized === loadedItem) return;
       if (!item) {
@@ -182,18 +186,14 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
         return false;
       }
       const data = options.data();
-      const selectedAtStart = JSON.stringify(selected() ?? null);
+      const selectedAtStart = snapshot(selected());
       const item =
         id === 'new'
           ? await options.create(data)
           : await options.patch(id, changedFields(baseline ?? data, data));
       const latest = id === 'new' ? undefined : selected();
-      const response = JSON.stringify(item);
-      if (
-        latest &&
-        JSON.stringify(latest) !== selectedAtStart &&
-        JSON.stringify(latest) !== response
-      ) {
+      const response = snapshot(item);
+      if (latest && snapshot(latest) !== selectedAtStart && snapshot(latest) !== response) {
         load(latest);
         setStatus('A newer version arrived while saving; it has been loaded.', 'info');
         return false;

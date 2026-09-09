@@ -2,6 +2,7 @@ import SettingLabel from '../../forms/SettingField.tsx';
 import { For, Show, createSignal } from 'solid-js';
 import type { Endpoint, GenParams } from '@tinytavern/shared';
 import { api } from '../../../state/api.ts';
+import { endpointEditorSnapshot } from '../../../state/endpointSync.ts';
 import { selectSettingsEntity } from '../../../state/settingsSelection.ts';
 import { state } from '../../../state/store.ts';
 import { createEntityEditor, errorMessage } from '../../../util.ts';
@@ -42,6 +43,7 @@ export default function EndpointsTab() {
   const editor = createEntityEditor({
     ...api.endpoints,
     items: () => state.endpoints,
+    snapshot: endpointEditorSnapshot,
     load: (endpoint) => {
       setEditingExisting(endpoint != null);
       setKeyCleared(false);
@@ -115,10 +117,10 @@ export default function EndpointsTab() {
     editor.setStatus('Fetching models…', 'info');
     try {
       const models = await api.endpoints.models(id);
+      if (editor.selectedId() !== id) return;
       editor.setStatus(`${models.length} models available.`, 'success');
-      if (!model() && models.length > 0) setModel(models[0]!);
     } catch (err) {
-      editor.setStatus(errorMessage(err));
+      if (editor.selectedId() === id) editor.setStatus(errorMessage(err));
     }
   };
 
@@ -184,6 +186,7 @@ export default function EndpointsTab() {
             <Select
               value={model()}
               ariaLabel="Endpoint model"
+              searchPlaceholder="Search models…"
               onChange={setModel}
               options={[
                 { value: '', label: '— endpoint default —' },
