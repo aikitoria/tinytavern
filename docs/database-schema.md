@@ -1,8 +1,10 @@
 # Database schema and future migrations
 
-Version 67 is the minimum supported database schema; older schemas are rejected at startup. Versions 66–67 added the reviewed indexes and trigger corrections; subtree deletion is handled explicitly by the application. `server/src/schema.ts` contains the complete current schema; a new database creates it and the current seeds in one transaction. Existing version-67 databases skip initialization and retain their settings, rows and file paths. New settings start at revision zero.
+Version 68 is the minimum supported database schema. `server/src/schema.ts` contains the complete current schema. New databases create it and the current seeds in one transaction, with settings revision zero. Existing supported databases retain their settings, rows and file paths; older schemas are rejected at startup.
 
-`server/src/db.ts` retains the `migrate(target, apply)` entry point. There are no pending migrations. The next migration is 68. Keep the baseline number at 67; do not reset existing databases to zero. Pre-baseline databases and older backups need an upgrade-capable build before they can use this baseline; changing `user_version` alone does not upgrade their schema. Historical upgrade code is intentionally absent from the current source. A database from a newer build must use that build or a newer compatible one.
+Media jobs, review drafts and recipes use `INTEGER PRIMARY KEY AUTOINCREMENT`. Each table has its own numeric ID namespace; jobs reference recipes explicitly. Workflow and media-preset identities in settings and captured configurations are decimal IDs. Request correlation uses decimal nonces; only Comfy submission IDs require UUIDs.
+
+`server/src/db.ts` retains the `migrate(target, apply)` entry point, with no registered migrations. The next migration is 69. Keep the baseline at 68 and never reset existing databases to zero. Older databases and backups require an upgrade-capable older build before this baseline can open them; changing `user_version` alone does not upgrade their schema. A database from a newer build must use that build or a newer compatible one.
 
 For a future persistent change:
 
@@ -20,3 +22,9 @@ Check these storage locations when deciding what needs conversion:
 - **Other persistent contracts:** FTS indexes/triggers, auth-session records, conversation JSON, PNG character cards, settings transfer documents and shared URLs. Import/export compatibility is independent of the database version.
 
 Ordinary startup recovery is still required: interrupted generations, durable jobs, temporary ownership, missing derivatives and orphan cleanup can recur on the current schema. These are runtime lifecycles, not one-time migrations.
+
+Application queries use `bun:sqlite` synchronously through the same prepared-statement cache.
+Bun returns `null` for a missing SQL row and `Uint8Array` for BLOBs; DTO helpers keep
+their existing public absence conventions. Journaling and durability settings are
+unchanged. The separate backup process uses `VACUUM INTO` on a read-only connection,
+then syncs and atomically publishes the complete snapshot without overwriting files.

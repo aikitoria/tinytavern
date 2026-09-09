@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('client sync', async () => {
   const { prepareEndpointPatch } = await import('../../client/src/state/endpointSync.ts');
@@ -328,8 +328,10 @@ test('client transport', async () => {
   }
 
   try {
-    globalThis.fetch = async () =>
-      response('data: {"d":"A😀"}\r\n\r\ndata: {"d":"B"}\ndata: {"done":true}');
+    globalThis.fetch = (async () =>
+      response(
+        'data: {"d":"A😀"}\r\n\r\ndata: {"d":"B"}\ndata: {"done":true}',
+      )) as unknown as typeof fetch;
     const deltas: string[] = [];
     const accumulated: string[] = [];
     assert.equal(
@@ -347,12 +349,13 @@ test('client transport', async () => {
     assert.deepEqual(deltas, ['A😀', 'B']);
     assert.deepEqual(accumulated, ['A😀', 'A😀B']);
 
-    globalThis.fetch = async () => response('data: {"d":"partial"}\n');
+    globalThis.fetch = (async () => response('data: {"d":"partial"}\n')) as unknown as typeof fetch;
     await assert.rejects(
       streamTextCompletion('/test', {}, () => {}, 'test'),
       /ended before completion/,
     );
-    globalThis.fetch = async () => response('data: {"error":"upstream failure"}\n');
+    globalThis.fetch = (async () =>
+      response('data: {"error":"upstream failure"}\n')) as unknown as typeof fetch;
     await assert.rejects(
       streamTextCompletion('/test', {}, () => {}, 'test'),
       (err: unknown) => err instanceof ApiError && (err as Error).message === 'upstream failure',
@@ -366,25 +369,33 @@ test('client transport', async () => {
       onText: (text: string) => draftTexts.push(text),
     };
     const draftTexts: string[] = [];
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = (async (
+      _url: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
       assert.deepEqual(JSON.parse(init?.body as string), {
         draft: 'Original',
         expectedActiveLeafId: 3,
         expectedMutationRevision: 9,
       });
       return response('data: {"d":" suffix"}\ndata: {"done":true}');
-    };
+    }) as unknown as typeof fetch;
     assert.equal(await completeComposerDraft(options), true);
     assert.deepEqual(draftTexts, ['Original suffix']);
 
     draftTexts.length = 0;
-    globalThis.fetch = async () =>
-      response('data: {"d":" partial"}\ndata: {"error":"stale draft"}\n');
+    globalThis.fetch = (async () =>
+      response(
+        'data: {"d":" partial"}\ndata: {"error":"stale draft"}\n',
+      )) as unknown as typeof fetch;
     await assert.rejects(completeComposerDraft(options), /stale draft/);
     assert.deepEqual(draftTexts, ['Original partial', 'Original']);
 
     draftTexts.length = 0;
-    globalThis.fetch = async (_url, init) =>
+    globalThis.fetch = (async (
+      _url: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) =>
       new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -396,7 +407,7 @@ test('client transport', async () => {
             );
           },
         }),
-      );
+      )) as unknown as typeof fetch;
     const pending = completeComposerDraft({
       ...options,
       onText(text: string) {
@@ -415,7 +426,7 @@ test('client transport', async () => {
     // Headers establish the listener; returning done must not wait for events or EOF.
     let progressController!: ReadableStreamDefaultController<Uint8Array>;
     let cancelled = false;
-    globalThis.fetch = async () =>
+    globalThis.fetch = (async () =>
       new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -425,7 +436,7 @@ test('client transport', async () => {
             cancelled = true;
           },
         }),
-      );
+      )) as unknown as typeof fetch;
     const progress: number[][] = [];
     const previews: string[] = [];
     const opened = await api.openAvatarRenderProgress(
@@ -444,7 +455,10 @@ test('client transport', async () => {
     assert.equal(cancelled, true, 'done releases the progress stream');
 
     const expected = { activeLeafId: null, mutationRevision: 42 };
-    globalThis.fetch = async (url, init) => {
+    globalThis.fetch = (async (
+      url: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
       assert.equal(url, '/api/conversations/7/messages');
       assert.deepEqual(JSON.parse(init?.body as string), {
         content: 'hello',
@@ -452,20 +466,24 @@ test('client transport', async () => {
         expectedMutationRevision: 42,
       });
       return Response.json({ userMessageId: 1, assistantMessageId: 2 });
-    };
+    }) as unknown as typeof fetch;
     await api.send(7, 'hello', expected);
-    globalThis.fetch = async (url, init) => {
+    globalThis.fetch = (async (
+      url: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
       assert.equal(url, '/api/messages/8?expectedActiveLeafId=null&expectedMutationRevision=42');
       assert.equal(init?.method, 'DELETE');
       assert.equal(init?.body, undefined);
       return new Response(null, { status: 204 });
-    };
+    }) as unknown as typeof fetch;
     await api.deleteMessage(8, expected);
     assert.deepEqual(expected, { activeLeafId: null, mutationRevision: 42 });
 
     let authenticationRequests = 0;
     setAuthenticationRequiredHandler(() => authenticationRequests++);
-    globalThis.fetch = async () => Response.json({ error: 'locked' }, { status: 401 });
+    globalThis.fetch = (async () =>
+      Response.json({ error: 'locked' }, { status: 401 })) as unknown as typeof fetch;
     await assert.rejects(api.conversations(), /locked/);
     assert.equal(authenticationRequests, 1);
     await assert.rejects(api.login('bad'), /locked/);
@@ -489,7 +507,7 @@ test('client transport', async () => {
 });
 
 test('ws lifecycle', async () => {
-  const { mock } = await import('node:test');
+  const { jest } = await import('bun:test');
 
   type Listener = (event: { persisted?: boolean }) => void;
   const documentListeners = new Map<string, Listener[]>();
@@ -565,7 +583,7 @@ test('ws lifecycle', async () => {
   // client tsconfig checks it, and this test supplies runtime browser globals.
   const wsModulePath = '../../client/src/state/ws.ts';
   const { configureWs, startWs, stopWs, subscribe } = (await import(wsModulePath)) as WsModule;
-  mock.timers.enable({ apis: ['setTimeout'] });
+  jest.useFakeTimers();
   const dispatch = (listeners: Map<string, Listener[]>, type: string, event = {}) => {
     for (const listener of listeners.get(type) ?? []) listener(event);
   };
@@ -596,7 +614,7 @@ test('ws lifecycle', async () => {
   // callback schedule another replacement.
   fakeDocument.visibilityState = 'visible';
   dispatch(documentListeners, 'visibilitychange');
-  mock.timers.tick(80);
+  jest.advanceTimersByTime(80);
   assert.equal(FakeWebSocket.instances.length, 2);
   assert.equal(first.readyState, FakeWebSocket.CLOSED);
   const second = FakeWebSocket.instances[1]!;
@@ -605,13 +623,13 @@ test('ws lifecycle', async () => {
     second.sent.map((payload) => JSON.parse(payload)),
     [{ sub: 42 }],
   );
-  mock.timers.tick(550);
+  jest.advanceTimersByTime(550);
   assert.equal(FakeWebSocket.instances.length, 2);
 
   // Coalesce lifecycle events commonly delivered together on network/app resume.
   dispatch(windowListeners, 'online');
   dispatch(windowListeners, 'pageshow', { persisted: true });
-  mock.timers.tick(80);
+  jest.advanceTimersByTime(80);
   assert.equal(FakeWebSocket.instances.length, 3);
   const third = FakeWebSocket.instances[2]!;
   third.open();
@@ -622,7 +640,7 @@ test('ws lifecycle', async () => {
 
   stopWs();
   dispatch(documentListeners, 'visibilitychange');
-  mock.timers.tick(80);
+  jest.advanceTimersByTime(80);
   assert.equal(FakeWebSocket.instances.length, 3);
   assert.equal(statuses.at(-1), false);
 
@@ -634,7 +652,7 @@ test('ws lifecycle', async () => {
     const before = resyncs;
     dispatch(windowListeners, 'focus');
     dispatch(documentListeners, 'resume');
-    mock.timers.tick(50);
+    jest.advanceTimersByTime(50);
     const resumed = FakeWebSocket.instances.at(-1)!;
     assert.notEqual(
       resumed,
@@ -646,19 +664,19 @@ test('ws lifecycle', async () => {
     assert.equal(resumed.sent.length, 0);
     fakeDocument.visibilityState = 'hidden';
     dispatch(windowListeners, 'focus');
-    mock.timers.tick(50);
+    jest.advanceTimersByTime(50);
     assert.equal(FakeWebSocket.instances.at(-1), resumed);
     fakeDocument.visibilityState = 'visible';
     dispatch(documentListeners, 'resume');
-    mock.timers.tick(50);
+    jest.advanceTimersByTime(50);
     const stuck = FakeWebSocket.instances.at(-1)!;
-    mock.timers.tick(10_000);
+    jest.advanceTimersByTime(10_000);
     assert.equal(
       stuck.readyState,
       FakeWebSocket.CLOSED,
       'A stalled handshake does not hang indefinitely',
     );
-    mock.timers.tick(500);
+    jest.advanceTimersByTime(500);
     const replacement = FakeWebSocket.instances.at(-1)!;
     assert.notEqual(replacement, stuck);
     replacement.open();
@@ -666,6 +684,6 @@ test('ws lifecycle', async () => {
     assert.equal(statuses.at(-1), true, 'Late close callbacks cannot disconnect the replacement');
   } finally {
     stopWs();
-    mock.timers.reset();
+    jest.useRealTimers();
   }
 });

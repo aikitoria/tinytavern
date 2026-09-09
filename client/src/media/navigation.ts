@@ -1,3 +1,4 @@
+import { newRequestId } from '@tinytavern/shared';
 import { restoreMediaInputs } from './restoreInputs.ts';
 import {
   applyPageLocation,
@@ -7,7 +8,7 @@ import {
   type PageLocation,
 } from '../state/pageLocation.ts';
 import { batch } from 'solid-js';
-import { dialogStack } from '../state/dialogStack.ts';
+import { dialogStack, nextDialogId, type DialogFrame } from '../state/dialogStack.ts';
 import type { MediaAsset, MediaJobInput, MediaOperation } from '@tinytavern/shared';
 import {
   applyMediaJob,
@@ -22,12 +23,21 @@ import { api } from '../state/api.ts';
 export interface MediaToolSession {
   id: string;
   operation: MediaOperation;
-  jobId: string | null;
+  jobId: number | null;
   contextConversationId: number | null;
   destination: 'gallery' | 'chat';
   prompt: string;
   inputs: MediaJobInput[];
   assets: MediaAsset[];
+}
+
+function revisitDialog(frame: DialogFrame | undefined): boolean {
+  if (!frame) return false;
+  if (frame !== dialogStack.top()) {
+    const target = frame.page;
+    navigatePageWithGuards(target, () => returnToPageLocation(target, () => restorePage(target)));
+  }
+  return true;
 }
 
 export function openMediaTool(
@@ -36,21 +46,15 @@ export function openMediaTool(
     conversationId?: number | null;
     prompt?: string;
     input?: { asset: MediaAsset; slot: MediaJobInput['slot'] };
-    jobId?: string;
+    jobId?: number;
   } = {},
 ): void {
   const existing = options.jobId ? dialogStack.findJob(options.jobId, state.mediaJobs) : undefined;
-  if (existing) {
-    if (existing !== dialogStack.top()) {
-      const target = existing.page;
-      navigatePageWithGuards(target, () => returnToPageLocation(target, () => restorePage(target)));
-    }
-    return;
-  }
+  if (revisitDialog(existing)) return;
   const input = options.input;
   const conversationId = options.conversationId ?? null;
   const session: MediaToolSession = {
-    id: crypto.randomUUID(),
+    id: nextDialogId(),
     operation,
     jobId: options.jobId ?? null,
     contextConversationId: conversationId,
@@ -67,7 +71,8 @@ export function openMediaTool(
 }
 
 export function openMediaJobs(): void {
-  openModal('media-jobs');
+  if (!revisitDialog(dialogStack.frames().find((frame) => frame.page.modal === 'media-jobs')))
+    openModal('media-jobs');
 }
 
 export function leaveMediaTool(): void {
@@ -78,7 +83,7 @@ export async function openMediaRerun(
   asset: MediaAsset,
   conversationId?: number | null,
 ): Promise<void> {
-  const job = await api.rerunMediaAsset(asset.id, crypto.randomUUID(), {
+  const job = await api.rerunMediaAsset(asset.id, newRequestId(), {
     contextConversationId: conversationId ?? null,
     destination: conversationId == null ? 'gallery' : 'chat',
     reviewBeforeSave: true,

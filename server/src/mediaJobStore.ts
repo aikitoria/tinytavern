@@ -37,8 +37,9 @@ export interface MediaPromptContext {
 }
 export type CapturedMediaEndpoint = Omit<Endpoint, 'apiKey'>;
 export interface MediaJobRow {
-  id: string;
-  draft_id: string | null;
+  id: number;
+  draft_id: number | null;
+  recipe_id: number | null;
   revision: number;
   operation: MediaOperation;
   state: MediaJobState;
@@ -53,7 +54,7 @@ export interface MediaJobRow {
   context_conversation_id: number | null;
   message_id: number | null;
   destination: 'gallery' | 'chat';
-  source_job_id: string | null;
+  source_job_id: number | null;
   seed: number | null;
   comfy_prompt_id: string | null;
   submission_id: string | null;
@@ -71,17 +72,17 @@ export interface MediaJobRow {
 // Only live prompt text and ephemeral progress are kept in RAM. State changes
 // persist through updateMediaJob; a shutdown flushes these text buffers once.
 export const mediaLive = new Map<
-  string,
+  number,
   { prompt?: string; reasoning?: string; progress?: MediaJob['progress'] }
 >();
 export const mediaPromptBuffers = new Map<number, { prompt: string; reasoning: string }>();
-const jobListeners = new Map<string, Set<(row: MediaJobRow) => void>>();
+const jobListeners = new Map<number, Set<(row: MediaJobRow) => void>>();
 
-export function hasMediaJobObservers(id: string): boolean {
+export function hasMediaJobObservers(id: number): boolean {
   return jobListeners.has(id);
 }
 
-export function observeMediaJob(id: string, listener: (row: MediaJobRow) => void): () => void {
+export function observeMediaJob(id: number, listener: (row: MediaJobRow) => void): () => void {
   let listeners = jobListeners.get(id);
   if (!listeners) {
     listeners = new Set();
@@ -96,7 +97,7 @@ export function observeMediaJob(id: string, listener: (row: MediaJobRow) => void
   };
 }
 
-export function notifyMediaJobListeners(id: string): void {
+export function notifyMediaJobListeners(id: number): void {
   const listeners = jobListeners.get(id);
   if (!listeners) {
     return;
@@ -109,11 +110,11 @@ export function notifyMediaJobListeners(id: string): void {
   }
 }
 
-export function mediaJobRow(id: string): MediaJobRow | undefined {
-  return stmt('SELECT * FROM media_jobs WHERE id = ?').get(id) as unknown as
+export function mediaJobRow(id: number): MediaJobRow | undefined {
+  return (stmt('SELECT * FROM media_jobs WHERE id = ?').get(id) ?? undefined) as unknown as
     MediaJobRow | undefined;
 }
-export function requireMediaJob(id: string, revision?: unknown): MediaJobRow {
+export function requireMediaJob(id: number, revision?: unknown): MediaJobRow {
   const row = mediaJobRow(id);
   if (!row) {
     throw new HttpError(404, 'Media job not found');
@@ -124,7 +125,7 @@ export function requireMediaJob(id: string, revision?: unknown): MediaJobRow {
   return row;
 }
 
-export function mediaDraft(id: string): MediaDraft {
+export function mediaDraft(id: number): MediaDraft {
   const row = stmt('SELECT * FROM media_drafts WHERE id = ?').get(id);
   if (!row) {
     throw new HttpError(404, 'Media draft not found');
@@ -229,7 +230,7 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
   });
 }
 
-export function publishMediaJob(id: string): void {
+export function publishMediaJob(id: number): void {
   const row = mediaJobRow(id);
   if (row) {
     broadcast({ t: 'mediaJob', job: mediaJobDto(row) });
@@ -243,6 +244,7 @@ type JobPatch = Partial<
     MediaJobRow,
     | 'state'
     | 'operation'
+    | 'recipe_id'
     | 'workflow_id'
     | 'preset_id'
     | 'instruction'
@@ -266,6 +268,7 @@ type JobPatch = Partial<
 const PATCH_COLUMNS = new Set([
   'state',
   'operation',
+  'recipe_id',
   'workflow_id',
   'preset_id',
   'instruction',
@@ -285,7 +288,7 @@ const PATCH_COLUMNS = new Set([
   'deadline',
   'retention_deadline',
 ]);
-export function updateMediaJob(id: string, patch: JobPatch): MediaJobRow {
+export function updateMediaJob(id: number, patch: JobPatch): MediaJobRow {
   const entries = Object.entries(patch).filter(([key]) => PATCH_COLUMNS.has(key));
   if (entries.length > 0) {
     const assignments = entries.map(([key]) => `${key} = ?`).join(', ');
@@ -300,7 +303,7 @@ export function updateMediaJob(id: string, patch: JobPatch): MediaJobRow {
 }
 
 /** Caller validates every asset before replacing pins, synchronously in one transaction. */
-export function pinMediaInputs(id: string, inputs: MediaJobInputSnapshot[]): void {
+export function pinMediaInputs(id: number, inputs: MediaJobInputSnapshot[]): void {
   transaction(() => {
     stmt(`
       DELETE FROM media_owners

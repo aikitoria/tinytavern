@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { BunRequest, Serve, Server } from 'bun';
 
 export class HttpError extends Error {
   status: number;
@@ -9,41 +9,35 @@ export class HttpError extends Error {
 }
 
 export interface Ctx {
-  req: IncomingMessage;
-  res: ServerResponse;
+  req: Request;
+  headers: Headers;
+  remoteAddress: string | undefined;
   params: Record<string, string>;
   body: unknown;
   raw: Buffer | null;
 }
 
 type Handler = (ctx: Ctx) => unknown | Promise<unknown>;
-
 interface Route {
-  method: string;
-  regex: RegExp;
-  paramNames: string[];
   handler: Handler;
   rawBody: boolean;
   maxBodyBytes: number;
 }
 
-const routes: Route[] = [];
+const MAX_BODY = 32 * 1024 * 1024;
+const routes = new Map<string, Map<string, Route>>();
+const API_HEADERS = { 'cache-control': 'private, no-store' };
 
 function add(
   method: string,
-  pattern: string,
+  path: string,
   handler: Handler,
   opts?: { rawBody?: boolean; maxBodyBytes?: number },
 ): void {
-  const paramNames: string[] = [];
-  const regexSrc = pattern.replace(/:([a-zA-Z]+)/g, (_, name: string) => {
-    paramNames.push(name);
-    return '([^/]+)';
-  });
-  routes.push({
-    method,
-    regex: new RegExp(`^${regexSrc}$`),
-    paramNames,
+  let methods = routes.get(path);
+  if (!methods) routes.set(path, (methods = new Map()));
+  if (methods.has(method)) throw new Error(`Duplicate route: ${method} ${path}`);
+  methods.set(method, {
     handler,
     rawBody: opts?.rawBody ?? false,
     maxBodyBytes: opts?.maxBodyBytes ?? MAX_BODY,
@@ -60,77 +54,100 @@ export const route = {
   del: (p: string, h: Handler) => add('DELETE', p, h),
 };
 
-const MAX_BODY = 32 * 1024 * 1024;
-
-function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        // Drain without destroying the socket so the 413 response can reach the client.
-        req.removeAllListeners('data');
-        req.resume();
-        reject(new HttpError(413, 'body too large'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
+export function apiError(status: number, message: string): Response {
+  return Response.json({ error: message }, { status, headers: API_HEADERS });
 }
 
-/** Returns false if no route matched (caller falls through to static file serving). */
-export async function dispatch(
-  req: IncomingMessage,
-  res: ServerResponse,
-  pathname: string,
-): Promise<boolean> {
-  for (const r of routes) {
-    if (r.method !== req.method) continue;
-    const m = r.regex.exec(pathname);
-    if (!m) continue;
-    const params: Record<string, string> = {};
-    try {
-      r.paramNames.forEach((name, i) => {
-        try {
-          params[name] = decodeURIComponent(m[i + 1]!);
-        } catch {
-          throw new HttpError(400, 'malformed percent-encoding in path');
-        }
-      });
-      let body: unknown = null;
-      let raw: Buffer | null = null;
-      if (req.method !== 'GET' && req.method !== 'DELETE') {
-        const buf = await readBody(req, r.maxBodyBytes);
-        if (r.rawBody) raw = buf;
-        else if (buf.length > 0) {
-          try {
-            body = JSON.parse(buf.toString('utf8'));
-          } catch {
-            throw new HttpError(400, 'invalid JSON body');
-          }
-        }
+async function readBody(req: Request, maxBytes: number): Promise<Buffer> {
+  const declared = req.headers.get('content-length');
+  if (declared !== null && Number(declared) > maxBytes) throw new HttpError(413, 'body too large');
+  if (!req.body) return Buffer.alloc(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return Buffer.concat(chunks, size);
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new HttpError(413, 'body too large');
       }
-      const result = await r.handler({ req, res, params, body, raw });
-      if (res.writableEnded) return true;
-      if (result === undefined) {
-        res.writeHead(204).end();
-      } else {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
-      }
-    } catch (err) {
-      if (res.writableEnded) return true;
-      const status = err instanceof HttpError ? err.status : 500;
-      const message = err instanceof Error ? err.message : String(err);
-      if (status === 500) console.error(`[api] ${req.method} ${pathname}:`, err);
-      res
-        .writeHead(status, { 'content-type': 'application/json' })
-        .end(JSON.stringify({ error: message }));
+      chunks.push(value);
     }
-    return true;
+  } finally {
+    reader.releaseLock();
   }
-  return false;
+}
+
+async function invoke(
+  req: BunRequest,
+  matched: Route,
+  remoteAddress: string | undefined,
+): Promise<Response> {
+  try {
+    // Bun decodes route params. Validate malformed percent escapes without decoding twice.
+    if (req.url.includes('%')) {
+      try {
+        decodeURI(new URL(req.url).pathname);
+      } catch {
+        throw new HttpError(400, 'malformed percent-encoding in path');
+      }
+    }
+    let body: unknown = null;
+    let raw: Buffer | null = null;
+    if (req.method !== 'GET' && req.method !== 'DELETE') {
+      const bytes = await readBody(req, matched.maxBodyBytes);
+      if (matched.rawBody) raw = bytes;
+      else if (bytes.length) {
+        try {
+          body = JSON.parse(bytes.toString('utf8'));
+        } catch {
+          throw new HttpError(400, 'invalid JSON body');
+        }
+      }
+    }
+    const headers = new Headers(API_HEADERS);
+    // Body reading finishes before the synchronous handler's guard-and-act section.
+    const result = await matched.handler({
+      req,
+      headers,
+      remoteAddress,
+      params: req.params,
+      body,
+      raw,
+    });
+    if (result instanceof Response) {
+      for (const [key, value] of headers) result.headers.set(key, value);
+      return result;
+    }
+    return result === undefined
+      ? new Response(null, { status: 204, headers })
+      : Response.json(result, { headers });
+  } catch (err) {
+    const status = err instanceof HttpError ? err.status : 500;
+    const message = err instanceof Error ? err.message : String(err);
+    if (status === 500) console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, err);
+    return apiError(status, message);
+  }
+}
+
+/** Bun compiles the paths once. Method lookup is constant-time and every route uses the same gate. */
+export function apiRoutes<T>(
+  authorize?: (req: Request, server: Server<T>) => Response | undefined,
+): Serve.Routes<T, string> {
+  return Object.fromEntries(
+    [...routes].map(([path, methods]) => [
+      path,
+      (req: BunRequest, server: Server<T>) => {
+        const rejected = authorize?.(req, server);
+        if (rejected) return rejected;
+        const matched = methods.get(req.method);
+        return matched
+          ? invoke(req, matched, server.requestIP(req)?.address)
+          : apiError(404, 'not found');
+      },
+    ]),
+  );
 }

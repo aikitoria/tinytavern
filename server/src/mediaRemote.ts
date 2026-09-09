@@ -8,7 +8,7 @@ export interface ComfyFile {
 }
 export interface RemoteFileRow extends ComfyFile {
   id: number;
-  job_id: string;
+  job_id: number;
   endpoint: string;
   purpose: string;
   state: 'owned' | 'pending' | 'deleted';
@@ -78,7 +78,7 @@ export function comfyOutputFiles(value: unknown): ComfyFile[] {
 
 /** Persist before an upload, or immediately upon observing job output metadata. */
 export function ownRemoteFile(
-  jobId: string,
+  jobId: number,
   endpoint: string,
   file: ComfyFile,
   purpose: string,
@@ -97,7 +97,7 @@ export function ownRemoteFile(
   ).get(jobId, endpoint, file.filename, file.subfolder, file.type) as unknown as RemoteFileRow;
 }
 
-export function releaseRemoteFiles(jobId: string, delayMs = 0): void {
+export function releaseRemoteFiles(jobId: number, delayMs = 0): void {
   stmt(
     "UPDATE media_remote_files SET state = 'pending', retry_at = ? WHERE job_id = ? AND state = 'owned'",
   ).run(Date.now() + delayMs, jobId);
@@ -148,7 +148,7 @@ async function deleteRemoteFile(file: RemoteFileRow, signal?: AbortSignal): Prom
       `).run(file.endpoint, file.filename, file.subfolder, file.type);
     });
     for (const owner of owners) {
-      publishMediaJob(String(owner.job_id));
+      publishMediaJob(Number(owner.job_id));
     }
   } catch (err) {
     if (signal?.aborted) {

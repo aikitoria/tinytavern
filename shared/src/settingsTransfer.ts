@@ -1,3 +1,4 @@
+import { nextCollectionId } from './numericIds.ts';
 import type { Settings, MediaPromptPreset, MediaWorkflow } from './index.ts';
 import {
   MEDIA_OPERATIONS,
@@ -144,7 +145,7 @@ export function importPromptCollection(
     const text = Object.fromEntries(fields.map((key) => [key, transferString(item[key], key)]));
     const preset = {
       ...text,
-      id: existing?.id ?? crypto.randomUUID(),
+      id: existing?.id ?? nextCollectionId(presets),
       name,
       operation,
     } as MediaPromptPreset;
@@ -212,7 +213,7 @@ export function importWorkflow(
     );
   };
   return {
-    id: existing?.id ?? crypto.randomUUID(),
+    id: existing?.id ?? nextCollectionId(workflows),
     name,
     operation,
     referenceCount,

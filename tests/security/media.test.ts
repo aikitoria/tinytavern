@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media url', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');

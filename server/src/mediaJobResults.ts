@@ -17,7 +17,7 @@ import { deleteImageFiles } from './images.ts';
 import { insertGalleryAsset } from './galleryStore.ts';
 
 /** A remote-file ledger ID is a stable ingestion key across retries and restarts. */
-export function ingestedMedia(jobId: string, remoteFileId: number) {
+export function ingestedMedia(jobId: number, remoteFileId: number) {
   const row = stmt(`
     SELECT a.* FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
     WHERE o.owner_type = 'job' AND o.owner_id = ? AND o.slot = ?
@@ -26,15 +26,15 @@ export function ingestedMedia(jobId: string, remoteFileId: number) {
 }
 
 export function recordMediaResult(
-  jobId: string,
+  jobId: number,
   remoteFileId: number,
   media: DownloadedMedia,
 ): number {
   return transaction(() => {
     const job = requireMediaJob(jobId);
     const configuration = JSON.parse(job.configuration_json!) as MediaJobConfiguration;
-    saveMediaRecipe(configuration, JSON.parse(job.inputs_json), job.prompt, {
-      id: job.id,
+    const recipeId = saveMediaRecipe(configuration, JSON.parse(job.inputs_json), job.prompt, {
+      id: job.recipe_id ?? undefined,
       instruction: job.instruction,
       seed: job.seed,
     });
@@ -48,7 +48,7 @@ export function recordMediaResult(
       media.width,
       media.height,
       media.duration,
-      job.id,
+      recipeId,
       Date.now(),
       media.path,
     );
@@ -62,14 +62,14 @@ export function recordMediaResult(
 
     const outputs = JSON.parse(job.outputs_json) as number[];
     outputs.push(assetId);
-    updateMediaJob(jobId, { outputs_json: JSON.stringify(outputs) });
+    updateMediaJob(jobId, { recipe_id: recipeId, outputs_json: JSON.stringify(outputs) });
     invalidateMediaAsset(media.path);
     return assetId;
   });
 }
 
 export function finishMediaJob(
-  jobId: string,
+  jobId: number,
   state: MediaJobState,
   error: string | null = null,
 ): void {
@@ -88,7 +88,7 @@ export function finishMediaJob(
 }
 
 /** Active work may finish using a source that was deleted during generation. */
-export function releaseDeletedMediaInputs(jobId: string): void {
+export function releaseDeletedMediaInputs(jobId: number): void {
   const deletedInputs = stmt(`SELECT a.path FROM media_assets a
     JOIN media_owners o ON o.asset_id = a.id
     WHERE o.owner_type = 'job' AND o.owner_id = ? AND o.slot LIKE 'input:%'
@@ -105,7 +105,7 @@ export function releaseDeletedMediaInputs(jobId: string): void {
 }
 
 /** Publish every final attachment together, after all requested files are durable. */
-export function completeMediaJob(jobId: string): void {
+export function completeMediaJob(jobId: number): void {
   const saved = transaction(() => {
     const job = requireMediaJob(jobId);
     if (job.state !== 'downloading') {

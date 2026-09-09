@@ -28,10 +28,10 @@ interface MsgRow {
   active_child_id: number | null;
 }
 
-function getRow(id: number): MsgRow | undefined {
+function getRow(id: number): MsgRow | null {
   return stmt(
     'SELECT id, conversation_id, parent_id, active_child_id FROM messages WHERE id = ?',
-  ).get(id) as MsgRow | undefined;
+  ).get(id) as unknown as MsgRow | null;
 }
 
 export function getMessage(id: number): Message | undefined {

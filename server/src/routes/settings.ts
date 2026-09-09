@@ -25,7 +25,7 @@ import { parseMediaRendering, parseMediaPrompts } from '../mediaSettings.ts';
 
 route.get('/api/settings', () => getSettings());
 
-route.put('/api/settings', ({ req, res, body }) => {
+route.put('/api/settings', ({ req, headers, body, remoteAddress }) => {
   const b = objectBody(body);
   const current = getSettings();
   const expectedRevision = optionalNumber(b, 'expectedRevision');
@@ -139,8 +139,8 @@ route.put('/api/settings', ({ req, res, body }) => {
   putSettings(next);
   if (accessPassword !== undefined) {
     setAccessPassword(accessPassword as string | null);
-    if (accessPassword === null) clearSession(req, res);
-    else startSession(req, res);
+    if (accessPassword === null) clearSession(req, headers);
+    else startSession(req, headers);
   }
   const generationContextChanged =
     current.activeEndpointId !== next.activeEndpointId ||

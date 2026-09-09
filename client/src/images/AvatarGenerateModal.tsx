@@ -1,3 +1,4 @@
+import { newRequestId } from '@tinytavern/shared';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
@@ -41,7 +42,7 @@ export default function AvatarGenerateModal(props: {
     }
     const abort = new AbortController();
     renderAbort = abort;
-    const jobId = crypto.randomUUID();
+    const jobId = newRequestId();
     setProgress(null);
     setPreviewUrl(null);
     setRendering(true);

@@ -1,5 +1,4 @@
 import type { MediaAssetInput, MediaImageConfig, MediaResultDetails } from '@tinytavern/shared';
-import { randomUUID } from 'node:crypto';
 import type { MediaJobInput, Message } from '@tinytavern/shared';
 import { stmt, toMediaAsset } from './db.ts';
 import { getSettings } from './settingsStore.ts';
@@ -13,7 +12,7 @@ export interface MediaRecipeInput {
 }
 
 export interface MediaRecipe {
-  id: string;
+  id: number;
   prompt: string;
   instruction: string;
   configuration: MediaJobConfiguration & { seed?: number | null };
@@ -24,9 +23,8 @@ export function saveMediaRecipe(
   configuration: MediaJobConfiguration,
   inputs: MediaRecipeInput[],
   prompt: string,
-  options: { id?: string; instruction?: string; seed?: number | null } = {},
-): string {
-  const id = options.id ?? randomUUID();
+  options: { id?: number; instruction?: string; seed?: number | null } = {},
+): number {
   const instruction = options.instruction ?? '';
   inputs = inputs.map((input) => ({
     ...input,
@@ -37,13 +35,13 @@ export function saveMediaRecipe(
         : null,
   }));
   const { comfyUrl, workflow, timeoutSeconds, workflowValues, characterIds } = configuration;
-  stmt(`
+  const inserted = stmt(`
     INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET prompt = excluded.prompt, instruction = excluded.instruction,
       configuration_json = excluded.configuration_json, inputs_json = excluded.inputs_json
   `).run(
-    id,
+    options.id ?? null,
     prompt,
     instruction,
     JSON.stringify({
@@ -57,6 +55,7 @@ export function saveMediaRecipe(
     JSON.stringify(inputs),
     Date.now(),
   );
+  const id = options.id ?? Number(inserted.lastInsertRowid);
   stmt("DELETE FROM media_owners WHERE owner_type = 'recipe' AND owner_id = ?").run(id);
   for (const input of inputs) {
     if (input.assetId === null) continue;
@@ -75,11 +74,11 @@ export function imageRenderConfiguration(config: MediaImageConfig): MediaJobConf
   };
 }
 
-export function createImageRecipe(config: MediaImageConfig, prompt: string): string {
+export function createImageRecipe(config: MediaImageConfig, prompt: string): number {
   return saveMediaRecipe(imageRenderConfiguration(config), [], prompt);
 }
 
-export function getMediaRecipe(id: string): MediaRecipe {
+export function getMediaRecipe(id: number): MediaRecipe {
   const row = stmt('SELECT * FROM media_recipes WHERE id = ?').get(id);
   if (!row) {
     throw new HttpError(404, 'The rendering recipe is unavailable');
@@ -98,11 +97,11 @@ export function getMediaAssetResultDetails(assetId: number): MediaResultDetails 
     WHERE id = ? AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)`).get(assetId);
   if (!asset) throw new HttpError(404, 'Media asset not found');
   if (!asset.recipe_id) throw new HttpError(404, 'The rendering recipe is unavailable');
-  const recipe = getMediaRecipe(String(asset.recipe_id));
+  const recipe = getMediaRecipe(Number(asset.recipe_id));
   // Older recipes can recover their seed while their original job still exists.
   const seed =
     recipe.configuration.seed ??
-    (stmt('SELECT seed FROM media_jobs WHERE id = ?').get(recipe.id)?.seed as
+    (stmt('SELECT seed FROM media_jobs WHERE recipe_id = ?').get(recipe.id)?.seed as
       number | null | undefined) ??
     null;
   return {
@@ -134,13 +133,13 @@ export function getMediaAssetInputs(assetId: number): MediaAssetInput[] {
     }));
 }
 
-export function messageRecipeId(message: Message): string | null {
+export function messageRecipeId(message: Message): number | null {
   const asset = message.media[Math.min(message.activeImage, message.media.length - 1)];
   if (asset?.recipeId) {
     return asset.recipeId;
   }
   return (
     (stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(message.id)
-      ?.render_recipe_id as string | null) ?? null
+      ?.render_recipe_id as number | null) ?? null
   );
 }

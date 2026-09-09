@@ -55,7 +55,7 @@ databaseCase('media ownership', async () => {
   sweepOrphanedImages();
   assert.equal(
     stmt('SELECT id FROM media_assets WHERE id = ?').get(reservedBeforeCrash.id),
-    undefined,
+    null,
     'Startup releases a reservation whose process died before creating the file',
   );
   assert.ok(existsSync(join(IMAGES_DIR, path.slice(8))), 'Startup sweep retains input pins');
@@ -77,12 +77,12 @@ databaseCase('media ownership', async () => {
   );
   const input = saveImage('.png', makePlaceholderPng());
   stmt(
-    "INSERT INTO media_recipes(id, prompt, configuration_json, inputs_json, created_at) VALUES ('recipe', 'prompt', '{}', '[]', 1)",
+    "INSERT INTO media_recipes(id, prompt, configuration_json, inputs_json, created_at) VALUES (901, 'prompt', '{}', '[]', 1)",
   ).run();
-  stmt("INSERT INTO media_owners VALUES (?, 'recipe', 'recipe', 'source')").run(
+  stmt("INSERT INTO media_owners VALUES (?, 'recipe', 901, 'source')").run(
     mediaAssetForPath(input)!.id,
   );
-  stmt("UPDATE media_assets SET recipe_id = 'recipe' WHERE path = ?").run(duplicate);
+  stmt('UPDATE media_assets SET recipe_id = 901 WHERE path = ?').run(duplicate);
   const { invalidateMediaAsset } = await import('../../server/src/db.ts');
   invalidateMediaAsset(duplicate);
   deleteImageFiles([input, duplicate]);
@@ -211,7 +211,7 @@ databaseCase('media attachment ownership', async () => {
 });
 
 databaseCase('media characters', async () => {
-  const { randomUUID } = await import('node:crypto');
+  const { newRequestId } = await import('@tinytavern/shared');
 
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
@@ -256,7 +256,7 @@ databaseCase('media characters', async () => {
   putSettings({ ...getSettings(), mediaRendering: { ...getSettings().mediaRendering, workflows } });
   const jobs = workflows.map((workflow) => {
     const job = createMediaJob({
-      requestKey: randomUUID(),
+      requestKey: newRequestId(),
       operation: workflow.operation,
       workflowId: workflow.id,
       prompt: 'Both characters',
@@ -310,7 +310,7 @@ databaseCase('media characters', async () => {
       'Results retain captured associations after reference deletion',
     );
     assert.deepEqual(getMediaRecipe(job.id).configuration.characterIds, characters);
-    const rerun = createMediaJobFromAsset(assetId, { requestKey: randomUUID() });
+    const rerun = createMediaJobFromAsset(assetId, { requestKey: newRequestId() });
     assert.deepEqual(
       JSON.parse(requireMediaJob(rerun.id).configuration_json!).characterIds,
       characters,
@@ -352,8 +352,8 @@ databaseCase('temporary media job', async () => {
   const { deleteMediaJob } = await import('../../server/src/mediaJobs.ts');
   stopMediaWorker(); // Exercise consumption and cancellation without starting remote work.
 
-  const files = new Map<string, string>();
-  function job(id: string, state: MediaJobState = 'succeeded') {
+  const files = new Map<number, string>();
+  function job(id: number, state: MediaJobState = 'succeeded') {
     const path = saveImage('.png', makePlaceholderPng());
     files.set(id, join(IMAGES_DIR, basename(path)));
     const asset = mediaAssetForPath(path)!;
@@ -367,14 +367,14 @@ databaseCase('temporary media job', async () => {
     return requireMediaJob(id);
   }
 
-  const completed = job('consumed');
+  const completed = job(1);
   let finishRead!: () => void;
   const read = new Promise<void>((resolve) => {
     finishRead = resolve;
   });
   const result = consumeTemporaryMediaJob(completed, {}, async () => {
     await read;
-    assert(existsSync(files.get('consumed')!), 'Ownership lasts through the read');
+    assert(existsSync(files.get(1)!), 'Ownership lasts through the read');
     return 'bytes';
   });
   await Promise.resolve();
@@ -385,22 +385,22 @@ databaseCase('temporary media job', async () => {
   finishRead();
   assert.equal(await result, 'bytes');
   assert(!mediaJobRow(completed.id));
-  assert(!existsSync(files.get('consumed')!));
+  assert(!existsSync(files.get(1)!));
   assert(!hasMediaJobObservers(completed.id));
 
   await assert.rejects(
-    consumeTemporaryMediaJob(job('read-failure'), {}, () => {
+    consumeTemporaryMediaJob(job(2), {}, () => {
       throw new Error('Read failed');
     }),
     /Read failed/,
   );
-  assert(!existsSync(files.get('read-failure')!));
+  assert(!existsSync(files.get(2)!));
 
   const abort = new AbortController();
   abort.abort(new Error('Already cancelled'));
   await assert.rejects(
     consumeTemporaryMediaJob(
-      job('pre-abort', 'preparing'),
+      job(3, 'preparing'),
       {
         signal: abort.signal,
       },
@@ -408,12 +408,12 @@ databaseCase('temporary media job', async () => {
     ),
     /Already cancelled/,
   );
-  assert(!mediaJobRow('pre-abort'), 'Prompt cancellation releases its result immediately');
+  assert(!mediaJobRow(3), 'Prompt cancellation releases its result immediately');
 
   const runningAbort = new AbortController();
   await assert.rejects(
     consumeTemporaryMediaJob(
-      job('running', 'rendering'),
+      job(4, 'rendering'),
       {
         signal: runningAbort.signal,
         onProgress: () => runningAbort.abort(new Error('Disconnected')),
@@ -422,21 +422,18 @@ databaseCase('temporary media job', async () => {
     ),
     /Disconnected/,
   );
-  assert.equal(requireMediaJob('running').state, 'cancelling');
-  assert(existsSync(files.get('running')!), 'Remote execution retains ownership until stopped');
-  assert(
-    !hasMediaJobObservers('running'),
-    'The worker can reclaim the cancelled job after stopping it',
-  );
-  stmt("UPDATE media_jobs SET state = 'cancelled' WHERE id = 'running'").run();
-  deleteMediaJob(requireMediaJob('running'));
-  assert(!existsSync(files.get('running')!));
+  assert.equal(requireMediaJob(4).state, 'cancelling');
+  assert(existsSync(files.get(4)!), 'Remote execution retains ownership until stopped');
+  assert(!hasMediaJobObservers(4), 'The worker can reclaim the cancelled job after stopping it');
+  stmt("UPDATE media_jobs SET state = 'cancelled' WHERE id = 4").run();
+  deleteMediaJob(requireMediaJob(4));
+  assert(!existsSync(files.get(4)!));
 
-  const failed = job('failed', 'failed');
+  const failed = job(5, 'failed');
   await assert.rejects(
     consumeTemporaryMediaJob(failed, {}, () => assert.fail()),
     /cancelled/,
   );
-  assert(!mediaJobRow('failed'));
+  assert(!mediaJobRow(5));
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
 });

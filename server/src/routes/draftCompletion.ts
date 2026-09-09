@@ -13,7 +13,7 @@ import { getConversation } from '../conversationStore.ts';
 const DRAFT_COMPLETION_MAX_TOKENS = 1024;
 const streaming = new Set<number>();
 
-async function completeDraft(ctx: Ctx): Promise<void> {
+function completeDraft(ctx: Ctx): Response {
   const conversationId = positiveId(ctx.params.id);
   const body = objectBody(ctx.body);
   const draft = body.draft;
@@ -37,26 +37,31 @@ async function completeDraft(ctx: Ctx): Promise<void> {
   );
   streaming.add(conversationId);
   try {
-    await streamResponse(ctx.res, async (send, signal) => {
-      const suffix = new DraftSuffixFilter(draft);
-      await streamChatCompletion(
-        conversation,
-        messages,
-        // Reserve room for the verbatim prefix as well as the continuation.
-        DRAFT_COMPLETION_MAX_TOKENS + Buffer.byteLength(draft, 'utf8'),
-        (delta) => {
-          const output = suffix.push(delta);
-          if (output) send({ d: output });
-        },
-        signal,
-        { reasoningPrefill: built.reasoningPrefill },
-      );
-      // Reject stale snapshots so the client discards suffix text after concurrent path edits.
-      requireExpectedActiveLeaf(conversationId, expectedActiveLeafId, expectedMutationRevision);
-      suffix.finish();
-    });
-  } finally {
+    return streamResponse(
+      ctx.req,
+      async (send, signal) => {
+        const suffix = new DraftSuffixFilter(draft);
+        await streamChatCompletion(
+          conversation,
+          messages,
+          // Reserve room for the verbatim prefix as well as the continuation.
+          DRAFT_COMPLETION_MAX_TOKENS + Buffer.byteLength(draft, 'utf8'),
+          (delta) => {
+            const output = suffix.push(delta);
+            if (output) send({ d: output });
+          },
+          signal,
+          { reasoningPrefill: built.reasoningPrefill },
+        );
+        // Reject stale snapshots so the client discards suffix text after concurrent path edits.
+        requireExpectedActiveLeaf(conversationId, expectedActiveLeafId, expectedMutationRevision);
+        suffix.finish();
+      },
+      () => streaming.delete(conversationId),
+    );
+  } catch (err) {
     streaming.delete(conversationId);
+    throw err;
   }
 }
 

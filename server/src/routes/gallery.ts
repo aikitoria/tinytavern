@@ -177,7 +177,7 @@ route.post('/api/gallery/bulk-delete', ({ body }) => {
 });
 
 const describing = new Set<number>();
-route.post('/api/gallery/:id/describe', ({ params, body, res }) => {
+route.post('/api/gallery/:id/describe', ({ params, body, req }) => {
   const id = positiveId(params.id);
   const item = galleryItem(id);
   if (!item.media || item.media.kind !== 'image')
@@ -187,12 +187,16 @@ route.post('/api/gallery/:id/describe', ({ params, body, res }) => {
   const configuration = descriptionWorkflow(optionalString(objectBody(body), 'workflowId'));
   const assetId = item.media.id;
   describing.add(id);
-  return streamResponse(res, async (send, signal) => {
-    const prompt = await describeImage(assetId, configuration, signal, (update) =>
-      send({ progress: update }),
-    );
-    send({ d: prompt });
-  }).finally(() => describing.delete(id));
+  return streamResponse(
+    req,
+    async (send, signal) => {
+      const prompt = await describeImage(assetId, configuration, signal, (update) =>
+        send({ progress: update }),
+      );
+      send({ d: prompt });
+    },
+    () => describing.delete(id),
+  );
 });
 
 route.patch('/api/gallery/:id', ({ params, body }) => {

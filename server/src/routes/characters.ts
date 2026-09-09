@@ -170,7 +170,7 @@ route.post(
   { rawBody: true },
 );
 
-route.get('/api/characters/:id/card', ({ params, res }) => {
+route.get('/api/characters/:id/card', ({ params }) => {
   const id = positiveId(params.id);
   const row = rowById('characters', id);
   const character = toCharacter(row);
@@ -222,11 +222,11 @@ route.get('/api/characters/:id/card', ({ params, res }) => {
   // Legacy uploads trusted Content-Type; invalid PNGs need the placeholder.
   if (base && !isPng(base)) base = null;
   const png = buildCharacterCard(base ?? makePlaceholderPng(), card);
-  res
-    .writeHead(200, {
+  return new Response(png, {
+    headers: {
       'content-type': 'image/png',
       'content-disposition': `attachment; filename="${character.name.replace(/[^\w.-]+/g, '_')}.card.png"`,
-      'content-length': png.length,
-    })
-    .end(png);
+      'content-length': String(png.length),
+    },
+  });
 });

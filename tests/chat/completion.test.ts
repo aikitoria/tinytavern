@@ -20,14 +20,17 @@ databaseCase('server completion', async () => {
   const originalFetch = globalThis.fetch;
   let reply = () => new Response();
   let wire: Record<string, unknown> = {};
-  globalThis.fetch = async (url, init) => {
+  globalThis.fetch = (async (
+    url: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     assert.equal(url, 'https://upstream.invalid/v1/chat/completions');
     assert.equal(init?.method, 'POST');
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret');
     assert(init?.signal);
     wire = JSON.parse(String(init?.body));
     return reply();
-  };
+  }) as unknown as typeof fetch;
   const messages = [{ role: 'user' as const, content: 'hello' }];
   const frame = (delta: Record<string, unknown>) =>
     `data: ${JSON.stringify({ choices: [{ delta }] })}\n`;
@@ -155,7 +158,7 @@ databaseCase('server completion', async () => {
 });
 
 databaseCase('generation stream', async () => {
-  const { mock } = await import('node:test');
+  const { jest } = await import('bun:test');
 
   const { setImmediate: flush } = await import('node:timers/promises');
 
@@ -203,7 +206,10 @@ databaseCase('generation stream', async () => {
       ).run(conversation.id).lastInsertRowid,
     );
   }
-  globalThis.fetch = async (_, init) => {
+  globalThis.fetch = (async (
+    _: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     const signal = init!.signal!;
     return new Response(
       new ReadableStream<Uint8Array>({
@@ -213,20 +219,24 @@ databaseCase('generation stream', async () => {
         },
       }),
     );
-  };
-  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const timers = mock.method(globalThis, 'setTimeout');
+  }) as unknown as typeof fetch;
+  jest.useFakeTimers();
+  const timers = jest.spyOn(globalThis, 'setTimeout');
   try {
     const mid = message();
     startGeneration(conversation, mid, undefined, { prompt });
     await flush();
     const active = requests.at(-1)!;
-    const timerCount = timers.mock.callCount();
+    const timerCount = timers.mock.calls.length;
     for (let index = 0; index < 32; index++) {
       active.stream.enqueue(encoder.encode(': heartbeat\n\n'));
       await flush();
     }
-    assert.equal(timers.mock.callCount(), timerCount, 'Network chunks do not allocate idle timers');
+    assert.equal(
+      timers.mock.calls.length,
+      timerCount,
+      'Network chunks do not allocate idle timers',
+    );
     active.stream.enqueue(encoder.encode('data: null\ndata: malformed\n'));
     active.stream.enqueue(encoder.encode(frame({ content: 42, reasoning_content: {} })));
     for (const content of [' H', 'a', 'l', ':', ' Hello']) {
@@ -235,7 +245,7 @@ databaseCase('generation stream', async () => {
     }
     assert.equal(mergeLiveBuffers([getMessage(mid)!])[0]!.content, ' Hello');
     for (let index = 0; index < 4; index++) {
-      mock.timers.tick(90_000);
+      jest.advanceTimersByTime(90_000);
       assert(!active.signal.aborted, 'An active chat stream survives beyond two minutes');
       // Heartbeats count as activity even when they carry no model tokens.
       active.stream.enqueue(encoder.encode(': heartbeat\n\n'));
@@ -247,24 +257,24 @@ databaseCase('generation stream', async () => {
     assert.equal(getMessage(mid)!.status, 'done');
     assert.equal(getMessage(mid)!.content, 'Hello');
     assert.equal(getMessage(mid)!.reasoning, 'Thought');
-    mock.timers.tick(120_000);
+    jest.advanceTimersByTime(120_000);
     assert(!active.signal.aborted, 'Finalization clears the idle watchdog');
 
     const retryId = message();
     startGeneration(conversation, retryId, undefined, { prompt });
     await flush();
     const stalled = requests.at(-1)!;
-    mock.timers.tick(90_000);
+    jest.advanceTimersByTime(90_000);
     stalled.stream.enqueue(encoder.encode(frame({ content: 'Ha' })));
     await flush();
-    mock.timers.tick(119_999);
+    jest.advanceTimersByTime(119_999);
     assert(!stalled.signal.aborted, 'Content renews the full inactivity window');
-    mock.timers.tick(1);
+    jest.advanceTimersByTime(1);
     await flush();
     assert(stalled.signal.aborted);
     assert.equal(getMessage(retryId)!.status, 'streaming', 'Foreground idle failures are retried');
     assert.equal(mergeLiveBuffers([getMessage(retryId)!])[0]!.content, 'Ha');
-    mock.timers.tick(1000);
+    jest.advanceTimersByTime(1000);
     await flush();
     const retry = requests.at(-1)!;
     assert.notEqual(retry, stalled);
@@ -277,22 +287,22 @@ databaseCase('generation stream', async () => {
 
     // A request that stalls before returning response headers has the same deadline.
     let waitingSignal!: AbortSignal;
-    globalThis.fetch = (_, init) =>
+    globalThis.fetch = ((_: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
       new Promise((_, reject) => {
         waitingSignal = init!.signal!;
         waitingSignal.addEventListener('abort', () => reject(waitingSignal.reason), { once: true });
-      });
+      })) as unknown as typeof fetch;
     const waitingId = message();
     startGeneration(conversation, waitingId, undefined, { prompt, background: true });
-    mock.timers.tick(120_000);
+    jest.advanceTimersByTime(120_000);
     await flush();
     assert(waitingSignal.aborted);
     assert.equal(getMessage(waitingId)!.status, 'error');
     assert.match(getMessage(waitingId)!.genMeta?.error ?? '', /Upstream idle timeout/);
   } finally {
     stopAllGenerations();
-    timers.mock.restore();
-    mock.timers.reset();
+    timers.mockRestore();
+    jest.useRealTimers();
     globalThis.fetch = originalFetch;
   }
 });
@@ -300,7 +310,7 @@ databaseCase('generation stream', async () => {
 databaseCase('generation persistence', async () => {
   const { setImmediate: flush } = await import('node:timers/promises');
 
-  const { mock } = await import('node:test');
+  const { jest } = await import('bun:test');
 
   type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
   const { requireTestIsolation } = await import('../support/isolation.ts');
@@ -340,14 +350,14 @@ databaseCase('generation persistence', async () => {
   };
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
+  globalThis.fetch = (async () =>
     new Response(
       new ReadableStream({
         start(controller) {
           streams.push(controller);
         },
       }),
-    );
+    )) as unknown as typeof fetch;
   const encoder = new TextEncoder();
   function append(
     stream: ReadableStreamDefaultController<Uint8Array>,
@@ -378,10 +388,10 @@ databaseCase('generation persistence', async () => {
     const mid = message();
     const stream = begin(mid);
     append(stream, ' First', ' Think');
-    mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
-    mock.timers.tick(650); // A reintroduced periodic flush would fire here.
+    jest.useFakeTimers();
+    jest.advanceTimersByTime(650); // A reintroduced periodic flush would fire here.
     await flush();
-    mock.timers.reset();
+    jest.useRealTimers();
     assert.equal(getMessage(mid)!.content, '');
     assert.equal(getMessage(mid)!.reasoning, null);
     assert.equal(getMessage(mid)!.model, null);
@@ -459,12 +469,12 @@ databaseCase('generation persistence', async () => {
   } finally {
     stopAllGenerations();
     globalThis.fetch = originalFetch;
-    mock.timers.reset();
+    jest.useRealTimers();
   }
 });
 
 databaseCase('prompt reasoning', async () => {
-  const { mock } = await import('node:test');
+  const { jest } = await import('bun:test');
 
   const { setImmediate: flush } = await import('node:timers/promises');
 
@@ -492,7 +502,7 @@ databaseCase('prompt reasoning', async () => {
   }
   try {
     for (const field of ['reasoning_content', 'reasoning']) {
-      globalThis.fetch = async () =>
+      globalThis.fetch = (async () =>
         new Response(
           [
             upstream({ [field]: 'Check the lighting. ' }),
@@ -502,7 +512,7 @@ databaseCase('prompt reasoning', async () => {
             upstream({}, 'stop'),
             'data: [DONE]\n\n',
           ].join(''),
-        );
+        )) as unknown as typeof fetch;
       const events: object[] = [];
       const prompt = await streamEndpointCompletion(
         endpoint,
@@ -525,10 +535,10 @@ databaseCase('prompt reasoning', async () => {
         { d: 'Photo: ' },
         { d: 'A bright scene' },
       ]);
-      globalThis.fetch = async () =>
+      globalThis.fetch = (async () =>
         new Response(
           [...events, { done: true }].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
-        );
+        )) as unknown as typeof fetch;
       let displayedReasoning = '';
       let visiblePrompt = '';
       const output = await streamTextCompletion(
@@ -549,8 +559,10 @@ databaseCase('prompt reasoning', async () => {
       assert.equal(visiblePrompt, prompt);
       assert.equal(displayedReasoning, '');
     }
-    globalThis.fetch = async () =>
-      new Response(upstream({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n');
+    globalThis.fetch = (async () =>
+      new Response(
+        upstream({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n',
+      )) as unknown as typeof fetch;
     let onlyReasoning = '';
     await assert.rejects(
       streamEndpointCompletion(
@@ -564,7 +576,8 @@ databaseCase('prompt reasoning', async () => {
       /only reasoning/,
     );
     assert.equal(onlyReasoning, 'No final prompt');
-    globalThis.fetch = async () => new Response('data: {"r":"Still thinking"}\n\n');
+    globalThis.fetch = (async () =>
+      new Response('data: {"r":"Still thinking"}\n\n')) as unknown as typeof fetch;
     await assert.rejects(
       streamTextCompletion('/prompt', {}, () => assert.fail('No content arrived'), 'test prompt'),
       /ended before completion/,

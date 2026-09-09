@@ -235,7 +235,7 @@ export const api = {
     return request<MediaJob[]>('GET', `/api/media/jobs${query}`);
   },
   activeMediaJobs: () => request<MediaJob[]>('GET', '/api/media/jobs/active'),
-  mediaJob: (id: string) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
+  mediaJob: (id: number) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
   createMediaJob: (draft: MediaJobDraft, requestKey: string) =>
     request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
   mediaAssetInputs: (assetId: number) =>
@@ -262,7 +262,7 @@ export const api = {
       ...options,
       expectedRevision: job.revision,
     }),
-  mediaVariations: (jobId: string) =>
+  mediaVariations: (jobId: number) =>
     request<MediaJob[]>('GET', `/api/media/jobs/${jobId}/variations`),
   selectMediaVariation: (job: MediaJob, assetId: number, expectedDraftRevision: number) =>
     request<MediaJob>('POST', `/api/media/jobs/${job.id}/select`, {

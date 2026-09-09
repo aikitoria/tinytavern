@@ -1,48 +1,65 @@
 name: tinytavern
 
-# Read-only overlays protect repository metadata and deployment files during hot reload.
-x-dev-volumes: &dev-volumes
-  volumes:
-    - .:/app
-    - ./.git:/app/.git:ro
-    - ./Dockerfile:/app/Dockerfile:ro
-    - ./docker-compose.yml:/app/docker-compose.yml:ro
-    - ./docker-compose.dev.yml:/app/docker-compose.dev.yml:ro
+# Dependencies belong to the image. Source mounts cannot modify the checkout.
+x-source-volumes: &source-volumes
+  - ./package.json:/app/package.json:ro
+  - ./bunfig.toml:/app/bunfig.toml:ro
+  - ./shared/src:/app/shared/src:ro
+  - ./shared/package.json:/app/shared/package.json:ro
+  - ./server/src:/app/server/src:ro
+  - ./server/package.json:/app/server/package.json:ro
+  - ./client/src:/app/client/src:ro
+  - ./client/public:/app/client/public:ro
+  - ./client/index.html:/app/client/index.html:ro
+  - ./client/vite.config.ts:/app/client/vite.config.ts:ro
+  - ./client/package.json:/app/client/package.json:ro
+  - ./client/tsconfig.json:/app/client/tsconfig.json:ro
+  - ./scripts:/app/scripts:ro
+  - ./tests:/app/tests:ro
 
 services:
   server:
-    image: tinytavern-server-dev
+    image: tinytavern-tools-bun
     build:
       context: .
       dockerfile: Dockerfile
-      target: server-base
+      target: tools
     working_dir: /app
-    user: "1000:1000"
-    # --watch-path is more reliable than module-graph watching on bind mounts
-    command: node --watch-path=server/src --watch-path=shared/src server/src/index.ts
+    user: '1000:1000'
+    init: true
+    command: bun scripts/watch-server.ts
     environment:
-      DATA_DIR: /app/data-dev
-      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
-      MEDIA_SIGNING_KEY_FILE: /app/.secrets/dev/media.key
-      CADDY_PROXY_KEY_FILE: /app/.secrets/dev/proxy.key
+      DATA_DIR: /data
+      TINYTAVERN_IP_ALLOWLIST: '${TINYTAVERN_IP_ALLOWLIST-}'
+      MEDIA_SIGNING_KEY_FILE: /secrets/media.key
+      CADDY_PROXY_KEY_FILE: /secrets/proxy.key
       SESSION_COOKIE_NAME: tinytavern_dev_session
-    <<: *dev-volumes
+    volumes:
+      - ./package.json:/app/package.json:ro
+      - ./bunfig.toml:/app/bunfig.toml:ro
+      - ./shared/src:/app/shared/src:ro
+      - ./shared/package.json:/app/shared/package.json:ro
+      - ./server/src:/app/server/src:ro
+      - ./server/package.json:/app/server/package.json:ro
+      - ./scripts:/app/scripts:ro
+      - ./data-dev:/data
+      - ./.secrets/dev:/secrets:ro
     # Separate network for ComfyUI; optionally reuse an external network via .env.
     networks:
       - default
       - comfy
 
   client:
-    image: node:26-alpine
+    image: tinytavern-tools-bun
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
     working_dir: /app
-    user: "1000:1000"
-    command: npm run dev -w client
-    volumes:
-      - .:/app
-      - ./.git:/app/.git:ro
-      - ./Dockerfile:/app/Dockerfile:ro
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
-      - ./docker-compose.dev.yml:/app/docker-compose.dev.yml:ro
+    user: '1000:1000'
+    init: true
+    command: bun --bun run --cwd client dev
+    volumes: *source-volumes
     depends_on:
       - server
 
@@ -51,13 +68,13 @@ services:
       context: .
       dockerfile: caddy/Dockerfile
       target: caddy-dev
-    user: "1000:1000"
+    user: '1000:1000'
     ports:
-      - "5173:5173/tcp"
-      - "5173:5173/udp"
+      - '5173:5173/tcp'
+      - '5173:5173/udp'
     environment:
-      PUBLIC_PORT: "5173"
-      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
+      PUBLIC_PORT: '5173'
+      TINYTAVERN_IP_ALLOWLIST: '${TINYTAVERN_IP_ALLOWLIST-}'
     volumes:
       - ./certs:/certs:ro
       - ./.secrets/dev:/secrets:ro
@@ -72,14 +89,14 @@ services:
 
   # Mock endpoint: http://mock:9800/v1 from the server. See AGENTS.md for isolated tests.
   mock:
-    profiles: ["mock"]
-    image: node:26-alpine
+    profiles: ['mock']
+    image: tinytavern-tools-bun
     working_dir: /app
-    user: "1000:1000"
-    command: node tests/mocks/server.ts
-    <<: *dev-volumes
+    user: '1000:1000'
+    command: bun tests/mocks/server.ts
+    volumes: *source-volumes
     ports:
-      - "9800:9800"
+      - '9800:9800'
 
 networks:
   comfy:

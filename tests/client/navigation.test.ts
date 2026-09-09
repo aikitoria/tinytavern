@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('page location', async () => {
   const modulePath = '../../client/src/state/pageLocation.ts';
@@ -16,10 +16,10 @@ test('page location', async () => {
     '#70/map',
     '#70/trace',
     '#70/map+/gallery/123',
-    '#70+/gallery/123+/jobs+/media/job/job-123',
+    '#70+/gallery/123+/jobs+/media/job/123',
     '#71+/media/create-image+/jobs',
     '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
-    '#71+/media/job/job-a',
+    '#71+/media/job/1',
     '#71+/media/edit-image',
     '#71+/media/describe-image',
     '#70+/gallery/123?q=night+sky%2B%2F&sort=oldest+/jobs',
@@ -32,12 +32,12 @@ test('page location', async () => {
     '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
   );
   for (const old of [
-    '#71+/gallery/35?sort=newest+/media/create-video/e886b56a-cd06-490f-9c22-5dcecbf75623?mode=first-frame',
-    '#71+/gallery/35?sort=newest+/media/create-video/e886b56a-cd06-490f-9c22-5dcecbf75623?mode=references&context=71',
+    '#71+/gallery/35?sort=newest+/media/create-video/8?mode=first-frame',
+    '#71+/gallery/35?sort=newest+/media/create-video/8?mode=references&context=71',
   ]) {
     assert.equal(
       formatPageLocation(parsePageLocation(old)),
-      '#71+/gallery/35?sort=newest+/media/job/e886b56a-cd06-490f-9c22-5dcecbf75623',
+      '#71+/gallery/35?sort=newest+/media/job/8',
     );
   }
   for (const hash of [
@@ -52,7 +52,7 @@ test('page location', async () => {
   }
   const legacyJobs = '#71/media/image?jobs=1&return=%2371%2Fgallery%2F35';
   assert.equal(formatPageLocation(parsePageLocation(legacyJobs)), '#71+/gallery/35+/jobs');
-  const media = parsePageLocation('#70/media/video/job-123?return=%2370%2Fgallery%2F123');
+  const media = parsePageLocation('#70/media/video/123?return=%2370%2Fgallery%2F123');
   assert.equal(media.chatId, 70);
   assert.equal(
     media.media.contextConversationId,
@@ -61,7 +61,7 @@ test('page location', async () => {
   );
   assert.equal(pageStack(media)[1].modal, 'gallery');
   assert.equal(pageStack(media)[1].galleryId, 123);
-  assert.equal(formatPageLocation(media), '#70+/gallery/123+/media/job/job-123');
+  assert.equal(formatPageLocation(media), '#70+/gallery/123+/media/job/123');
   assert.equal(
     parsePageLocation('#+/gallery').chatId,
     null,
@@ -112,9 +112,11 @@ test('page location', async () => {
     returnToPageLocation,
   } = await import(modulePath);
   let rendered = '#70';
+  let restoreDialogs: ((page: unknown) => void) | undefined;
   installPageNavigation((page: unknown) => {
     applyPageLocation(page, () => {
       rendered = formatPageLocation(page);
+      restoreDialogs?.(page);
     });
   });
   function settle() {
@@ -206,9 +208,9 @@ test('page location', async () => {
   assert.equal(fallback, true, 'A reloaded link can close without an earlier parent history entry');
 
   // Browser jumps guard every removed pane, but never editors retained underneath Jobs.
-  const draftHash = '#70+/gallery/123+/media/job/draft-a';
+  const draftHash = '#70+/gallery/123+/media/job/3';
   const jobsHash = draftHash + '+/jobs';
-  const otherHash = jobsHash + '+/media/job/draft-b';
+  const otherHash = jobsHash + '+/media/job/4';
   open(draftHash);
   open(jobsHash);
   open(otherHash);
@@ -247,21 +249,32 @@ test('page location', async () => {
   removeJobGuard();
   removeDraftGuard();
 
-  const repeated = '#71+/gallery/35?sort=newest+/media/job/job-a+/jobs+/media/job/job-a';
+  const repeated = '#71+/gallery/35?sort=newest+/media/job/1+/jobs+/media/job/1';
   assert.equal(
     formatPageLocation(parsePageLocation(repeated)),
-    '#71+/gallery/35?sort=newest+/media/job/job-a',
+    '#71+/gallery/35?sort=newest+/media/job/1',
   );
   assert.equal(
-    formatPageLocation(parsePageLocation(repeated + '+/jobs+/media/job/job-b')),
-    '#71+/gallery/35?sort=newest+/media/job/job-a+/jobs+/media/job/job-b',
+    formatPageLocation(parsePageLocation(repeated + '+/jobs+/media/job/2')),
+    '#71+/gallery/35?sort=newest+/media/job/1+/jobs+/media/job/2',
     'Unwinding repeated job panes keeps subsequent different panes',
+  );
+  const repeatedJobs = '#71+/gallery?sort=newest+/jobs+/media/job/9+/jobs';
+  assert.equal(
+    formatPageLocation(parsePageLocation(repeatedJobs)),
+    '#71+/gallery?sort=newest+/jobs',
+    'Previously generated duplicate Jobs links unwind to the original list',
+  );
+  assert.equal(
+    formatPageLocation(parsePageLocation(repeatedJobs + '+/media/job/2')),
+    '#71+/gallery?sort=newest+/jobs+/media/job/2',
+    'Normalizing Jobs retains subsequent navigation',
   );
 
   const { navigatePageWithGuards } = await import(modulePath);
-  open('#70+/gallery/123+/media/job/job-a');
-  open('#70+/gallery/123+/media/job/job-a+/jobs');
-  const targetJob = parsePageLocation('#70+/gallery/123+/media/job/job-a');
+  open('#70+/gallery/123+/media/job/1');
+  open('#70+/gallery/123+/media/job/1+/jobs');
+  const targetJob = parsePageLocation('#70+/gallery/123+/media/job/1');
   let approveChild: (() => void) | undefined;
   const unguardRetained = guardPageNavigation(
     () => assert.fail('The retained editor must not be saved or discarded'),
@@ -276,26 +289,26 @@ test('page location', async () => {
     returnToPageLocation(targetJob, () => assert.fail('Reuse the existing history entry'));
   });
   assert.equal(reopened, false, 'Reopening waits for any removed child editor guard');
-  assert.equal(rendered, '#70+/gallery/123+/media/job/job-a+/jobs');
+  assert.equal(rendered, '#70+/gallery/123+/media/job/1+/jobs');
   approveChild!();
   settle();
   assert.equal(reopened, true);
-  assert.equal(rendered, '#70+/gallery/123+/media/job/job-a');
+  assert.equal(rendered, '#70+/gallery/123+/media/job/1');
   unguardChild();
   unguardRetained();
 
   // Saving a removed child can replace its job ID without cancelling the intended return.
   const stackModule = '../../client/src/state/dialogStack.ts';
   const { dialogStack } = await import(stackModule);
-  const child = parsePageLocation('#70+/media/job/job-a+/jobs+/media/job/job-b');
+  const child = parsePageLocation('#70+/media/job/1+/jobs+/media/job/2');
   open(formatPageLocation(child));
   dialogStack.restore(child);
   const stopSaveGuard = guardPageNavigation((action: () => void) => {
-    writePageLocation({ ...child, media: { ...child.media, jobId: 'saved-variation' } });
+    writePageLocation({ ...child, media: { ...child.media, jobId: 5 } });
     action();
   });
   let returnedAfterSave = false;
-  navigatePageWithGuards(parsePageLocation('#70+/media/job/job-a'), () => {
+  navigatePageWithGuards(parsePageLocation('#70+/media/job/1'), () => {
     returnedAfterSave = true;
   });
   assert(
@@ -303,6 +316,53 @@ test('page location', async () => {
     'Saving a child variation must still finish the return to the existing pane',
   );
   stopSaveGuard();
+  dialogStack.restore(parsePageLocation('#70'));
+
+  // Exercise the actual Jobs button: reuse the mounted list and its history entry.
+  const navigationModule = '../../client/src/media/navigation.ts';
+  Object.defineProperty(globalThis, 'matchMedia', {
+    configurable: true,
+    value: () => Object.assign(new EventTarget(), { matches: false }),
+  });
+  const { openMediaJobs, openMediaTool } = await import(navigationModule);
+  const galleryPage = parsePageLocation('#+/gallery?sort=newest');
+  applyPageLocation(galleryPage, () => dialogStack.restore(galleryPage));
+  restoreDialogs = (page) => dialogStack.restore(page);
+  openMediaJobs();
+  const originalJobs = dialogStack.top()!;
+  const originalJobsCursor = cursor;
+  const originalJobsHash = location.hash;
+  openMediaJobs();
+  assert.equal(dialogStack.top(), originalJobs, 'Opening the active Jobs pane is a no-op');
+  assert.equal(cursor, originalJobsCursor);
+  openMediaTool('image', { jobId: 6 });
+  const editor = dialogStack.top()!;
+  const editorHash = location.hash;
+  let approveJobs: (() => void) | undefined;
+  const removeEditorGuard = guardPageNavigation(
+    (action: () => void) => {
+      approveJobs = action;
+    },
+    (target: unknown) => !dialogStack.retains(editor, target),
+  );
+  openMediaJobs();
+  assert(approveJobs, 'Returning to Jobs consults the removed editor guard');
+  approveJobs = undefined; // Cancel retains the editor and original list.
+  assert.equal(dialogStack.top(), editor);
+  assert.equal(location.hash, editorHash);
+  assert.equal(dialogStack.frames().length, 3);
+  openMediaJobs();
+  approveJobs!();
+  settle();
+  assert.equal(dialogStack.top(), originalJobs, 'List identity preserves filters and scroll');
+  assert.equal(location.hash, originalJobsHash);
+  assert.equal(cursor, originalJobsCursor, 'Reuse the existing history entry');
+  removeEditorGuard();
+  history.go(1);
+  settle();
+  assert.equal(location.hash, editorHash, 'Forward can reopen the editor after returning to Jobs');
+  assert.equal(dialogStack.frames()[1], originalJobs);
+  restoreDialogs = undefined;
   dialogStack.restore(parsePageLocation('#70'));
 });
 
@@ -355,7 +415,7 @@ test('dialog stack', async () => {
   const draftJobs = parsePageLocation(formatPageLocation(draft) + '+/jobs');
   stack.push(draftJobs, draft);
   const jobsFrame = stack.top()!;
-  const other = parsePageLocation(formatPageLocation(draftJobs) + '+/media/job/job-b');
+  const other = parsePageLocation(formatPageLocation(draftJobs) + '+/media/job/2');
   stack.push(other, draftJobs);
   assert.equal(stack.frames().length, 4);
   assert.equal(stack.retains(draftFrame, draftJobs), true);
@@ -371,12 +431,12 @@ test('dialog stack', async () => {
   // URL writes update only the top frame, keeping its ancestors and component identity.
   const updated = stack.remember({
     ...paneLocation(draft),
-    media: { ...draft.media!, jobId: 'job-a' },
+    media: { ...draft.media!, jobId: 1 },
   });
   assert.equal(stack.top(), draftFrame);
-  assert.equal(formatPageLocation(updated), formatPageLocation(gallery) + '+/media/job/job-a');
+  assert.equal(formatPageLocation(updated), formatPageLocation(gallery) + '+/media/job/1');
   assert.equal(localState.get(stack.top()!), draftEdits);
-  const snapshot = formatPageLocation(updated) + '+/jobs+/media/job/job-b';
+  const snapshot = formatPageLocation(updated) + '+/jobs+/media/job/2';
   const restored = createDialogStack();
   restored.restore(parsePageLocation(snapshot));
   assert.deepEqual(
@@ -385,9 +445,9 @@ test('dialog stack', async () => {
   );
   assert.equal(restored.frames()[0]!.page.galleryId, 123);
   assert.equal(restored.frames()[0]!.page.query, 'night sky');
-  assert.equal(restored.frames()[1]!.media!.jobId, 'job-a');
+  assert.equal(restored.frames()[1]!.media!.jobId, 1);
   assert.equal(restored.frames()[2]!.media, undefined, 'Restored Jobs has no editor session');
-  assert.equal(restored.frames()[3]!.media!.jobId, 'job-b');
+  assert.equal(restored.frames()[3]!.media!.jobId, 2);
   assert.equal(
     restored.frames()[1]!.media!.prompt,
     '',
@@ -476,7 +536,7 @@ test('dialog stack', async () => {
     '#71+/gallery/35+/media/create-video',
     '#71+/gallery/35+/media/create-image',
     '#71+/gallery/35+/jobs',
-    '#71+/gallery/35+/media/job/saved-job',
+    '#71+/gallery/35+/media/job/10',
     '#71+/gallery/999+/media/create-video?mode=first-frame',
     '#71+/gallery/36+/media/create-video?mode=first-frame',
     '#71+/media/create-video?mode=first-frame',
@@ -484,11 +544,11 @@ test('dialog stack', async () => {
     assert.equal(restoreMediaInputs(parsePageLocation(hash), galleryItems, {}), undefined, hash);
   }
   const sourceJobs = {
-    old: { outputs: [otherImage], draft: { id: 'review', selectedAssetId: 12 } },
-    current: { outputs: [], draft: { id: 'review', selectedAssetId: 12 } },
+    6: { outputs: [otherImage], draft: { id: 4, selectedAssetId: 12 } },
+    7: { outputs: [], draft: { id: 4, selectedAssetId: 12 } },
   };
   const nestedSource = parsePageLocation(
-    '#71+/gallery/35+/media/job/current+/jobs+/media/create-video?mode=first-frame',
+    '#71+/gallery/35+/media/job/7+/jobs+/media/create-video?mode=first-frame',
   );
   assert.equal(
     restoreMediaInputs(nestedSource, galleryItems, sourceJobs).inputs[0].assetId,
@@ -504,27 +564,23 @@ test('dialog stack', async () => {
   // The route follows newly created job IDs; the immutable launch session may still have no ID.
   const existingEditor = stack.top()!;
   assert.equal(existingEditor.media.jobId, null);
-  assert.equal(existingEditor.page.media.jobId, 'job-a');
+  assert.equal(existingEditor.page.media.jobId, 1);
   const reviewJobs = {
-    'job-a': { draft: { id: 'review-a' } },
-    'job-a-variation': { draft: { id: 'review-a' } },
-    'job-b': { draft: { id: 'review-b' } },
+    1: { draft: { id: 1 } },
+    11: { draft: { id: 1 } },
+    2: { draft: { id: 2 } },
   };
+  assert.equal(stack.findJob(1, {}), existingEditor, 'Job identity works before history DTOs load');
   assert.equal(
-    stack.findJob('job-a', {}),
-    existingEditor,
-    'Job identity works before history DTOs load',
-  );
-  assert.equal(
-    stack.findJob('job-a-variation', reviewJobs),
+    stack.findJob(11, reviewJobs),
     existingEditor,
     'A grouped variation returns to its existing editor',
   );
-  assert.equal(stack.findJob('job-b', reviewJobs), undefined, 'Different jobs open independently');
+  assert.equal(stack.findJob(2, reviewJobs), undefined, 'Different jobs open independently');
   const originalPage = existingEditor.page;
   const listPage = parsePageLocation(formatPageLocation(originalPage) + '+/jobs');
   stack.push(listPage, originalPage);
-  const target = stack.findJob('job-a', reviewJobs)!;
+  const target = stack.findJob(1, reviewJobs)!;
   stack.restore(target.page);
   assert.equal(stack.top(), existingEditor);
   assert.equal(

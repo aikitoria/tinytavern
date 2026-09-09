@@ -21,7 +21,7 @@ import { tickMediaWorker } from '../mediaWorker.ts';
 import { getMediaAssetInputs, getMediaAssetResultDetails } from '../mediaRecipes.ts';
 import { publicMediaAsset } from '../mediaUrls.ts';
 
-function jobForMutation(id: string, body: Record<string, unknown>) {
+function jobForMutation(id: number, body: Record<string, unknown>) {
   if (!Number.isSafeInteger(body.expectedRevision)) {
     throw new HttpError(400, 'expectedRevision is required');
   }
@@ -38,8 +38,8 @@ route.get('/api/media/jobs', ({ req }) => {
   } else {
     const separator = before.indexOf(':');
     const timestamp = Number(before.slice(0, separator));
-    const id = before.slice(separator + 1);
-    if (separator < 1 || !Number.isInteger(timestamp) || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) {
+    const id = Number(before.slice(separator + 1));
+    if (separator < 1 || !Number.isSafeInteger(timestamp) || !Number.isSafeInteger(id) || id <= 0) {
       throw new HttpError(400, 'Invalid media history cursor');
     }
     rows = stmt(`
@@ -59,7 +59,9 @@ route.get('/api/media/jobs/active', () => {
   return rows.map(mediaJobDto);
 });
 
-route.get('/api/media/jobs/:id', ({ params }) => mediaJobDto(requireMediaJob(params.id!)));
+route.get('/api/media/jobs/:id', ({ params }) =>
+  mediaJobDto(requireMediaJob(positiveId(params.id, 'job ID'))),
+);
 
 route.post('/api/media/jobs', ({ body }) => createMediaJob(objectBody(body)));
 
@@ -80,13 +82,17 @@ route.get('/api/media/assets/:id/details', ({ params }) =>
 
 route.patch('/api/media/jobs/:id', ({ params, body }) => {
   const values = objectBody(body);
-  return editMediaJob(jobForMutation(params.id!, values), values);
+  return editMediaJob(jobForMutation(positiveId(params.id, 'job ID'), values), values);
 });
 
 for (const action of ['prepare', 'render'] as const) {
   route.post(`/api/media/jobs/:id/${action}`, ({ params, body }) => {
     const values = objectBody(body);
-    const result = startMediaJob(jobForMutation(params.id!, values), values, action === 'prepare');
+    const result = startMediaJob(
+      jobForMutation(positiveId(params.id, 'job ID'), values),
+      values,
+      action === 'prepare',
+    );
     queueMicrotask(tickMediaWorker);
     return result;
   });
@@ -94,20 +100,22 @@ for (const action of ['prepare', 'render'] as const) {
 
 route.post('/api/media/jobs/:id/cancel', ({ params, body }) => {
   const values = objectBody(body);
-  const result = cancelMediaJob(jobForMutation(params.id!, values));
+  const result = cancelMediaJob(jobForMutation(positiveId(params.id, 'job ID'), values));
   queueMicrotask(tickMediaWorker);
   return result;
 });
 
 route.post('/api/media/jobs/:id/retry-retrieval', ({ params, body }) => {
-  const result = retryMediaRetrieval(jobForMutation(params.id!, objectBody(body)));
+  const result = retryMediaRetrieval(
+    jobForMutation(positiveId(params.id, 'job ID'), objectBody(body)),
+  );
   queueMicrotask(tickMediaWorker);
   return result;
 });
 
 route.post('/api/media/jobs/:id/rerun', ({ params, body }) => {
   const values = objectBody(body);
-  const source = jobForMutation(params.id!, values);
+  const source = jobForMutation(positiveId(params.id, 'job ID'), values);
   return createMediaJob(values, source);
 });
 
@@ -115,18 +123,18 @@ route.del('/api/media/jobs/:id', ({ params, req }) => {
   const query = new URL(req.url!, 'http://localhost').searchParams;
   const revision = query.get('expectedRevision');
   const values = { expectedRevision: revision === null ? undefined : Number(revision) };
-  deleteMediaJob(jobForMutation(params.id!, values));
+  deleteMediaJob(jobForMutation(positiveId(params.id, 'job ID'), values));
   return { ok: true };
 });
 
 route.get('/api/media/jobs/:id/variations', ({ params }) =>
-  mediaDraftJobs(requireMediaJob(params.id!)).map(mediaJobDto),
+  mediaDraftJobs(requireMediaJob(positiveId(params.id, 'job ID'))).map(mediaJobDto),
 );
 
 for (const action of ['select', 'accept', 'discard'] as const) {
   route.post(`/api/media/jobs/:id/${action}`, ({ params, body }) => {
     const values = objectBody(body);
-    const row = jobForMutation(params.id!, values);
+    const row = jobForMutation(positiveId(params.id, 'job ID'), values);
     if (action === 'select') return selectMediaVariation(row, values);
     if (action === 'accept') return acceptMediaVariation(row, values);
     discardMediaDraft(row, values);

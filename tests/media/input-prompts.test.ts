@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media input prompts', async () => {
-  const { randomUUID } = await import('node:crypto');
+  const { newRequestId } = await import('@tinytavern/shared');
 
   type MediaJob = import('@tinytavern/shared').MediaJob;
   type MediaOperation = import('@tinytavern/shared').MediaOperation;
@@ -103,7 +103,7 @@ test('media input prompts', async () => {
   });
   function image(name: string, prompt: string | null) {
     const path = saveImage('.png', makePlaceholderPng());
-    let recipeId: string | null = null;
+    let recipeId: number | null = null;
     if (prompt !== null) {
       recipeId = saveMediaRecipe(
         { comfyUrl: 'http://unused.invalid', workflow: imageWorkflow, timeoutSeconds: 60 },
@@ -146,7 +146,7 @@ test('media input prompts', async () => {
     return context;
   }
   const edit = createMediaJob({
-    requestKey: randomUUID(),
+    requestKey: newRequestId(),
     operation: 'image-edit',
     workflowId: 'image-edit',
     inputs: [
@@ -182,7 +182,7 @@ test('media input prompts', async () => {
   const output = image('output', null);
   stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipeId, output.id);
   deleteMediaJob(requireMediaJob(edit.id));
-  const rerun = createMediaJobFromAsset(output.id, { requestKey: randomUUID() });
+  const rerun = createMediaJobFromAsset(output.id, { requestKey: newRequestId() });
   assert.deepEqual(
     rerun.inputs,
     unchanged.inputs,
@@ -201,7 +201,7 @@ test('media input prompts', async () => {
   );
   assert.equal(changed.inputs[1]!.prompt, '');
   const newSelection = createMediaJob({
-    requestKey: randomUUID(),
+    requestKey: newRequestId(),
     operation: 'video-first',
     workflowId: 'video-first',
     inputs: [{ slot: 'first_frame', assetId: first.id }],
@@ -218,7 +218,7 @@ test('media input prompts', async () => {
     upload.galleryId,
   );
   const describedUpload = createMediaJob({
-    requestKey: randomUUID(),
+    requestKey: newRequestId(),
     operation: 'video-first',
     workflowId: 'video-first',
     inputs: [{ slot: 'first_frame', assetId: upload.id }],
@@ -230,7 +230,7 @@ test('media input prompts', async () => {
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', upload.galleryId);
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', first.galleryId);
   const cleared = createMediaJob({
-    requestKey: randomUUID(),
+    requestKey: newRequestId(),
     operation: 'video-first',
     workflowId: 'video-first',
     inputs: [{ slot: 'first_frame', assetId: first.id }],
@@ -256,7 +256,7 @@ test('media input prompts', async () => {
               { slot: 'reference3', assetId: blank.id },
             ];
       const job = createMediaJob({
-        requestKey: randomUUID(),
+        requestKey: newRequestId(),
         operation,
         workflowId: operation,
         contextConversationId,

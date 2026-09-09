@@ -1,8 +1,6 @@
-// E2E mock for OpenAI completions and ComfyUI rendering, progress, and output cleanup.
-import http from 'node:http';
+// Manual development mock for OpenAI completions and ComfyUI rendering, progress, and output cleanup.
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { WebSocketServer } from 'ws';
+import { previewJpeg as MOCK_JPEG } from '../support/videoPreview.ts';
 
 const PORT = Number(process.env.PORT ?? 9800);
 
@@ -18,7 +16,6 @@ const MOCK_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
-const MOCK_JPEG = readFileSync(new URL('../fixtures/image.jpg', import.meta.url));
 const MOCK_WEBP = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
 type ComfyOutputKind = 'png' | 'jpeg' | 'webp' | 'html' | 'svg' | 'polyglot';
 const COMFY_OUTPUTS: Record<ComfyOutputKind, { filename: string; type: string; data: Buffer }> = {
@@ -79,121 +76,145 @@ let nextComfyOutput: ComfyOutputKind = 'png';
 const comfyDeleted: { filename: string; subfolder: string; type: string }[] = [];
 const comfyCancelled: string[] = [];
 
-const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/control/comfy-cancelled') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ids: comfyCancelled }));
-    return;
-  }
-  if (req.method === 'GET' && (req.url === '/v1/models' || req.url === '/alt/v1/models')) {
-    lastModelAuthorization = req.headers.authorization ?? null;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ data: [{ id: 'mock-large' }, { id: 'mock-small' }] }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/fail-next')) {
-    const count = Number(new URL(req.url, 'http://mock').searchParams.get('count'));
-    failuresRemaining = Number.isSafeInteger(count) && count > 0 ? count : 0;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ failuresRemaining }));
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/control/terminal-without-newline') {
-    terminalWithoutNewline = true;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ terminalWithoutNewline }));
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/control/reasoning-only') {
-    reasoningOnly = true;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ reasoningOnly }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/token-delay-next')) {
-    const ms = Number(new URL(req.url, 'http://mock').searchParams.get('ms'));
-    if (!Number.isSafeInteger(ms) || ms < 1 || ms > 1000) {
-      res.writeHead(400).end();
+const clients = new Set<import('bun').ServerWebSocket<undefined>>();
+const server = Bun.serve({
+  port: PORT,
+  idleTimeout: 0,
+  websocket: {
+    open(socket) {
+      clients.add(socket);
+    },
+    close(socket) {
+      clients.delete(socket);
+    },
+    message() {},
+  },
+  async fetch(req, server) {
+    if (
+      req.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
+      server.upgrade(req, { data: undefined })
+    )
       return;
+    const parsedUrl = new URL(req.url);
+    const path = parsedUrl.pathname + parsedUrl.search;
+    let status = 200,
+      mime = 'application/json';
+    const reply = (body?: string | Buffer) =>
+      new Response(body ?? null, { status, headers: { 'content-type': mime } });
+    if (req.method === 'GET' && path === '/control/comfy-cancelled') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ ids: comfyCancelled }));
     }
-    nextTokenMs = ms;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ nextTokenMs }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/completion-next')) {
-    nextCompletionContent = new URL(req.url, 'http://mock').searchParams.get('content');
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/die-after-content')) {
-    dieAfterContent = new URL(req.url, 'http://mock').searchParams.get('content');
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ dieAfterContent }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/last-workflow') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ workflow: lastComfyWorkflow, previewMethod: lastComfyPreviewMethod }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/last-model-authorization') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ authorization: lastModelAuthorization }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/last-completion') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ completion: lastCompletion }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/completions') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ completions: completionLog }));
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/control/clear-completions') {
-    completionLog.length = 0;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ cleared: true }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/comfy-deleted') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ deleted: comfyDeleted }));
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/control/comfy-history-count') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ count: comfyHistoryRequests }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/comfy-fail-next')) {
-    const url = new URL(req.url, 'http://mock');
-    const count = Number(url.searchParams.get('count') ?? '1');
-    const n = Number.isSafeInteger(count) && count > 0 ? count : 0;
-    if (url.searchParams.get('stage') === 'render') comfyFailRenders = n;
-    else comfyFailPrompts = n;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ comfyFailPrompts, comfyFailRenders }));
-    return;
-  }
-  if (req.method === 'POST' && req.url?.startsWith('/control/comfy-output-next')) {
-    const kind = new URL(req.url, 'http://mock').searchParams.get('kind') as ComfyOutputKind;
-    if (!Object.hasOwn(COMFY_OUTPUTS, kind)) {
-      res.writeHead(400).end('unknown output kind');
-      return;
+    if (req.method === 'GET' && (path === '/v1/models' || path === '/alt/v1/models')) {
+      lastModelAuthorization = req.headers.get('authorization') ?? null;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ data: [{ id: 'mock-large' }, { id: 'mock-small' }] }));
     }
-    nextComfyOutput = kind;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ nextComfyOutput }));
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/prompt') {
-    let body = '';
-    req.on('data', (chunk) => (body += chunk));
-    req.on('end', () => {
+    if (req.method === 'POST' && path?.startsWith('/control/fail-next')) {
+      const count = Number(new URL(path, 'http://mock').searchParams.get('count'));
+      failuresRemaining = Number.isSafeInteger(count) && count > 0 ? count : 0;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ failuresRemaining }));
+    }
+    if (req.method === 'POST' && path === '/control/terminal-without-newline') {
+      terminalWithoutNewline = true;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ terminalWithoutNewline }));
+    }
+    if (req.method === 'POST' && path === '/control/reasoning-only') {
+      reasoningOnly = true;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ reasoningOnly }));
+    }
+    if (req.method === 'POST' && path?.startsWith('/control/token-delay-next')) {
+      const ms = Number(new URL(path, 'http://mock').searchParams.get('ms'));
+      if (!Number.isSafeInteger(ms) || ms < 1 || ms > 1000) {
+        status = 400;
+        return reply();
+      }
+      nextTokenMs = ms;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ nextTokenMs }));
+    }
+    if (req.method === 'POST' && path?.startsWith('/control/completion-next')) {
+      nextCompletionContent = new URL(path, 'http://mock').searchParams.get('content');
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ ok: true }));
+    }
+    if (req.method === 'POST' && path?.startsWith('/control/die-after-content')) {
+      dieAfterContent = new URL(path, 'http://mock').searchParams.get('content');
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ dieAfterContent }));
+    }
+    if (req.method === 'GET' && path === '/control/last-workflow') {
+      status = 200;
+      mime = 'application/json';
+      return reply(
+        JSON.stringify({ workflow: lastComfyWorkflow, previewMethod: lastComfyPreviewMethod }),
+      );
+    }
+    if (req.method === 'GET' && path === '/control/last-model-authorization') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ authorization: lastModelAuthorization }));
+    }
+    if (req.method === 'GET' && path === '/control/last-completion') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ completion: lastCompletion }));
+    }
+    if (req.method === 'GET' && path === '/control/completions') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ completions: completionLog }));
+    }
+    if (req.method === 'POST' && path === '/control/clear-completions') {
+      completionLog.length = 0;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ cleared: true }));
+    }
+    if (req.method === 'GET' && path === '/control/comfy-deleted') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ deleted: comfyDeleted }));
+    }
+    if (req.method === 'GET' && path === '/control/comfy-history-count') {
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ count: comfyHistoryRequests }));
+    }
+    if (req.method === 'POST' && path?.startsWith('/control/comfy-fail-next')) {
+      const url = new URL(path, 'http://mock');
+      const count = Number(url.searchParams.get('count') ?? '1');
+      const n = Number.isSafeInteger(count) && count > 0 ? count : 0;
+      if (url.searchParams.get('stage') === 'render') comfyFailRenders = n;
+      else comfyFailPrompts = n;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ comfyFailPrompts, comfyFailRenders }));
+    }
+    if (req.method === 'POST' && path?.startsWith('/control/comfy-output-next')) {
+      const kind = new URL(path, 'http://mock').searchParams.get('kind') as ComfyOutputKind;
+      if (!Object.hasOwn(COMFY_OUTPUTS, kind)) {
+        status = 400;
+        return reply('unknown output kind');
+      }
+      nextComfyOutput = kind;
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ nextComfyOutput }));
+    }
+    if (req.method === 'POST' && path === '/prompt') {
+      const body = await req.text();
       let parsed: {
         prompt: unknown;
         prompt_id?: string;
@@ -203,19 +224,19 @@ const server = http.createServer((req, res) => {
       try {
         parsed = JSON.parse(body) as typeof parsed;
       } catch {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'invalid JSON' }));
-        return;
+        status = 400;
+        mime = 'application/json';
+        return reply(JSON.stringify({ error: 'invalid JSON' }));
       }
       lastComfyWorkflow = parsed.prompt;
       lastComfyPreviewMethod = parsed.extra_data?.preview_method ?? null;
       if (comfyFailPrompts > 0) {
         comfyFailPrompts--;
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'mock comfy submission failure' }));
-        return;
+        status = 400;
+        mime = 'application/json';
+        return reply(JSON.stringify({ error: 'mock comfy submission failure' }));
       }
-      // UUIDs avoid collisions in promptId-derived image filenames.
+      // Match Comfy's required UUID submission-ID protocol.
       const promptId = parsed.prompt_id ?? randomUUID();
       comfyJobs.set(promptId, {
         readyAt: Date.now() + 400,
@@ -225,7 +246,7 @@ const server = http.createServer((req, res) => {
       nextComfyOutput = 'png';
       if (comfyFailRenders > 0) comfyFailRenders--;
       setTimeout(() => {
-        for (const client of wss.clients) {
+        for (const client of clients) {
           client.send(
             JSON.stringify({ type: 'progress', data: { value: 1, max: 2, prompt_id: promptId } }),
           );
@@ -240,105 +261,102 @@ const server = http.createServer((req, res) => {
           );
         }
       }, 100);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ prompt_id: promptId }));
-    });
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/queue') {
-    const queued = [...comfyJobs].filter(([, job]) => Date.now() < job.readyAt);
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }));
-    return;
-  }
-  if (req.method === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(req.url ?? '')) {
-    const id = req.url!.split('/')[3]!;
-    const job = comfyJobs.get(id);
-    const cancelled = Boolean(job && Date.now() < job.readyAt);
-    if (cancelled) {
-      comfyJobs.delete(id);
-      comfyCancelled.push(id);
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ prompt_id: promptId }));
     }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ cancelled }));
-    return;
-  }
-  if (req.method === 'GET' && req.url?.startsWith('/history/')) {
-    comfyHistoryRequests++;
-    const promptId = req.url.slice('/history/'.length);
-    const job = comfyJobs.get(promptId);
-    res.writeHead(200, { 'content-type': 'application/json' });
-    if (job == null || Date.now() < job.readyAt) {
-      res.end('{}');
-      return;
+    if (req.method === 'GET' && path === '/queue') {
+      const queued = [...comfyJobs].filter(([, job]) => Date.now() < job.readyAt);
+      status = 200;
+      mime = 'application/json';
+      return reply(
+        JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }),
+      );
     }
-    if (job.fail) {
-      res.end(
+    if (req.method === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(path ?? '')) {
+      const id = path!.split('/')[3]!;
+      const job = comfyJobs.get(id);
+      const cancelled = Boolean(job && Date.now() < job.readyAt);
+      if (cancelled) {
+        comfyJobs.delete(id);
+        comfyCancelled.push(id);
+      }
+      status = 200;
+      mime = 'application/json';
+      return reply(JSON.stringify({ cancelled }));
+    }
+    if (req.method === 'GET' && path?.startsWith('/history/')) {
+      comfyHistoryRequests++;
+      const promptId = path.slice('/history/'.length);
+      const job = comfyJobs.get(promptId);
+      status = 200;
+      mime = 'application/json';
+      if (job == null || Date.now() < job.readyAt) {
+        return reply('{}');
+      }
+      if (job.fail) {
+        return reply(
+          JSON.stringify({
+            [promptId]: {
+              status: {
+                status_str: 'error',
+                completed: false,
+                messages: [
+                  [
+                    'execution_error',
+                    {
+                      node_type: 'KSampler',
+                      node_id: '3',
+                      exception_type: 'RuntimeError',
+                      exception_message: 'mock render explosion',
+                    },
+                  ],
+                ],
+              },
+              outputs: {},
+            },
+          }),
+        );
+      }
+      return reply(
         JSON.stringify({
           [promptId]: {
-            status: {
-              status_str: 'error',
-              completed: false,
-              messages: [
-                [
-                  'execution_error',
-                  {
-                    node_type: 'KSampler',
-                    node_id: '3',
-                    exception_type: 'RuntimeError',
-                    exception_message: 'mock render explosion',
-                  },
+            status: { status_str: 'success', completed: true },
+            outputs: {
+              '9': {
+                images: [
+                  { filename: COMFY_OUTPUTS[job.output].filename, subfolder: '', type: 'output' },
                 ],
-              ],
+              },
             },
-            outputs: {},
           },
         }),
       );
-      return;
     }
-    res.end(
-      JSON.stringify({
-        [promptId]: {
-          status: { status_str: 'success', completed: true },
-          outputs: {
-            '9': {
-              images: [
-                { filename: COMFY_OUTPUTS[job.output].filename, subfolder: '', type: 'output' },
-              ],
-            },
-          },
-        },
-      }),
-    );
-    return;
-  }
-  if ((req.method === 'GET' || req.method === 'DELETE') && req.url?.startsWith('/view')) {
-    // Match ComfyUI's strict file parameters to test the server's URL construction.
-    const q = new URL(req.url, 'http://mock').searchParams;
-    const output = Object.values(COMFY_OUTPUTS).find(
-      (candidate) => candidate.filename === q.get('filename'),
-    );
-    if (!output || q.get('type') !== 'output' || q.get('subfolder') !== '') {
-      res.writeHead(404).end();
-      return;
+    if ((req.method === 'GET' || req.method === 'DELETE') && path?.startsWith('/view')) {
+      // Match ComfyUI's strict file parameters to test the server's URL construction.
+      const q = new URL(path, 'http://mock').searchParams;
+      const output = Object.values(COMFY_OUTPUTS).find(
+        (candidate) => candidate.filename === q.get('filename'),
+      );
+      if (!output || q.get('type') !== 'output' || q.get('subfolder') !== '') {
+        status = 404;
+        return reply();
+      }
+      if (req.method === 'DELETE') {
+        // Record deletion only: later jobs reuse these output files.
+        comfyDeleted.push({ filename: output.filename, subfolder: '', type: 'output' });
+        status = 200;
+        mime = 'application/json';
+        return reply(JSON.stringify({ deleted: true }));
+      }
+      status = 200;
+      mime = output.type;
+      return reply(output.data);
     }
-    if (req.method === 'DELETE') {
-      // Record deletion only: later jobs reuse these output files.
-      comfyDeleted.push({ filename: output.filename, subfolder: '', type: 'output' });
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ deleted: true }));
-      return;
-    }
-    res.writeHead(200, { 'content-type': output.type });
-    res.end(output.data);
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-    console.log('[mock] POST /v1/chat/completions');
-    let body = '';
-    req.on('data', (chunk) => (body += chunk));
-    req.on('end', () => {
+    if (req.method === 'POST' && path === '/v1/chat/completions') {
+      console.log('[mock] POST /v1/chat/completions');
+      const body = await req.text();
       console.log('[mock] body received:', body.length, 'bytes');
       // Catch malformed JSON here so the event callback cannot crash the mock.
       let parsed: {
@@ -352,9 +370,9 @@ const server = http.createServer((req, res) => {
       try {
         parsed = JSON.parse(body) as typeof parsed;
       } catch {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'invalid JSON' }));
-        return;
+        status = 400;
+        mime = 'application/json';
+        return reply(JSON.stringify({ error: 'invalid JSON' }));
       }
       const firstNonSystem = parsed.messages.findIndex((message) => message.role !== 'system');
       const conversational = parsed.messages.slice(
@@ -374,11 +392,11 @@ const server = http.createServer((req, res) => {
             (index > 0 && message.role === conversational[index - 1]!.role),
         );
       if (invalidShape) {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(
+        status = 400;
+        mime = 'application/json';
+        return reply(
           JSON.stringify({ error: 'User and assistant messages must alternate and be non-empty' }),
         );
-        return;
       }
       const lastUser = [...parsed.messages].reverse().find((m) => m.role === 'user');
       lastCompletion = {
@@ -399,8 +417,9 @@ const server = http.createServer((req, res) => {
       completionLog.push(lastCompletion);
       // Auto-title and other non-streaming calls must not consume streaming failure controls.
       if (parsed.stream === false) {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
+        status = 200;
+        mime = 'application/json';
+        return reply(
           JSON.stringify({
             choices: [
               {
@@ -414,39 +433,19 @@ const server = http.createServer((req, res) => {
             usage: { prompt_tokens: 42, completion_tokens: 8 },
           }),
         );
-        return;
       }
       if (failuresRemaining > 0) {
         failuresRemaining--;
-        res.writeHead(503, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'controlled mock failure' }));
-        return;
+        status = 503;
+        mime = 'application/json';
+        return reply(JSON.stringify({ error: 'controlled mock failure' }));
       }
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       const tokenMs = nextTokenMs ?? TOKEN_MS;
       nextTokenMs = null;
-      const send = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-
-      // Force retries to resume from partial output.
-      if (dieAfterContent != null) {
-        const partialContent = dieAfterContent;
-        dieAfterContent = null;
-        send({ choices: [{ delta: { reasoning_content: 'PARTIAL_RETRY_REASONING' } }] });
-        setTimeout(() => {
-          send({ choices: [{ delta: { content: partialContent } }] });
-          setTimeout(() => res.socket?.destroy(), 50);
-        }, 10);
-        return;
-      }
-      if (reasoningOnly) {
-        reasoningOnly = false;
-        send({ choices: [{ delta: { reasoning_content: 'REASONING_ONLY_OUTPUT' } }] });
-        send({ choices: [{ delta: {}, finish_reason: 'stop' }] });
-        res.write('data: [DONE]\n\n');
-        res.end();
-        return;
-      }
-
+      const partial = dieAfterContent;
+      const onlyReasoning = reasoningOnly;
+      dieAfterContent = null;
+      reasoningOnly = false;
       const system = parsed.messages[0]?.role === 'system' ? parsed.messages[0].content : '';
       const text =
         nextCompletionContent ??
@@ -459,40 +458,72 @@ const server = http.createServer((req, res) => {
         'Thinking about the request… composing a demo answer with markdown and code. '.split(
           /(?<=\s)/,
         );
-      let ri = 0;
-      let wi = 0;
-      const timer = setInterval(() => {
-        if (ri < reasoning.length) {
-          send({ choices: [{ delta: { reasoning_content: reasoning[ri++] } }] });
-        } else if (wi < words.length) {
-          send({ choices: [{ delta: { content: words[wi++] } }] });
-        } else {
-          if (terminalWithoutNewline) {
-            terminalWithoutNewline = false;
-            res.end(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: 'TERMINAL_NO_NEWLINE' } }] })}`,
-            );
-            clearInterval(timer);
-            return;
-          }
-          send({
-            choices: [{ delta: {}, finish_reason: 'stop' }],
-            usage: { prompt_tokens: 42, completion_tokens: words.length },
-          });
-          res.write('data: [DONE]\n\n');
-          res.end();
-          clearInterval(timer);
-        }
-      }, tokenMs);
-      // 'close' on req fires once the body is consumed; the response signals disconnects.
-      res.on('close', () => clearInterval(timer));
-    });
-    return;
-  }
-  res.writeHead(404).end();
+      const encoder = new TextEncoder();
+      const bodyStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          let closed = false;
+          const abort = () => {
+            if (!closed) {
+              closed = true;
+              controller.close();
+            }
+          };
+          req.signal.addEventListener('abort', abort, { once: true });
+          const write = (frame: string) => {
+            if (!closed) controller.enqueue(encoder.encode(frame));
+          };
+          const send = (obj: unknown) => write(`data: ${JSON.stringify(obj)}\n\n`);
+          void (async () => {
+            try {
+              if (partial !== null) {
+                send({ choices: [{ delta: { reasoning_content: 'PARTIAL_RETRY_REASONING' } }] });
+                await Bun.sleep(10);
+                send({ choices: [{ delta: { content: partial } }] });
+                await Bun.sleep(50);
+                if (!closed) {
+                  closed = true;
+                  controller.error(new Error('controlled disconnect'));
+                }
+                return;
+              }
+              if (onlyReasoning)
+                send({ choices: [{ delta: { reasoning_content: 'REASONING_ONLY_OUTPUT' } }] });
+              else {
+                for (const token of reasoning) {
+                  await Bun.sleep(tokenMs);
+                  if (closed) return;
+                  send({ choices: [{ delta: { reasoning_content: token } }] });
+                }
+                for (const token of words) {
+                  await Bun.sleep(tokenMs);
+                  if (closed) return;
+                  send({ choices: [{ delta: { content: token } }] });
+                }
+                if (terminalWithoutNewline) {
+                  terminalWithoutNewline = false;
+                  write(
+                    `data: ${JSON.stringify({ choices: [{ delta: { content: 'TERMINAL_NO_NEWLINE' } }] })}`,
+                  );
+                  return;
+                }
+              }
+              send({
+                choices: [{ delta: {}, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 42, completion_tokens: words.length },
+              });
+              write('data: [DONE]\n\n');
+            } finally {
+              req.signal.removeEventListener('abort', abort);
+              abort();
+            }
+          })();
+        },
+      });
+      return new Response(bodyStream, {
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+      });
+    }
+    return new Response(null, { status: 404 });
+  },
 });
-
-// ComfyUI-style progress socket (any path; the real one uses /ws?clientId=…).
-const wss = new WebSocketServer({ server });
-
-server.listen(PORT, () => console.log(`mock openai listening on :${PORT}`));
+console.log(`mock openai listening on :${server.port}`);

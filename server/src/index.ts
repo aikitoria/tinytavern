@@ -1,13 +1,17 @@
-import { caddyEnabled } from './mediaUrls.ts';
-import http from 'node:http';
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import type { Server } from 'bun';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { stat } from 'node:fs/promises';
+import { caddyEnabled } from './mediaUrls.ts';
 import { AVATAR_DIR, IMAGES_DIR, db } from './db.ts';
 import { stopAllGenerations } from './generation.ts';
-import { dispatch } from './router.ts';
-import { initWebSocket, setSubscribeHandler, setUnsubscribeHandler } from './events.ts';
+import { apiRoutes, apiError } from './router.ts';
+import {
+  websocket,
+  bindWebSocketServer,
+  setSubscribeHandler,
+  setUnsubscribeHandler,
+  type SocketState,
+} from './events.ts';
 import { sendTreeTo } from './sync.ts';
 import { cancelBackgroundSwipe, prepareActiveSwipe } from './speculation.ts';
 import {
@@ -36,9 +40,6 @@ import './routes/conversationTransfer.ts';
 import './routes/draftCompletion.ts';
 import './routes/auth.ts';
 
-const PORT = Number(process.env.PORT ?? 5487);
-
-// Backstop for image-file deletion guarantees (crash windows, late renders).
 initMediaWorker();
 sweepOrphanedImages();
 initMediaThumbnails();
@@ -51,62 +52,6 @@ const MIME: Record<string, string> = {
   '.webm': 'video/webm',
 };
 
-/** Isolated HTTP regressions serve media here; deployed stacks serve it through Caddy. */
-async function serveFile(
-  res: ServerResponse,
-  path: string,
-  extraHeaders: Record<string, string> = {},
-  range?: string,
-): Promise<boolean> {
-  try {
-    const info = await stat(path);
-    if (!info.isFile()) return false;
-    let start = 0;
-    let end = info.size - 1;
-    let partial = false;
-    const requestedRange = range?.match(/^bytes=(\d*)-(\d*)$/);
-    if (requestedRange && (requestedRange[1] || requestedRange[2])) {
-      if (requestedRange[1]) {
-        start = Number(requestedRange[1]);
-        if (requestedRange[2]) {
-          end = Math.min(end, Number(requestedRange[2]));
-        }
-      } else {
-        start = Math.max(0, info.size - Number(requestedRange[2]));
-      }
-      if (
-        !Number.isSafeInteger(start) ||
-        !Number.isSafeInteger(end) ||
-        start > end ||
-        start >= info.size
-      ) {
-        res.writeHead(416, { 'content-range': `bytes */${info.size}`, ...extraHeaders }).end();
-        return true;
-      }
-      partial = true;
-    }
-    res.writeHead(partial ? 206 : 200, {
-      'content-type': MIME[extname(path)] ?? 'application/octet-stream',
-      'content-length': Math.max(0, end - start + 1),
-      'accept-ranges': 'bytes',
-      'cache-control': 'private, no-store',
-      ...(partial ? { 'content-range': `bytes ${start}-${end}/${info.size}` } : {}),
-      ...extraHeaders,
-    });
-    if (info.size === 0) {
-      res.end();
-      return true;
-    }
-    const stream = createReadStream(path, { start, end });
-    stream.on('error', () => res.destroy());
-    res.on('close', () => stream.destroy());
-    stream.pipe(res);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function safeJoin(root: string, urlPath: string): string | null {
   const base = resolve(root);
   const path = resolve(base, urlPath.replace(/^\/+/, ''));
@@ -114,132 +59,138 @@ function safeJoin(root: string, urlPath: string): string | null {
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? path : null;
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!isRequestIpAllowed(req)) {
-    res
-      .writeHead(403, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ error: 'IP address is not allowed' }));
-    console.warn(`[access] rejected ${requestIp(req) ?? 'unknown address'}`);
-    return;
-  }
-  const url = new URL(req.url ?? '/', 'http://x');
-  const pathname = url.pathname;
-
-  if (pathname.startsWith('/api/')) {
-    // Prevent private API data surviving logout/password changes in caches.
-    res.setHeader('cache-control', 'private, no-store');
-    if (!isRequestOriginAllowed(req)) {
-      res
-        .writeHead(403, { 'content-type': 'application/json' })
-        .end(JSON.stringify({ error: 'cross-site requests are not allowed' }));
-      return;
+/** Deployed media is served by Caddy; isolated HTTP tests use the same authenticated paths here. */
+async function mediaResponse(req: Request, path: string, image: boolean): Promise<Response> {
+  try {
+    const info = await stat(path);
+    if (!info.isFile()) return new Response(null, { status: 404 });
+    const headers = new Headers({
+      'content-type': MIME[extname(path)] ?? 'application/octet-stream',
+      'cache-control': 'private, no-store',
+      'accept-ranges': 'bytes',
+    });
+    if (image) {
+      headers.set('x-content-type-options', 'nosniff');
+      headers.set('content-security-policy', "default-src 'none'; sandbox");
     }
-    // Pre-login endpoints still require IP and same-origin checks.
-    const publicAuthEndpoint =
-      pathname === '/api/auth/status' ||
-      pathname === '/api/auth/login' ||
-      pathname === '/api/auth/logout';
-    if (!publicAuthEndpoint && !isRequestAuthenticated(req)) {
-      res
-        .writeHead(401, { 'content-type': 'application/json' })
-        .end(JSON.stringify({ error: 'authentication required' }));
-      return;
+    let start = 0;
+    let end = info.size - 1;
+    let partial = false;
+    const range = req.headers.get('range')?.match(/^bytes=(\d*)-(\d*)$/);
+    if (range && (range[1] || range[2])) {
+      if (range[1]) {
+        start = Number(range[1]);
+        if (range[2]) end = Math.min(end, Number(range[2]));
+      } else start = Math.max(0, info.size - Number(range[2]));
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start > end ||
+        start >= info.size
+      ) {
+        headers.set('content-range', `bytes */${info.size}`);
+        return new Response(null, { status: 416, headers });
+      }
+      partial = true;
+      headers.set('content-range', `bytes ${start}-${end}/${info.size}`);
     }
-    if (await dispatch(req, res, pathname)) return;
-    res
-      .writeHead(404, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ error: 'not found' }));
-    return;
+    headers.set('content-length', String(Math.max(0, end - start + 1)));
+    const file = Bun.file(path);
+    return new Response(info.size === 0 ? null : partial ? file.slice(start, end + 1) : file, {
+      status: partial ? 206 : 200,
+      headers,
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
+      console.error('[media] file read failed:', err);
+    return new Response(null, { status: 404 });
   }
-
-  if (caddyEnabled) {
-    res.writeHead(404).end('not found');
-    return;
-  }
-
-  if (pathname.startsWith('/avatars/')) {
-    if (!isRequestAuthenticated(req)) {
-      res.writeHead(401).end();
-      return;
-    }
-    const path = safeJoin(AVATAR_DIR, pathname.slice('/avatars/'.length));
-    if (path && (await serveFile(res, path))) return;
-    res.writeHead(404).end();
-    return;
-  }
-
-  if (pathname.startsWith('/images/')) {
-    if (!isRequestAuthenticated(req)) {
-      res.writeHead(401).end();
-      return;
-    }
-    const imageExt = extname(pathname).toLowerCase();
-    if (!['.png', '.jpg', '.jpeg', '.webp', '.webm'].includes(imageExt)) {
-      res.writeHead(404).end();
-      return;
-    }
-    // Media is user data: force every load through the session check above.
-    const path = safeJoin(IMAGES_DIR, pathname.slice('/images/'.length));
-    if (
-      path &&
-      (await serveFile(
-        res,
-        path,
-        {
-          'x-content-type-options': 'nosniff',
-          'content-security-policy': "default-src 'none'; sandbox",
-          'cache-control': 'no-store',
-        },
-        req.headers.range,
-      ))
-    )
-      return;
-    res.writeHead(404).end();
-    return;
-  }
-
-  res.writeHead(404).end('not found');
 }
 
-function onRequest(req: IncomingMessage, res: ServerResponse): void {
-  handleRequest(req, res).catch((err) => {
+function authorize(req: Request, server: Server<SocketState>): Response | undefined {
+  const remoteAddress = server.requestIP(req)?.address;
+  if (!isRequestIpAllowed(req, remoteAddress)) {
+    console.warn(`[access] rejected ${requestIp(req, remoteAddress) ?? 'unknown address'}`);
+    return apiError(403, 'IP address is not allowed');
+  }
+  if (!isRequestOriginAllowed(req)) return apiError(403, 'cross-site requests are not allowed');
+  const pathname = new URL(req.url).pathname;
+  const publicAuth = ['/api/auth/status', '/api/auth/login', '/api/auth/logout'].includes(pathname);
+  if (!publicAuth && !isRequestAuthenticated(req)) return apiError(401, 'authentication required');
+  // Generation/Comfy deadlines own long requests; Bun's short HTTP idle timer must not end them.
+  server.timeout(req, 0);
+}
+
+setUnsubscribeHandler((id) => {
+  try {
+    cancelBackgroundSwipe(id);
+  } catch (err) {
+    console.error(`[ws] unsubscribe handler failed for conversation ${id}:`, err);
+  }
+});
+setSubscribeHandler((ws, id) => {
+  try {
+    sendTreeTo(ws, id);
+    prepareActiveSwipe(id);
+  } catch (err) {
+    console.error(`[ws] subscribe handler failed for conversation ${id}:`, err);
+  }
+});
+
+const server = Bun.serve({
+  port: Number(process.env.PORT ?? 5487),
+  hostname: '0.0.0.0',
+  idleTimeout: 30,
+  // Per-route limits are checked while reading. The router owns consistent JSON 413 responses.
+  maxRequestBodySize: 512 * 1024 * 1024,
+  routes: apiRoutes<SocketState>(authorize),
+  websocket,
+  fetch(req, server) {
+    const pathname = new URL(req.url).pathname;
+    if (pathname.startsWith('/api/') || pathname === '/ws') {
+      const rejected = authorize(req, server);
+      if (rejected) return rejected;
+      if (pathname === '/ws') {
+        return server.upgrade(req, { data: { sub: null, closed: false } })
+          ? undefined
+          : apiError(400, 'WebSocket upgrade required');
+      }
+      return apiError(404, 'not found');
+    }
+    if (!isRequestIpAllowed(req, server.requestIP(req)?.address))
+      return apiError(403, 'IP address is not allowed');
+    if (caddyEnabled) return new Response(null, { status: 404 });
+    const image = pathname.startsWith('/images/');
+    const avatar = pathname.startsWith('/avatars/');
+    if (image || avatar) {
+      if (!isRequestAuthenticated(req)) return new Response(null, { status: 401 });
+      if (image && !MIME[extname(pathname).toLowerCase()])
+        return new Response(null, { status: 404 });
+      const path = safeJoin(image ? IMAGES_DIR : AVATAR_DIR, pathname.slice(image ? 8 : 9));
+      if (path) return mediaResponse(req, path, image);
+    }
+    return new Response(null, { status: 404 });
+  },
+  error(err) {
     console.error('[http] unhandled error:', err);
-    if (!res.writableEnded) res.writeHead(500).end();
-  });
-}
-
-const server = http.createServer(onRequest);
-
-setUnsubscribeHandler((conversationId) => {
-  try {
-    cancelBackgroundSwipe(conversationId);
-  } catch (err) {
-    console.error(`[ws] unsubscribe handler failed for conversation ${conversationId}:`, err);
-  }
+    return apiError(500, 'internal server error');
+  },
 });
-setSubscribeHandler((ws, conversationId) => {
-  // The ws listener has no upstream catch; an escaping throw crashes the process.
-  try {
-    sendTreeTo(ws, conversationId);
-    prepareActiveSwipe(conversationId);
-  } catch (err) {
-    console.error(`[ws] subscribe handler failed for conversation ${conversationId}:`, err);
-  }
-});
-initWebSocket(server);
+bindWebSocketServer(server);
+console.log(`tinytavern server listening on http://0.0.0.0:${server.port}`);
+console.log(`IP allowlist: ${configuredIpAllowlist()}`);
 
-server.listen(PORT, () => {
-  console.log(`tinytavern server listening on http://0.0.0.0:${PORT}`);
-  console.log(`IP allowlist: ${configuredIpAllowlist()}`);
-});
-
+let shuttingDown = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     try {
       stopMediaWorker();
       stopAllGenerations();
+      await server.stop(true);
       await stopMediaThumbnails();
-      db.close();
+      db.close(true);
       process.exit(0);
     } catch (err) {
       console.error('[shutdown] could not save active generations:', err);

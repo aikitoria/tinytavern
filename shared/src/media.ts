@@ -136,7 +136,7 @@ export interface MediaAsset {
   duration: number | null;
   thumbnail: string | null;
   thumbnailRevision: number;
-  recipeId: string | null;
+  recipeId: number | null;
 }
 
 export interface MediaJobInput {
@@ -164,7 +164,7 @@ export interface MediaResultDetails {
 }
 
 export interface MediaDraft {
-  id: string;
+  id: number;
   revision: number;
   state: 'open' | 'accepted' | 'discarding';
   selectedAssetId: number | null;
@@ -246,7 +246,7 @@ export interface MediaJob {
   /** Captured render associations, or current input/chat associations before capture. */
   characterIds: number[];
   workflowValues: MediaWorkflowValues;
-  id: string;
+  id: number;
   draft: MediaDraft | null;
   revision: number;
   operation: MediaOperation;
@@ -264,7 +264,7 @@ export interface MediaJob {
   contextConversationId: number | null;
   messageId: number | null;
   destination: 'gallery' | 'chat';
-  sourceJobId: string | null;
+  sourceJobId: number | null;
   seed: number | null;
   comfyPromptId: string | null;
   submitted: boolean;

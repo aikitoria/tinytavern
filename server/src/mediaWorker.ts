@@ -1,9 +1,7 @@
 import { ComfyGraphProgress, type ComfyProgressData } from './comfyGraphProgress.ts';
 import { cleanupDiscardedMediaDraft } from './mediaDrafts.ts';
 import { randomUUID } from 'node:crypto';
-import { openAsBlob } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import WebSocket from 'ws';
 import {
   compileMediaWorkflow,
   expandMediaWorkflow,
@@ -76,11 +74,11 @@ interface WorkerTask {
 
 const POLL_MS = Number(process.env.COMFY_POLL_MS ?? (process.env.E2E_BASE ? 100 : 1500));
 const RETRIEVAL_WINDOW_MS = 24 * 3600_000;
-const tasks = new Map<string, WorkerTask>();
-const retryAt = new Map<string, { failures: number; time: number; state: MediaJobRow['state'] }>();
-const sockets = new Map<string, { socket: WebSocket; ready: Promise<void> }>();
-const progressTimers = new Map<string, NodeJS.Timeout>();
-const pendingVideoPreviews = new Map<string, MediaVideoPreview | null>();
+const tasks = new Map<number, WorkerTask>();
+const retryAt = new Map<number, { failures: number; time: number; state: MediaJobRow['state'] }>();
+const sockets = new Map<number, { socket: WebSocket; ready: Promise<void> }>();
+const progressTimers = new Map<number, NodeJS.Timeout>();
+const pendingVideoPreviews = new Map<number, MediaVideoPreview | null>();
 let timer: NodeJS.Timeout | undefined;
 let stopping = false;
 let cleanupRunning = false;
@@ -116,7 +114,7 @@ async function comfyJson<T>(
   return (await response.json()) as T;
 }
 
-function flushProgress(id: string): void {
+function flushProgress(id: number): void {
   const current = mediaLive.get(id);
   if (!current || stopping) return;
   const progress = { ...current.progress };
@@ -148,7 +146,7 @@ function flushProgress(id: string): void {
   }
 }
 
-function publishProgress(id: string, progress: MediaJob['progress']): void {
+function publishProgress(id: number, progress: MediaJob['progress']): void {
   const live = mediaLive.get(id) ?? {};
   const firstUpdate = !live.progress;
   const firstPreview = Boolean(progress?.preview && !live.progress?.preview);
@@ -187,8 +185,9 @@ function openProgress(row: MediaJobRow): Promise<void> {
   const existing = sockets.get(row.id);
   if (existing) return existing.ready;
   if (sockets.size >= 32) return Promise.resolve();
-  const base = configuration(row).comfyUrl.replace(/^http/, 'ws');
-  const socket = new WebSocket(`${base}/ws?clientId=${row.id}`, { maxPayload: 5 * 1024 * 1024 });
+  const config = configuration(row);
+  const base = config.comfyUrl.replace(/^http/, 'ws');
+  const socket = new WebSocket(`${base}/ws?clientId=${row.request_key}`);
   let connected!: () => void;
   const ready = new Promise<void>((resolve) => {
     connected = resolve;
@@ -200,12 +199,13 @@ function openProgress(row: MediaJobRow): Promise<void> {
     }
   }, 2000);
   openTimeout.unref();
-  socket.on('error', () => socket.terminate());
-  socket.on('open', () => {
+  socket.binaryType = 'arraybuffer';
+  socket.addEventListener('error', () => socket.terminate());
+  socket.addEventListener('open', () => {
     clearTimeout(openTimeout);
     connected();
   });
-  socket.on('close', () => {
+  socket.addEventListener('close', () => {
     clearTimeout(openTimeout);
     connected();
     if (sockets.get(row.id)?.socket === socket) {
@@ -217,13 +217,18 @@ function openProgress(row: MediaJobRow): Promise<void> {
   );
   let executingNode: string | null = null;
   let videoPreview: ComfyVideoPreview | null = null;
-  socket.on('message', (raw, binary) => {
+  socket.addEventListener('message', ({ data: raw }) => {
+    const binary = typeof raw !== 'string';
+    if ((binary ? raw.byteLength : Buffer.byteLength(raw)) > 5 * 1024 * 1024) {
+      socket.terminate();
+      return;
+    }
     if (stopping || sockets.get(row.id)?.socket !== socket) {
       return;
     }
     if (binary) {
       if (mediaJobRow(row.id)?.state !== 'rendering') return;
-      const bytes = Array.isArray(raw) ? Buffer.concat(raw) : Buffer.from(raw as ArrayBuffer);
+      const bytes = Buffer.from(raw as ArrayBuffer);
       const video = videoPreview?.accept(bytes);
       if (video) {
         publishProgress(row.id, { videoPreview: video });
@@ -307,7 +312,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
   return ready;
 }
 
-function closeProgress(id: string): void {
+function closeProgress(id: number): void {
   sockets.get(id)?.socket.terminate();
   sockets.delete(id);
   pendingVideoPreviews.delete(id);
@@ -402,7 +407,7 @@ async function uploadInputs(
         throw new Error('A pinned reference image is missing');
       }
       const file: ComfyFile = {
-        filename: `tinytavern-${row.id}-asset-${input.assetId}${extname(String(asset.path))}`,
+        filename: `tinytavern-${row.request_key}-asset-${input.assetId}${extname(String(asset.path))}`,
         subfolder: '',
         type: 'input',
       };
@@ -410,7 +415,7 @@ async function uploadInputs(
       // upload whose response is lost. Retrying overwrites only this job's input.
       ownRemoteFile(row.id, base, file, 'input');
       const data = new FormData();
-      const source = await openAsBlob(join(IMAGES_DIR, basename(String(asset.path))), {
+      const source = Bun.file(join(IMAGES_DIR, basename(String(asset.path))), {
         type: String(asset.mime),
       });
       data.set('image', source, file.filename);
@@ -469,7 +474,7 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
       ...inputs,
       prompt: row.prompt,
       seed: row.seed!,
-      job_id: row.id,
+      job_id: String(row.id),
     },
     config.workflowValues,
   );
@@ -483,7 +488,7 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
     body: JSON.stringify({
       prompt,
       prompt_id: submissionId,
-      client_id: row.id,
+      client_id: row.request_key,
       extra_data: {
         preview_method: 'taesd',
         tinytavern_job_id: row.id,
@@ -720,7 +725,7 @@ async function runStep(row: MediaJobRow, signal: AbortSignal): Promise<void> {
   }
 }
 
-function stepFailed(id: string, error: unknown, interrupted: boolean): void {
+function stepFailed(id: number, error: unknown, interrupted: boolean): void {
   if (stopping) {
     return;
   }
@@ -836,8 +841,8 @@ export function tickMediaWorker(): void {
     SELECT id FROM media_jobs WHERE state = 'failed' AND retention_deadline <= ?
   `).all(Date.now());
   for (const row of expired) {
-    releaseRemoteFiles(String(row.id));
-    updateMediaJob(String(row.id), { retention_deadline: null });
+    releaseRemoteFiles(Number(row.id));
+    updateMediaJob(Number(row.id), { retention_deadline: null });
   }
   if (!cleanupRunning) {
     cleanupRunning = true;
@@ -877,7 +882,7 @@ export function initMediaWorker(): void {
   const interrupted = stmt("SELECT id FROM media_jobs WHERE state = 'preparing'").all();
   for (const row of interrupted) {
     finishMediaJob(
-      String(row.id),
+      Number(row.id),
       'failed',
       'Prompt preparation was interrupted; prepare it again',
     );

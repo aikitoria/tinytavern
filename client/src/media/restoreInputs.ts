@@ -10,7 +10,7 @@ export interface RestoredMediaInputs {
 export function restoreMediaInputs(
   page: PageLocation,
   gallery: readonly GalleryItem[],
-  jobs: Readonly<Record<string, MediaJob>>,
+  jobs: Readonly<Record<number, MediaJob>>,
 ): RestoredMediaInputs | undefined {
   const media = page.media;
   if (!media || media.jobId) return;

@@ -40,8 +40,8 @@ or adjust the user and file ownership for your installation.
    ```
 
 Open **`https://<host>:5487`**. Chats, settings, jobs, avatars, images, videos and
-thumbnails are stored in `./data`. The server image includes FFmpeg; no host Node
-or FFmpeg installation is needed.
+thumbnails are stored in `./data`. The server image includes Bun and FFmpeg; no
+host Bun, Node.js or FFmpeg installation is needed.
 
 To update after pulling new code, run `docker compose -f docker-compose.yml up --build -d tinytavern caddy-prod` again.
 
@@ -252,9 +252,14 @@ captures its current prompt. The workflow receives the actual selected images.
 ### Review variations and rerun
 
 Tool pages keep results in a draft. Generate variations, compare them with
-Previous/Next, then choose **Use in chat** or **Save to gallery**. Selecting a
-variation restores its instruction, final prompt, workflow controls and inputs.
-Accepting one finishes the draft, removes its jobs, and deletes unselected results.
+Previous/Next, then choose **Add to chat** or **Save to gallery**. You can save
+multiple results and keep generating in the same draft. **Finish** closes the
+draft and removes its unsaved results while keeping everything you saved.
+
+Selecting a variation changes the preview and leaves your working prompt and
+controls intact. **Result details** shows that variation's captured workflow,
+seed, controls, instruction and prompt. Use its **Copy** or **Use in editor**
+actions to reuse the saved text.
 
 Closing a draft before starting any preparation or rendering discards it. Once
 work has started, closing saves the draft and leaves generation running.
@@ -279,8 +284,9 @@ long reasoning stream stays active while data keeps arriving. Submitted Comfy jo
 recover after a TinyTavern server restart. If downloading a completed result fails,
 you can retry retrieval for 24 hours without generating it again.
 
-Successful jobs are deleted after their results are saved. Unaccepted variations
-and failed jobs remain available. Comfy uploads and outputs are deleted once no
+Jobs outside a review draft are deleted after their results are saved. Review
+variations remain until you finish or discard their draft; failed jobs remain
+available for inspection or deletion. Comfy uploads and outputs are deleted once no
 longer needed; failed deletions retry independently of visible job history.
 Cancellation targets only that job and waits for Comfy to stop before releasing
 its inputs. VHS metadata PNG sidecars and retained intermediate files are disabled
@@ -336,7 +342,8 @@ from the player when needed.
 Page URLs remember the open chat, gallery item and filters, settings section, and
 media job with its return page. Reloading restores that view, and reconnecting
 refreshes an open job's progress. Closing a tool opened from gallery details
-returns to that item with the chat still behind it.
+returns to that item with the chat still behind it. Opening Jobs returns to an
+already open jobs list, preserving its position and avoiding duplicate pages.
 
 Mouse Back first uses the current UI's Back/Close action, starting with open menus
 and viewers. Once no UI remains to close, browser navigation proceeds normally.
@@ -345,23 +352,17 @@ Forward preserves the browser history entry.
 
 ## Backups
 
-When upgrading an installation from before the TinyTavern rename, back up both
-databases and stop the old containers before changing files. Rename the database
-in each data directory to `tinytavern.db`, keeping any `-wal` and `-shm` sidecars
-with it under the same new basename. Preserve the media directories, `.secrets`,
-and certificates, and rename the allowlist variable in `.env` to
-`TINYTAVERN_IP_ALLOWLIST` before recreating the stacks. Browser sessions and local
-view preferences use new keys, so sign in again after upgrading. To import a
-conversation JSON exported before the rename, change its top-level `format`
-field to `tinytavern-conversation`.
+The current database baseline is schema 68. New installations create it directly.
+Older databases and backups require an upgrade-capable older build before this
+version can open them; see [database schema notes](docs/database-schema.md).
 
 Create a database backup while TinyTavern is running:
 
 ```sh
-docker compose exec tinytavern node server/src/backup.ts /data/backups/tinytavern-$(date +%F).db
+docker compose exec tinytavern bun server/src/backup.ts /data/backups/tinytavern-$(date +%F).db
 ```
 
-The command refuses to overwrite an existing backup. Do not copy the live
+The command creates a consistent online SQLite snapshot and atomically publishes it, refusing to overwrite an existing backup. Do not copy the live
 `tinytavern.db` file directly: an active transaction can leave an inconsistent copy.
 For a complete backup including avatars, images, videos and recipe references,
 stop TinyTavern and copy `./data`. Preserve `.secrets` and certificates separately.
@@ -388,3 +389,40 @@ docker compose exec caddy-prod tinytavern-caddy reload --force --config /etc/cad
   conversation.
 - `/image`, `/imagechar`, and `/imageface` use the corresponding image prompt
   preset. Each accepts an optional instruction after the command.
+
+## Development commands
+
+Bun 1.4.2 Alpine runs the backend, Vite, tools and tests. Dependencies are pinned
+in `bun.lock`; no Node runtime or host dependency installation is needed.
+
+Start the development stack with the same certificates and keys as above:
+
+```sh
+./scripts/init-caddy.sh --media-dirs
+docker compose -f docker-compose.dev.yml build server client caddy-dev
+docker compose -f docker-compose.dev.yml up -d --no-build --force-recreate server client caddy-dev
+```
+
+Open **`https://<host>:5173`**. Development stores its data in `./data-dev`,
+separately from production. Both stacks share a Compose project; never use
+`--remove-orphans`, which can remove the other stack.
+
+Run development checks without affecting either stack:
+
+```sh
+./scripts/run-in-container.sh check
+./scripts/run-in-container.sh format
+./scripts/run-in-container.sh build
+./scripts/run-isolated-tests.sh
+```
+
+These commands copy source into disposable containers with no host mounts.
+Tests always run the complete suite with isolated tmpfs databases. Formatting and
+client builds copy their output back on success. After changing package versions,
+run `./scripts/run-in-container.sh install` to update the lockfile, then rebuild
+the development images before deploying them. Development source mounts are
+read-only; server/shared edits trigger graceful application restarts, while Vite
+handles client and shared-source hot reload with a container-local cache.
+Recreate the affected development services after changing mounted configuration
+files, including `client/vite.config.ts`; container file mounts can otherwise
+retain the previous file when an editor replaces it.

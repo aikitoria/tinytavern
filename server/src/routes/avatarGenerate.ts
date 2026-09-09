@@ -36,7 +36,7 @@ function expandAvatarMacros(template: string, vars: Record<string, string>): str
   );
 }
 
-async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
+function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
   const id = positiveId(ctx.params.id);
   const b = objectBody(ctx.body);
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
@@ -77,21 +77,26 @@ async function streamAvatarPrompt(kind: AvatarKind, ctx: Ctx) {
     const user = expandAvatarMacros(context, vars);
     if (!user.trim()) throw new HttpError(400, 'context must produce non-empty text');
     // SSE from here on — failures mid-stream go out as error events, not HTTP.
-    await streamResponse(ctx.res, async (send, signal) => {
-      await streamChatCompletion(
-        null,
-        [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        AVATAR_PROMPT_MAX_TOKENS,
-        (d) => send({ d }),
-        signal,
-        { onReasoning: (r) => send({ r }) },
-      );
-    });
-  } finally {
+    return streamResponse(
+      ctx.req,
+      async (send, signal) => {
+        await streamChatCompletion(
+          null,
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          AVATAR_PROMPT_MAX_TOKENS,
+          (d) => send({ d }),
+          signal,
+          { onReasoning: (r) => send({ r }) },
+        );
+      },
+      () => streaming.delete(key),
+    );
+  } catch (err) {
     streaming.delete(key);
+    throw err;
   }
 }
 
@@ -115,12 +120,6 @@ async function renderAvatar(ctx: Ctx) {
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : 'invalid image config');
   }
-  const abort = new AbortController();
-  const onClose = () => {
-    if (!ctx.res.writableEnded) abort.abort();
-  };
-  ctx.res.on('close', onClose);
-  if (ctx.res.destroyed) abort.abort();
   let result: Awaited<ReturnType<typeof renderToBuffer>>;
   try {
     result = await renderToBuffer({
@@ -129,22 +128,19 @@ async function renderAvatar(ctx: Ctx) {
       prompt,
       onProgress: jobId ? (value, max) => publishRenderProgress(jobId, value, max) : undefined,
       onPreview: jobId ? (preview) => publishRenderPreview(jobId, preview) : undefined,
-      signal: abort.signal,
+      signal: ctx.req.signal,
     });
   } catch (err) {
-    if (abort.signal.aborted) {
-      if (!ctx.res.writableEnded) ctx.res.end();
-      return;
-    }
+    if (ctx.req.signal.aborted) return new Response(null, { status: 499 });
     throw new HttpError(502, err instanceof Error ? err.message : String(err));
   } finally {
-    ctx.res.off('close', onClose);
     if (jobId) finishRenderProgress(jobId);
   }
-  ctx.res.writeHead(200, {
-    'content-type': IMAGE_CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
+  return new Response(result.data, {
+    headers: {
+      'content-type': IMAGE_CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
+    },
   });
-  ctx.res.end(result.data);
 }
 
 route.post('/api/characters/:id/avatar/prompt', (ctx) => streamAvatarPrompt('character', ctx));

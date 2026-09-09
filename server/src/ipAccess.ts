@@ -1,6 +1,5 @@
 import { behindCaddy, isTrustedProxy } from './proxy.ts';
 import { BlockList, isIP } from 'node:net';
-import type { IncomingMessage } from 'node:http';
 
 export const DEFAULT_IP_ALLOWLIST =
   '127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10';
@@ -56,18 +55,19 @@ export function createIpAllowlist(env: string | undefined): IpAllowlist {
 
 const allowlist = createIpAllowlist(process.env.TINYTAVERN_IP_ALLOWLIST);
 
-export function requestIp(req: IncomingMessage): string | null {
-  const address = isTrustedProxy(req)
-    ? (req.headers['x-tinytavern-client-ip'] as string | undefined)
-    : req.socket.remoteAddress;
+export function requestIp(req: Request, remoteAddress?: string): string | null {
+  const address = isTrustedProxy(req) ? req.headers.get('x-tinytavern-client-ip') : remoteAddress;
   return address ? normalizeAddress(address) : null;
 }
 
-export function isRequestIpAllowed(req: IncomingMessage): boolean {
-  return (!behindCaddy || isTrustedProxy(req)) && allowlist.isAllowed(requestIp(req) ?? undefined);
+export function isRequestIpAllowed(req: Request, remoteAddress?: string): boolean {
+  return (
+    (!behindCaddy || isTrustedProxy(req)) &&
+    allowlist.isAllowed(requestIp(req, remoteAddress) ?? undefined)
+  );
 }
 
-function requestHostMatchesOrigin(host: string | undefined, origin: URL): boolean {
+function requestHostMatchesOrigin(host: string | null, origin: URL): boolean {
   if (!host) return false;
   const requestHost = host.trim().toLowerCase();
   const originHost = origin.host.toLowerCase();
@@ -81,24 +81,22 @@ function requestHostMatchesOrigin(host: string | undefined, origin: URL): boolea
 /**
  * Require same-origin browser requests; allow clients without Origin or Fetch Metadata.
  */
-export function isRequestOriginAllowed(req: IncomingMessage): boolean {
-  const rawOrigin = req.headers.origin;
-  if (rawOrigin !== undefined) {
-    if (Array.isArray(rawOrigin)) return false;
+export function isRequestOriginAllowed(req: Request): boolean {
+  const rawOrigin = req.headers.get('origin');
+  if (rawOrigin !== null) {
     try {
       const origin = new URL(rawOrigin);
       return (
         (origin.protocol === 'http:' || origin.protocol === 'https:') &&
-        requestHostMatchesOrigin(req.headers.host, origin)
+        requestHostMatchesOrigin(req.headers.get('host'), origin)
       );
     } catch {
       return false;
     }
   }
 
-  const fetchSite = req.headers['sec-fetch-site'];
-  if (Array.isArray(fetchSite)) return false;
-  return fetchSite === undefined || fetchSite === 'same-origin' || fetchSite === 'none';
+  const fetchSite = req.headers.get('sec-fetch-site');
+  return fetchSite === null || fetchSite === 'same-origin' || fetchSite === 'none';
 }
 
 export function configuredIpAllowlist(): string {

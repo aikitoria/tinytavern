@@ -1,3 +1,4 @@
+import { nextCollectionId } from '@tinytavern/shared';
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { exportWorkflow, importWorkflow, transferObject } from '@tinytavern/shared';
 import { For, Show } from 'solid-js';
@@ -54,7 +55,7 @@ export default function MediaRenderingTab() {
     };
     const add = (duplicate = false) => {
       const source = current();
-      const id = crypto.randomUUID();
+      const id = nextCollectionId(form.draft().workflows);
       const baseName = duplicate && source ? `${source.name} (copy)` : 'New workflow';
       const name = uniqueCollectionName(baseName, workflows());
       form.setDraft((value) => ({

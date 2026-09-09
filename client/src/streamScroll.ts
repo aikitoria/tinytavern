@@ -11,7 +11,7 @@ export function createStreamScroll(
   schedule: (callback: () => void) => number,
   cancel: (frame: number) => void,
 ) {
-  let stream: string | null = null;
+  let stream: string | number | null = null;
   let visible = false;
   let follow = true;
   let frame: number | undefined;
@@ -20,7 +20,7 @@ export function createStreamScroll(
     frame = undefined;
   };
   return {
-    update(nextStream: string | null, nextVisible: boolean) {
+    update(nextStream: string | number | null, nextVisible: boolean) {
       const ended = stream !== null && nextStream === null;
       if (nextStream !== null && nextStream !== stream) follow = true;
       stream = nextStream;

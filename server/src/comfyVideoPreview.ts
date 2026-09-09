@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newRequestId } from '@tinytavern/shared';
 import type { MediaVideoPreview } from '@tinytavern/shared';
 import { rasterImageFormat } from './images.ts';
 
@@ -32,7 +32,7 @@ export class ComfyVideoPreview {
   private characters = 0;
 
   private constructor(nodeId: string, frameCount: number, frameRate: number) {
-    this.metadata = { id: randomUUID(), nodeId, frameCount, frameRate };
+    this.metadata = { id: newRequestId(), nodeId, frameCount, frameRate };
   }
 
   static fromEvent(data: unknown, executingNode: string | null): ComfyVideoPreview | null {

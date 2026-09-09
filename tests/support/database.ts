@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
@@ -19,7 +19,7 @@ let used = false;
 
 /** Reuse this suite's schema/connection; only fixture rows and files are reset between cases. */
 function reset(): void {
-  assert.equal(db.isTransaction, false, 'A case must finish its transactions');
+  assert.equal(db.inTransaction, false, 'A case must finish its transactions');
   for (const row of stmt('SELECT path FROM media_assets').all())
     invalidateMediaAsset(String(row.path));
   db.exec('PRAGMA foreign_keys = OFF');
@@ -53,6 +53,6 @@ export function databaseCase(name: string, run: () => Promise<void>): void {
     if (used) reset();
     used = true;
     await run();
-    assert.equal(db.isTransaction, false, 'A case must finish its transactions');
+    assert.equal(db.inTransaction, false, 'A case must finish its transactions');
   });
 }

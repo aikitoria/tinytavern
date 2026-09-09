@@ -1,9 +1,8 @@
+import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media source images', async () => {
-  const { createServer } = await import('node:http');
-
   const { once } = await import('node:events');
 
   const { execFile } = await import('node:child_process');
@@ -32,7 +31,7 @@ test('media source images', async () => {
   const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
   const { updateMediaJob } = await import('../../server/src/mediaJobStore.ts');
   const { finishMediaJob } = await import('../../server/src/mediaJobResults.ts');
-  const { dispatch } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/mediaJobs.ts');
   await import('../../server/src/routes/gallery.ts');
 
@@ -111,18 +110,14 @@ test('media source images', async () => {
     return { asset: mediaAssetForPath(path)!, galleryId: gallery(path) };
   });
 
-  const server = createServer((req, res) => {
-    void dispatch(req, res, new URL(req.url!, 'http://test').pathname).then((handled) => {
-      if (!handled) {
-        res.writeHead(404);
-        res.end();
-      }
-    });
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    routes: apiRoutes(),
+    fetch: () => new Response(null, { status: 404 }),
+    idleTimeout: 0,
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
+  const address = { port: server.port };
   const base = `http://127.0.0.1:${address.port}`;
   async function request(method: string, path: string, body?: unknown) {
     const response = await fetch(`${base}${path}`, {
@@ -209,11 +204,11 @@ test('media source images', async () => {
       assert.equal((await fetch(`${base}/api/media/assets/${id}/details`)).status, 404);
     }
     const activeJob = (await request('POST', `/api/media/assets/${results[0]!.asset.id}/rerun`, {
-      requestKey: 'active-input-owner',
+      requestKey: testRequestKey('active-input-owner'),
     })) as MediaJob;
     updateMediaJob(activeJob.id, { state: 'rendering' });
     const idleJob = (await request('POST', `/api/media/assets/${results[1]!.asset.id}/rerun`, {
-      requestKey: 'idle-input-owner',
+      requestKey: testRequestKey('idle-input-owner'),
     })) as MediaJob;
     await request('DELETE', `/api/gallery/${firstGallery}`);
     const partial = (await request(
@@ -263,7 +258,7 @@ test('media source images', async () => {
         savedInputs[index]!.map(({ slot }) => ({ slot, asset: null })),
       );
       const rerun = (await request('POST', `/api/media/assets/${result.asset.id}/rerun`, {
-        requestKey: `rerun-${index}`,
+        requestKey: testRequestKey(`rerun-${index}`),
       })) as MediaJob;
       assert.deepEqual(rerun.inputs, [], 'Reruns leave missing input selectors empty');
       assert.equal(rerun.workflowSnapshot!.id, workflows[index]!.id);
@@ -290,7 +285,6 @@ test('media source images', async () => {
     assert.equal((await fetch(`${base}/api/media/assets/invalid/inputs`)).status, 400);
     assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server.stop(true);
   }
 });

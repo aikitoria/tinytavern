@@ -1,6 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { IncomingMessage } from 'node:http';
 
 const keyFile = process.env.CADDY_PROXY_KEY_FILE;
 const token = keyFile ? readFileSync(keyFile, 'utf8').trim() : null;
@@ -12,8 +11,8 @@ export const behindCaddy = expected !== null;
 
 // Caddy overwrites this header. Backends publish no ports, and the private
 // token also prevents other containers on ComfyUI's shared network spoofing it.
-export function isTrustedProxy(req: IncomingMessage): boolean {
-  const supplied = req.headers['x-tinytavern-proxy'];
+export function isTrustedProxy(req: Request): boolean {
+  const supplied = req.headers.get('x-tinytavern-proxy');
   return (
     expected !== null &&
     typeof supplied === 'string' &&

@@ -1,6 +1,5 @@
 import { captureMediaCharacters, mediaCharacterIds } from './mediaCharacters.ts';
 import type { MediaRecipeInput } from './mediaRecipes.ts';
-import { randomUUID } from 'node:crypto';
 import {
   MEDIA_OPERATIONS,
   systemNote,
@@ -227,12 +226,12 @@ export function createMediaJob(
     });
   }
   const requestKey = optionalString(body, 'requestKey');
-  if (!requestKey || !/^[A-Za-z0-9_-]{1,100}$/.test(requestKey)) {
+  if (!requestKey || !/^[0-9]{1,100}$/.test(requestKey)) {
     throw new HttpError(400, 'A stable requestKey is required');
   }
   const previous = stmt('SELECT id FROM media_jobs WHERE request_key = ?').get(requestKey);
   if (previous) {
-    return mediaJobDto(requireMediaJob(String(previous.id)));
+    return mediaJobDto(requireMediaJob(Number(previous.id)));
   }
 
   const operation = parseOperation(body.operation ?? source?.operation);
@@ -275,7 +274,7 @@ export function createMediaJob(
   );
   const sourceDraft = source?.draft_id ? mediaDraft(source.draft_id) : null;
   const review = body.reviewBeforeSave === true || sourceDraft?.state === 'open';
-  const draftId = review ? (sourceDraft?.state === 'open' ? sourceDraft.id : randomUUID()) : null;
+  let draftId = review && sourceDraft?.state === 'open' ? sourceDraft.id : null;
   if (draftId && sourceDraft?.state === 'open') {
     const unfinished = stmt(`SELECT id FROM media_jobs WHERE draft_id = ?
       AND (state NOT IN ('succeeded', 'failed', 'cancelled') OR submission_id IS NULL)`).get(
@@ -285,35 +284,36 @@ export function createMediaJob(
       throw new HttpError(409, 'Finish or cancel the current variation before creating another');
     }
   }
-  const id = randomUUID();
+  let id = 0;
   const now = Date.now();
 
   transaction(() => {
-    if (draftId) {
-      stmt('INSERT OR IGNORE INTO media_drafts(id) VALUES (?)').run(draftId);
+    if (review) {
+      draftId ??= Number(stmt('INSERT INTO media_drafts DEFAULT VALUES').run().lastInsertRowid);
       stmt('UPDATE media_drafts SET revision = revision + 1 WHERE id = ?').run(draftId);
     }
-    stmt(`
+    id = Number(
+      stmt(`
       INSERT INTO media_jobs (
-        id, operation, workflow_id, preset_id, instruction, prompt,
+        operation, workflow_id, preset_id, instruction, prompt,
         context_conversation_id, destination, source_job_id, request_key, created_at, updated_at,
         configuration_json, draft_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id,
-      operation,
-      workflowId,
-      presetId,
-      instruction,
-      prompt,
-      conversationId,
-      destination,
-      source?.id ?? null,
-      requestKey,
-      now,
-      now,
-      configurationJson,
-      draftId,
+        operation,
+        workflowId,
+        presetId,
+        instruction,
+        prompt,
+        conversationId,
+        destination,
+        source?.id ?? null,
+        requestKey,
+        now,
+        now,
+        configurationJson,
+        draftId,
+      ).lastInsertRowid,
     );
     pinMediaInputs(id, inputs);
   });
@@ -384,13 +384,13 @@ export function createMediaJobFromAsset(assetId: number, body: JobBody) {
     throw new HttpError(404, 'This media has no saved generation recipe');
   }
   return createMediaJobFromRecipe(
-    String(recipe.id),
+    Number(recipe.id),
     { prompt: recipe.saved_prompt, ...body },
     mediaCharacterIds(assetId),
   );
 }
 
-export function createMediaJobFromRecipe(recipeId: string, body: JobBody, characterIds?: number[]) {
+export function createMediaJobFromRecipe(recipeId: number, body: JobBody, characterIds?: number[]) {
   const recipe = getMediaRecipe(recipeId);
   const configuration = { ...recipe.configuration };
   configuration.sourceCharacterIds = characterIds ?? configuration.characterIds;
@@ -595,10 +595,11 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
     const messageId = attachToolMessage(row, body, prepare);
     if (messageId !== null) {
       const recipeId = saveMediaRecipe(configuration, JSON.parse(row.inputs_json), row.prompt, {
-        id: row.id,
+        id: row.recipe_id ?? undefined,
         instruction: row.instruction,
       });
       stmt('UPDATE messages SET render_recipe_id = ? WHERE id = ?').run(recipeId, messageId);
+      updateMediaJob(row.id, { recipe_id: recipeId });
     }
     updateMediaJob(row.id, {
       ...context,
@@ -710,7 +711,7 @@ export function retryMediaRetrieval(row: MediaJobRow) {
 }
 
 /** Caller holds a transaction; file deletion and client notifications follow commit. */
-export function deleteMediaJobRecord(id: string): void {
+export function deleteMediaJobRecord(id: number): void {
   releaseRemoteFiles(id);
   stmt('DELETE FROM media_jobs WHERE id = ?').run(id);
   stmt("DELETE FROM media_remote_files WHERE job_id = ? AND state = 'deleted'").run(id);

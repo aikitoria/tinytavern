@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media description', async () => {
-  const { createServer } = await import('node:http');
-
   const { once } = await import('node:events');
 
   const { setTimeout: sleep } = await import('node:timers/promises');
 
-  const { WebSocketServer } = await import('ws');
-  type WebSocket = import('ws').WebSocket;
+  type WebSocket = import('bun').ServerWebSocket<{ client: string }>;
   const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } =
     await import('@tinytavern/shared');
   type ImageDescriptionProgress = import('@tinytavern/shared').ImageDescriptionProgress;
@@ -28,7 +25,7 @@ test('media description', async () => {
   const { initMediaWorker, stopMediaWorker, tickMediaWorker } =
     await import('../../server/src/mediaWorker.ts');
   const { comfyTextOutput } = await import('../../server/src/comfyTextOutput.ts');
-  const { dispatch } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/gallery.ts');
 
   assert.deepEqual(getSettings().mediaRendering.workflows, []);
@@ -72,123 +69,154 @@ test('media description', async () => {
   let cancelled = 0;
   let failDelete = false;
   const errors: unknown[] = [];
-  const comfy = createServer(async (request, response) => {
-    try {
-      const url = new URL(request.url!, 'http://test');
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const data = Buffer.concat(chunks);
-      response.setHeader('content-type', 'application/json');
-      if (url.pathname === '/upload/image') {
-        const form = await new Response(data, {
-          headers: { 'content-type': request.headers['content-type']! },
-        }).formData();
-        const file = form.get('image') as File;
-        assert.equal(form.get('subfolder'), '');
-        uploads.set(file.name, Buffer.from(await file.arrayBuffer()));
-        response.end(JSON.stringify({ name: file.name, subfolder: '', type: 'input' }));
-      } else if (url.pathname === '/prompt') {
-        const body = JSON.parse(data.toString());
-        posted++;
-        assert(
-          uploads.has(body.prompt['2'].inputs.image),
-          'The image reaches Comfy before submission',
-        );
-        assert(sockets.has(body.client_id), 'Progress is connected before submission');
-        const execution = {
-          client: body.client_id,
-          done: false,
-          cancelled: false,
-          output: {
-            '4': {
-              text: [
-                mode === 'empty' ? '' : '  A detailed uploaded image description.\nSecond line.  ',
-              ],
-            },
-          },
-        };
-        executions.set(body.prompt_id, execution);
-        response.end(JSON.stringify({ prompt_id: body.prompt_id }));
-        const socket = sockets.get(body.client_id)!;
-        socket.send(
-          JSON.stringify({ type: 'execution_start', data: { prompt_id: body.prompt_id } }),
-        );
-        socket.send(
-          JSON.stringify({
-            type: 'executing',
-            data: { prompt_id: body.prompt_id, node: '3', display_node: '3' },
-          }),
-        );
-        socket.send(
-          JSON.stringify({
-            type: 'progress',
-            data: { prompt_id: body.prompt_id, value: 16, max: 512 },
-          }),
-        );
-        if (mode !== 'running') {
-          setTimeout(() => {
-            execution.done = true;
-            socket.send(
-              JSON.stringify({ type: 'execution_success', data: { prompt_id: body.prompt_id } }),
-            );
-          }, 60);
-        }
-      } else if (url.pathname.startsWith('/history/')) {
-        const id = url.pathname.slice('/history/'.length);
-        const execution = executions.get(id);
-        response.end(
-          JSON.stringify(
-            execution?.done
-              ? {
-                  [id]: {
-                    status: {
-                      completed: true,
-                      status_str: execution.cancelled ? 'error' : 'success',
-                    },
-                    outputs: execution.cancelled ? {} : execution.output,
-                  },
-                }
-              : {},
-          ),
-        );
-      } else if (url.pathname === '/queue') {
-        response.end(
-          JSON.stringify({
-            queue_running: [...executions].filter(([, item]) => !item.done).map(([id]) => [0, id]),
-            queue_pending: [],
-          }),
-        );
-      } else if (url.pathname.endsWith('/cancel')) {
-        const execution = executions.get(url.pathname.split('/')[3]!)!;
-        execution.cancelled = true;
-        execution.done = true;
-        cancelled++;
-        response.end('{}');
-      } else if (url.pathname === '/view' && request.method === 'DELETE') {
-        if (failDelete) {
-          failDelete = false;
-          response.writeHead(503).end('{}');
+  const comfy = Bun.serve<{ client: string }>({
+    hostname: '127.0.0.1',
+    port: 0,
+    idleTimeout: 0,
+    websocket: {
+      open(socket) {
+        sockets.set(socket.data.client, socket);
+      },
+      message() {},
+      close(socket) {
+        sockets.delete(socket.data.client);
+      },
+    },
+    async fetch(request, server) {
+      if (new URL(request.url).pathname === '/ws') {
+        if (
+          server.upgrade(request, {
+            data: { client: new URL(request.url).searchParams.get('clientId')! },
+          })
+        )
           return;
+        return new Response(null, { status: 400 });
+      }
+      let status = 200,
+        mime = 'application/json';
+      let result: Response | Promise<Response> = new Response(null, { status: 404 });
+      const respond = (body: string) => {
+        result = new Response(body, { status, headers: { 'content-type': mime } });
+      };
+
+      try {
+        const url = new URL(request.url!, 'http://test');
+        const data = Buffer.from(await request.arrayBuffer());
+
+        if (url.pathname === '/upload/image') {
+          const form = await new Response(data, {
+            headers: { 'content-type': request.headers.get('content-type')! },
+          }).formData();
+          const file = form.get('image') as File;
+          assert.equal(form.get('subfolder'), '');
+          uploads.set(file.name, Buffer.from(await file.arrayBuffer()));
+          respond(JSON.stringify({ name: file.name, subfolder: '', type: 'input' }));
+        } else if (url.pathname === '/prompt') {
+          const body = JSON.parse(data.toString());
+          posted++;
+          assert(
+            uploads.has(body.prompt['2'].inputs.image),
+            'The image reaches Comfy before submission',
+          );
+          assert(sockets.has(body.client_id), 'Progress is connected before submission');
+          const execution = {
+            client: body.client_id,
+            done: false,
+            cancelled: false,
+            output: {
+              '4': {
+                text: [
+                  mode === 'empty'
+                    ? ''
+                    : '  A detailed uploaded image description.\nSecond line.  ',
+                ],
+              },
+            },
+          };
+          executions.set(body.prompt_id, execution);
+          respond(JSON.stringify({ prompt_id: body.prompt_id }));
+          const socket = sockets.get(body.client_id)!;
+          socket.send(
+            JSON.stringify({ type: 'execution_start', data: { prompt_id: body.prompt_id } }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'executing',
+              data: { prompt_id: body.prompt_id, node: '3', display_node: '3' },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'progress',
+              data: { prompt_id: body.prompt_id, value: 16, max: 512 },
+            }),
+          );
+          if (mode !== 'running') {
+            setTimeout(() => {
+              execution.done = true;
+              socket.send(
+                JSON.stringify({ type: 'execution_success', data: { prompt_id: body.prompt_id } }),
+              );
+            }, 60);
+          }
+        } else if (url.pathname.startsWith('/history/')) {
+          const id = url.pathname.slice('/history/'.length);
+          const execution = executions.get(id);
+          respond(
+            JSON.stringify(
+              execution?.done
+                ? {
+                    [id]: {
+                      status: {
+                        completed: true,
+                        status_str: execution.cancelled ? 'error' : 'success',
+                      },
+                      outputs: execution.cancelled ? {} : execution.output,
+                    },
+                  }
+                : {},
+            ),
+          );
+        } else if (url.pathname === '/queue') {
+          respond(
+            JSON.stringify({
+              queue_running: [...executions]
+                .filter(([, item]) => !item.done)
+                .map(([id]) => [0, id]),
+              queue_pending: [],
+            }),
+          );
+        } else if (url.pathname.endsWith('/cancel')) {
+          const execution = executions.get(url.pathname.split('/')[3]!)!;
+          execution.cancelled = true;
+          execution.done = true;
+          cancelled++;
+          respond('{}');
+        } else if (url.pathname === '/view' && request.method === 'DELETE') {
+          if (failDelete) {
+            failDelete = false;
+            status = 503;
+            respond('{}');
+            return result;
+          }
+          const name = url.searchParams.get('filename')!;
+          assert.equal(url.searchParams.get('type'), 'input');
+          removed.push(name);
+          uploads.delete(name);
+          respond('{}');
+        } else {
+          status = 404;
+          respond('{}');
         }
-        const name = url.searchParams.get('filename')!;
-        assert.equal(url.searchParams.get('type'), 'input');
-        removed.push(name);
-        uploads.delete(name);
-        response.end('{}');
-      } else response.writeHead(404).end('{}');
-    } catch (err) {
-      errors.push(err);
-      response.writeHead(500).end('{}');
-    }
+      } catch (err) {
+        errors.push(err);
+        status = 500;
+        respond('{}');
+      }
+      return result;
+    },
   });
-  const websocket = new WebSocketServer({ server: comfy });
-  websocket.on('connection', (socket, request) => {
-    sockets.set(new URL(request.url!, 'http://test').searchParams.get('clientId')!, socket);
-  });
-  comfy.listen(0, '127.0.0.1');
-  await once(comfy, 'listening');
-  const address = comfy.address();
-  assert(address && typeof address !== 'string');
+  const address = { port: comfy.port };
   putSettings({
     ...getSettings(),
     mediaRendering: {
@@ -213,13 +241,14 @@ test('media description', async () => {
     }
     assert(condition(), 'Condition completed before timeout');
   }
-  const http = createServer((request, response) => {
-    void dispatch(request, response, new URL(request.url!, 'http://test').pathname);
+  const http = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    routes: apiRoutes(),
+    fetch: () => new Response(null, { status: 404 }),
+    idleTimeout: 0,
   });
-  http.listen(0, '127.0.0.1');
-  await once(http, 'listening');
-  const apiAddress = http.address();
-  assert(apiAddress && typeof apiAddress !== 'string');
+  const apiAddress = { port: http.port };
   try {
     initMediaWorker();
     const response = await fetch(`http://127.0.0.1:${apiAddress.port}/api/gallery/${id}/describe`, {
@@ -260,13 +289,7 @@ test('media description', async () => {
     assert.deepEqual(errors, []);
   } finally {
     await stopMediaWorker();
-    for (const socket of sockets.values()) socket.terminate();
-    websocket.close();
-    comfy.closeAllConnections();
-    http.closeAllConnections();
-    await Promise.all([
-      new Promise((resolve) => comfy.close(resolve)),
-      new Promise((resolve) => http.close(resolve)),
-    ]);
+    for (const socket of sockets.values()) socket.close();
+    await Promise.all([comfy.stop(true), http.stop(true)]);
   }
 });

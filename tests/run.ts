@@ -40,10 +40,8 @@ async function execute(file: string): Promise<void> {
     process.execPath,
     [
       ...(file.startsWith('client/') ? ['--conditions=browser'] : []),
-      '--test',
-      '--test-isolation=none',
-      '--test-reporter=tap',
-      '--test-force-exit',
+      'test',
+      '--timeout=15000',
       join(import.meta.dirname, file),
     ],
     { env: environment(data), stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 },
@@ -68,7 +66,7 @@ async function execute(file: string): Promise<void> {
         failed = true;
         console.error(output.trim(), signal ? `\nTerminated: ${signal}` : '');
       }
-      count += Number(output.match(/# tests (\d+)/)?.[1] ?? 0);
+      count += Number(output.match(/Ran (\d+) tests?/)?.[1] ?? 0);
       resolve();
     });
   });
@@ -85,7 +83,7 @@ try {
   // Initialize SQLite once for the entire run, before any test worker can import server code.
   Object.assign(process.env, environment(seed));
   const { db } = await import('../server/src/db.ts');
-  db.close();
+  db.close(true);
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(8, availableParallelism(), suites.length) }, async () => {

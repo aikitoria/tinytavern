@@ -1,7 +1,7 @@
 import { setMediaCharacters } from './mediaCharacters.ts';
-import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_MEDIA_RENDERING,
+  nextCollectionId,
   namedItem,
   mediaInputSlots,
   compileMediaWorkflow,
@@ -38,11 +38,11 @@ export interface DecodedTransferImage {
 export function exportImageRecipes(
   paths: Map<string, string>,
   addImage: (path: string) => string,
-  messageRecipes: Iterable<string> = [],
+  messageRecipes: Iterable<number> = [],
 ) {
-  const recipes = new Map<string, TransferImageRecipe>();
+  const recipes = new Map<number, TransferImageRecipe>();
   const assetRecipes = new Map<string, string>();
-  const addRecipe = (recipeId: string) => {
+  const addRecipe = (recipeId: number) => {
     let recipe = recipes.get(recipeId);
     if (!recipe) {
       const row = stmt('SELECT * FROM media_recipes WHERE id = ?').get(recipeId);
@@ -240,7 +240,7 @@ export function importRecipeImages(
   assets: ReadonlyMap<string, DecodedTransferImage>,
   recipes: ReadonlyMap<string, TransferImageRecipe>,
   writtenImages: string[],
-): { imagePath: (assetId: string) => string; recipeIds: Map<string, string> } {
+): { imagePath: (assetId: string) => string; recipeIds: Map<string, number> } {
   const characters = stmt('SELECT id, name FROM characters')
     .all()
     .map((row) => ({ id: Number(row.id), name: String(row.name) }));
@@ -261,10 +261,8 @@ export function importRecipeImages(
     );
   }
   const rendering = getSettings().mediaRendering;
-  const recipeIds = new Map<string, string>();
+  const recipeIds = new Map<string, number>();
   for (const recipe of recipes.values()) {
-    const id = randomUUID();
-    recipeIds.set(recipe.id, id);
     const inputs = recipe.inputs.map((input) => ({
       ...input,
       assetId: input.assetId === null ? null : assetIds.get(input.assetId)!,
@@ -275,20 +273,33 @@ export function importRecipeImages(
           ? ''
           : (recipes.get(assets.get(input.assetId)?.recipeId ?? '')?.prompt ?? '')),
     }));
-    stmt(`INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(
-      id,
-      recipe.prompt,
-      recipe.instruction,
-      JSON.stringify({
-        comfyUrl: rendering.comfyUrl,
-        timeoutSeconds: rendering.jobTimeoutSeconds,
-        workflow: recipe.workflow,
-        workflowValues: recipe.workflowValues,
-      }),
-      JSON.stringify(inputs),
-      Date.now(),
+    const id = Number(
+      stmt(`INSERT INTO media_recipes(prompt, instruction, configuration_json, inputs_json, created_at)
+      VALUES (?, ?, ?, ?, ?)`).run(
+        recipe.prompt,
+        recipe.instruction,
+        JSON.stringify({
+          comfyUrl: rendering.comfyUrl,
+          timeoutSeconds: rendering.jobTimeoutSeconds,
+          workflow: {
+            ...recipe.workflow,
+            id:
+              namedItem(
+                rendering.workflows.filter(
+                  (workflow) =>
+                    workflow.operation === recipe.workflow.operation &&
+                    workflow.referenceCount === recipe.workflow.referenceCount,
+                ),
+                recipe.workflow.name,
+              )?.id ?? nextCollectionId(rendering.workflows),
+          },
+          workflowValues: recipe.workflowValues,
+        }),
+        JSON.stringify(inputs),
+        Date.now(),
+      ).lastInsertRowid,
     );
+    recipeIds.set(recipe.id, id);
     for (const input of inputs) {
       if (input.assetId === null) continue;
       stmt(`INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)

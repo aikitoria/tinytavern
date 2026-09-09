@@ -1,5 +1,6 @@
+import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media prompts', async () => {
   const { DEFAULT_SETTINGS } = await import('@tinytavern/shared');
@@ -114,7 +115,10 @@ test('media prompts', async () => {
   let releaseCompletion: (() => void) | undefined;
   let requestAborted = false;
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = (async (
+    url: Parameters<typeof fetch>[0],
+    options?: Parameters<typeof fetch>[1],
+  ) => {
     assert.equal(url, 'http://endpoint.invalid/v1/chat/completions');
     assert.equal(new Headers(options!.headers).get('authorization'), 'Bearer private-key');
     wire = JSON.parse(String(options!.body));
@@ -165,9 +169,9 @@ test('media prompts', async () => {
         },
       }),
     );
-  };
+  }) as unknown as typeof fetch;
 
-  async function waitFor(id: string, state: MediaJob['state']) {
+  async function waitFor(id: number, state: MediaJob['state']) {
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline) {
       tickMediaWorker();
@@ -187,7 +191,7 @@ test('media prompts', async () => {
       '[System Note]\nChat video formatting\nTask: Use literal {{context}} in the title',
     );
     const job = createMediaJob({
-      requestKey: 'snapshot',
+      requestKey: testRequestKey('snapshot'),
       operation: 'video',
       instruction: 'Use literal {{context}} in the title',
       contextConversationId: conversationId,
@@ -274,7 +278,7 @@ test('media prompts', async () => {
 
     finishReason = 'length';
     const truncated = createMediaJob({
-      requestKey: 'truncated',
+      requestKey: testRequestKey('truncated'),
       operation: 'video',
       instruction: 'Move slowly',
     });
@@ -294,7 +298,7 @@ test('media prompts', async () => {
 
     holdStream = true;
     const interrupted = createMediaJob({
-      requestKey: 'cancel-prompt',
+      requestKey: testRequestKey('cancel-prompt'),
       operation: 'video',
       instruction: 'Move slowly',
       contextConversationId: conversationId,
@@ -429,7 +433,7 @@ test('media prompts', async () => {
       instruction = 'Evening with literal {{prompt}}',
     ) => {
       const draft = createMediaJob({
-        requestKey: key,
+        requestKey: testRequestKey(key),
         operation: 'image',
         contextConversationId: context,
         reviewBeforeSave: true,
@@ -484,7 +488,7 @@ test('media prompts', async () => {
       ['wrong-gallery-preset', null, portrait.id],
     ] as const) {
       const invalid = createMediaJob({
-        requestKey: key,
+        requestKey: testRequestKey(key),
         operation: 'image',
         contextConversationId: context,
         reviewBeforeSave: true,
@@ -503,7 +507,7 @@ test('media prompts', async () => {
       stmt("SELECT id FROM media_assets WHERE path = '/images/prompt-source.png'").get()!.id,
     );
     const edit = createMediaJob({
-      requestKey: 'edit-with-chat-destination',
+      requestKey: testRequestKey('edit-with-chat-destination'),
       operation: 'image-edit',
       workflowId: 'edit',
       contextConversationId: conversationId,
@@ -528,7 +532,7 @@ test('media prompts', async () => {
     });
     pauseReasoning = true;
     const thinking = createMediaJob({
-      requestKey: 'thinking-preview',
+      requestKey: testRequestKey('thinking-preview'),
       operation: 'video',
       workflowId: workflow.id,
       contextConversationId: conversationId,

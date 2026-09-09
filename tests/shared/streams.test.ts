@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('sse', async () => {
   const { readSseData } = await import('../../shared/src/sse.ts');
@@ -91,63 +91,56 @@ test('sse', async () => {
 });
 
 test('server response', async () => {
-  const { EventEmitter } = await import('node:events');
-
-  type ServerResponse = import('node:http').ServerResponse;
   const { streamResponse } = await import('../../server/src/routes/streamResponse.ts');
-
-  function response(destroyed = false) {
-    return Object.assign(new EventEmitter(), {
-      destroyed,
-      writableEnded: false,
-      frames: [] as unknown[],
-      writeHead(status: number, headers: Record<string, string>) {
-        assert.equal(status, 200);
-        assert.equal(headers['content-type'], 'text/event-stream');
-      },
-      write(frame: string) {
-        this.frames.push(JSON.parse(frame.slice(6)));
-      },
-      end() {
-        this.writableEnded = true;
-      },
-    });
-  }
-
-  const success = response();
-  await streamResponse(success as unknown as ServerResponse, async (send) => {
-    send({ d: 'immediate' });
-    assert.deepEqual(success.frames, [{ d: 'immediate' }], 'token callbacks write synchronously');
-    await Promise.resolve();
-    send({ d: 'flushed suffix' });
-  });
-  assert.deepEqual(success.frames, [{ d: 'immediate' }, { d: 'flushed suffix' }, { done: true }]);
-  assert.equal(success.listenerCount('close'), 0);
-  assert.ok(success.writableEnded);
-
-  const stale = response();
-  await streamResponse(stale as unknown as ServerResponse, async (send) => {
-    send({ d: 'discard this draft' });
-    throw new Error('conversation branch changed');
-  });
-  assert.deepEqual(
-    stale.frames,
-    [{ d: 'discard this draft' }, { error: 'conversation branch changed' }],
-    'failed final validation never emits done',
+  const frames = async (response: Response) =>
+    (await response.text())
+      .split('\n')
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => JSON.parse(line.slice(6)));
+  let finished = 0;
+  const success = streamResponse(
+    new Request('http://test'),
+    async (send) => {
+      send({ d: 'immediate' });
+      await Promise.resolve();
+      send({ d: 'flushed suffix' });
+    },
+    () => finished++,
   );
-  assert.equal(stale.listenerCount('close'), 0);
-
+  assert.deepEqual(await frames(success), [
+    { d: 'immediate' },
+    { d: 'flushed suffix' },
+    { done: true },
+  ]);
+  assert.equal(finished, 1);
+  const stale = streamResponse(new Request('http://test'), async (send) => {
+    send({ d: 'draft' });
+    throw new Error('branch changed');
+  });
+  assert.deepEqual(await frames(stale), [{ d: 'draft' }, { error: 'branch changed' }]);
   for (const alreadyClosed of [false, true]) {
-    const closed = response(alreadyClosed);
-    await streamResponse(closed as unknown as ServerResponse, async (send, signal) => {
-      if (!alreadyClosed) closed.emit('close');
-      assert.ok(signal.aborted);
-      send({ d: 'late output' });
-      throw new Error('aborted');
-    });
-    assert.deepEqual(closed.frames, [], 'closed response suppresses output, done and errors');
-    assert.equal(closed.listenerCount('close'), 0);
+    const abort = new AbortController();
+    if (alreadyClosed) abort.abort();
+    const response = streamResponse(
+      new Request('http://test', { signal: abort.signal }),
+      async (send, signal) => {
+        if (!alreadyClosed) abort.abort();
+        assert(signal.aborted);
+        send({ d: 'late output' });
+        throw new Error('aborted');
+      },
+    );
+    assert.deepEqual(await frames(response), []);
   }
+  let cancelled!: Promise<void>;
+  const response = streamResponse(new Request('http://test'), async (_send, signal) => {
+    cancelled = new Promise((resolve) =>
+      signal.addEventListener('abort', () => resolve(), { once: true }),
+    );
+    await cancelled;
+  });
+  await response.body!.cancel();
+  await cancelled;
 });
 
 test('video preview', async () => {

@@ -11,12 +11,17 @@ export interface DialogFrame {
   readonly media?: MediaToolSession;
 }
 
+let nextFrameId = 0;
+export function nextDialogId(): string {
+  return String(++nextFrameId);
+}
+
 function createFrame(
   page: PageLocation,
   session?: MediaToolSession,
   inputs?: RestoredMediaInputs,
 ): DialogFrame {
-  const id = crypto.randomUUID();
+  const id = nextDialogId();
   const media = page.media;
   return {
     id,
@@ -56,7 +61,7 @@ export function createDialogStack() {
   return {
     frames,
     top,
-    findJob(jobId: string, jobs: Readonly<Record<string, MediaJob>>) {
+    findJob(jobId: number, jobs: Readonly<Record<number, MediaJob>>) {
       const draftId = jobs[jobId]?.draft?.id;
       return frames().find((frame) => {
         const media = frame.page.media;

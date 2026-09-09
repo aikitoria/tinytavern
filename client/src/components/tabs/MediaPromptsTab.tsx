@@ -1,3 +1,4 @@
+import { nextCollectionId } from '@tinytavern/shared';
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { importPromptCollection, transferObject } from '@tinytavern/shared';
 import { For, Show } from 'solid-js';
@@ -94,7 +95,7 @@ function MediaPromptFields(props: {
         ),
       }));
     const add = (copy = false) => {
-      const id = crypto.randomUUID();
+      const id = nextCollectionId(form.draft().presets);
       const source = current();
       const baseName = copy && source ? `${source.name} (copy)` : 'New preset';
       const name = uniqueCollectionName(baseName, presets());

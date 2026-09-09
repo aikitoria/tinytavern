@@ -4,16 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@tinytavern/shared": "*",
-    "ws": "^8.18.0"
-  },
-  "devDependencies": {
-    "@types/node": "^26.0.0",
-    "@types/ws": "^8.5.13",
-    "typescript": "^5.9.0"
+    "@tinytavern/shared": "workspace:*"
   },
   "scripts": {
-    "start": "node src/index.ts",
+    "start": "bun src/index.ts",
     "check": "tsc --noEmit"
   }
 }

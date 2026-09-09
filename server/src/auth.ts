@@ -1,5 +1,4 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isTrustedProxy } from './proxy.ts';
 import { stmt } from './db.ts';
 
@@ -73,8 +72,8 @@ export function setAccessPassword(password: string | null): void {
   stmt('DELETE FROM auth_sessions').run();
 }
 
-function cookieValue(req: IncomingMessage, name: string): string | null {
-  const raw = req.headers.cookie;
+function cookieValue(req: Request, name: string): string | null {
+  const raw = req.headers.get('cookie');
   if (!raw) return null;
   for (const part of raw.split(';')) {
     const separator = part.indexOf('=');
@@ -84,7 +83,7 @@ function cookieValue(req: IncomingMessage, name: string): string | null {
   return null;
 }
 
-function validSession(req: IncomingMessage): boolean {
+function validSession(req: Request): boolean {
   const token = cookieValue(req, SESSION_COOKIE);
   if (!token) return false;
   const tokenHash = sessionHash(token);
@@ -99,7 +98,7 @@ function validSession(req: IncomingMessage): boolean {
   return true;
 }
 
-export function isRequestAuthenticated(req: IncomingMessage): boolean {
+export function isRequestAuthenticated(req: Request): boolean {
   return !isPasswordConfigured() || validSession(req);
 }
 
@@ -108,14 +107,14 @@ export function passwordMatches(password: string): boolean {
   return encoded !== null && verifyPassword(password, encoded);
 }
 
-function cookieSecurity(req: IncomingMessage): string {
-  return (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted ||
-    (isTrustedProxy(req) && req.headers['x-forwarded-proto'] === 'https')
+function cookieSecurity(req: Request): string {
+  return new URL(req.url).protocol === 'https:' ||
+    (isTrustedProxy(req) && req.headers.get('x-forwarded-proto') === 'https')
     ? '; Secure'
     : '';
 }
 
-export function startSession(req: IncomingMessage, res: ServerResponse): void {
+export function startSession(req: Request, headers: Headers): void {
   const token = randomBytes(32).toString('base64url');
   const now = Date.now();
   stmt('INSERT INTO auth_sessions (token_hash, expires_at, created_at) VALUES (?, ?, ?)').run(
@@ -123,16 +122,16 @@ export function startSession(req: IncomingMessage, res: ServerResponse): void {
     now + SESSION_TTL_MS,
     now,
   );
-  res.setHeader(
+  headers.set(
     'set-cookie',
     `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${cookieSecurity(req)}`,
   );
 }
 
-export function clearSession(req: IncomingMessage, res: ServerResponse): void {
+export function clearSession(req: Request, headers: Headers): void {
   const token = cookieValue(req, SESSION_COOKIE);
   if (token) stmt('DELETE FROM auth_sessions WHERE token_hash = ?').run(sessionHash(token));
-  res.setHeader(
+  headers.set(
     'set-cookie',
     `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${cookieSecurity(req)}`,
   );

@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once, EventEmitter } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
-import { test } from 'node:test';
-import { WebSocket } from 'ws';
+import { test, onTestFinished } from 'bun:test';
 import type { ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
 import { requireTestIsolation } from '../support/isolation.ts';
 
 // Exercise the public boundary once; feature suites cover combinations directly.
-test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) => {
+test('application HTTP and WebSocket contracts', async () => {
+  async function step(name: string, run: () => Promise<void>) {
+    try {
+      await run();
+    } catch (cause) {
+      throw new Error(name, { cause });
+    }
+  }
   requireTestIsolation();
   const base = 'http://127.0.0.1:15487';
   const sockets: WebSocket[] = [];
@@ -57,7 +63,7 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
   child.stderr.on('data', (chunk) => {
     logs += String(chunk);
   });
-  t.after(async () => {
+  onTestFinished(async () => {
     for (const socket of sockets) socket.terminate();
     upstream.closeAllConnections();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
@@ -99,25 +105,39 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
   });
   async function connect(origin = base, expected = 101) {
     const socket = new WebSocket(base.replace('http', 'ws') + '/ws', {
-      origin,
-      headers: { cookie },
+      headers: { cookie, origin },
     });
     sockets.push(socket);
-    socket.on('error', () => {});
+    socket.addEventListener('error', () => {});
     const events: ServerEvent[] = [];
     const notifications = new EventEmitter();
-    socket.on('message', (data) => {
-      events.push(JSON.parse(data.toString()) as ServerEvent);
+    socket.addEventListener('message', ({ data }) => {
+      events.push(JSON.parse(String(data)) as ServerEvent);
       notifications.emit('event');
     });
-    const status = await new Promise<number>((resolve) => {
-      socket.once('open', () => resolve(101));
-      socket.once('unexpected-response', (_req, response) => {
-        response.resume();
-        socket.terminate();
-        resolve(response.statusCode!);
-      });
+    const status = await new Promise<number>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(101), { once: true });
+      socket.addEventListener(
+        'error',
+        () =>
+          expected === 101 ? reject(new Error('WebSocket upgrade failed')) : resolve(expected),
+        { once: true },
+      );
     });
+    if (expected !== 101) {
+      const rejected = await fetch(base + '/ws', {
+        headers: {
+          cookie,
+          origin,
+          upgrade: 'websocket',
+          connection: 'Upgrade',
+          'sec-websocket-version': '13',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        },
+      });
+      assert.equal(rejected.status, expected);
+      await rejected.arrayBuffer();
+    }
     assert.equal(status, expected);
     return {
       socket,
@@ -132,7 +152,20 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     };
   }
 
-  await t.test('origin checks, endpoint secrets and optimistic settings writes', async () => {
+  await step('native routing and request body boundaries', async () => {
+    for (const [method, path, body, status] of [
+      ['GET', '/api/conversations/%E0%A4%A/tree', undefined, 400],
+      ['PUT', '/api/conversations', '{}', 404],
+      ['POST', '/api/conversations', '{broken', 400],
+      ['POST', '/api/auth/login', 'x'.repeat(4097), 413],
+    ] as const) {
+      const response = await fetch(base + path, { method, body });
+      assert.equal(response.status, status, `${method} ${path}: ${await response.text()}`);
+      assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    }
+  });
+
+  await step('origin checks, endpoint secrets and optimistic settings writes', async () => {
     const hostile = await fetch(base + '/api/settings', {
       headers: { origin: 'http://attacker.invalid' },
     });
@@ -178,7 +211,7 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     await viewer.wait((event) => event.t === 'tree');
   }
   let mid = 0;
-  await t.test('streaming, reconnect snapshots, live export and peer consistency', async () => {
+  await step('streaming, reconnect snapshots, live export and peer consistency', async () => {
     const initial = await tree(conv.id);
     const sent = await request<{ assistantMessageId: number }>(
       'POST',
@@ -227,7 +260,7 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     assert.equal(persisted.messages.find((message) => message.id === mid)!.status, 'done');
   });
 
-  await t.test('incremental edits, stale same-leaf writes and branch restoration', async () => {
+  await step('incremental edits, stale same-leaf writes and branch restoration', async () => {
     const before = await tree(conv.id);
     await request('PATCH', `/api/messages/${mid}`, { ...guard(before), content: 'Edited' });
     await request(
@@ -272,7 +305,7 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     assert.equal((await tree(conv.id)).activeLeafId, sent.assistantMessageId);
   });
 
-  await t.test(
+  await step(
     'background swipes promote the prepared stream without another submission',
     async () => {
       const before = await tree(conv.id);
@@ -320,47 +353,44 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     },
   );
 
-  await t.test(
-    'cancellation persists partial content and upstream failures terminate',
-    async () => {
-      hold = true;
-      const sent = await request<{ assistantMessageId: number }>(
-        'POST',
-        `/api/conversations/${conv.id}/messages`,
-        {
-          ...guard(await tree(conv.id)),
-          content: 'Stop this',
-        },
-      );
-      await first.wait((event) => event.t === 'delta' && event.mid === sent.assistantMessageId);
-      const message = (await tree(conv.id)).messages.find(
-        (message) => message.id === sent.assistantMessageId,
-      )!;
-      await request('POST', `/api/generations/${message.id}/stop`, {
-        expectedGenerationToken: message.generationToken,
-      });
-      assert.equal(
-        (await tree(conv.id)).messages.find((item) => item.id === message.id)!.content,
-        'Hello',
-      );
-      held = undefined;
-      hold = false;
-      upstreamStatus = 400;
-      const failed = await request<{ assistantMessageId: number }>(
-        'POST',
-        `/api/messages/${message.id}/advance`,
-        guard(await tree(conv.id)),
-      );
-      const final = await first.wait(
-        (event) => event.t === 'final' && event.message.id === failed.assistantMessageId,
-      );
-      assert(final.t === 'final');
-      assert(final.message.genMeta?.error?.includes('400'));
-      upstreamStatus = 200;
-    },
-  );
+  await step('cancellation persists partial content and upstream failures terminate', async () => {
+    hold = true;
+    const sent = await request<{ assistantMessageId: number }>(
+      'POST',
+      `/api/conversations/${conv.id}/messages`,
+      {
+        ...guard(await tree(conv.id)),
+        content: 'Stop this',
+      },
+    );
+    await first.wait((event) => event.t === 'delta' && event.mid === sent.assistantMessageId);
+    const message = (await tree(conv.id)).messages.find(
+      (message) => message.id === sent.assistantMessageId,
+    )!;
+    await request('POST', `/api/generations/${message.id}/stop`, {
+      expectedGenerationToken: message.generationToken,
+    });
+    assert.equal(
+      (await tree(conv.id)).messages.find((item) => item.id === message.id)!.content,
+      'Hello',
+    );
+    held = undefined;
+    hold = false;
+    upstreamStatus = 400;
+    const failed = await request<{ assistantMessageId: number }>(
+      'POST',
+      `/api/messages/${message.id}/advance`,
+      guard(await tree(conv.id)),
+    );
+    const final = await first.wait(
+      (event) => event.t === 'final' && event.message.id === failed.assistantMessageId,
+    );
+    assert(final.t === 'final');
+    assert(final.message.genMeta?.error?.includes('400'));
+    upstreamStatus = 200;
+  });
 
-  await t.test('password sessions, protected media, logout and socket revocation', async () => {
+  await step('password sessions, protected media, logout and socket revocation', async () => {
     const settings = await request<Settings>('GET', '/api/settings');
     const response = await fetch(base + '/api/settings', {
       method: 'PUT',
@@ -404,4 +434,35 @@ test('application HTTP and WebSocket contracts', { timeout: 8_000 }, async (t) =
     await request('POST', '/api/auth/logout');
     await request('GET', '/api/conversations', undefined, 401);
   });
-});
+  await step('SIGTERM saves an unfinished generation before SQLite closes', async () => {
+    const login = await fetch(base + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'new-password' }),
+    });
+    assert.equal(login.status, 200);
+    await login.arrayBuffer();
+    cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+    const viewer = await connect();
+    const shutdown = await request<{ id: number }>('POST', '/api/conversations', {});
+    viewer.socket.send(JSON.stringify({ sub: shutdown.id }));
+    await viewer.wait((event) => event.t === 'tree');
+    hold = true;
+    const active = await request<{ assistantMessageId: number }>(
+      'POST',
+      `/api/conversations/${shutdown.id}/messages`,
+      { ...guard(await tree(shutdown.id)), content: 'Save this unfinished reply' },
+    );
+    await viewer.wait((event) => event.t === 'delta' && event.mid === active.assistantMessageId);
+    const exited = once(child, 'exit');
+    child.kill('SIGTERM');
+    const [code] = await exited;
+    assert.equal(code, 0, logs);
+    const { Database } = await import('bun:sqlite');
+    using saved = new Database(process.env.DB_PATH!, { readonly: true });
+    assert.deepEqual(
+      saved.query('SELECT content,status FROM messages WHERE id=?').get(active.assistantMessageId),
+      { content: 'Hello', status: 'stopped' },
+    );
+  });
+}, 8_000);

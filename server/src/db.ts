@@ -1,5 +1,7 @@
-import { DatabaseSync } from 'node:sqlite';
-import type { StatementSync } from 'node:sqlite';
+import { Database, type Statement, type SQLQueryBindings } from 'bun:sqlite';
+
+type SqlRow = Record<string, string | number | bigint | Uint8Array | null>;
+type PreparedStatement = Statement<SqlRow, SQLQueryBindings[]>;
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
@@ -40,7 +42,7 @@ if (dirname(DB_PATH) !== DATA_DIR) privateDirectory(dirname(DB_PATH));
 privateDirectory(AVATAR_DIR);
 privateDirectory(IMAGES_DIR);
 
-export const db = new DatabaseSync(DB_PATH);
+export const db = new Database(DB_PATH, { strict: true });
 chmodSync(DB_PATH, 0o600);
 db.exec('PRAGMA foreign_keys = ON');
 // The online backup opens a separate connection; allow its short read locks to finish.
@@ -51,11 +53,11 @@ db.exec('PRAGMA journal_mode = DELETE');
 db.exec('PRAGMA synchronous = EXTRA');
 
 // Query strings form a bounded set, so this cache needs no eviction.
-const stmtCache = new Map<string, StatementSync>();
-export function stmt(sql: string): StatementSync {
+const stmtCache = new Map<string, PreparedStatement>();
+export function stmt(sql: string): PreparedStatement {
   let prepared = stmtCache.get(sql);
   if (!prepared) {
-    prepared = db.prepare(sql);
+    prepared = db.prepare<SqlRow, SQLQueryBindings[]>(sql);
     stmtCache.set(sql, prepared);
   }
   return prepared;
@@ -63,7 +65,7 @@ export function stmt(sql: string): StatementSync {
 
 // Existing databases must already meet the minimum supported schema version.
 // Never renumber this baseline or silently open an older/newer schema.
-const BASELINE_VERSION = 67;
+const BASELINE_VERSION = 68;
 let version = Number(stmt('PRAGMA user_version').get()!.user_version);
 if (version !== 0 && (version < BASELINE_VERSION || version > SCHEMA_VERSION)) {
   throw new Error(
@@ -107,7 +109,7 @@ if (version === 0) {
   version = SCHEMA_VERSION;
 }
 
-// Future upgrades go here, starting at 68. Also update schema.ts and fresh seeds above.
+// Future upgrades go here, starting at 69. Also update schema.ts and fresh seeds above.
 // See docs/database-schema.md for persisted JSON, file ownership and deployment notes.
 function migrate(target: number, apply: () => void): void {
   if (version >= target) return;
@@ -117,8 +119,6 @@ function migrate(target: number, apply: () => void): void {
   });
   version = target;
 }
-// migrate(68, () => { ... });
-
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 deleteMessageSubtrees(
@@ -142,7 +142,7 @@ stmt(`UPDATE messages SET image_pending = 0 WHERE image_pending = 1
  * Inner failures roll back only if propagated; catching them commits the inner writes.
  */
 export function transaction<T>(fn: () => T): T {
-  if (db.isTransaction) return fn();
+  if (db.inTransaction) return fn();
   db.exec('BEGIN');
   try {
     const result = fn();
@@ -220,7 +220,7 @@ export function toMediaAsset(row: Row): MediaAsset {
     duration: row.duration as number | null,
     thumbnail: row.thumbnail as string | null,
     thumbnailRevision: row.thumbnail_revision as number,
-    recipeId: row.recipe_id as string | null,
+    recipeId: row.recipe_id as number | null,
   };
 }
 

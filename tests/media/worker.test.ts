@@ -1,5 +1,6 @@
+import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media jobs', async () => {
   const { existsSync, readFileSync } = await import('node:fs');
@@ -95,11 +96,14 @@ test('media jobs', async () => {
   const cancellations: string[] = [];
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = async (input, init) => {
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     const url = new URL(String(input));
     assert.equal(url.origin, base, 'Tests never contact a live Comfy endpoint');
     if (url.pathname === '/upload/image') {
-      const form = init!.body as FormData;
+      const form = await new Response(init!.body).formData();
       const image = form.get('image') as File;
       const subfolder = String(form.get('subfolder'));
       uploads.push({ name: image.name, subfolder, data: Buffer.from(await image.arrayBuffer()) });
@@ -183,9 +187,9 @@ test('media jobs', async () => {
       return new Response(raster, { headers: { 'content-type': 'image/png' } });
     }
     throw new Error(`Unexpected mock Comfy request: ${url.pathname}`);
-  };
+  }) as unknown as typeof fetch;
 
-  async function waitFor(id: string, state: MediaJob['state']): Promise<MediaJob> {
+  async function waitFor(id: number, state: MediaJob['state']): Promise<MediaJob> {
     // Completion is transient: capture its notification before automatic deletion.
     let completed: MediaJob | undefined;
     const unsubscribe = observeMediaJob(id, (row) => {
@@ -207,7 +211,12 @@ test('media jobs', async () => {
   }
 
   function draft(requestKey: string, extra: Record<string, unknown> = {}) {
-    return createMediaJob({ requestKey, operation: 'image', prompt: 'A landscape', ...extra });
+    return createMediaJob({
+      requestKey: testRequestKey(requestKey),
+      operation: 'image',
+      prompt: 'A landscape',
+      ...extra,
+    });
   }
 
   try {
@@ -232,15 +241,15 @@ test('media jobs', async () => {
     assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(finished.outputs[0]!.url))), raster);
     assert.throws(() => requireMediaJob(first.id), { status: 404 });
     assert.equal(
-      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get('idempotent'),
-      undefined,
+      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get(testRequestKey('idempotent')),
+      null,
       'Success deletes the full job, including its request key, even when remote cleanup fails',
     );
     assert.equal(
       stmt("SELECT owner_id FROM media_owners WHERE owner_type = 'job' AND owner_id = ?").get(
         first.id,
       ),
-      undefined,
+      null,
     );
 
     failDeletion = false;
@@ -323,7 +332,9 @@ test('media jobs', async () => {
       ...getSettings(),
       mediaRendering: { ...renderingSettings, workflows: [imageWorkflow] },
     });
-    const restored = createMediaJobFromAsset(edited.outputs[0]!.id, { requestKey: 'recipe-rerun' });
+    const restored = createMediaJobFromAsset(edited.outputs[0]!.id, {
+      requestKey: testRequestKey('recipe-rerun'),
+    });
     assert.equal(restored.inputs.length, 3);
     assert.equal(
       restored.instruction,

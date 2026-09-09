@@ -465,10 +465,10 @@ export interface TreeNode {
 export type ServerEvent =
   | { t: 'mediaThumbnails'; items: { id: number; thumbnail: string; revision: number }[] }
   | { t: 'mediaJob'; job: MediaJob }
-  | { t: 'mediaJobDeleted'; id: string }
+  | { t: 'mediaJobDeleted'; id: number }
   | {
       t: 'mediaJobProgress';
-      id: string;
+      id: number;
       progress: NonNullable<MediaJob['progress']>;
       prompt?: string;
       reasoning?: string;
@@ -505,3 +505,5 @@ export type ServerEvent =
     };
 
 export type ClientCommand = { sub: number | null };
+
+export { newRequestId, nextCollectionId } from './numericIds.ts';

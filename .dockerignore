@@ -6,3 +6,7 @@ data-dev
 certs
 .secrets
 client/dist
+
+.env*
+.codex
+.agents

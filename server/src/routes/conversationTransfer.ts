@@ -107,7 +107,7 @@ interface MessageRow {
   generation_kind: GenerationKind;
   images_json: string;
   active_image: number;
-  render_recipe_id: string | null;
+  render_recipe_id: number | null;
 }
 
 function object(value: unknown, label: string): JsonObject {
@@ -225,53 +225,56 @@ export function exportPortableConversation(conversationId: number): PortableConv
     });
     return id;
   }
-  const messages = rows.map((row): TransferMessage => {
-    const paths = JSON.parse(row.images_json) as string[];
-    const imageAssetIds: string[] = [];
-    let activeImage = 0;
-    for (const [index, path] of paths.entries()) {
-      // Portable JSON carries raster images only. Keep video prompts and tree nodes.
-      if (extname(path).toLowerCase() === '.webm' || mediaAssetForPath(path)?.kind === 'video') {
-        continue;
+  const messages = rows.map(
+    (row): Omit<TransferMessage, 'renderRecipeId'> & { renderRecipeId: number | null } => {
+      const paths = JSON.parse(row.images_json) as string[];
+      const imageAssetIds: string[] = [];
+      let activeImage = 0;
+      for (const [index, path] of paths.entries()) {
+        // Portable JSON carries raster images only. Keep video prompts and tree nodes.
+        if (extname(path).toLowerCase() === '.webm' || mediaAssetForPath(path)?.kind === 'video') {
+          continue;
+        }
+        if (index <= row.active_image) {
+          activeImage = imageAssetIds.length;
+        }
+        imageAssetIds.push(addImage(path));
       }
-      if (index <= row.active_image) {
-        activeImage = imageAssetIds.length;
-      }
-      imageAssetIds.push(addImage(path));
-    }
-    const renderRecipeId =
-      row.render_recipe_id &&
-      !getMediaRecipe(row.render_recipe_id).configuration.workflow.operation.startsWith('video')
-        ? row.render_recipe_id
-        : null;
-    const current = live.get(row.id);
-    return {
-      id: row.id,
-      parentId: row.parent_id,
-      role: row.role,
-      content: mediaPromptBuffers.get(row.id)?.prompt ?? current?.content ?? row.content,
-      reasoning: current?.reasoning ?? row.reasoning,
-      name: row.name,
-      status: row.status,
-      activeChildId: row.active_child_id,
-      model: current?.model ?? row.model,
-      genMeta: parseJsonObject(row.gen_meta_json, `message ${row.id} genMeta`),
-      generationKind: row.generation_kind,
-      imageAssetIds,
-      activeImage,
-      renderRecipeId,
-      createdAt: row.created_at,
-    };
-  });
+      const renderRecipeId =
+        row.render_recipe_id &&
+        !getMediaRecipe(row.render_recipe_id).configuration.workflow.operation.startsWith('video')
+          ? row.render_recipe_id
+          : null;
+      const current = live.get(row.id);
+      return {
+        id: row.id,
+        parentId: row.parent_id,
+        role: row.role,
+        content: mediaPromptBuffers.get(row.id)?.prompt ?? current?.content ?? row.content,
+        reasoning: current?.reasoning ?? row.reasoning,
+        name: row.name,
+        status: row.status,
+        activeChildId: row.active_child_id,
+        model: current?.model ?? row.model,
+        genMeta: parseJsonObject(row.gen_meta_json, `message ${row.id} genMeta`),
+        generationKind: row.generation_kind,
+        imageAssetIds,
+        activeImage,
+        renderRecipeId,
+        createdAt: row.created_at,
+      };
+    },
+  );
 
   const { recipes, assetRecipes, recipeIds } = exportImageRecipes(
     assetByPath,
     addImage,
     messages.flatMap((message) => (message.renderRecipeId ? [message.renderRecipeId] : [])),
   );
-  for (const message of messages) {
-    if (message.renderRecipeId) message.renderRecipeId = recipeIds.get(message.renderRecipeId)!;
-  }
+  const exportedMessages: TransferMessage[] = messages.map((message) => ({
+    ...message,
+    renderRecipeId: message.renderRecipeId === null ? null : recipeIds.get(message.renderRecipeId)!,
+  }));
   for (const asset of assets) {
     const recipeId = assetRecipes.get(asset.id);
     if (recipeId) {
@@ -294,7 +297,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
       createdAt: conv.createdAt,
       updatedAt: conv.updatedAt,
     },
-    messages,
+    messages: exportedMessages,
     assets,
     recipes,
   };
@@ -625,19 +628,19 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
   }
 }
 
-route.get('/api/conversations/:id/export', ({ params, res }) => {
+route.get('/api/conversations/:id/export', ({ params }) => {
   const payload = exportPortableConversation(positiveId(params.id));
   const filename = payload.conversation.title.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'chat';
   const json = JSON.stringify(payload, null, 2);
   if (Buffer.byteLength(json) > MAX_IMPORT_BODY_BYTES) {
     throw new HttpError(413, 'conversation export is too large to import');
   }
-  res
-    .writeHead(200, {
+  return new Response(json, {
+    headers: {
       'content-type': 'application/json',
       'content-disposition': `attachment; filename="${filename}.tinytavern.json"`,
-    })
-    .end(json);
+    },
+  });
 });
 
 route.post('/api/conversations/import', ({ body }) => importPortableConversation(body), {

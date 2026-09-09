@@ -4,7 +4,7 @@ import { databaseCase } from '../support/database.ts';
 databaseCase('conversation transfer', async () => {
   const { imageConfig } = await import('../support/imageConfig.ts');
 
-  // Run through npm test for isolated data; this script is destructive.
+  // Run through scripts/run-isolated-tests.sh for isolated data.
   const { existsSync, readFileSync } = await import('node:fs');
 
   const { join } = await import('node:path');
@@ -217,7 +217,7 @@ databaseCase('conversation transfer', async () => {
   );
   const importedPromptRow = stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(
     importedPrompt.id,
-  ) as { render_recipe_id: string };
+  ) as { render_recipe_id: number };
   assert(
     getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflow.json.includes(
       '{{seed}}',
@@ -409,7 +409,7 @@ databaseCase('conversation copy', async () => {
 });
 
 databaseCase('media transfer', async () => {
-  const { randomUUID } = await import('node:crypto');
+  const { newRequestId } = await import('@tinytavern/shared');
 
   const { existsSync, readFileSync, readdirSync } = await import('node:fs');
 
@@ -474,7 +474,7 @@ databaseCase('media transfer', async () => {
     { slot: 'reference2', assetId: referenceId },
     { slot: 'reference1', assetId: sourceId },
   ];
-  function recipe(id: string, path: string, workflow: MediaWorkflow, inputs: MediaJobInput[]) {
+  function recipe(id: number, path: string, workflow: MediaWorkflow, inputs: MediaJobInput[]) {
     stmt(
       'INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(
@@ -503,7 +503,7 @@ databaseCase('media transfer', async () => {
     }
   }
   recipe(
-    'original-recipe',
+    902,
     source,
     {
       ...workflow,
@@ -515,7 +515,7 @@ databaseCase('media transfer', async () => {
     },
     [],
   );
-  recipe('edit-recipe', output, workflow, inputs);
+  recipe(901, output, workflow, inputs);
   setMediaCharacters(mediaAssetForPath(output)!.id, organizationCharacters);
   setMediaCharacters(sourceId, organizationCharacters);
   const conversationId = Number(
@@ -550,8 +550,6 @@ databaseCase('media transfer', async () => {
     'source-only',
     'must-not-export',
     'private-preset',
-    'original-recipe',
-    'edit-recipe',
   ]) {
     assert(
       !json.includes(secret),
@@ -599,7 +597,7 @@ databaseCase('media transfer', async () => {
     const row = stmt('SELECT path FROM media_assets WHERE id = ?').get(input.assetId)!;
     assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(String(row.path)))), png);
   }
-  const rerun = createMediaJobFromAsset(asset.id, { requestKey: randomUUID() });
+  const rerun = createMediaJobFromAsset(asset.id, { requestKey: newRequestId() });
   assert.equal(rerun.operation, 'image-edit');
   assert.equal(
     rerun.instruction,
@@ -718,7 +716,7 @@ databaseCase('media transfer', async () => {
   );
   const missingPaths = collectConversationImages(missingCopy.id);
   const missingRerun = createMediaJobFromAsset(mediaAssetForPath(missingPaths[0]!)!.id, {
-    requestKey: randomUUID(),
+    requestKey: newRequestId(),
   });
   assert.deepEqual(missingRerun.inputs, []);
   assert.equal(missingRerun.workflowSnapshot!.referenceCount, 3);

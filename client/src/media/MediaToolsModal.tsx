@@ -1,3 +1,4 @@
+import { newRequestId } from '@tinytavern/shared';
 import MediaResultDetails from './MediaResultDetails.tsx';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 import { createStreamScroll } from '../streamScroll.ts';
@@ -121,7 +122,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     destination: session.destination,
   });
   let baseline = JSON.stringify(draft);
-  let variationRequestKey = crypto.randomUUID();
+  let variationRequestKey = newRequestId();
   createEffect(() => {
     if (!paneActive()) return;
     rememberMediaPage({
@@ -147,7 +148,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
     return Object.values(state.mediaJobs)
       .filter((item) => item.draft?.id === current.draft!.id)
-      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+      .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   });
   const review = createMemo(() => {
     let latest = job()?.draft;
@@ -447,7 +448,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       : current
         ? await api.editMediaJob(current, values)
         : await api.createMediaJob(values, session.id);
-    variationRequestKey = crypto.randomUUID();
+    variationRequestKey = newRequestId();
     loadJob(saved);
     setJobId(saved.id);
     applyMediaJob(saved);
@@ -618,7 +619,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
     setBusy(true);
     try {
-      const next = await api.rerunMediaJob(job()!, crypto.randomUUID(), { reviewBeforeSave: true });
+      const next = await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true });
       applyMediaJob(next);
       setJobId(next.id);
       loadJob(next);

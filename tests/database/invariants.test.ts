@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('deep tree delete', async () => {
   const { once } = await import('node:events');
 
   const { existsSync } = await import('node:fs');
-
-  const { createServer } = await import('node:http');
 
   const { basename, join } = await import('node:path');
 
@@ -19,15 +17,16 @@ test('deep tree delete', async () => {
     await import('../../server/src/tree.ts');
   const { saveImage } = await import('../../server/src/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { dispatch } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/conversations.ts');
-  const server = createServer((req, res) => {
-    void dispatch(req, res, new URL(req.url!, 'http://localhost').pathname);
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    routes: apiRoutes(),
+    fetch: () => new Response(null, { status: 404 }),
+    idleTimeout: 0,
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
+  const address = { port: server.port };
   const base = `http://127.0.0.1:${address.port}`;
 
   function conversation(): number {
@@ -93,12 +92,12 @@ test('deep tree delete', async () => {
       doomed.at(-1)!,
     );
     stmt(`INSERT INTO media_jobs(id,operation,state,destination,context_conversation_id,message_id,created_at,updated_at)
-    VALUES ('deep-job','image','queued','chat',?,?,1,1)`).run(cid, doomed.at(-1)!);
+    VALUES (9001,'image','queued','chat',?,?,1,1)`).run(cid, doomed.at(-1)!);
     deleteMessage(doomed[0]!);
     assert.equal(remaining(cid), 2);
     assert.equal(getActiveLeafId(cid), survivor);
     assert(!existsSync(join(IMAGES_DIR, basename(image))));
-    const job = stmt("SELECT state,message_id FROM media_jobs WHERE id='deep-job'").get()!;
+    const job = stmt('SELECT state,message_id FROM media_jobs WHERE id=9001').get()!;
     assert.equal(job.state, 'cancelling');
     assert.equal(job.message_id, null);
 
@@ -165,19 +164,22 @@ test('deep tree delete', async () => {
     stmt("INSERT INTO messages_fts(messages_fts, rank) VALUES ('integrity-check', 1)").run();
     assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server.stop(true);
   }
 });
 
 // These plans guard linear work on unrelated rows during deletion and list reads.
 test('foreign-key actions and ordered lists stay indexed', async () => {
-  const { stmt } = await import('../../server/src/db.ts');
-  const plan = (sql: string) =>
-    stmt(`EXPLAIN QUERY PLAN ${sql}`)
+  const { Database } = await import('bun:sqlite');
+  using plans = new Database(process.env.DB_PATH!, { readonly: true });
+  const plan = (sql: string) => {
+    // Finalize EXPLAIN statements for writes; retaining them can hold an implicit transaction.
+    using statement = plans.prepare<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${sql}`);
+    return statement
       .all()
-      .map((row) => String(row.detail))
+      .map((row) => row.detail)
       .join('\n');
+  };
   for (const table of [
     'messages',
     'conversations',
@@ -210,4 +212,53 @@ test('foreign-key actions and ordered lists stay indexed', async () => {
     plan("SELECT id FROM media_jobs WHERE state='failed' AND retention_deadline<=100"),
     /SEARCH.*state=\? AND retention_deadline</,
   );
+});
+
+test('online backup preserves committed state and refuses replacement', async () => {
+  const { Database } = await import('bun:sqlite');
+  const { spawnSync } = await import('node:child_process');
+  const { join } = await import('node:path');
+  const { readFileSync, statSync } = await import('node:fs');
+  const { db, stmt, DATA_DIR } = await import('../../server/src/db.ts');
+  const binary = new Uint8Array([0, 255, 128, 13]);
+  const roundTrip = stmt('SELECT ? AS bytes').get(binary)!.bytes;
+  assert(roundTrip instanceof Uint8Array);
+  assert.deepEqual([...roundTrip], [...binary]);
+  const cid = Number(
+    stmt("INSERT INTO conversations(title,created_at,updated_at) VALUES ('Backup',1,1)").run()
+      .lastInsertRowid,
+  );
+  const mid = Number(
+    stmt(
+      "INSERT INTO messages(conversation_id,role,content,created_at) VALUES (?,'user','backupftsprobe',1)",
+    ).run(cid).lastInsertRowid,
+  );
+  const target = join(DATA_DIR, 'backup.db');
+  const run = () =>
+    spawnSync(process.execPath, ['server/src/backup.ts', target], { encoding: 'utf8' });
+  db.exec('BEGIN');
+  try {
+    stmt("UPDATE messages SET content='uncommitted' WHERE id=?").run(mid);
+    const result = run();
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    db.exec('ROLLBACK');
+  }
+  using copy = new Database(target, { readonly: true });
+  assert.deepEqual(copy.query('PRAGMA integrity_check').get(), { integrity_check: 'ok' });
+  assert.deepEqual(copy.query('PRAGMA foreign_key_check').all(), []);
+  assert.deepEqual(copy.query('PRAGMA user_version').get(), { user_version: 68 });
+  assert.deepEqual(copy.query('SELECT content FROM messages WHERE id=?').get(mid), {
+    content: 'backupftsprobe',
+  });
+  assert.deepEqual(
+    copy.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'backupftsprobe'").get(),
+    { rowid: mid },
+  );
+  assert.equal(statSync(target).mode & 0o777, 0o600);
+  const before = readFileSync(target);
+  const again = run();
+  assert.notEqual(again.status, 0);
+  assert.match(again.stderr, /Refusing to overwrite/);
+  assert.deepEqual(readFileSync(target), before);
 });

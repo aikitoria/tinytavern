@@ -1,8 +1,13 @@
 import type { Ctx } from './router.ts';
 import { HttpError } from './router.ts';
+import { streamResponse } from './routes/streamResponse.ts';
 
+interface Listener {
+  send: (event: unknown) => void;
+  finish: () => void;
+}
 /** Random job IDs restrict avatar/gallery progress to matching SSE listeners. */
-const listenersByJob = new Map<string, Set<Ctx['res']>>();
+const listenersByJob = new Map<string, Set<Listener>>();
 
 export function renderJobId(raw: string): string {
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(raw)) throw new HttpError(400, 'invalid render job id');
@@ -10,10 +15,7 @@ export function renderJobId(raw: string): string {
 }
 
 function publish(jobId: string, event: Record<string, unknown>): void {
-  const payload = `data: ${JSON.stringify(event)}\n\n`;
-  for (const res of listenersByJob.get(jobId) ?? []) {
-    if (!res.destroyed && !res.writableEnded) res.write(payload);
-  }
+  for (const listener of listenersByJob.get(jobId) ?? []) listener.send(event);
 }
 
 export function publishRenderProgress(jobId: string, value: number, max: number): void {
@@ -28,35 +30,28 @@ export function finishRenderProgress(jobId: string): void {
   const listeners = listenersByJob.get(jobId);
   if (!listeners) return;
   listenersByJob.delete(jobId);
-  for (const res of listeners) {
-    if (!res.destroyed && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    }
-  }
+  for (const listener of listeners) listener.finish();
 }
 
-export async function streamRenderProgress(ctx: Ctx): Promise<void> {
+export function streamRenderProgress(ctx: Ctx): Response {
   const jobId = renderJobId(ctx.params.id ?? '');
-  let listeners = listenersByJob.get(jobId);
-  if (!listeners) {
-    listeners = new Set();
-    listenersByJob.set(jobId, listeners);
-  }
-  listeners.add(ctx.res);
-  ctx.res.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
+  return streamResponse(ctx.req, async (send, signal) => {
+    let listeners = listenersByJob.get(jobId);
+    if (!listeners) listenersByJob.set(jobId, (listeners = new Set()));
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const listener = { send, finish };
+    listeners.add(listener);
+    signal.addEventListener('abort', finish, { once: true });
+    if (signal.aborted) finish();
+    try {
+      await done;
+    } finally {
+      signal.removeEventListener('abort', finish);
+      listeners.delete(listener);
+      if (!listeners.size && listenersByJob.get(jobId) === listeners) listenersByJob.delete(jobId);
+    }
   });
-  // Flush headers before render submission to avoid racing the first sampler event.
-  ctx.res.write(': ready\n\n');
-  await new Promise<void>((resolve) => {
-    ctx.res.once('close', resolve);
-  });
-  listeners.delete(ctx.res);
-  if (listeners.size === 0 && listenersByJob.get(jobId) === listeners) {
-    listenersByJob.delete(jobId);
-  }
-  if (!ctx.res.writableEnded) ctx.res.end();
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('gallery layout', async () => {
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
@@ -103,7 +103,7 @@ test('media job cards', async () => {
 
   const { mediaWorkflowView } = await import('../../client/src/media/workflowDefaults.ts');
 
-  function job(id: string, overrides: Partial<MediaJob> = {}): MediaJob {
+  function job(id: number, overrides: Partial<MediaJob> = {}): MediaJob {
     return {
       id,
       characterIds: [],
@@ -137,40 +137,40 @@ test('media job cards', async () => {
     };
   }
   const draft = {
-    id: 'variations',
+    id: 4,
     revision: 1,
     state: 'open' as const,
     selectedAssetId: null,
     savedAssetIds: [],
   };
-  const running = job('running', { draft, state: 'rendering', createdAt: 2 });
-  const newer = job('newer', { draft, createdAt: 3 });
-  const complete = job('complete', { draft, state: 'succeeded' });
-  const standalone = job('standalone', { createdAt: 4 });
+  const running = job(1, { draft, state: 'rendering', createdAt: 2 });
+  const newer = job(2, { draft, createdAt: 3 });
+  const complete = job(3, { draft, state: 'succeeded' });
+  const standalone = job(4, { createdAt: 4 });
   let groups = groupMediaJobs([
     complete,
     newer,
     standalone,
     running,
-    job('description', { operation: 'image-describe', createdAt: 10 }),
+    job(5, { operation: 'image-describe', createdAt: 10 }),
   ]);
   assert.deepEqual(
     groups.map((group) => group.id),
-    ['standalone', 'variations'],
+    [4, -4],
   );
-  assert.equal(groups[1]!.job.id, 'running', 'An older active variation remains visible');
+  assert.equal(groups[1]!.job.id, 1, 'An older active variation remains visible');
   assert.equal(groups[1]!.jobs.length, 3, 'All variations remain available to the card');
   running.state = 'succeeded';
   groups = groupMediaJobs([newer, running, complete]);
-  assert.equal(groups[0]!.job.id, 'newer');
+  assert.equal(groups[0]!.job.id, 2);
 
   const long = 'x'.repeat(1000);
   assert.deepEqual(
-    jobPromptExcerpt(job('thinking', { state: 'preparing', reasoning: `${long}new reasoning` })),
+    jobPromptExcerpt(job(6, { state: 'preparing', reasoning: `${long}new reasoning` })),
     { label: 'Thinking…', text: `…${long.slice(-407)}new reasoning` },
   );
   const writing = jobPromptExcerpt(
-    job('writing', {
+    job(7, {
       state: 'preparing',
       prompt: `${long}new prompt`,
       reasoning: 'hidden reasoning',
@@ -181,12 +181,12 @@ test('media job cards', async () => {
   assert(writing.text.length <= 421);
   assert.equal(
     jobPromptExcerpt(
-      job('ready', { state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' }),
+      job(8, { state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' }),
     ).text,
     `Prompt ${long.slice(0, 413)}…`,
   );
   assert.equal(
-    jobPromptExcerpt(job('draft', { instruction: 'Use this character' })).text,
+    jobPromptExcerpt(job(9, { instruction: 'Use this character' })).text,
     'Use this character',
   );
 
@@ -207,7 +207,7 @@ test('media job cards', async () => {
   };
   const edited = { ...snapshot, name: 'Edited workflow', json: snapshot.json.replace('5', '9') };
   const other = { ...snapshot, id: 'other-workflow' };
-  const captured = job('captured', {
+  const captured = job(10, {
     state: 'rendering',
     workflowId: snapshot.id,
     workflowSnapshot: snapshot,
@@ -239,7 +239,7 @@ test('media job cards', async () => {
     'Unlocked edits retain their local values',
   );
   const defaulted = mediaWorkflowView(
-    job('defaults', { workflowSnapshot: snapshot }),
+    job(11, { workflowSnapshot: snapshot }),
     snapshot.id,
     [edited],
     {},

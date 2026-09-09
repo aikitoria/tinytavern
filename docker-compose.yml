@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
       target: server-prod
     container_name: tinytavern
-    user: "1000:1000"
+    user: '1000:1000'
     volumes:
       - ./data:/data
       - ./.secrets/prod:/secrets:ro
@@ -15,7 +15,7 @@ services:
       MEDIA_SIGNING_KEY_FILE: /secrets/media.key
       CADDY_PROXY_KEY_FILE: /secrets/proxy.key
       SESSION_COOKIE_NAME: tinytavern_prod_session
-      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
+      TINYTAVERN_IP_ALLOWLIST: '${TINYTAVERN_IP_ALLOWLIST-}'
     restart: unless-stopped
     # Separate network for ComfyUI; optionally reuse an external network via .env.
     networks:
@@ -27,14 +27,14 @@ services:
       context: .
       dockerfile: caddy/Dockerfile
       target: caddy-prod
-    user: "1000:1000"
+    user: '1000:1000'
     ports:
-      - "5487:5487/tcp"
-      - "5487:5487/udp"
+      - '5487:5487/tcp'
+      - '5487:5487/udp'
     environment:
-      PUBLIC_PORT: "5487"
+      PUBLIC_PORT: '5487'
       BACKEND: tinytavern:5487
-      TINYTAVERN_IP_ALLOWLIST: "${TINYTAVERN_IP_ALLOWLIST-}"
+      TINYTAVERN_IP_ALLOWLIST: '${TINYTAVERN_IP_ALLOWLIST-}'
     volumes:
       - ./certs:/certs:ro
       - ./.secrets/prod:/secrets:ro

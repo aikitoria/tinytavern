@@ -24,7 +24,7 @@ export const MEDIA_INPUT_LABELS: Record<MediaJob['inputs'][number]['slot'], stri
 };
 
 export interface MediaJobGroup {
-  id: string;
+  id: number;
   job: MediaJob;
   jobs: MediaJob[];
   createdAt: number;
@@ -32,10 +32,10 @@ export interface MediaJobGroup {
 
 /** Keep a running variation visible even when a newer, idle variation exists. */
 export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
-  const groups = new Map<string, MediaJobGroup>();
+  const groups = new Map<number, MediaJobGroup>();
   for (const job of jobs) {
     if (job.operation === 'image-describe') continue;
-    const id = job.draft?.id ?? job.id;
+    const id = job.draft ? -job.draft.id : job.id;
     const group = groups.get(id);
     if (!group) {
       groups.set(id, { id, job, jobs: [job], createdAt: job.createdAt });
@@ -53,7 +53,7 @@ export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
     )
       group.job = job;
   }
-  return [...groups.values()].sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+  return [...groups.values()].sort((a, b) => b.createdAt - a.createdAt || a.id - b.id);
 }
 
 /** Bound card text work; show the newest tokens during generation. */

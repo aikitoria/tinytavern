@@ -4,8 +4,4 @@ data/
 data-dev/
 data-e2e/
 certs/
-package-lock.json
 client/public/
-# read-only in dev containers (write-protection mounts)
-docker-compose*.yml
-Dockerfile

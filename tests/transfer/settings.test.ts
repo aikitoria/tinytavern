@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('settings transfer', async () => {
-  const { createServer } = await import('node:http');
-
   const { once } = await import('node:events');
 
   const {
@@ -87,7 +85,7 @@ test('settings transfer', async () => {
 
   const { stmt } = await import('../../server/src/db.ts');
   const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { dispatch } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/templates.ts');
   await import('../../server/src/routes/presets.ts');
   await import('../../server/src/routes/personas.ts');
@@ -96,16 +94,14 @@ test('settings transfer', async () => {
   await import('../../server/src/routes/settings.ts');
   const { makePlaceholderPng, parseCharacterCard } = await import('../../server/src/pngCard.ts');
   const { readAvatarFile } = await import('../../server/src/routes/avatarStore.ts');
-  const server = createServer(
-    (req, res) =>
-      void dispatch(req, res, new URL(req.url!, 'http://test').pathname).then((found) => {
-        if (!found) res.writeHead(404).end();
-      }),
-  );
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    routes: apiRoutes(),
+    fetch: () => new Response(null, { status: 404 }),
+    idleTimeout: 0,
+  });
+  const address = { port: server.port };
   const base = `http://127.0.0.1:${address.port}`;
   async function request(method: string, path: string, body?: unknown, status = 200): Promise<any> {
     const response = await fetch(`${base}${path}`, {
@@ -251,7 +247,6 @@ test('settings transfer', async () => {
     assert.equal(importedCharacter.templateId, template.id);
     assert.equal(importedCharacter.disableBackgroundSwipeGeneration, true);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server.stop(true);
   }
 });

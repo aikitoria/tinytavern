@@ -20,9 +20,9 @@ route.get('/api/auth/status', ({ req }) => ({
 
 route.post(
   '/api/auth/login',
-  ({ req, res, body }) => {
+  ({ req, headers, body, remoteAddress }) => {
     if (!isPasswordConfigured()) return { authenticated: true };
-    const ip = requestIp(req) ?? 'unknown';
+    const ip = requestIp(req, remoteAddress) ?? 'unknown';
     const now = Date.now();
     const previous = failures.get(ip);
     if (previous && previous.blockedUntil > now) {
@@ -41,13 +41,13 @@ route.post(
     }
 
     failures.delete(ip);
-    startSession(req, res);
+    startSession(req, headers);
     return { authenticated: true };
   },
   { maxBodyBytes: 4096 },
 );
 
-route.post('/api/auth/logout', ({ req, res }) => {
-  clearSession(req, res);
+route.post('/api/auth/logout', ({ req, headers }) => {
+  clearSession(req, headers);
   return { authenticated: false };
 });

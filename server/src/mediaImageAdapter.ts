@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newRequestId } from '@tinytavern/shared';
 import { readFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Message, MediaJobInputSnapshot } from '@tinytavern/shared';
@@ -38,7 +38,7 @@ export function startMessageImageRender(
   }
   const result = transaction(() => {
     const draft = createMediaJobFromRecipe(recipeId, {
-      requestKey: randomUUID(),
+      requestKey: newRequestId(),
       prompt: message.content,
       contextConversationId: message.conversationId,
       destination: 'chat',
@@ -66,7 +66,7 @@ function startImageMediaJob(request: ImageRenderRequest): MediaJobRow {
   return transaction(() => {
     const draft = createMediaJob(
       {
-        requestKey: randomUUID(),
+        requestKey: newRequestId(),
         operation: configuration.workflow.operation,
         workflowId: configuration.workflow.id,
         prompt: request.prompt,

@@ -13,17 +13,17 @@ COPY caddy/Caddyfile /etc/caddy/Caddyfile
 COPY caddy/dev.caddy /etc/caddy/frontend.caddy
 USER 1000:1000
 
-FROM node:26-alpine AS client-build
+FROM oven/bun:1.4.2-alpine AS client-build
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json bun.lock bunfig.toml ./
 COPY shared/package.json shared/
 COPY server/package.json server/
 COPY client/package.json client/
-RUN npm ci
+RUN bun install --frozen-lockfile
 COPY shared shared
 COPY server server
 COPY client client
-RUN npm run build -w client
+RUN bun --bun run --cwd client build
 
 FROM caddy-dev AS caddy-prod
 COPY caddy/prod.caddy /etc/caddy/frontend.caddy

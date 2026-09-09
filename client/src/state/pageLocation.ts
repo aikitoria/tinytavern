@@ -4,7 +4,7 @@ import type { ModalKind } from './store.ts';
 
 export interface MediaPageLocation {
   operation: MediaOperation;
-  jobId: string | null;
+  jobId: number | null;
   contextConversationId: number | null;
 }
 
@@ -25,7 +25,7 @@ export interface PageLocation {
 
 const positiveId = (value: string | null | undefined) => {
   const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 };
 
 function parsePane(hash: string): PageLocation {
@@ -59,12 +59,12 @@ function parsePane(hash: string): PageLocation {
     result.viewMode = page;
   } else if (page === 'jobs') {
     result.modal = 'media-jobs';
-  } else if (page === 'media' && detail === 'job' && entity) {
+  } else if (page === 'media' && detail === 'job' && positiveId(entity)) {
     result.modal = 'media-tools';
     // The operation and context are resolved from the saved job, never from its URL.
     result.media = {
       operation: 'image',
-      jobId: entity,
+      jobId: positiveId(entity),
       contextConversationId: null,
     };
   } else if (page === 'media') {
@@ -91,7 +91,7 @@ function parsePane(hash: string): PageLocation {
         result.modal = 'media-tools';
         result.media = {
           operation: operation.id,
-          jobId: entity || null,
+          jobId: positiveId(entity),
           contextConversationId: positiveId(params.get('context')),
         };
       }
@@ -116,7 +116,7 @@ function formatPane(page: PageLocation): string {
   } else if (page.modal === 'media-jobs') {
     parts.push('jobs');
   } else if (page.modal === 'media-tools' && page.media) {
-    if (page.media.jobId) parts.push('media', 'job', page.media.jobId);
+    if (page.media.jobId) parts.push('media', 'job', String(page.media.jobId));
     else {
       const operation = page.media.operation;
       parts.push(
@@ -183,11 +183,15 @@ export function parsePageLocation(hash: string): PageLocation {
         pages.unshift({ chatId: first.chatId, viewMode: first.viewMode, modal: null });
     }
   }
-  // Previously shared URLs may revisit the same saved job. Revisiting unwinds to it.
+  // Revisiting Jobs or the same saved job unwinds to the original pane.
   const unique: PageLocation[] = [];
   for (const pane of pages) {
     const jobId = pane.media?.jobId;
-    const existing = jobId ? unique.findIndex((item) => item.media?.jobId === jobId) : -1;
+    const existing = unique.findIndex((item) =>
+      pane.modal === 'media-jobs'
+        ? item.modal === 'media-jobs'
+        : jobId != null && item.media?.jobId === jobId,
+    );
     if (existing >= 0) unique.splice(existing + 1);
     else unique.push(pane);
   }

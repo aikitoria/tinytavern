@@ -4,16 +4,16 @@ Repository instructions for coding agents. `AGENTS.md` links to this file.
 
 ## Project
 
-TinyTavern: self-hosted chat frontend for OpenAI-compatible LLM APIs with tree-structured conversation history and ComfyUI image, video and image-description workflows. Media generation runs as durable background jobs with review drafts, gallery organization and rerun recipes. Everything runs in Docker — no node process is expected to run on the host, so run commands through `docker compose`.
+TinyTavern: self-hosted chat frontend for OpenAI-compatible LLM APIs with tree-structured conversation history and ComfyUI image, video and image-description workflows. Media generation runs as durable background jobs with review drafts, gallery organization and rerun recipes. Everything runs in Docker. Never run a Bun or Node process on the host. Use the container scripts below for tooling: they copy source into a disposable container with no host mounts. Only explicitly requested output artifacts are copied back.
 
 ## Live environments — do not disturb
 
 The user keeps stacks running while working. Treat them as someone else's live session:
 
 - **Dev stack** (`docker-compose.dev.yml`: `server`, `client`, `caddy-dev`, HTTPS host port 5173, state in `./data-dev`) is the user's live hot-reload environment. Never `up`, `stop`, `restart`, or attach `--profile mock` to it. Application source edits hot-reload on their own. Caddy image/configuration or Compose changes require deployment; do not deploy unless the user requests it.
-- **Prod stack** (`docker-compose.yml`: Node container `tinytavern` plus `caddy-prod`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
+- **Prod stack** (`docker-compose.yml`: Bun container `tinytavern` plus `caddy-prod`, host port **5487**, state in `./data`) may also be running. Never touch it or its data.
 - Never run tests or ad-hoc scripts against either live server — the test suite mutates global settings, creates endpoints/conversations, and would repoint the active endpoint at the mock mid-session.
-- One-off throwaway containers are always safe: `docker compose -f docker-compose.dev.yml run --rm --no-deps server <cmd>` (used for typecheck/format below). It does not start or affect stack services.
+- Use `scripts/run-in-container.sh` for throwaway work. Do not use a live service definition for tests or tooling: its writable data mount belongs to the running application.
 
 ## Screenshots
 
@@ -22,8 +22,8 @@ When the user references a screenshot by bare filename (e.g. `chrome_o4vT3bpfcy.
 ## Stack setup and maintenance
 
 Both stacks use Caddy for HTTPS and public HTTP/1.1, HTTP/2 and HTTP/3 traffic.
-Only Caddy publishes application ports. Node serves APIs and WebSockets over
-internal HTTP; Vite serves the dev client and HMR over internal HTTP. Node has no direct TLS or compiled-SPA mode; its authenticated media/range routes remain available for isolated HTTP regressions.
+Only Caddy publishes application ports. Bun serves APIs and WebSockets over
+internal HTTP; Vite runs under Bun and serves the dev client and HMR over internal HTTP. The backend has no direct TLS or compiled-SPA mode; its authenticated media/range routes remain available for isolated HTTP regressions.
 
 | Stack       | Compose file             | Public URL            | Services                        | Data         |
 | ----------- | ------------------------ | --------------------- | ------------------------------- | ------------ |
@@ -45,14 +45,12 @@ For a new installation or an explicitly requested deployment:
 ```sh
 ./scripts/init-caddy.sh --media-dirs
 
-# Production: Node image plus Caddy image containing the compiled client.
+# Production: Bun image plus Caddy image containing the compiled client.
 docker compose -f docker-compose.yml build
 docker compose -f docker-compose.yml up -d --no-build tinytavern caddy-prod
 
-# Development: bind-mounted application sources and Caddy in front of Vite.
-docker compose -f docker-compose.dev.yml build server
-docker compose -f docker-compose.dev.yml run --rm --no-deps server npm install
-docker compose -f docker-compose.dev.yml build caddy-dev
+# Development: read-only source mounts and image-owned dependencies.
+docker compose -f docker-compose.dev.yml build server client caddy-dev
 docker compose -f docker-compose.dev.yml up -d --no-build --force-recreate server client caddy-dev
 ```
 
@@ -64,7 +62,11 @@ dev need no container action. Do not attach the mock profile to the live stack;
 use the isolated regression command below.
 
 An explicitly requested dev deployment recreates the Vite client too, clearing
-cached module transforms from earlier hot reloads of shared sources.
+cached module transforms from earlier hot reloads of shared sources. Vite watches
+the entire shared source directory from startup, including new files and atomic
+replacements. Individually mounted configuration and package files can retain
+an old inode after an editor replaces the host file; those changes require
+recreating the affected service as part of an authorized deployment.
 
 Reload certificate files through the wrapper, which reads the proxy key before
 Caddy adapts its configuration:
@@ -74,8 +76,8 @@ docker compose -f docker-compose.yml exec caddy-prod tinytavern-caddy reload --f
 docker compose -f docker-compose.dev.yml exec caddy-dev tinytavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-Production database backup: `docker compose exec tinytavern node server/src/backup.ts /data/backups/<unique-name>.db`.
-The helper uses SQLite's online backup API and refuses to overwrite files. Never
+Production database backup: `docker compose exec tinytavern bun server/src/backup.ts /data/backups/<unique-name>.db`.
+The helper uses SQLite's online `VACUUM INTO` snapshot through `bun:sqlite`. It syncs the result and atomically publishes it without overwriting an existing path. Never
 copy an active database file directly; it may contain a partially written transaction.
 A full backup also needs the media directories. Preserve `.secrets/` across
 container replacements.
@@ -83,32 +85,38 @@ container replacements.
 ## Commands
 
 ```sh
-# First time / after dependency changes
-docker compose -f docker-compose.dev.yml build server
-docker compose -f docker-compose.dev.yml run --rm --no-deps server npm install
+# Update the lockfile after editing dependency manifests. No host node_modules.
+./scripts/run-in-container.sh install
 
-# Typecheck (tsc --noEmit for server + client; there is no lint step)
-docker compose -f docker-compose.dev.yml run --rm --no-deps server npm run check
+# Server/client/scripts/tests typecheck; there is no lint step.
+./scripts/run-in-container.sh check
 
-# Format (Prettier, enforced repo-wide)
-docker compose -f docker-compose.dev.yml run --rm --no-deps server npm run format
+# Format all supported source files; copy formatted sources back on success.
+./scripts/run-in-container.sh format
+./scripts/run-in-container.sh format:check
 
-# Complete regression suite, including real HTTP/WebSocket integration:
+# Build the client and copy client/dist back on success.
+./scripts/run-in-container.sh build
+
+# Complete regression suite, including real HTTP/WebSocket integration.
 ./scripts/run-isolated-tests.sh
 ```
 
+The scripts build cached dependency stages with frozen `bun.lock` installs, then
+copy source into a disposable container. There are no host mounts, published
+ports or live credentials. Only `install` needs network access; other tasks use
+container loopback only. Dependency installs and caches stay inside containers.
+Failures and interrupts remove the task container. `format`, `build` and `install`
+copy their requested artifacts back only after successful execution. Image builds
+do not deploy services. Rebuild and deploy dev services when dependency versions change.
+
 The test command always runs every test; there are no filters or separate E2E
 command. `tests/run.ts` discovers feature-grouped `tests/**/*.test.ts` files and
-runs them through `node:test`, with up to eight independent workers. SQLite's
+runs them through `bun:test`, with up to eight independent workers. SQLite's
 schema and defaults are initialized once; each worker receives a copy of that
 closed seed database on tmpfs. Related database cases reuse their connection and
 reset fixture rows, not the schema. Browser-state cases use Solid's browser runtime.
-
-The launcher uses `tests/compose.yml`: one disposable container, no network access
-except its own loopback, no published ports, a read-only repository mount and
-container-local data. It removes its container on exit or interruption and never
-starts or changes the live stacks. The existing development image is reused;
-the first run builds it if absent. `npm test` is the inner container command.
+`bun test` is the worker command; `bun run test` runs the complete coordinator.
 
 Keep one direct regression for each meaningful invariant. Exercise combinations
 in feature tests; use `tests/http/application.test.ts` for actual application
@@ -118,23 +126,27 @@ mock clocks to real sleeps. Real process crashes and FFmpeg remain where those
 boundaries are the behavior under test. Keep the complete warm-image command
 under 15 seconds, including Docker startup, on the development machine.
 
-**Caddy edge**: `caddy/Caddyfile` selects `/images/*` and `/avatars/*` for the local `tinytavern_signed_url` matcher, which only validates the exact signed URI and expiry. Node signs outgoing DTOs in `mediaUrls.ts` (24-hour URLs, reused to avoid repeated signing; no client renewal), never DB/export/copy paths. Caddy serves media directly from read-only directory mounts with `Cache-Control: private, no-store`; signed URLs remain valid until expiry regardless of session revocation. APIs/WS stay session-authenticated in Node. `proxy.ts` requires a private header that Caddy overwrites before accepting original-client-IP/protocol headers. Only Caddy publishes application TCP/UDP ports; dev proxies Vite/HMR, prod serves its compiled client. `.secrets/{dev,prod}` keys are initialized by `scripts/init-caddy.sh`; changes apply on container recreation, never restart/recreate the live stacks during implementation. The isolated HTTP regression command above disables Caddy credentials for its container-local server and mock.
+**Caddy edge**: `caddy/Caddyfile` selects `/images/*` and `/avatars/*` for the local `tinytavern_signed_url` matcher, which only validates the exact signed URI and expiry. Bun signs outgoing DTOs in `mediaUrls.ts` (24-hour URLs, reused to avoid repeated signing; no client renewal), never DB/export/copy paths. Caddy serves media directly from read-only directory mounts with `Cache-Control: private, no-store`; signed URLs remain valid until expiry regardless of session revocation. APIs/WS stay session-authenticated in Bun. `proxy.ts` requires a private header that Caddy overwrites before accepting original-client-IP/protocol headers. Only Caddy publishes application TCP/UDP ports; dev proxies Vite/HMR, prod serves its compiled client. `.secrets/{dev,prod}` keys are initialized by `scripts/init-caddy.sh`; changes apply on container recreation, never restart/recreate the live stacks during implementation. The isolated test runner creates its own HTTP server and mock without live Caddy credentials.
 
-There is no server build step: Node 26 runs the TypeScript sources directly (`node server/src/index.ts`). Only the client is bundled (Vite), and only for production.
+There is no server build step: Bun 1.4.2 runs the TypeScript sources directly (`bun server/src/index.ts`). Only the client is bundled (Vite), and only for production.
 
 Both Compose files select stages from the root `Dockerfile`: development uses
-`server-base`, and production uses `server-prod`. Both server
+`tools`, and production uses `server-prod`. Development mounts source read-only and
+keeps dependencies in the image. `scripts/watch-server.ts` watches server/shared
+sources and gracefully terminates the application child before starting a fresh
+process. Vite caches transforms under `/tmp`. Only the application data directory
+is writable from the deployed server. Both server
 images include FFmpeg for AV1 WebM inspection and thumbnail generation. Building an
 image does not replace a live container. Source-only work still needs no service
 action; applying a changed image remains a requested deployment.
 
 ## Architecture
 
-npm workspaces: `shared/` (contracts and the callback-based SSE frame reader), `server/` (dependency-light Node: `node:sqlite`, `ws`, hand-rolled router), `client/` (SolidJS + Vite).
+Bun workspaces: `shared/` (contracts and the callback-based SSE frame reader), `server/` (native `bun:sqlite`, `Bun.serve` routing and WebSockets), `client/` (SolidJS + Vite).
 
 **`shared/src/index.ts` is the contract.** All entity types (`Message`, `Conversation`, `Character`, `Endpoint`, …), the WebSocket protocol (`ServerEvent` / `ClientCommand`), and default settings live here and are imported by both sides. Media operations, workflows, assets and jobs are defined in `shared/src/media.ts` and re-exported here. Protocol changes start in this file.
 
-**Server-authoritative state, clients are pure viewers.** All state lives in SQLite (`server/src/db.ts`, current schema in `server/src/schema.ts`, versioned via `PRAGMA user_version`; see `docs/database-schema.md` for future migrations, DELETE rollback journaling with `synchronous=EXTRA`). All SQL goes through `stmt()` from db.ts — a memoized prepared-statement cache; never call `db.prepare` directly. Clients keep local form drafts and navigation state, but persistent mutations go through REST endpoints under `/api/` and receive updates over the `/ws` WebSocket:
+**Server-authoritative state, clients are pure viewers.** All state lives in SQLite (`server/src/db.ts`, current schema in `server/src/schema.ts`, versioned via `PRAGMA user_version`; see `docs/database-schema.md` for future migrations, DELETE rollback journaling with `synchronous=EXTRA`). All application SQL goes through `stmt()` from db.ts — a memoized prepared-statement cache; never call `db.prepare` directly. Clients keep local form drafts and navigation state, but persistent mutations go through REST endpoints under `/api/` and receive updates over the `/ws` WebSocket:
 
 - `tree` — full snapshot of a conversation's message tree (sent on subscribe; also the client's resync fallback)
 - `treePatch` — incremental structural update after mutations (`broadcastTree` coalesces per microtask): `nodes` lists every message's structure (absent ids were deleted), `messages` carries full bodies only for messages created/edited since the last frame (tracked via `markMessageDirty` in tree.ts). Structural updates include `parentId` — splice deletions and block moves reparent messages without resending bodies, and the client must apply it.
@@ -151,13 +163,13 @@ Each WebSocket client subscribes to at most one conversation (`events.ts`). The 
 
 **Client conventions**: the settings editors are imperative — they load/save via `.value` on refs (`createEntityEditor` in util.ts). Two custom components honor that contract: `MacroTextarea` (macro-highlight overlay; intercepts the element's `value` property so programmatic loads re-render, and mirrors scrollbar width/scroll position onto the overlay) and `Select` (dropdown replacing native `<select>`, which repositions on scroll; exposes a `SelectHandle` with a `value` accessor). All dropdowns use `DropdownSurface` and the single shared `.popover-surface`/`.popover-menu` appearance in `styles/controls.css`. Feature styles may arrange menu content, but must not redefine menu surfaces, row padding, typography, or selection colors. Sibling swipe animations run off the `pendingSwipe` signal in store.ts: the outgoing side slides fully out and holds until the replacing `treePatch` unmounts it, the incoming sibling/descendants consume the signal at mount time to slide in.
 
-**Dialog stack and page URLs** (`state/dialogStack.ts`, `state/pageLocation.ts`): routed panes are retained as stable frames, rendered by `App` through `DialogContext`. Pushing Jobs, a media tool, gallery or settings keeps the covered component and its unsaved form/selection/scroll state mounted. Only the top pane writes its URL or plays previews. Back pops to the real parent; Jobs is a separate pane and never fabricates an empty draft. Opening an already-mounted job (including another variation of the same review draft) unwinds to that existing editor, retaining its local edits; removed child editors pass through their leave guards. Repeated job IDs in shared URLs normalize to a single pane. Flat hash routes describe the pane order: `#70+/gallery/123+/jobs+/media/job/<job-id>` and `#70+/conversation+/settings/characters/5?detail=1`. The root carries the background chat/map/trace view; individual panes retain gallery filters, settings selection and media context. Media routes use action names (`create-image`, `edit-image`, `create-video`), with `mode=first-frame` or `mode=references` for unsaved video inputs. Once a job exists its pane is `/media/job/<job-id>`; the server supplies the operation, context, inputs and workflow, and controls stay locked until the job loads. Reconstructing a new unsaved media pane seeds its first input from the nearest suitable gallery detail or saved job result in its ancestor panes; saved jobs and already-mounted editors keep their own inputs. Reload reconstructs the frames and fetches saved jobs, without serializing prompts, credentials, media URLs or local form buffers. Older links are readable but normalized to the flat format. Browser Back/Forward retains the common frame prefix and guards every removed editor, including covered ones; Cancel restores the original history entry without consuming it. UI Back uses the parent's existing history entry when available, or replaces a deep link on close. `Modal` shares `dialogLayers` for activation, focus restoration and inert covered surfaces, including local pickers and confirmation dialogs. `uiBack.ts` routes Escape and hardware mouse Back to one top visible surface (including dropdowns, image viewers and mobile editor detail); one press cannot dismiss two layers. Navigation confirmations can appear above covered editors.
+**Dialog stack and page URLs** (`state/dialogStack.ts`, `state/pageLocation.ts`): routed panes are retained as stable frames, rendered by `App` through `DialogContext`. Pushing Jobs, a media tool, gallery or settings keeps the covered component and its unsaved form/selection/scroll state mounted. Only the top pane writes its URL or plays previews. Back pops to the real parent; Jobs is a separate pane and never fabricates an empty draft. Opening an already-mounted job (including another variation of the same review draft) unwinds to that existing editor, retaining its local edits; removed child editors pass through their leave guards. Repeated job IDs in shared URLs normalize to a single pane. Flat hash routes describe the pane order: `#70+/gallery/123+/jobs+/media/job/<job-id>` and `#70+/conversation+/settings/characters/5?detail=1`. The root carries the background chat/map/trace view; individual panes retain gallery filters, settings selection and media context. Media routes use action names (`create-image`, `edit-image`, `create-video`), with `mode=first-frame` or `mode=references` for unsaved video inputs. Once a job exists its pane is `/media/job/<job-id>`; the server supplies the operation, context, inputs and workflow, and controls stay locked until the job loads. Reconstructing a new unsaved media pane seeds its first input from the nearest suitable gallery detail or saved job result in its ancestor panes; saved jobs and already-mounted editors keep their own inputs. Reload reconstructs the frames and fetches saved jobs, without serializing prompts, credentials, media URLs or local form buffers. Older path layouts normalize to the flat format; saved job IDs must be numeric. Browser Back/Forward retains the common frame prefix and guards every removed editor, including covered ones; Cancel restores the original history entry without consuming it. UI Back uses the parent's existing history entry when available, or replaces a deep link on close. `Modal` shares `dialogLayers` for activation, focus restoration and inert covered surfaces, including local pickers and confirmation dialogs. `uiBack.ts` routes Escape and hardware mouse Back to one top visible surface (including dropdowns, image viewers and mobile editor detail); one press cannot dismiss two layers. Navigation confirmations can appear above covered editors.
 
 **Settings workspace** (`SettingsModal.tsx`): a full-screen page using the same `Modal fullscreen` shell as Gallery (`styles/pages.css`). Desktop section navigation sits beside the editor; below 1100px the shared Select in the header replaces it. Fields are centered at a maximum 960px width, while save bars span the available workspace. Forms use shared controls; related settings are grouped in subtly shaded sections with padding, and selectors share bordered inner groups with the fields they control. This treatment is shared across all settings pages. There are no settings-only input sizes. The header and shared action footer stay outside the scrolling editor on desktop and mobile. Entity editors retain their mobile list/detail navigation; SettingsActions portals each editor’s buttons into the shared footer. Back, Escape, section changes, and entity changes go through the existing Save/Discard/Cancel guard. Each editable setting uses `SettingLabel` and a conditional revert arrow; entity/preset editor pickers have no revert action. `createDefaultField` in `SettingField.tsx` tracks both native edits and imperative `.value`/`.checked` loads; Select resets call its explicit `change` method so dependent editors update too. Defaults are the built-in new-entity values, never an editable entity named or selected as default. Reverts affect one draft field and retain the existing save/guard behavior; avatar removal remains immediate. Section headings use spacing rather than divider lines, with a smaller gap below than above.
 
 **Settings JSON transfer** (`shared/src/settingsTransfer.ts`, `SettingsTransferButtons.tsx`, `routes/entityTransfer.ts`): version-1 `tinytavern-settings` documents are scoped to a settings page or individual saved entity. Page settings import into the current draft and use the usual Save/Discard/revision guard. Entity-page imports have a review dialog and atomically merge records through the existing CRUD field validators; a snapshot hash rejects concurrent changes. Named items merge within their operation/reference-count group. References resolve by unique exact name, then unique case-insensitive name; missing or ambiguous names retain the destination selection. Imported IDs are never reused across installations. Protected entity defaults create editable copies. Persona JSON includes PNG avatar data; characters keep PNG cards, whose TinyTavern extension includes named prompt/template/folder references. Endpoint API keys and the access password are excluded from JSON transfer; an existing endpoint key is retained only when its origin is unchanged.
 
-**Route registration is by side effect.** `server/src/router.ts` is a tiny regex router; each file in `server/src/routes/` registers its routes at import time, and `server/src/index.ts` imports them for their side effects. A new route file does nothing until added to that import list. Entity CRUD (presets, templates, personas, characters, endpoints) is table-driven: `defineEntityRoutes` in `server/src/routes/entityRoutes.ts` generates list/create/patch/delete/duplicate from a field spec (column, validator, current-value merge; duplicate copies the full row including secrets and import blobs, plus side-band files such as avatars via `onDuplicate`); only bespoke routes (avatars, card import/export, model fetching) live in the per-entity files. Adding a column to an entity means: schema migration, shared type, `toX` mapper, one field-spec line.
+**Route registration is by side effect.** `server/src/router.ts` collects route declarations and compiles them once into `Bun.serve` native routes; each file in `server/src/routes/` registers its routes at import time, and `server/src/index.ts` imports them for their side effects. A new route file does nothing until added to that import list. Entity CRUD (presets, templates, personas, characters, endpoints) is table-driven: `defineEntityRoutes` in `server/src/routes/entityRoutes.ts` generates list/create/patch/delete/duplicate from a field spec (column, validator, current-value merge; duplicate copies the full row including secrets and import blobs, plus side-band files such as avatars via `onDuplicate`); only bespoke routes (avatars, card import/export, model fetching) live in the per-entity files. Adding a column to an entity means: schema migration, shared type, `toX` mapper, one field-spec line.
 
 **The message tree** (`server/src/tree.ts`): messages form a tree via `parentId`; each node stores `activeChildId` and the conversation stores `activeLeafId`. `setActiveLeaf` repoints `active_child_id` along the entire new path — this invariant is what lets switching back to a branch restore the deep chain that was previously active beneath it.
 
@@ -167,7 +179,7 @@ Each WebSocket client subscribes to at most one conversation (`events.ts`). The 
 
 **Optimistic concurrency** (`server/src/concurrency.ts`): mutating conversation endpoints require `expectedActiveLeafId`; a mismatch returns 409 and rebroadcasts the tree so the stale client resyncs. Settings writes are similarly guarded by a monotonic `revision`.
 
-**Synchronous route handlers are the concurrency model.** Route handlers in `server/src/routes/` are race-free only because they run fully synchronously between check and act — Node's single thread serializes them against each other and against generation/streaming callbacks, so guard-then-act sequences like `hasActiveGeneration` → `startGeneration` are atomic. Introducing a single `await` mid-handler reopens double-generation and active-leaf races; if a handler ever needs to await, every checked precondition must be re-validated after it.
+**Synchronous route handlers are the concurrency model.** Route handlers in `server/src/routes/` are race-free only because they run fully synchronously between check and act — Bun's single JavaScript thread serializes them against each other and against generation/streaming callbacks, so guard-then-act sequences like `hasActiveGeneration` → `startGeneration` are atomic. Introducing a single `await` mid-handler reopens double-generation and active-leaf races; if a handler ever needs to await, every checked precondition must be re-validated after it.
 
 **Generation** (`server/src/generation.ts`): in-flight content and reasoning stay in an in-memory `active` map keyed by message id. The initial message row and generation token are created immediately for tree synchronization; streamed buffers are written once on completion, cancellation, or terminal failure, atomically with the status and conversation revision. There is no periodic persistence. SIGINT/SIGTERM cancel and save active generations before SQLite closes; a process crash loses the unfinished in-memory portion. `mergeLiveBuffers` overlays in-flight content onto tree snapshots so a client subscribing mid-stream sees partial text. The endpoint resolves per generation: conversation `endpointId` override → global `activeEndpointId`. Transient upstream failures (5xx/429, network errors, idle timeout) retry up to 2× on foreground generations, resuming from the partial content prefill-style unless the endpoint disables prefills; 4xx fails immediately and the client toasts `genMeta.error` (background swipes rely on speculation.ts's own retry instead). The `active` map uses identity checks (`active.get(mid) === gen`) because `continue` reuses message ids.
 
@@ -274,7 +286,7 @@ Successful automatic attachments delete their job records after the attachment t
 
 `media_assets` gives each local file a stable ID; `media_owners` records message, gallery, job and recipe ownership. Canonical attachment paths still live in `messages.images_json` and `gallery_items.image`; triggers cover all SQL writers and cascading deletes. Results transfer ownership from job to message/gallery atomically. Copies own independent files; immutable recipes may be shared. Cleanup checks both asset and message recipe references, and `message_media_files` includes recipe inputs in deletion scopes.
 
-Downloads stream into exclusive `.part` files, bounded to 64 MB raster or 1 GB video. Validate raster bytes and dimensions; video inspection verifies the WebM EBML type and AV1 codec through FFprobe. Reserve an asset ID before downloading, sync and exclusively publish `media-<assetId>.<ext>` before recording the result, then remove the temporary link; preserve original WebM bytes. Recording updates that reserved asset. Failed operations release reservations, and startup sweeps unfinished `.part` files and reservations left before file creation. Caddy serves signed `/images/` rasters, WebM and thumbnails with range support. Node's direct media serving also supports ranges and streams with backpressure. FFmpeg is installed in both root Dockerfile stages used by Compose.
+Downloads stream into exclusive `.part` files, bounded to 64 MB raster or 1 GB video. Validate raster bytes and dimensions; video inspection verifies the WebM EBML type and AV1 codec through FFprobe. Reserve an asset ID before downloading, sync and exclusively publish `media-<assetId>.<ext>` before recording the result, then remove the temporary link; preserve original WebM bytes. Recording updates that reserved asset. Failed operations release reservations, and startup sweeps unfinished `.part` files and reservations left before file creation. Caddy serves signed `/images/` rasters, WebM and thumbnails with range support. Bun's direct media serving also supports ranges and streams with backpressure. FFmpeg is installed in both root Dockerfile stages used by Compose.
 
 `media_remote_files` is a durable cleanup ledger independent of job history. Record planned uploads before sending, then record the returned locator and every observed history/WS output. Upload names are `tinytavern-<job>-asset-<id>.<ext>` in Comfy's input root, not per-job directories. Seeing a pre-existing input preview in Comfy output does not acquire ownership of that file. Never delete the user's sample inputs.
 
@@ -320,7 +332,7 @@ Conversation JSON remains version 1. Export raster attachments and recursively r
 
 Validate the entire tree, raster bytes, recipe bindings, reachability and acyclic references before import writes. Remap message/asset/recipe IDs in one transaction; rollback removes every written raster. Repeated attachments get independent copies, while recipe inputs share pins. Imported recipes use the destination Comfy connection even when their workflow is not saved in settings. Older image JSON without recipes remains supported as an import format, not a second rendering path.
 
-The complete current schema is `server/src/schema.ts`. Version 67 is the minimum supported database schema; older schemas are rejected at startup. New databases create the current schema and defaults directly. Existing databases skip initialization. The `migrate(...)` entry point in `db.ts` is reserved for future changes starting at 68. Keep the baseline at 67, update the fresh schema alongside each new migration, and never replay seeds on existing data. See `docs/database-schema.md` for the persisted JSON, file references and ownership records to consider. Runtime restart recovery and documented transfer formats remain active contracts.
+The complete current schema is `server/src/schema.ts`. Version 68 is the minimum supported database schema; older schemas are rejected at startup. Media jobs, drafts and recipes use independent numeric IDs with explicit references. Only Comfy submission IDs require UUIDs. New databases create the current schema and defaults directly; existing supported databases skip initialization. The `migrate(...)` entry point in `db.ts` is reserved for future changes starting at 69. Keep the baseline at 68, update the fresh schema alongside each new migration, and never replay seeds on existing data. See `docs/database-schema.md` for persisted JSON, file references and ownership records to consider. Runtime restart recovery and documented transfer formats remain active contracts.
 
 ### Chat assistance and remaining server behavior
 
@@ -338,6 +350,6 @@ The complete current schema is `server/src/schema.ts`. Version 67 is the minimum
 
 **Speculative swipes** (`server/src/speculation.ts`): when `backgroundSwipeGeneration` is on, the server keeps one unread assistant sibling ahead of the active leaf (`generationKind: 'speculative'`), only while the conversation has a connected viewer and its character has not opted out via `disableBackgroundSwipeGeneration`. By default preparation waits for the primary reply to finish; `parallelBackgroundSwipeGeneration` allows the active streaming reply and its one speculative sibling to overlap (at most two streams, still only one unread alternative). Swiping to the prepared reply stops the outgoing primary, promotes the prepared reply, and refills under the same limit. Stopping/failing the primary, leaving the last subscription, or changing branches cancels in-flight background work and retries. Context changes discard prepared swipes; refill retries use backoff capped at 8 attempts, with explicit user actions resetting the budget.
 
-**Access control**: Caddy applies the configured source-IP allowlist to the entire application; every Node HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`, using the client IP forwarded by the trusted Caddy service). Configured via `TINYTAVERN_IP_ALLOWLIST` in a gitignored `.env`; the Compose files default to an empty value, which allows all addresses. Docker-internal traffic (e.g. the mock, e2e runs) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes and WebSocket upgrades require an opaque HTTP-only session cookie. Caddy media routes use expiring signed URLs issued through authenticated DTOs. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
+**Access control**: Caddy applies the configured source-IP allowlist to the entire application; every Bun HTTP request and WebSocket upgrade is first gated by source IP (`server/src/ipAccess.ts`, using the client IP forwarded by the trusted Caddy service). Configured via `TINYTAVERN_IP_ALLOWLIST` in a gitignored `.env`; the Compose files default to an empty value, which allows all addresses. Docker-internal traffic (e.g. the manual mock) needs `172.16.0.0/12`. An optional password under Settings > General adds a second server-side gate (`server/src/auth.ts`): API routes and WebSocket upgrades require an opaque HTTP-only session cookie. Caddy media routes use expiring signed URLs issued through authenticated DTOs. Session token hashes/expiry live in SQLite so cookies survive server restarts; raw tokens exist only in cookies. Only the static login shell and exact `/api/auth/{status,login,logout}` endpoints are public behind the IP/origin checks; password changes revoke all persisted sessions and connected sockets.
 
 **Mock LLM** (`tests/mocks/server.ts`): OpenAI-compatible streaming endpoint at `http://mock:9800/v1` (from inside the compose network) with `/control/*` endpoints to inject failures; available for manual isolated demonstrations. Automated tests own their focused upstream fixtures.

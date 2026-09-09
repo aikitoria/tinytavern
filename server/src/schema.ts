@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 67;
+export const SCHEMA_VERSION = 68;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -90,7 +90,7 @@ CREATE TABLE messages (
   active_image INTEGER NOT NULL DEFAULT 0,
   image_pending INTEGER NOT NULL DEFAULT 0,
   generation_token INTEGER,
-  render_recipe_id TEXT REFERENCES media_recipes(id) ON DELETE SET NULL
+  render_recipe_id INTEGER REFERENCES media_recipes(id) ON DELETE SET NULL
 );
 
 CREATE TABLE templates (
@@ -137,7 +137,7 @@ CREATE TABLE gallery_items (
 );
 
 CREATE TABLE media_recipes (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   prompt TEXT NOT NULL,
   configuration_json TEXT NOT NULL,
   inputs_json TEXT NOT NULL DEFAULT '[]',
@@ -154,7 +154,7 @@ CREATE TABLE media_assets (
   width INTEGER,
   height INTEGER,
   duration REAL,
-  recipe_id TEXT REFERENCES media_recipes(id) ON DELETE SET NULL,
+  recipe_id INTEGER REFERENCES media_recipes(id) ON DELETE SET NULL,
   created_at INTEGER NOT NULL DEFAULT 0,
   reference_deleted INTEGER NOT NULL DEFAULT 0,
   thumbnail TEXT,
@@ -166,13 +166,13 @@ CREATE TABLE media_assets (
 CREATE TABLE media_owners (
   asset_id INTEGER NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
   owner_type TEXT NOT NULL CHECK(owner_type IN ('message', 'gallery', 'job', 'recipe')),
-  owner_id TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
   slot TEXT NOT NULL,
   PRIMARY KEY(owner_type, owner_id, slot)
 );
 
 CREATE TABLE media_jobs (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
   operation TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'draft',
@@ -187,7 +187,8 @@ CREATE TABLE media_jobs (
   context_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
   message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
   destination TEXT NOT NULL DEFAULT 'gallery',
-  source_job_id TEXT,
+  source_job_id INTEGER,
+  recipe_id INTEGER REFERENCES media_recipes(id) ON DELETE SET NULL,
   seed INTEGER,
   comfy_prompt_id TEXT,
   submission_id TEXT UNIQUE,
@@ -200,12 +201,12 @@ CREATE TABLE media_jobs (
   started_at INTEGER,
   deadline INTEGER,
   retention_deadline INTEGER,
-  draft_id TEXT REFERENCES media_drafts(id)
+  draft_id INTEGER REFERENCES media_drafts(id)
 );
 
 CREATE TABLE media_remote_files (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  job_id TEXT NOT NULL,
+  job_id INTEGER NOT NULL,
   endpoint TEXT NOT NULL,
   filename TEXT NOT NULL,
   subfolder TEXT NOT NULL DEFAULT '',
@@ -219,7 +220,7 @@ CREATE TABLE media_remote_files (
 );
 
 CREATE TABLE media_drafts (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open', 'accepted', 'discarding')),
   selected_asset_id INTEGER REFERENCES media_assets(id) ON DELETE SET NULL
@@ -279,6 +280,7 @@ CREATE INDEX media_remote_identity ON media_remote_files(endpoint, filename, sub
 CREATE INDEX messages_render_recipe ON messages(render_recipe_id);
 
 CREATE INDEX media_jobs_draft ON media_jobs(draft_id);
+CREATE INDEX media_jobs_recipe ON media_jobs(recipe_id);
 
 CREATE INDEX media_thumbnail_pending ON media_assets(thumbnail_retry_at, id)
   WHERE thumbnail_size IS NULL;
@@ -318,7 +320,7 @@ CREATE TRIGGER media_message_insert AFTER INSERT ON messages BEGIN
     SELECT j.value, new.created_at FROM json_each(new.images_json) j
     WHERE NOT EXISTS (SELECT 1 FROM media_assets WHERE path = j.value);
   INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)
-    SELECT a.id, 'message', CAST(new.id AS TEXT), CAST(j.key AS TEXT)
+    SELECT a.id, 'message', new.id, CAST(j.key AS TEXT)
     FROM json_each(new.images_json) j JOIN media_assets a ON a.path = j.value;
   INSERT OR IGNORE INTO media_characters(asset_id, character_id)
     SELECT a.id, c.character_id FROM json_each(new.images_json) j
@@ -333,13 +335,13 @@ WHEN old.images_json IS NOT new.images_json BEGIN
     SELECT j.value, new.created_at FROM json_each(new.images_json) j
     WHERE NOT EXISTS (SELECT 1 FROM media_assets WHERE path = j.value);
   DELETE FROM media_owners
-    WHERE owner_type = 'message' AND owner_id = CAST(new.id AS TEXT)
+    WHERE owner_type = 'message' AND owner_id = new.id
       AND NOT EXISTS (
         SELECT 1 FROM json_each(new.images_json) j JOIN media_assets a ON a.path = j.value
         WHERE CAST(j.key AS TEXT) = media_owners.slot AND a.id = media_owners.asset_id
       );
   INSERT OR IGNORE INTO media_owners(asset_id, owner_type, owner_id, slot)
-    SELECT a.id, 'message', CAST(new.id AS TEXT), CAST(j.key AS TEXT)
+    SELECT a.id, 'message', new.id, CAST(j.key AS TEXT)
     FROM json_each(new.images_json) j JOIN media_assets a ON a.path = j.value;
   INSERT OR IGNORE INTO media_characters(asset_id, character_id)
     SELECT a.id, c.character_id FROM json_each(new.images_json) j
@@ -354,30 +356,30 @@ CREATE TRIGGER media_message_delete BEFORE DELETE ON messages BEGIN
     updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
     WHERE message_id = old.id AND destination = 'chat'
     AND state NOT IN ('succeeded', 'failed', 'cancelled', 'draft', 'ready');
-  DELETE FROM media_owners WHERE owner_type = 'message' AND owner_id = CAST(old.id AS TEXT);
+  DELETE FROM media_owners WHERE owner_type = 'message' AND owner_id = old.id;
 END;
 
 CREATE TRIGGER media_gallery_insert AFTER INSERT ON gallery_items BEGIN
-  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = CAST(new.id AS TEXT);
+  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = new.id;
   INSERT OR IGNORE INTO media_assets(path, width, height, created_at)
     SELECT new.image, new.image_width, new.image_height, new.created_at WHERE new.image IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM media_assets WHERE path = new.image);
   INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)
-    SELECT id, 'gallery', CAST(new.id AS TEXT), '0' FROM media_assets WHERE path = new.image;
+    SELECT id, 'gallery', new.id, '0' FROM media_assets WHERE path = new.image;
 END;
 
 CREATE TRIGGER media_gallery_update AFTER UPDATE OF image ON gallery_items
 WHEN old.image IS NOT new.image BEGIN
-  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = CAST(new.id AS TEXT);
+  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = new.id;
   INSERT OR IGNORE INTO media_assets(path, width, height, created_at)
     SELECT new.image, new.image_width, new.image_height, new.created_at WHERE new.image IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM media_assets WHERE path = new.image);
   INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)
-    SELECT id, 'gallery', CAST(new.id AS TEXT), '0' FROM media_assets WHERE path = new.image;
+    SELECT id, 'gallery', new.id, '0' FROM media_assets WHERE path = new.image;
 END;
 
 CREATE TRIGGER media_gallery_delete AFTER DELETE ON gallery_items BEGIN
-  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = CAST(old.id AS TEXT);
+  DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = old.id;
 END;
 
 CREATE TRIGGER media_job_delete AFTER DELETE ON media_jobs BEGIN

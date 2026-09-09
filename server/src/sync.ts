@@ -1,5 +1,5 @@
 import { publicMessage } from './mediaUrls.ts';
-import type { WebSocket } from 'ws';
+import type { ClientSocket } from './events.ts';
 import type { Message, TreeSnapshot } from '@tinytavern/shared';
 import {
   getActiveLeafId,
@@ -59,6 +59,6 @@ export function broadcastTree(conversationId: number): void {
 }
 
 /** Initial tree push when a client subscribes; live buffers included, deltas follow in order. */
-export function sendTreeTo(ws: WebSocket, conversationId: number): void {
+export function sendTreeTo(ws: ClientSocket, conversationId: number): void {
   sendTo(ws, { t: 'tree', ...treeSnapshot(conversationId) });
 }

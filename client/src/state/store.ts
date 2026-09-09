@@ -66,7 +66,7 @@ interface AppState {
   endpoints: Endpoint[];
   gallery: GalleryItem[];
   /** Client-local live cards for gallery renders; final items are server-owned. */
-  mediaJobs: Record<string, MediaJob>;
+  mediaJobs: Record<number, MediaJob>;
   settings: Settings;
   connected: boolean;
   booted: boolean;
@@ -299,9 +299,9 @@ export async function loadAll(): Promise<void> {
 }
 
 let mediaEventSequence = 0;
-const mediaJobEvents = new Map<string, number>();
+const mediaJobEvents = new Map<number, number>();
 // Job IDs are never reused. Late HTTP responses must not restore a deleted job.
-const deletedMediaJobs = new Set<string>();
+const deletedMediaJobs = new Set<number>();
 const mediaFetches = new SuccessfulFetchSequence<string>();
 
 export function applyMediaJob(job: MediaJob): void {
@@ -334,7 +334,7 @@ export async function refreshMediaJobs(): Promise<void> {
   if (!mediaFetches.accept('jobs', sequence)) {
     return;
   }
-  const jobs: Record<string, MediaJob> = {};
+  const jobs: Record<number, MediaJob> = {};
   const oldest = recent.at(-1);
   if (recent.length === 100 && oldest) {
     // The first page cannot establish whether previously loaded older history was deleted.

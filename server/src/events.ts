@@ -1,135 +1,116 @@
-import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'node:http';
+import type { Server, ServerWebSocket, WebSocketHandler } from 'bun';
 import type { ClientCommand, InvalidateEntity, ServerEvent } from '@tinytavern/shared';
-import { isRequestIpAllowed, isRequestOriginAllowed } from './ipAccess.ts';
-import { isRequestAuthenticated } from './auth.ts';
 
-const clients = new Map<WebSocket, { sub: number | null; alive: boolean }>();
-let onSubscribe: ((ws: WebSocket, conversationId: number) => void) | null = null;
+export interface SocketState {
+  sub: number | null;
+  closed: boolean;
+}
+export type ClientSocket = ServerWebSocket<SocketState>;
+const clients = new Set<ClientSocket>();
+const subscriberCounts = new Map<number, number>();
+const GLOBAL_TOPIC = 'global';
+const topic = (id: number) => `conversation:${id}`;
+let server: Server<SocketState> | undefined;
+let onSubscribe: ((ws: ClientSocket, conversationId: number) => void) | null = null;
 let onUnsubscribe: ((conversationId: number) => void) | null = null;
 
-/** Push the initial tree on each subscription. */
-export function setSubscribeHandler(fn: (ws: WebSocket, conversationId: number) => void): void {
+export function bindWebSocketServer(value: Server<SocketState>): void {
+  server = value;
+}
+export function setSubscribeHandler(fn: (ws: ClientSocket, conversationId: number) => void): void {
   onSubscribe = fn;
 }
-
-/** Called when a conversation loses its last connected viewer. */
 export function setUnsubscribeHandler(fn: (conversationId: number) => void): void {
   onUnsubscribe = fn;
 }
-
-export function hasConversationSubscribers(conversationId: number): boolean {
-  for (const [ws, state] of clients) {
-    if (state.sub === conversationId && ws.readyState === WebSocket.OPEN) return true;
-  }
-  return false;
+export function hasConversationSubscribers(id: number): boolean {
+  return subscriberCounts.has(id);
 }
 
-function notifyUnsubscribed(conversationId: number | null): void {
-  if (conversationId != null && !hasConversationSubscribers(conversationId)) {
-    onUnsubscribe?.(conversationId);
+function unsubscribe(ws: ClientSocket, id: number): void {
+  ws.unsubscribe(topic(id));
+  const remaining = (subscriberCounts.get(id) ?? 1) - 1;
+  if (remaining > 0) subscriberCounts.set(id, remaining);
+  else {
+    subscriberCounts.delete(id);
+    onUnsubscribe?.(id);
   }
 }
 
-function removeClient(ws: WebSocket): void {
-  const state = clients.get(ws);
-  if (!state) return;
+function removeClient(ws: ClientSocket): void {
+  if (ws.data.closed) return;
+  ws.data.closed = true;
   clients.delete(ws);
-  notifyUnsubscribed(state.sub);
+  ws.unsubscribe(GLOBAL_TOPIC);
+  if (ws.data.sub !== null) unsubscribe(ws, ws.data.sub);
+  ws.data.sub = null;
 }
 
-export function initWebSocket(server: Server): void {
-  const wss = new WebSocketServer({
-    server,
-    path: '/ws',
-    verifyClient: ({ req }, done) => {
-      if (!isRequestIpAllowed(req)) done(false, 403, 'IP address is not allowed');
-      else if (!isRequestOriginAllowed(req))
-        done(false, 403, 'cross-site requests are not allowed');
-      else if (!isRequestAuthenticated(req)) done(false, 401, 'authentication required');
-      else done(true);
-    },
-  });
-  wss.on('connection', (ws) => {
-    clients.set(ws, { sub: null, alive: true });
+export const websocket: WebSocketHandler<SocketState> = {
+  idleTimeout: 60,
+  sendPings: true,
+  maxPayloadLength: 64 * 1024,
+  backpressureLimit: 4 * 1024 * 1024,
+  closeOnBackpressureLimit: true,
+  open(ws) {
+    clients.add(ws);
+    ws.subscribe(GLOBAL_TOPIC);
     ws.send(JSON.stringify({ t: 'hello' } satisfies ServerEvent));
-    ws.on('message', (data) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      if (parsed == null || typeof parsed !== 'object' || !('sub' in parsed)) return;
-      const cmd = parsed as ClientCommand;
-      if (cmd.sub === null || (Number.isSafeInteger(cmd.sub) && cmd.sub > 0)) {
-        const state = clients.get(ws);
-        if (!state) return;
-        const previous = state.sub;
-        state.sub = cmd.sub;
-        if (previous !== cmd.sub) notifyUnsubscribed(previous);
-        if (cmd.sub != null) onSubscribe?.(ws, cmd.sub);
-      }
-    });
-    ws.on('pong', () => {
-      const state = clients.get(ws);
-      if (state) state.alive = true;
-    });
-    ws.on('close', () => removeClient(ws));
-    ws.on('error', () => removeClient(ws));
-  });
-  const heartbeat = setInterval(() => {
-    for (const [ws, state] of clients) {
-      if (!state.alive) {
-        ws.terminate();
-        removeClient(ws);
-        continue;
-      }
-      state.alive = false;
-      ws.ping();
+  },
+  message(ws, data) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(typeof data === 'string' ? data : data.toString());
+    } catch {
+      return;
     }
-  }, 30_000);
-  heartbeat.unref();
-  wss.on('close', () => clearInterval(heartbeat));
-}
+    if (parsed == null || typeof parsed !== 'object' || !('sub' in parsed)) return;
+    const cmd = parsed as ClientCommand;
+    if (cmd.sub !== null && (!Number.isSafeInteger(cmd.sub) || cmd.sub <= 0)) return;
+    if (ws.data.sub !== cmd.sub) {
+      const previous = ws.data.sub;
+      ws.data.sub = cmd.sub;
+      if (previous !== null) unsubscribe(ws, previous);
+      if (cmd.sub !== null) {
+        subscriberCounts.set(cmd.sub, (subscriberCounts.get(cmd.sub) ?? 0) + 1);
+        ws.subscribe(topic(cmd.sub));
+      }
+    }
+    if (cmd.sub !== null) onSubscribe?.(ws, cmd.sub);
+  },
+  close: removeClient,
+};
 
-/** Password changes invalidate sessions, including already-upgraded sockets. */
+/** Password changes revoke upgraded sockets before any later broadcasts. */
 export function disconnectAllForAuthChange(): void {
-  for (const ws of clients.keys()) ws.close(4001, 'authentication changed');
+  for (const ws of clients) {
+    removeClient(ws);
+    ws.close(4001, 'authentication changed');
+  }
 }
 
-export function sendTo(ws: WebSocket, ev: ServerEvent): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(ev));
+export function sendTo(ws: ClientSocket, ev: ServerEvent): void {
+  if (!ws.data.closed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(ev));
 }
 
 export function broadcast(ev: ServerEvent): void {
-  const payload = JSON.stringify(ev);
-  for (const ws of clients.keys()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(payload);
-  }
+  server?.publish(GLOBAL_TOPIC, JSON.stringify(ev));
 }
 
-/** Skip congested viewers; reconnect snapshots include the current indexed preview cache. */
+/** Drop only replaceable previews for congested clients; durable state remains recoverable. */
 export function broadcastMediaProgress(ev: Extract<ServerEvent, { t: 'mediaJobProgress' }>): void {
   const payload = JSON.stringify(ev);
-  for (const ws of clients.keys()) {
-    if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 1024 * 1024) {
-      ws.send(payload);
-    }
+  for (const ws of clients) {
+    if (ws.readyState === WebSocket.OPEN && ws.getBufferedAmount() < 1024 * 1024) ws.send(payload);
   }
 }
 
-export function broadcastConv(conversationId: number, ev: ServerEvent): void {
-  const payload = JSON.stringify(ev);
-  for (const [ws, state] of clients) {
-    if (state.sub === conversationId && ws.readyState === WebSocket.OPEN) ws.send(payload);
-  }
+export function broadcastConv(id: number, ev: ServerEvent): void {
+  server?.publish(topic(id), JSON.stringify(ev));
 }
 
 export function subscribedConversationIds(): number[] {
-  return [
-    ...new Set([...clients.values()].flatMap((state) => (state.sub == null ? [] : [state.sub]))),
-  ];
+  return [...subscriberCounts.keys()];
 }
 
 const invalidationObservers = new Set<(entity: InvalidateEntity) => void>();

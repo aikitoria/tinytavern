@@ -1,5 +1,6 @@
+import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('media restart', async () => {
   const { fork, execFile } = await import('node:child_process');
@@ -175,7 +176,7 @@ test('media restart', async () => {
     "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Test', '', ?, 1, 1)",
   ).run(inputPath);
   const draft = createMediaJob({
-    requestKey: 'restart-idempotency',
+    requestKey: testRequestKey('restart-idempotency'),
     operation: 'video-first',
     workflowId: workflow.id,
     prompt: 'Slow camera move',
@@ -259,8 +260,10 @@ test('media restart', async () => {
     assert.equal(stmt('SELECT count(*) AS n FROM gallery_items').get()!.n, 2);
     assert.equal(mediaJobRow(draft.id), undefined);
     assert.equal(
-      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get('restart-idempotency'),
-      undefined,
+      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get(
+        testRequestKey('restart-idempotency'),
+      ),
+      null,
     );
     assert.equal(
       stmt("SELECT count(*) AS n FROM media_remote_files WHERE state != 'deleted'").get()!.n,

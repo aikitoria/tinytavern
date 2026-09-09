@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newRequestId } from '@tinytavern/shared';
 import { mediaWorkflowKey, type ImageDescriptionProgress } from '@tinytavern/shared';
 import { createMediaJob, startMediaJob } from './mediaJobs.ts';
 import { mediaLive, requireMediaJob } from './mediaJobStore.ts';
@@ -34,7 +34,7 @@ export async function describeImage(
   const job = transaction(() => {
     const draft = createMediaJob(
       {
-        requestKey: randomUUID(),
+        requestKey: newRequestId(),
         operation: 'image-describe',
         workflowId: configuration.workflow.id,
         inputs: [{ slot: 'source', assetId }],

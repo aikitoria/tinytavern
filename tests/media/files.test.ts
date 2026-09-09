@@ -142,8 +142,6 @@ databaseCase('media thumbnails', async () => {
   const { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } =
     await import('node:fs');
 
-  const { createServer } = await import('node:http');
-
   const { basename, extname, join } = await import('node:path');
 
   const { setTimeout: sleep } = await import('node:timers/promises');
@@ -167,7 +165,7 @@ databaseCase('media thumbnails', async () => {
   const { publicAvatar } = await import('../../server/src/mediaUrls.ts');
   const { saveAvatar, deleteAvatarFiles, readAvatarFile } =
     await import('../../server/src/routes/avatarStore.ts');
-  const { dispatch } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/router.ts');
   await import('../../server/src/routes/gallery.ts');
   await import('../../server/src/routes/settings.ts');
   const runFile = promisify(execFile);
@@ -232,13 +230,14 @@ databaseCase('media thumbnails', async () => {
     assert.deepEqual(imageDimensions(data), { width, height });
     assert.equal(current.updatedAt, 1, 'Generating a thumbnail must not reorder the gallery');
   }
-  const server = createServer((request, response) => {
-    void dispatch(request, response, new URL(request.url!, 'http://test').pathname);
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    routes: apiRoutes(),
+    fetch: () => new Response(null, { status: 404 }),
+    idleTimeout: 0,
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
+  const address = { port: server.port };
   const base = `http://127.0.0.1:${address.port}`;
   async function resize(size: unknown, status = 200) {
     const response = await fetch(`${base}/api/settings`, {
@@ -433,6 +432,6 @@ databaseCase('media thumbnails', async () => {
     assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
   } finally {
     await stopMediaThumbnails();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server.stop(true);
   }
 });
