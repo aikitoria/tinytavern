@@ -24,6 +24,7 @@ test('media drafts', async () => {
     await import('../../server/src/media/mediaRecipes.ts');
   const {
     acceptMediaVariation,
+    cancelMediaVariation,
     selectMediaVariation,
     discardMediaDraft,
     cleanupDiscardedMediaDraft,
@@ -86,6 +87,27 @@ test('media drafts', async () => {
   discard(unused.id, { onlyUnstarted: true });
   assert.equal(stmt('SELECT id FROM media_jobs WHERE id = ?').get(unused.id), null);
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(unused.draft!.id), null);
+  const cancelledKey = newRequestId();
+  const promptCancelled = job({
+    requestKey: cancelledKey,
+    prompt: 'Keep this working prompt',
+    reviewBeforeSave: true,
+  });
+  updateMediaJob(promptCancelled.id, { state: 'preparing' });
+  assert.equal(cancelMediaVariation(requireMediaJob(promptCancelled.id)).state, 'cancelled');
+  assert.throws(() => requireMediaJob(promptCancelled.id), { status: 404 });
+  assert.equal(
+    stmt('SELECT id FROM media_drafts WHERE id = ?').get(promptCancelled.draft!.id),
+    null,
+    'Cancelling the only prompt attempt removes its empty draft',
+  );
+  const restarted = job({
+    requestKey: cancelledKey,
+    prompt: 'Keep this working prompt',
+    reviewBeforeSave: true,
+  });
+  assert.notEqual(restarted.id, promptCancelled.id, 'An empty editor can generate again');
+  discard(restarted.id);
 
   const first = job({
     prompt: 'First prompt',
@@ -166,13 +188,6 @@ test('media drafts', async () => {
     'An unused variation must not discard an earlier generated result',
   );
   assert.equal(requireMediaJob(first.id).state, 'succeeded');
-  start(second.id);
-  assert.throws(
-    () => accept(firstAssets[0]!),
-    { status: 409 },
-    'Acceptance waits for running work to finish or be cancelled',
-  );
-  const secondAssets = result(second.id);
   const currentDraft = mediaDraft(first.draft!.id);
   selectMediaVariation(requireMediaJob(second.id), {
     assetId: firstAssets[0],
@@ -181,7 +196,7 @@ test('media drafts', async () => {
   assert.throws(
     () =>
       selectMediaVariation(requireMediaJob(second.id), {
-        assetId: secondAssets[0],
+        assetId: firstAssets[1],
         expectedDraftRevision: currentDraft.revision,
       }),
     { status: 409 },
@@ -221,6 +236,8 @@ test('media drafts', async () => {
     firstAssets[0],
     'A fresh process recovers the unsaved selection',
   );
+  start(second.id);
+  const runningSecond = requireMediaJob(second.id);
   const request = {
     assetId: firstAssets[0],
     expectedDraftRevision: mediaDraft(first.draft!.id).revision,
@@ -231,6 +248,11 @@ test('media drafts', async () => {
     status: 409,
   });
   const accepted = accept(firstAssets[0]!, request);
+  assert.deepEqual(
+    requireMediaJob(second.id),
+    runningSecond,
+    'Saving a completed chat variation leaves the running variation unchanged',
+  );
   assert.equal(accepted.id, first.id);
   assert.equal(accepted.draft!.state, 'open');
   assert.deepEqual(accepted.draft!.savedAssetIds, [firstAssets[0]]);
@@ -255,19 +277,21 @@ test('media drafts', async () => {
   });
   assert.equal(repeated.draft!.revision, accepted.draft!.revision);
   assert.equal(count('messages'), 2, 'Saving an already-owned output is idempotent');
+  const secondAssets = result(second.id);
+  const completedDraftRevision = mediaDraft(first.draft!.id).revision;
   const afterFirst = stmt('SELECT * FROM conversations WHERE id = 1').get()!;
   assert.throws(
     () =>
       accept(secondAssets[0]!, {
         ...request,
         assetId: secondAssets[0],
-        expectedDraftRevision: accepted.draft!.revision,
+        expectedDraftRevision: completedDraftRevision,
       }),
     { status: 409 },
     'A second save still checks the current chat branch',
   );
   const acceptedSecond = accept(secondAssets[0]!, {
-    expectedDraftRevision: accepted.draft!.revision,
+    expectedDraftRevision: completedDraftRevision,
     expectedActiveLeafId: Number(afterFirst.active_leaf_id),
     expectedMutationRevision: Number(afterFirst.mutation_revision),
   });
@@ -314,6 +338,9 @@ test('media drafts', async () => {
   });
   start(galleryDraft.id);
   const galleryAssets = result(galleryDraft.id, 2);
+  const galleryPending = job({ prompt: 'Next gallery variation' }, galleryDraft.id);
+  start(galleryPending.id);
+  const runningGallery = requireMediaJob(galleryPending.id);
   let saved = mediaJobDto(requireMediaJob(galleryDraft.id));
   for (const [assetId, expectedCount, savedIds, reason] of [
     [galleryAssets[1], 1, [galleryAssets[1]], 'Gallery receives only the accepted result'],
@@ -327,14 +354,44 @@ test('media drafts', async () => {
     assert.equal(count('gallery_items'), expectedCount, reason);
     assert.deepEqual(saved.draft!.savedAssetIds, savedIds);
     assert.equal(requireMediaJob(saved.id).state, 'succeeded');
+    assert.deepEqual(
+      requireMediaJob(galleryPending.id),
+      runningGallery,
+      'Saving completed gallery variations leaves the running variation unchanged',
+    );
     if (expectedCount === 1)
       assert.equal(
         stmt('SELECT image FROM gallery_items').get()!.image,
         saved.outputs.find((asset) => asset.id === galleryAssets[1])!.url,
       );
   }
+  const cancelling = cancelMediaVariation(requireMediaJob(galleryPending.id));
+  assert.equal(cancelling.state, 'cancelling');
+  cleanupDiscardedMediaDraft(requireMediaJob(galleryPending.id));
+  assert.equal(requireMediaJob(galleryPending.id).state, 'cancelling');
+  const queuedAfterCancel = job({ prompt: 'Generate again' }, galleryPending.id);
+  assert.equal(
+    JSON.parse(requireMediaJob(queuedAfterCancel.id).configuration_json!).discardOnCancel,
+    undefined,
+    'A new variation cannot inherit the previous cancellation request',
+  );
+  finishMediaJob(galleryPending.id, 'cancelled');
+  initMediaWorker();
+  stopMediaWorker();
+  assert.throws(() => requireMediaJob(galleryPending.id), { status: 404 });
+  assert.equal(requireMediaJob(queuedAfterCancel.id).state, 'draft');
+  assert.deepEqual(mediaDraft(saved.draft!.id).savedAssetIds, galleryAssets);
+  assert.throws(
+    () =>
+      selectMediaVariation(requireMediaJob(galleryDraft.id), {
+        assetId: galleryAssets[0],
+        expectedDraftRevision: queuedAfterCancel.draft!.revision,
+      }),
+    { status: 409 },
+    'Removing a variation advances the shared draft revision',
+  );
   discard(galleryDraft.id, {
-    expectedDraftRevision: saved.draft!.revision,
+    expectedDraftRevision: mediaDraft(saved.draft!.id).revision,
   });
   assert.throws(() => requireMediaJob(saved.id), { status: 404 });
   for (const asset of saved.outputs)
@@ -362,8 +419,46 @@ test('media drafts', async () => {
     inputs: [{ assetId: input.id, slot: 'reference1' }],
   });
   start(discarded.id);
+  const queued = [discarded.id];
+  const firstSnapshot = requireMediaJob(discarded.id);
+  for (let index = 1; index < 10; index++) {
+    const requestKey = newRequestId();
+    const sourceId = queued.at(-1)!;
+    const next = job({ operation: 'image-edit', requestKey }, sourceId);
+    assert.equal(next.draft!.id, discarded.draft!.id);
+    assert.equal(
+      job({ operation: 'image-edit', requestKey }, sourceId).id,
+      next.id,
+      'A repeated queue request creates only one variation',
+    );
+    start(next.id);
+    queued.push(next.id);
+  }
+  assert.equal(new Set(queued).size, 10, 'Ten attempts can queue before any render completes');
+  assert.deepEqual(
+    requireMediaJob(discarded.id),
+    firstSnapshot,
+    'Queueing more variations cannot alter the running job snapshot',
+  );
+  assert.equal(
+    stmt('SELECT count(*) AS n FROM media_jobs WHERE draft_id = ? AND state = ?').get(
+      discarded.draft!.id,
+      'submitting',
+    )!.n,
+    10,
+  );
   stmt("DELETE FROM media_owners WHERE owner_type = 'gallery' AND owner_id = 'test-input'").run();
-  discard(discarded.id, {
+  cancelMediaVariation(requireMediaJob(discarded.id));
+  cleanupDiscardedMediaDraft(requireMediaJob(discarded.id));
+  assert.equal(requireMediaJob(discarded.id).state, 'cancelling');
+  deleteImageFiles([inputPath]);
+  assert.ok(onDisk(inputPath), 'Individual cancellation retains inputs until execution stops');
+  finishMediaJob(discarded.id, 'cancelled');
+  cleanupDiscardedMediaDraft(requireMediaJob(discarded.id));
+  assert.throws(() => requireMediaJob(discarded.id), { status: 404 });
+  queued.shift();
+  assert.ok(onDisk(inputPath), 'Removing one variation preserves inputs owned by other jobs');
+  discard(queued[0]!, {
     expectedDraftRevision: mediaDraft(discarded.draft!.id).revision,
   });
   deleteImageFiles([inputPath]);
@@ -371,8 +466,14 @@ test('media drafts', async () => {
     existsSync(join(IMAGES_DIR, inputPath.slice(8))),
     'Running discard keeps inputs until cancellation completes',
   );
-  finishMediaJob(discarded.id, 'cancelled');
-  cleanupDiscardedMediaDraft(requireMediaJob(discarded.id));
+  for (const id of queued) {
+    assert.ok(
+      existsSync(join(IMAGES_DIR, inputPath.slice(8))),
+      'Shared inputs remain pinned until the last queued cancellation completes',
+    );
+    finishMediaJob(id, 'cancelled');
+    cleanupDiscardedMediaDraft(requireMediaJob(id));
+  }
   assert.equal(existsSync(join(IMAGES_DIR, inputPath.slice(8))), false);
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(discarded.draft!.id), null);
   assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);

@@ -5,6 +5,10 @@ import { test } from 'bun:test';
 
 test('media latency', async () => {
   const { setTimeout: sleep } = await import('node:timers/promises');
+  const { fork } = await import('node:child_process');
+  const { once } = await import('node:events');
+  type ChildProcess = import('node:child_process').ChildProcess;
+  type MediaProgress = import('@tinytavern/shared').MediaProgress;
 
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
@@ -18,7 +22,7 @@ test('media latency', async () => {
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { createMediaJob, startMediaJob } = await import('../../server/src/media/mediaJobs.ts');
-  const { requireMediaJob, mediaLive, observeMediaJob } =
+  const { requireMediaJob, mediaLive, observeMediaJob, mediaJobDto, activeMediaJobs } =
     await import('../../server/src/media/mediaJobStore.ts');
   const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
     await import('../../server/src/media/mediaWorker.ts');
@@ -28,6 +32,8 @@ test('media latency', async () => {
     { accept: (response: Response) => void; promptId: string; connected: boolean }
   >();
   const videoJobs = new Set<number>();
+  let submissionAttempts = 0;
+  let recoveredWorker: ChildProcess | undefined;
   const previews = new Map<number, { time: number; state: string; value?: number }>();
   const frame = Buffer.concat([Buffer.from([0, 0, 0, 1, 0, 0, 0, 2]), makePlaceholderPng()]);
   const server = serveComfy(async (request) => {
@@ -42,6 +48,7 @@ test('media latency', async () => {
     }
 
     if (path === '/prompt') {
+      submissionAttempts++;
       let accept!: (response: Response) => void;
       const result = new Promise<Response>((resolve) => {
         accept = resolve;
@@ -218,8 +225,105 @@ test('media latency', async () => {
         'Acceptance must not move an executing job back to queued',
       );
     }
+    const videoJobId = [...videoJobs][0]!;
+    const videoJob = requireMediaJob(videoJobId);
+    const header = JSON.parse(videoJob.configuration_json!).videoPreview;
+    assert.deepEqual(
+      header,
+      {
+        id: mediaLive.get(videoJobId)!.progress!.videoPreview!.id,
+        nodeId: 'sampler',
+        frameCount: 3,
+        frameRate: 6,
+      },
+      'Persist only the one-time VHS header, never frame bytes',
+    );
+    assert.equal(
+      Object.keys(mediaJobDto(videoJob).progress!.videoPreview!.frames).length,
+      3,
+      'Refreshing a browser receives the complete in-memory frame cache',
+    );
+    assert.equal(
+      Object.keys(
+        activeMediaJobs().find((job) => job.id === videoJobId)!.progress!.videoPreview!.frames,
+      ).length,
+      3,
+      'The initial WebSocket snapshot includes the cached video preview',
+    );
+
+    stopMediaWorker();
+    await waitFor(() => server.sockets.size === 0);
+    const updates: MediaProgress[] = [];
+    recoveredWorker = fork('tests/support/media-restart-worker.ts', [], {
+      env: { ...process.env, COMFY_POLL_MS: '50' },
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    recoveredWorker.on('message', (message) => {
+      const update = message as { id?: number; progress?: MediaProgress };
+      if (update?.id === videoJobId && update.progress) updates.push(update.progress);
+    });
+    await once(recoveredWorker, 'message');
+    recoveredWorker.send(videoJobId);
+    await waitFor(() => server.sockets.has(videoJob.request_key!));
+    const resumedSocket = server.sockets.get(videoJob.request_key!)!;
+    // Comfy replays only the executing node, without prompt_id or the VHS header.
+    resumedSocket.send(JSON.stringify({ type: 'executing', data: { node: 'sampler' } }));
+    resumedSocket.send(videoPreviewFrame(1));
+    await waitFor(() => Boolean(updates.at(-1)?.videoPreview?.frames[1]));
+    assert.equal(
+      updates.at(-1)!.videoPreview!.id,
+      header.id,
+      'A fresh worker resumes the original preview without another metadata event',
+    );
+
+    resumedSocket.close();
+    await waitFor(() => {
+      const current = server.sockets.get(videoJob.request_key!);
+      return Boolean(current && current !== resumedSocket);
+    });
+    const reconnectedSocket = server.sockets.get(videoJob.request_key!)!;
+    reconnectedSocket.send(JSON.stringify({ type: 'executing', data: { node: 'sampler' } }));
+    reconnectedSocket.send(videoPreviewFrame(0));
+    await waitFor(() => Boolean(updates.at(-1)?.videoPreview?.frames[0]));
+    assert.deepEqual(
+      Object.keys(updates.at(-1)!.videoPreview!.frames),
+      ['0', '1'],
+      'A socket reconnect preserves existing frames while accepting resumed updates',
+    );
+    reconnectedSocket.send(JSON.stringify({ type: 'executing', data: { node: 'next-sampler' } }));
+    reconnectedSocket.send(videoPreviewFrame(2, 'next-sampler'));
+    await waitFor(() => Boolean(updates.at(-1)?.preview));
+    assert.equal(
+      updates.at(-1)!.videoPreview,
+      null,
+      'An already-running sampler with no recoverable header still shows its arriving JPEG',
+    );
+    assert.equal(
+      JSON.parse(requireMediaJob(videoJobId).configuration_json!).videoPreview,
+      undefined,
+      'Changing samplers discards the previous persisted header',
+    );
+    reconnectedSocket.send(
+      JSON.stringify({
+        type: 'VHS_latentpreview',
+        data: { id: 'next-sampler', length: 3, rate: 6 },
+      }),
+    );
+    reconnectedSocket.send(videoPreviewFrame(1, 'next-sampler'));
+    await waitFor(() => Boolean(updates.at(-1)?.videoPreview?.frames[1]));
+    assert.notEqual(updates.at(-1)!.videoPreview!.id, header.id);
+    assert.deepEqual(
+      Object.keys(updates.at(-1)!.videoPreview!.frames),
+      ['1'],
+      'The next complete header restores animated playback without retaining old sampler frames',
+    );
+    assert.equal(submissionAttempts, 4, 'Preview recovery never resubmits the render');
     assert.deepEqual(server.errors, []);
   } finally {
+    if (recoveredWorker && recoveredWorker.exitCode === null) {
+      recoveredWorker.kill('SIGKILL');
+      await once(recoveredWorker, 'exit');
+    }
     for (const unsubscribe of subscriptions) unsubscribe();
     stopMediaWorker();
     for (const submission of submissions.values())

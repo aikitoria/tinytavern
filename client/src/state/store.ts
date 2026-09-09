@@ -305,6 +305,10 @@ let mediaEventSequence = 0;
 const mediaJobEvents = new Map<number, number>();
 // Job IDs are never reused. Late HTTP responses must not restore a deleted job.
 const deletedMediaJobs = new Set<number>();
+/** Absence from an active-job snapshot is temporary; only deletion events prove removal. */
+export function mediaJobWasDeleted(id: number): boolean {
+  return deletedMediaJobs.has(id);
+}
 const mediaFetches = new SuccessfulFetchSequence<string>();
 let activeJobSnapshot = new Set<number>();
 let activeJobSnapshotSequence = 0;

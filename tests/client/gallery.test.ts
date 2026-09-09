@@ -140,9 +140,17 @@ test('media job cards', async () => {
   const { compileMediaWorkflow } = await import('@tinytavern/shared');
   type MediaJob = import('@tinytavern/shared').MediaJob;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
-  const { groupMediaJobs, jobPromptExcerpt } = await import('../../client/src/media/jobCards.ts');
+  const {
+    groupMediaJobs,
+    jobPromptExcerpt,
+    mediaJobPreviews,
+    mediaVariations,
+    mediaVariationIndex,
+  } = await import('../../client/src/media/jobCards.ts');
 
-  const { mediaWorkflowView } = await import('../../client/src/media/workflowDefaults.ts');
+  const { createMediaWorkflowControls, mediaWorkflowView } =
+    await import('../../client/src/media/workflowDefaults.ts');
+  const { createRoot, createSignal } = await import('solid-js');
 
   function job(id: number, overrides: Partial<MediaJob> = {}): MediaJob {
     return {
@@ -201,14 +209,80 @@ test('media job cards', async () => {
   );
   assert.equal(groups[1]!.job.id, 1, 'An older active variation remains visible');
   assert.equal(groups[1]!.jobs.length, 3, 'All variations remain available to the card');
+  const asset = { id: 42 } as import('@tinytavern/shared').MediaAsset;
+  complete.outputs = [asset];
+  const previews = mediaJobPreviews([running, newer, complete]);
+  assert.deepEqual(
+    previews.results,
+    [{ job: complete, asset }],
+    'Only completed outputs count as variations',
+  );
+  assert.deepEqual(
+    previews.pending,
+    [running],
+    'A rendering alternative has its own tile beside completed results',
+  );
+  const queue = mediaVariations([newer, running, complete]);
+  assert.deepEqual(
+    queue.map((item) => item.job.id),
+    [3, 1, 2],
+  );
+  assert.equal(
+    mediaVariationIndex(queue, { jobId: running.id }, asset.id),
+    1,
+    'A pending variation is selectable beside the finished result',
+  );
   running.state = 'succeeded';
+  running.outputs = [{ ...asset, id: 43 }];
+  const finishedQueue = mediaVariations([newer, running, complete]);
+  assert.equal(
+    mediaVariationIndex(finishedQueue, { jobId: running.id }, asset.id),
+    1,
+    'The selected WIP stays selected when its output arrives',
+  );
+  assert.equal(
+    mediaVariationIndex(finishedQueue, { jobId: complete.id, assetId: asset.id }, 43),
+    0,
+    'Another completion cannot steal the preview from the viewed result',
+  );
+  newer.state = 'failed';
+  assert.equal(
+    mediaVariations([newer, running, complete]).length,
+    3,
+    'A failed attempt keeps its slot in the selector',
+  );
   groups = groupMediaJobs([newer, running, complete]);
   assert.equal(groups[0]!.job.id, 2);
+  newer.state = 'cancelled';
+  const afterCancel = mediaVariations([newer, running, complete]);
+  assert.equal(afterCancel.length, 2, 'Cancellation removes the variation instead of a tombstone');
+  assert.equal(
+    mediaVariationIndex(afterCancel, { jobId: newer.id }, null),
+    1,
+    'Removing the viewed variation selects a remaining result',
+  );
+  assert.equal(groupMediaJobs([newer, running, complete])[0]!.job.id, running.id);
+  assert.deepEqual(groupMediaJobs([newer]), [], 'A cancelled-only draft leaves no job card');
+  const regenerated = job(6, { draft, state: 'submitting', createdAt: 4 });
+  assert.deepEqual(
+    mediaVariations([newer, running, complete, regenerated]).map((item) => item.job.id),
+    [complete.id, running.id, regenerated.id],
+    'Generating again occupies the removed slot without retaining a cancelled alternative',
+  );
+  assert.equal(
+    mediaVariationIndex(
+      mediaVariations([{ ...complete, outputs: [asset, { ...asset, id: 44 }] }]),
+      { jobId: complete.id, assetId: 44 },
+      asset.id,
+    ),
+    1,
+    'A linked result ID selects the exact output ahead of shared draft selection',
+  );
 
   const long = 'x'.repeat(1000);
   assert.deepEqual(
     jobPromptExcerpt(job(6, { state: 'preparing', reasoning: `${long}new reasoning` })),
-    { label: 'Thinking…', text: `…${long.slice(-407)}new reasoning` },
+    { label: 'Thinking…', text: `${long}new reasoning` },
   );
   const writing = jobPromptExcerpt(
     job(7, {
@@ -218,13 +292,14 @@ test('media job cards', async () => {
     }),
   );
   assert.equal(writing.label, 'Writing prompt…');
-  assert(writing.text.endsWith('new prompt'));
-  assert(writing.text.length <= 421);
+  assert.equal(writing.text, `${long}new prompt`);
+  assert.equal(
+    jobPromptExcerpt(job(7, { state: 'preparing', prompt: `${writing.text} token` })).text,
+    `${writing.text} token`,
+    'New tokens preserve the displayed prefix so existing lines do not rewrap',
+  );
   for (const [overrides, text] of [
-    [
-      { state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' },
-      `Prompt ${long.slice(0, 413)}…`,
-    ],
+    [{ state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' }, `Prompt ${long}`],
     [{ instruction: 'Use this character' }, 'Use this character'],
   ] as const)
     assert.equal(jobPromptExcerpt(job(8, overrides)).text, text);
@@ -274,6 +349,30 @@ test('media job cards', async () => {
     5,
     'Omitted overrides use captured control defaults',
   );
+  createRoot((dispose) => {
+    try {
+      const [view, setView] = createSignal(unlocked);
+      const controls = createMediaWorkflowControls(() => view().workflow?.json);
+      const initial = controls();
+      setView({ ...unlocked, workflow: { ...other }, values: { duration: 30 } });
+      assert.equal(
+        controls(),
+        initial,
+        'Refreshing job metadata or values preserves every workflow control identity',
+      );
+      setView({ ...unlocked, workflow: edited });
+      assert.notEqual(controls(), initial);
+      assert.equal(controls().controls[0]!.value, 9, 'Changed graphs rebuild controls');
+      setView({ ...unlocked, workflow: { ...edited, json: '{' } });
+      assert.ok(controls().error);
+      assert.equal(controls().controls.length, 0);
+      setView(unlocked);
+      assert.equal(controls().error, '');
+      assert.equal(controls().controls[0]!.value, 5);
+    } finally {
+      dispose();
+    }
+  });
 });
 
 test('chat scroll', async () => {

@@ -256,8 +256,11 @@ export const api = {
       ...options,
       expectedRevision: job.revision,
     }),
-  mediaVariations: (jobId: number) =>
-    request<MediaJob[]>('GET', `/api/media/jobs/${jobId}/variations`),
+  mediaVariations: (jobId: number, draftId?: number | null) =>
+    request<MediaJob[]>(
+      'GET',
+      draftId ? `/api/media/drafts/${draftId}/variations` : `/api/media/jobs/${jobId}/variations`,
+    ),
   selectMediaVariation: (job: MediaJob, assetId: number, expectedDraftRevision: number) =>
     request<MediaJob>('POST', `/api/media/jobs/${job.id}/select`, {
       assetId,

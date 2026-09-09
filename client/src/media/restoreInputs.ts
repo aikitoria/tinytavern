@@ -31,7 +31,7 @@ export function restoreMediaInputs(
     } else if (ancestor.media?.jobId) {
       const job = jobs[ancestor.media.jobId];
       if (job) {
-        const selected = job.draft?.selectedAssetId;
+        const selected = ancestor.media.assetId ?? job.outputs[0]?.id ?? job.draft?.selectedAssetId;
         asset = job.outputs.find((output) => output.id === selected);
         if (!asset && selected != null && job.draft) {
           for (const variation of Object.values(jobs)) {

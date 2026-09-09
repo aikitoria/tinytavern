@@ -1,4 +1,4 @@
-import { mediaJobActive, type MediaJob } from '@tinytavern/shared';
+import { mediaJobActive, type MediaAsset, type MediaJob } from '@tinytavern/shared';
 
 export const MEDIA_JOB_STATUS: Record<MediaJob['state'], string> = {
   draft: 'Draft',
@@ -30,11 +30,64 @@ export interface MediaJobGroup {
   createdAt: number;
 }
 
+export interface MediaJobResult {
+  job: MediaJob;
+  asset: MediaAsset;
+}
+
+export interface MediaVariation {
+  job: MediaJob;
+  asset?: MediaAsset;
+}
+
+/** A pending attempt keeps its position when its finished outputs arrive. */
+export function mediaVariations(jobs: readonly MediaJob[]): MediaVariation[] {
+  return [...jobs]
+    .filter((job) => job.state !== 'cancelled')
+    .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id)
+    .flatMap((job) =>
+      job.state === 'succeeded' && job.outputs.length
+        ? job.outputs.map((asset) => ({ job, asset }))
+        : [{ job }],
+    );
+}
+
+export function mediaVariationIndex(
+  variations: readonly MediaVariation[],
+  viewed: { jobId: number; assetId?: number } | null,
+  selectedAssetId: number | null | undefined,
+) {
+  const index = viewed
+    ? variations.findIndex(
+        (item) =>
+          item.job.id === viewed.jobId && (!viewed.assetId || item.asset?.id === viewed.assetId),
+      )
+    : selectedAssetId == null
+      ? -1
+      : variations.findIndex((item) => item.asset?.id === selectedAssetId);
+  return index < 0 ? variations.length - 1 : index;
+}
+
+/** Finished outputs and running attempts are distinct; a selected result never replaces a live tile. */
+export function mediaJobPreviews(jobs: readonly MediaJob[]) {
+  const ordered = [...jobs].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
+  const results: MediaJobResult[] = [];
+  const pending: MediaJob[] = [];
+  for (const job of ordered) {
+    if (job.state === 'succeeded') {
+      for (const asset of job.outputs) results.push({ job, asset });
+    } else if (mediaJobActive(job.state)) {
+      pending.push(job);
+    }
+  }
+  return { results, pending };
+}
+
 /** Keep a running variation visible even when a newer, idle variation exists. */
 export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
   const groups = new Map<number, MediaJobGroup>();
   for (const job of jobs) {
-    if (job.operation === 'image-describe') continue;
+    if (job.operation === 'image-describe' || (job.draft && job.state === 'cancelled')) continue;
     const id = job.draft ? -job.draft.id : job.id;
     const group = groups.get(id);
     if (!group) {
@@ -56,7 +109,7 @@ export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
   return [...groups.values()].sort((a, b) => b.createdAt - a.createdAt || a.id - b.id);
 }
 
-/** Bound card text work; show the newest tokens during generation. */
+/** Keep full text for scrolling and preserve the prefix while tokens stream. */
 export function jobPromptExcerpt(
   job: Pick<MediaJob, 'state' | 'prompt' | 'reasoning' | 'instruction'>,
 ) {
@@ -64,12 +117,12 @@ export function jobPromptExcerpt(
     const text = job.prompt || job.reasoning || '';
     return {
       label: job.prompt ? 'Writing prompt…' : 'Thinking…',
-      text: text.length > 420 ? `…${text.slice(-420)}` : text,
+      text,
     };
   }
   const text = job.prompt || job.instruction;
   return {
     label: job.prompt ? 'Prompt' : 'Instruction',
-    text: text.length > 420 ? `${text.slice(0, 420)}…` : text,
+    text,
   };
 }

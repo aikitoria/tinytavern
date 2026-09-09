@@ -223,6 +223,23 @@ test('video preview', async () => {
   assert(sawEviction);
   assert(cached.videoPreview!.frames[31]);
   assert.equal(cached.videoPreview!.frames[0], undefined);
+  const restored = ComfyVideoPreview.restore(cached.videoPreview!, cached.videoPreview!.frames);
+  assert.equal(restored.metadata.id, bounded.metadata.id);
+  assert(
+    !('frames' in restored.metadata),
+    'Restored metadata must not pin an obsolete frame cache',
+  );
+  cached = mergeMediaProgress(cached, {
+    videoPreview: restored.accept(videoPreviewFrame(0, 'sampler', largeJpeg))!,
+  });
+  assert(
+    Object.values(cached.videoPreview!.frames).reduce(
+      (sum, frame) => sum + (frame?.length ?? 0),
+      0,
+    ) <=
+      16 * 1024 * 1024,
+    'Restoring a decoder must retain the frame cache memory limit',
+  );
 });
 
 test('image dimensions', async () => {

@@ -5,6 +5,7 @@ import type { ModalKind } from './store.ts';
 export interface MediaPageLocation {
   operation: MediaOperation;
   jobId: number | null;
+  assetId?: number;
   contextConversationId: number | null;
 }
 
@@ -65,6 +66,7 @@ function parsePane(hash: string): PageLocation {
     result.media = {
       operation: 'image',
       jobId: positiveId(entity),
+      assetId: positiveId(params.get('asset')) ?? undefined,
       contextConversationId: null,
     };
   } else if (page === 'media') {
@@ -116,8 +118,10 @@ function formatPane(page: PageLocation): string {
   } else if (page.modal === 'media-jobs') {
     parts.push('jobs');
   } else if (page.modal === 'media-tools' && page.media) {
-    if (page.media.jobId) parts.push('media', 'job', String(page.media.jobId));
-    else {
+    if (page.media.jobId) {
+      parts.push('media', 'job', String(page.media.jobId));
+      if (page.media.assetId) params.set('asset', String(page.media.assetId));
+    } else {
       const operation = page.media.operation;
       parts.push(
         'media',

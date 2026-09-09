@@ -1,19 +1,15 @@
 import { createEffect, onCleanup } from 'solid-js';
 import type { MediaVideoPreview } from '@tinytavern/shared';
+import { createVideoPreviewFrames, type VideoPreviewFrame } from './videoPreviewFrames.ts';
 
-/** VHS sends individually updated JPEG frames; play them without re-encoding a video. */
+/** Playback reads decoded snapshots; frame arrival never waits for the playback cursor. */
 export default function VideoPreview(props: { preview: MediaVideoPreview; active: boolean }) {
   let canvas!: HTMLCanvasElement;
-  const frames = new Map<number, { source: string; bitmap: ImageBitmap }>();
-  let sources: MediaVideoPreview['frames'] = {};
-  let clipId = '';
-  let frameCount = 0;
+  let frames: readonly VideoPreviewFrame<ImageBitmap>[] = [];
   let frameRate = 1;
   let cursor = -1;
   let lastDraw = 0;
   let animation = 0;
-  let decoding = false;
-  let disposed = false;
   let active = false;
 
   function draw(bitmap: ImageBitmap) {
@@ -26,111 +22,62 @@ export default function VideoPreview(props: { preview: MediaVideoPreview; active
 
   function animate(now: number) {
     animation = 0;
-    if (!active || document.hidden || !frames.size) return;
-    if (now - lastDraw >= 1000 / frameRate) {
-      for (let offset = 1; offset <= frameCount; offset++) {
-        const index = (cursor + offset) % frameCount;
-        const frame = frames.get(index);
-        if (frame) {
-          cursor = index;
-          draw(frame.bitmap);
-          lastDraw = now;
-          break;
-        }
-      }
+    if (!active || !frames.length) return;
+    const interval = 1000 / frameRate;
+    const advance = Math.floor((now - lastDraw) / interval);
+    if (advance > 0) {
+      cursor = (cursor + advance) % frames.length;
+      draw(frames[cursor]!.bitmap);
+      lastDraw += advance * interval;
     }
     animation = requestAnimationFrame(animate);
   }
 
   function resume() {
-    if (disposed || !active || document.hidden) {
+    if (!active || !frames.length) {
       cancelAnimationFrame(animation);
       animation = 0;
-      return;
-    }
-    if (!animation && frames.size) animation = requestAnimationFrame(animate);
-    void decode();
-  }
-
-  async function decode() {
-    if (decoding || disposed || !active || document.hidden) return;
-    decoding = true;
-    try {
-      // Decode serially, taking the newest source for each index and ignoring replaced clips.
-      for (const [key, source] of Object.entries(sources)) {
-        if (disposed || !active || document.hidden) break;
-        if (sources[key] !== source) continue;
-        const index = Number(key);
-        if (!source || frames.get(index)?.source === source) continue;
-        const id = clipId;
-        let bitmap: ImageBitmap | undefined;
-        try {
-          const blob = await (await fetch(source)).blob();
-          bitmap = await createImageBitmap(blob);
-          if (disposed || id !== clipId || sources[key] !== source) {
-            bitmap.close();
-            bitmap = undefined;
-            continue;
-          }
-          frames.get(index)?.bitmap.close();
-          frames.set(index, { source, bitmap });
-          if (cursor < 0 && active && !document.hidden) {
-            cursor = index;
-            draw(bitmap);
-            lastDraw = performance.now();
-          }
-          bitmap = undefined; // The frame cache now owns it.
-          if (!animation && active && !document.hidden) animation = requestAnimationFrame(animate);
-        } catch {
-          bitmap?.close();
-          // A malformed preview must not affect the job or its finished video.
-          if (id === clipId && sources[key] === source) delete sources[key];
-        }
-        if (disposed || !active || document.hidden) break;
-      }
-    } finally {
-      decoding = false;
-      // Frames may have arrived while decoding the previous batch.
-      if (
-        !disposed &&
-        active &&
-        !document.hidden &&
-        Object.entries(sources).some(
-          ([key, source]) => source && frames.get(Number(key))?.source !== source,
-        )
-      )
-        void decode();
+    } else if (!animation) {
+      lastDraw = performance.now();
+      animation = requestAnimationFrame(animate);
     }
   }
 
-  createEffect(() => {
-    const preview = props.preview;
-    active = props.active;
-    frameCount = preview.frameCount;
-    frameRate = preview.frameRate;
-    if (clipId !== preview.id) {
-      for (const frame of frames.values()) frame.bitmap.close();
-      frames.clear();
-      clipId = preview.id;
-      cursor = -1;
-    }
-    sources = { ...preview.frames };
-    for (const [index, frame] of frames) {
-      if (!sources[index]) {
-        frame.bitmap.close();
-        frames.delete(index);
+  const buffer = createVideoPreviewFrames(
+    async (source, signal) => {
+      // Frames are data URLs from the WebSocket; this converts their bytes to a Blob.
+      const response = await fetch(source, { signal });
+      if (!response.ok) throw new Error('Preview frame unavailable');
+      const blob = await response.blob();
+      signal.throwIfAborted();
+      return createImageBitmap(blob);
+    },
+    (next) => {
+      const index = frames[cursor]?.index;
+      frames = next;
+      cursor = frames.findIndex((frame) => frame.index === index);
+      if (frames.length && cursor < 0) {
+        cursor = 0;
+        draw(frames[0]!.bitmap);
+      } else if (!frames.length) {
+        canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       }
-    }
+      resume();
+    },
+  );
+
+  const update = () => {
+    active = props.active && !document.hidden;
+    frameRate = props.preview.frameRate;
+    buffer.update(props.preview, active);
     resume();
-  });
-
-  document.addEventListener('visibilitychange', resume);
+  };
+  createEffect(update);
+  document.addEventListener('visibilitychange', update);
   onCleanup(() => {
-    disposed = true;
     cancelAnimationFrame(animation);
-    document.removeEventListener('visibilitychange', resume);
-    for (const frame of frames.values()) frame.bitmap.close();
-    frames.clear();
+    document.removeEventListener('visibilitychange', update);
+    buffer.dispose();
   });
 
   return (

@@ -50,7 +50,7 @@ import {
 import { downloadMedia, InvalidMediaOutput } from './mediaFiles.ts';
 import { deleteImageFiles } from './images.ts';
 import { parsePreviewFrame } from './comfy/comfyPreview.ts';
-import { ComfyVideoPreview } from './comfy/comfyVideoPreview.ts';
+import { ComfyVideoPreview, parseVideoPreviewFrame } from './comfy/comfyVideoPreview.ts';
 import { comfyTextOutput } from './comfy/comfyTextOutput.ts';
 
 interface ComfyHistory {
@@ -204,8 +204,12 @@ function openProgress(row: MediaJobRow): Promise<void> {
   const graphProgress = new ComfyGraphProgress(
     compileMediaWorkflow(configuration(row).workflow.json).graph,
   );
-  let executingNode: string | null = null;
-  let videoPreview: ComfyVideoPreview | null = null;
+  const cachedPreview = mediaLive.get(row.id)?.progress?.videoPreview;
+  const previewMetadata = cachedPreview ?? config.videoPreview;
+  let executingNode: string | null = previewMetadata?.nodeId ?? null;
+  let videoPreview = previewMetadata
+    ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.frames)
+    : null;
   socket.addEventListener('message', ({ data: raw }) => {
     const binary = typeof raw !== 'string';
     if ((binary ? raw.byteLength : Buffer.byteLength(raw)) > 5 * 1024 * 1024) {
@@ -222,6 +226,15 @@ function openProgress(row: MediaJobRow): Promise<void> {
       if (video) {
         publishProgress(row.id, { videoPreview: video });
         return;
+      }
+      // A job already running before header recovery was added can still show arriving JPEGs.
+      // VHS puts the sampler ID in every frame but does not repeat its length/rate header.
+      if (!videoPreview && row.operation.startsWith('video') && executingNode) {
+        const frame = parseVideoPreviewFrame(bytes);
+        if (frame?.nodeId === executingNode.slice(0, 15)) {
+          publishProgress(row.id, { preview: frame.image, videoPreview: null });
+          return;
+        }
       }
       const preview = parsePreviewFrame(bytes);
       if (preview) {
@@ -249,9 +262,24 @@ function openProgress(row: MediaJobRow): Promise<void> {
       if (event.data?.prompt_id && event.data.prompt_id !== expectedId) {
         return;
       }
-      if (event.type === 'executing' && event.data && event.data.prompt_id === expectedId) {
-        executingNode = event.data.display_node ?? event.data.node ?? null;
-        videoPreview = null;
+      if (
+        event.type === 'executing' &&
+        event.data &&
+        (event.data.prompt_id === expectedId ||
+          (!event.data.prompt_id && mediaJobRow(row.id)?.state === 'rendering'))
+      ) {
+        // Comfy's reconnect snapshot is sent only to this client and omits prompt_id.
+        const nodeId = event.data.display_node ?? event.data.node;
+        const node = typeof nodeId === 'string' ? nodeId : null;
+        if (node !== executingNode) {
+          executingNode = node;
+          if (videoPreview) {
+            stmt(
+              "UPDATE media_jobs SET configuration_json = json_remove(configuration_json, '$.videoPreview') WHERE id = ?",
+            ).run(row.id);
+            videoPreview = null;
+          }
+        }
       }
       if (
         ['execution_success', 'execution_error', 'execution_interrupted'].includes(event.type ?? '')
@@ -265,6 +293,10 @@ function openProgress(row: MediaJobRow): Promise<void> {
         const incoming = ComfyVideoPreview.fromEvent(event.data, executingNode);
         if (incoming) {
           videoPreview = incoming;
+          // This changes no editable job state or revision. Never persist individual frames.
+          stmt(
+            "UPDATE media_jobs SET configuration_json = json_set(configuration_json, '$.videoPreview', json(?)) WHERE id = ?",
+          ).run(JSON.stringify(incoming.metadata), row.id);
           publishProgress(row.id, { videoPreview: { ...incoming.metadata, frames: {} } });
         }
         return;
@@ -863,7 +895,8 @@ export function initMediaWorker(): void {
   stmt(`DELETE FROM media_remote_files WHERE state = 'deleted'
     AND NOT EXISTS (SELECT 1 FROM media_jobs WHERE id = media_remote_files.job_id)`).run();
   const discarded = stmt(`SELECT j.* FROM media_jobs j JOIN media_drafts d ON d.id = j.draft_id
-    WHERE d.state = 'discarding'`).all() as unknown as MediaJobRow[];
+    WHERE d.state = 'discarding' OR (j.state = 'cancelled'
+      AND json_extract(j.configuration_json, '$.discardOnCancel') = 1)`).all() as unknown as MediaJobRow[];
   for (const row of discarded) {
     if (mediaJobActive(row.state)) cancelMediaJob(row);
     cleanupDiscardedMediaDraft(requireMediaJob(row.id));

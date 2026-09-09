@@ -28,8 +28,6 @@ import {
   faChevronLeft,
   faChevronRight,
   faRotateRight,
-  faCheck,
-  faTrashCan,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   MEDIA_OPERATIONS,
@@ -40,7 +38,6 @@ import {
   mediaWorkflowKey,
   mediaPromptSettingsKey,
   operationHasReferences,
-  compileMediaWorkflow,
   workflowInputError,
   type MediaWorkflowValues,
   type GalleryItem,
@@ -57,8 +54,14 @@ import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import PromptGenerationStatus from './PromptGenerationStatus.tsx';
 import GalleryModal from '../components/gallery/GalleryModal.tsx';
 import SamplerProgress from '../images/SamplerProgress.tsx';
-import { api } from '../state/api.ts';
-import { applyMediaJob, handleServerEvent, state, toast } from '../state/store.ts';
+import { api, ApiError } from '../state/api.ts';
+import {
+  applyMediaJob,
+  handleServerEvent,
+  mediaJobWasDeleted,
+  state,
+  toast,
+} from '../state/store.ts';
 import { download, errorMessage } from '../util.ts';
 import { leaveMediaTool, openMediaJobs, type MediaToolSession } from './navigation.ts';
 import MediaPlayer from './MediaPlayer.tsx';
@@ -66,9 +69,15 @@ import VideoFullscreenButton from './VideoFullscreenButton.tsx';
 import VideoPreview from './VideoPreview.tsx';
 import MediaActions from './MediaActions.tsx';
 import WorkflowInputs from './WorkflowInputs.tsx';
-import { imageWorkflowDefaults, mediaWorkflowView } from './workflowDefaults.ts';
+import {
+  createMediaWorkflowControls,
+  imageWorkflowDefaults,
+  mediaWorkflowView,
+} from './workflowDefaults.ts';
 import {
   groupMediaJobs,
+  mediaVariations,
+  mediaVariationIndex,
   MEDIA_JOB_STATUS as STATUS_LABELS,
   MEDIA_INPUT_LABELS as INPUT_LABELS,
 } from './jobCards.ts';
@@ -100,6 +109,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let promptArea: HTMLTextAreaElement | undefined;
   const session = props.session;
   const [jobId, setJobId] = createSignal(session.jobId);
+  const [draftId, setDraftId] = createSignal<number | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const paneActive = useDialogActive();
@@ -127,9 +137,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let variationRequestKey = newRequestId();
   createEffect(() => {
     if (!paneActive()) return;
+    const selected = selectedVariation();
     rememberMediaPage({
       operation: draft.operation,
-      jobId: jobId(),
+      jobId: selected?.job.id ?? jobId(),
+      assetId:
+        selected?.job.outputs.length === 1
+          ? undefined
+          : (selected?.asset?.id ?? (loadingJob() ? session.assetId : undefined)),
       contextConversationId: draft.contextConversationId ?? null,
     });
   });
@@ -141,14 +156,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const job = () => (jobId() ? state.mediaJobs[jobId()!] : undefined);
   const variations = createMemo(() => {
     const current = job();
-    if (!current) {
-      return [];
-    }
-    if (!current.draft) {
-      return [current];
-    }
+    const id = current?.draft?.id ?? draftId();
+    if (!id) return current ? [current] : [];
     return Object.values(state.mediaJobs)
-      .filter((item) => item.draft?.id === current.draft!.id)
+      .filter((item) => item.draft?.id === id)
       .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   });
   const review = createMemo(() => {
@@ -165,32 +176,46 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const active = () => runningJob() !== undefined;
   const loadingJob = () => jobId() !== null && !job();
   const frozen = () => loadingJob() || active() || (job()?.submitted === true && !reviewing());
-  const [showLivePreview, setShowLivePreview] = createSignal(true);
-  const preview = () => (showLivePreview() ? runningJob()?.progress?.preview : undefined);
+  const preview = () =>
+    selectedVariation()?.asset ? undefined : selectedVariation()?.job.progress?.preview;
   const videoPreview = () => {
-    const video = showLivePreview() ? runningJob()?.progress?.videoPreview : undefined;
+    const video = selectedVariation()?.asset
+      ? undefined
+      : selectedVariation()?.job.progress?.videoPreview;
     return video && Object.values(video.frames).some(Boolean) ? video : undefined;
   };
-  const candidates = createMemo(() =>
-    variations().flatMap((item) =>
-      item.state === 'succeeded' ? item.outputs.map((asset) => ({ asset, job: item })) : [],
-    ),
-  );
+  const candidates = createMemo(() => mediaVariations(variations()));
+  const completedCount = () => candidates().filter((item) => item.asset).length;
+  const pendingCount = () => variations().filter((item) => mediaJobActive(item.state)).length;
+  const queuedCount = () =>
+    variations().filter((item) =>
+      ['preparing', 'submitting', 'reconciling', 'queued'].includes(item.state),
+    ).length;
   const [resultDetails, setResultDetails] = createSignal<{
     instruction: string;
     prompt: string;
     variation: number;
     workflow: ReturnType<typeof resultWorkflowDetails>;
   } | null>(null);
-  const [viewedAssetId, setViewedAssetId] = createSignal<number | null>(null);
-  const selectedIndex = () => {
-    const assetId = reviewing()
-      ? review()?.selectedAssetId
-      : (viewedAssetId() ?? review()?.selectedAssetId);
-    const index = candidates().findIndex((item) => item.asset.id === assetId);
-    return index < 0 ? candidates().length - 1 : index;
+  const [viewedVariation, setViewedVariation] = createSignal<{
+    jobId: number;
+    assetId?: number;
+  } | null>(session.jobId === null ? null : { jobId: session.jobId, assetId: session.assetId });
+  const selectedIndex = () =>
+    mediaVariationIndex(candidates(), viewedVariation(), review()?.selectedAssetId);
+  const selectedVariation = () => candidates()[selectedIndex()];
+  const cancelTarget = () => {
+    const selected = selectedVariation()?.job;
+    return selected && mediaJobActive(selected.state) ? selected : runningJob();
   };
-  const selected = () => candidates()[selectedIndex()];
+  const selected = createMemo(
+    () => {
+      const item = selectedVariation();
+      return item?.asset ? { job: item.job, asset: item.asset } : undefined;
+    },
+    undefined,
+    { equals: (a, b) => a?.job === b?.job && a?.asset === b?.asset },
+  );
   const hasResults = () => Boolean(videoPreview() || preview() || selected());
   const sourcePreviewLabel = () =>
     draft.operation === 'video-first' ? 'First frame' : 'Reference 1';
@@ -250,17 +275,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     ),
   );
   const selectedWorkflow = () => workflowView().id;
-  const workflowControls = createMemo(() => {
-    const workflow = workflowView().workflow;
-    try {
-      return {
-        controls: workflow?.json ? compileMediaWorkflow(workflow.json).controls : [],
-        error: '',
-      };
-    } catch (err) {
-      return { controls: [], error: errorMessage(err) };
-    }
-  });
+  const workflowControls = createMediaWorkflowControls(() => workflowView().workflow?.json);
   const workflowError = createMemo(() => {
     if (workflowControls().error) return workflowControls().error;
     for (const control of workflowControls().controls) {
@@ -342,7 +357,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         .map((preset) => ({ value: preset.id, label: preset.name })),
     ];
   });
-  const preparingPrompt = () => showLivePreview() && runningJob()?.state === 'preparing';
+  const preparingPrompt = () => runningJob()?.state === 'preparing';
   const currentPrompt = () => (preparingPrompt() ? (runningJob()?.prompt ?? '') : draft.prompt);
   const thinking = () => preparingPrompt() && !currentPrompt();
   const promptScroll = createStreamScroll(
@@ -364,6 +379,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
 
   const loadJob = (incoming: MediaJob) =>
     batch(() => {
+      setDraftId(incoming.draft?.id ?? null);
       const next = draftFromJob(incoming);
       setDraft(next);
       setDraft('workflowValues', reconcile(next.workflowValues));
@@ -386,11 +402,52 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       }
       baseline = JSON.stringify(next);
     });
+  let knownJobId: number | null = null;
+  const recoverRemovedJob = (id: number) => {
+    if (jobId() !== id || knownJobId !== id) return;
+    const remaining = variations().at(-1);
+    // Cancellation can delete the editor's anchor. Keep its working values while repointing it.
+    baseline = remaining ? JSON.stringify(draftFromJob(remaining)) : '';
+    batch(() => {
+      if (!remaining) {
+        setDraftId(null);
+        setViewedVariation(null);
+      }
+      setJobId(remaining?.id ?? null);
+    });
+  };
+  createEffect(() => {
+    const current = job();
+    if (current) {
+      knownJobId = current.id;
+      setDraftId(current.draft?.id ?? null);
+      return;
+    }
+    const id = jobId();
+    if (id !== null && mediaJobWasDeleted(id)) recoverRemovedJob(id);
+  });
+  const jobRefreshError = async (id: number, err: unknown) => {
+    if (jobId() !== id) return;
+    if (err instanceof ApiError && err.status === 404 && knownJobId === id) {
+      try {
+        // The deleted anchor may have been the only cached job when the socket disconnected.
+        await refreshVariations();
+      } catch (refreshError) {
+        if (jobId() === id) setError(errorMessage(refreshError));
+        return;
+      }
+      if (jobId() !== id) return;
+      handleServerEvent({ t: 'mediaJobDeleted', id });
+      recoverRemovedJob(id);
+    } else {
+      setError(errorMessage(err));
+    }
+  };
   const refreshVariations = async () => {
     if (!jobId()) {
       return;
     }
-    const incoming = await api.mediaVariations(jobId()!);
+    const incoming = await api.mediaVariations(jobId()!, draftId());
     for (const item of incoming) {
       applyMediaJob(item);
     }
@@ -398,7 +455,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const refreshOpenJob = () => {
     const id = jobId();
     if (id) {
-      void refreshVariations().catch((err: unknown) => setError(errorMessage(err)));
+      void refreshVariations().catch((err: unknown) => jobRefreshError(id, err));
       const existing = state.mediaJobs[id];
       if (existing && !dirty()) {
         loadJob(existing);
@@ -411,7 +468,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
             loadJob(incoming);
           }
         })
-        .catch((err: unknown) => setError(errorMessage(err)));
+        .catch((err: unknown) => jobRefreshError(id, err));
     }
   };
   onMount(refreshOpenJob);
@@ -436,19 +493,21 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     ),
   );
 
-  const saveDraft = async (): Promise<MediaJob> => {
+  const saveDraft = async (queue = false): Promise<MediaJob> => {
     if (workflowError()) throw new Error(workflowError());
     const current = job();
     if (jobId() && !current) {
       throw new Error('The job is unavailable. Reopen it from the jobs list.');
     }
-    if (current && (frozen() || (!dirty() && !current.submitted))) {
+    const fork =
+      current && (current.submitted || (queue && !['draft', 'ready'].includes(current.state)));
+    if (current && ((!queue && frozen()) || (!fork && !dirty()))) {
       return current;
     }
     const values = JSON.parse(JSON.stringify(draft)) as ToolDraft;
     values.workflowId = selectedWorkflow() || null;
     values.presetId = selectedPromptId() || null;
-    const saved = current?.submitted
+    const saved = fork
       ? await api.rerunMediaJob(current, variationRequestKey, values)
       : current
         ? await api.editMediaJob(current, values)
@@ -479,16 +538,16 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       async () => {
         const current =
           action === 'cancel'
-            ? runningJob()!
+            ? cancelTarget()!
             : action === 'retry-retrieval'
               ? job()!
-              : await saveDraft();
+              : await saveDraft(action === 'render' && reviewing());
         const conversation =
           current.contextConversationId === state.tree.conversationId
             ? state.tree
             : state.conversations.find((item) => item.id === current.contextConversationId);
         if (action === 'render' || action === 'prepare') {
-          setShowLivePreview(true);
+          setViewedVariation({ jobId: current.id });
         }
         const result = await api.mediaJobAction(current, action, {
           autoRender,
@@ -624,20 +683,13 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     });
   };
   const jobGroups = createMemo(() => groupMediaJobs(Object.values(state.mediaJobs)));
-  const chooseCandidate = async (index: number) => {
+  const chooseCandidate = (index: number) => {
     const candidate = candidates()[index];
     if (!candidate || busy()) {
       return;
     }
-    if (!reviewing()) {
-      setViewedAssetId(candidate.asset.id);
-      setShowLivePreview(false);
-      return;
-    }
-    await perform(async () => {
-      applyMediaJob(await api.selectMediaVariation(job()!, candidate.asset.id, review()!.revision));
-      setShowLivePreview(false);
-    }, refreshVariations);
+    // Preview selection is navigation, retained in the URL without locking the editor.
+    setViewedVariation({ jobId: candidate.job.id, assetId: candidate.asset?.id });
   };
   const savedAssetIds = () => review()?.savedAssetIds ?? [];
   const selectedSaved = () => Boolean(selected() && savedAssetIds().includes(selected()!.asset.id));
@@ -649,7 +701,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
   };
   const accept = async () => {
-    if (!selected() || selectedSaved() || !reviewing() || busy() || active()) {
+    if (!selected() || selectedSaved() || !reviewing() || busy()) {
       return;
     }
     await perform(async () => {
@@ -715,7 +767,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   when={hasResults()}
                   fallback={
                     <Show
-                      when={sourcePreview()}
+                      when={selectedVariation() ? undefined : sourcePreview()}
                       fallback={
                         <div class="m-auto p-4 text-center">
                           <h3>
@@ -724,8 +776,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                               : 'Image preview'}
                           </h3>
                           <p class="hint">
-                            {active()
-                              ? STATUS_LABELS[runningJob()!.state]
+                            {selectedVariation()
+                              ? STATUS_LABELS[selectedVariation()!.job.state]
                               : 'Your result will appear here.'}
                           </p>
                         </div>
@@ -798,36 +850,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </Show>
                 </Show>
               </div>
-              <Show when={selected() || (!hasResults() && sourcePreview())}>
-                <div class="flex items-center flex-none gap-2 flex-wrap justify-center w-full">
-                  <Show when={!hasResults() && sourcePreview()}>
+              <Show when={selectedVariation() || (!hasResults() && sourcePreview())}>
+                <div class="flex flex-col items-center flex-none gap-2 w-full">
+                  <Show when={!selectedVariation() && !hasResults() && sourcePreview()}>
                     <span class="hint">{sourcePreviewLabel()}</span>
-                  </Show>
-                  <Show when={candidates().length > 1}>
-                    <div
-                      class="whitespace-nowrap flex items-center gap-2 justify-center text-sm"
-                      aria-label="Variations"
-                    >
-                      <button
-                        class="icon-btn"
-                        aria-label="Previous variation"
-                        disabled={busy() || selectedIndex() <= 0}
-                        onClick={() => void chooseCandidate(selectedIndex() - 1)}
-                      >
-                        <FontAwesomeIcon icon={faChevronLeft} size={14} />
-                      </button>
-                      <span aria-live="polite">
-                        Variation {selectedIndex() + 1} / {candidates().length}
-                      </span>
-                      <button
-                        class="icon-btn"
-                        aria-label="Next variation"
-                        disabled={busy() || selectedIndex() >= candidates().length - 1}
-                        onClick={() => void chooseCandidate(selectedIndex() + 1)}
-                      >
-                        <FontAwesomeIcon icon={faChevronRight} size={14} />
-                      </button>
-                    </div>
                   </Show>
                   <Show when={!videoPreview() && !preview() && selected()}>
                     {(candidate) => (
@@ -877,11 +903,37 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       </div>
                     )}
                   </Show>
+                  <Show when={candidates().length > 0}>
+                    <div
+                      class="whitespace-nowrap flex items-center gap-1 justify-center text-xs text-dim"
+                      aria-label="Variations"
+                    >
+                      <button
+                        class="icon-btn"
+                        aria-label="Previous variation"
+                        disabled={busy() || selectedIndex() <= 0}
+                        onClick={() => chooseCandidate(selectedIndex() - 1)}
+                      >
+                        <FontAwesomeIcon icon={faChevronLeft} size={14} />
+                      </button>
+                      <span class="text-center tabular-nums" aria-live="polite">
+                        Variation {selectedIndex() + 1} / {candidates().length}
+                      </span>
+                      <button
+                        class="icon-btn"
+                        aria-label="Next variation"
+                        disabled={busy() || selectedIndex() >= candidates().length - 1}
+                        onClick={() => chooseCandidate(selectedIndex() + 1)}
+                      >
+                        <FontAwesomeIcon icon={faChevronRight} size={14} />
+                      </button>
+                    </div>
+                  </Show>
                 </div>
               </Show>
             </section>
             <aside
-              class="detail-panel media-tool-form flex flex-col gap-4 flex-none min-h-0 p-4 overflow-y-auto bg-panel border-l border-l-solid border-l-subtle [&>*]:shrink-0 [&_textarea]:block [&_textarea]:w-full [&_textarea]:min-h-20 [&_textarea]:resize-y [&_.hint]:m-0 [&_.hint]:text-xs [&_.notice]:m-0 [&_.notice]:text-xs mobile:w-full mobile:overflow-visible [&.media-tool-form]:gap-0 [&.media-tool-form]:min-w-0 [&.media-tool-form]:p-0 [&.media-tool-form]:overflow-hidden mobile:[&.media-tool-form]:overflow-visible [&>.media-tool-fields]:flex [&>.media-tool-fields]:flex-col [&>.media-tool-fields]:min-h-0 [&>.media-tool-fields]:gap-2 [&>.media-tool-fields]:p-3 [&>.media-tool-fields]:overflow-y-auto [&>.media-tool-fields]:flex-auto [&_.field-group]:p-2 [&_.field-group_label]:text-sm [&_.field-group_label]:font-semibold [&_.field-group_label]:mt-2 [&_.field-group_label]:text-foreground [&_.workflow-inputs_label]:m-0 [&_.key-row]:flex-wrap [&_.form-actions]:flex-wrap [&_.form-actions>.primary-btn]:flex-1 [&_[role=status]]:m-0 mobile:[&>.media-tool-fields]:flex-none mobile:[&>.media-tool-fields]:overflow-visible w-[var(--detail-panel-width,_450px)]"
+              class="detail-panel media-tool-form flex flex-col gap-4 flex-none min-h-0 p-4 overflow-y-auto bg-panel border-l border-l-solid border-l-subtle [&>*]:shrink-0 [&_textarea]:block [&_textarea]:w-full [&_textarea]:min-h-20 [&_textarea]:resize-y [&_.hint]:m-0 [&_.hint]:text-xs [&_.notice]:m-0 [&_.notice]:text-xs mobile:w-full mobile:overflow-visible [&.media-tool-form]:gap-0 [&.media-tool-form]:min-w-0 [&.media-tool-form]:p-0 [&.media-tool-form]:overflow-hidden mobile:[&.media-tool-form]:overflow-visible [&>.media-tool-fields]:flex [&>.media-tool-fields]:flex-col [&>.media-tool-fields]:min-h-0 [&>.media-tool-fields]:gap-2 [&>.media-tool-fields]:p-3 [&>.media-tool-fields]:overflow-y-auto [&>.media-tool-fields]:flex-auto [&_.field-group]:p-2 [&_.field-group_label]:text-sm [&_.field-group_label]:font-semibold [&_.field-group_label]:mt-2 [&_.field-group_label]:text-foreground [&_.workflow-inputs_label]:m-0 [&_.key-row]:flex-wrap [&_[role=status]]:m-0 mobile:[&>.media-tool-fields]:flex-none mobile:[&>.media-tool-fields]:overflow-visible w-[var(--detail-panel-width,_450px)]"
               aria-label="Media controls"
             >
               <div class="media-tool-fields [&>*]:shrink-0 [&>textarea]:min-h-16 [&>#media-prompt]:shrink-0 [&>#media-prompt]:min-h-45 [&>#media-prompt]:flex-auto [&>.media-prompt-thinking]:shrink-0 [&>.media-prompt-thinking]:min-h-45 [&>.media-prompt-thinking]:flex-auto [&>label]:text-sm [&>label]:font-semibold [&>label]:mt-2 [&>label]:text-foreground mobile:[&>#media-prompt]:flex-none mobile:[&>.media-prompt-thinking]:flex-none">
@@ -1124,8 +1176,18 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </div>
                 </Show>
               </div>
-              <div class="py-2 px-3 border-t border-t-solid border-t-subtle flex flex-col flex-none gap-2 bg-panel mobile:sticky mobile:bottom-0 mobile:z-2 [&_.form-actions]:mt-0 [&_.media-render-heading]:mt-0 mobile:pb-[max(var(--space-2),_env(safe-area-inset-bottom))]">
-                <Show when={runningJob() ?? job()}>
+              <div class="py-2 px-3 border-t border-t-solid border-t-subtle flex flex-col flex-none gap-2 bg-panel mobile:sticky mobile:bottom-0 mobile:z-2 [&_.media-render-heading]:mt-0 mobile:pb-[max(var(--space-2),_env(safe-area-inset-bottom))]">
+                <Show when={candidates().length > 0}>
+                  <p class="text-xs text-dim m-0" aria-label="Variation queue" role="status">
+                    {completedCount()} / {candidates().length} variations complete
+                    <Show when={queuedCount()}> · {queuedCount()} queued</Show>
+                    <Show when={pendingCount() > queuedCount()}>
+                      {' '}
+                      · {pendingCount() - queuedCount()} running
+                    </Show>
+                  </p>
+                </Show>
+                <Show when={selectedVariation()?.job ?? runningJob() ?? job()}>
                   {(current) => (
                     <Show
                       when={
@@ -1148,7 +1210,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             </p>
                             <Show
                               when={
-                                active() &&
+                                mediaJobActive(current().state) &&
                                 current().state !== 'preparing' &&
                                 current().progress?.node
                               }
@@ -1171,7 +1233,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         <Show when={current().error}>
                           <p class="notice notice-error">{current().error}</p>
                         </Show>
-                        <Show when={active() && current().state !== 'preparing'}>
+                        <Show
+                          when={mediaJobActive(current().state) && current().state !== 'preparing'}
+                        >
                           <div class="flex flex-wrap gap-y-1 gap-x-4 [&:not(:has(.img-progress))]:display-none [&>.media-progress-row]:grow [&>.media-progress-row]:shrink [&>.media-progress-row]:basis-37.5 [&>.media-progress-row]:gap-2 [&>.media-progress-row]:grid-cols-[minmax(24px,_1fr)_auto]">
                             <div class="media-progress-row items-center tabular-nums grid gap-3 text-xs media-graph-progress [&:empty]:display-none [&_.img-progress]:w-full grid-cols-[minmax(0,_1fr)_12ch]">
                               <SamplerProgress
@@ -1193,56 +1257,65 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </Show>
                   )}
                 </Show>
-                <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
-                  <Show when={!frozen()}>
+                <div class="media-tool-actions grid grid-flow-col auto-cols-fr items-center min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:h-control [&>button]:py-0 [&>button]:px-2 [&>button]:min-w-0 [&>button]:whitespace-nowrap">
+                  <Show when={!frozen() || (reviewing() && !loadingJob())}>
                     <button
                       class="primary-btn"
-                      title="Render the final prompt shown above"
+                      title={
+                        reviewing() && candidates().length > 0
+                          ? 'Queue another variation'
+                          : 'Render the final prompt shown above'
+                      }
                       disabled={
                         busy() ||
+                        job()?.state === 'preparing' ||
                         !draft.prompt.trim() ||
                         !selectedWorkflow() ||
                         Boolean(workflowError())
                       }
                       onClick={() => void run('render')}
                     >
-                      {reviewing() && candidates().length > 0 ? 'Generate another' : 'Render'}
+                      Generate
                     </button>
                   </Show>
                   <Show when={active()}>
                     <button
-                      disabled={busy() || runningJob()?.state === 'cancelling'}
+                      title="Cancel generation"
+                      disabled={busy() || cancelTarget()?.state === 'cancelling'}
                       onClick={() => void run('cancel')}
                     >
-                      Cancel generation
+                      Cancel
                     </button>
                   </Show>
                   <Show when={job()?.retrievalAvailable}>
-                    <button disabled={busy()} onClick={() => void run('retry-retrieval')}>
-                      Retry download
+                    <button
+                      title="Retry download"
+                      disabled={busy()}
+                      onClick={() => void run('retry-retrieval')}
+                    >
+                      Retry
                     </button>
                   </Show>
                   <Show when={reviewing()}>
                     <button
-                      class="primary-btn"
-                      disabled={busy() || active() || !selected() || selectedSaved()}
+                      title={draft.destination === 'chat' ? 'Add to chat' : 'Save to gallery'}
+                      disabled={busy() || !selected() || selectedSaved()}
                       onClick={() => void accept()}
                     >
-                      <FontAwesomeIcon icon={faCheck} size={14} />{' '}
                       {selectedSaved()
                         ? draft.destination === 'chat'
-                          ? 'Added to chat'
-                          : 'Saved to gallery'
+                          ? 'Added'
+                          : 'Saved'
                         : draft.destination === 'chat'
-                          ? 'Add to chat'
-                          : 'Save to gallery'}
+                          ? 'Add'
+                          : 'Save'}
                     </button>
-                    <button disabled={busy()} onClick={() => void discard()}>
-                      <FontAwesomeIcon
-                        icon={savedAssetIds().length ? faCheck : faTrashCan}
-                        size={14}
-                      />{' '}
-                      {savedAssetIds().length ? 'Finish' : 'Discard draft'}
+                    <button
+                      title="Finish draft and discard unsaved variations"
+                      disabled={busy()}
+                      onClick={() => void discard()}
+                    >
+                      {savedAssetIds().length ? 'Finish' : 'Discard'}
                     </button>
                   </Show>
                   <Show when={job()?.submitted && !active() && !reviewing()}>

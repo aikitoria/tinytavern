@@ -28,6 +28,7 @@ test('media jobs', async () => {
     await import('../../server/src/media/mediaJobs.ts');
   const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
     await import('../../server/src/media/mediaWorker.ts');
+  const { cancelMediaVariation } = await import('../../server/src/media/mediaDrafts.ts');
   const { drainRemoteCleanup } = await import('../../server/src/media/mediaRemote.ts');
   const { startMessageImageRender } = await import('../../server/src/media/mediaImageAdapter.ts');
   const { appendMessage, getMessage } = await import('../../server/src/conversations/tree.ts');
@@ -114,11 +115,11 @@ test('media jobs', async () => {
     return comfy.fetch(request);
   }) as typeof fetch;
 
-  async function waitFor(id: number, state: MediaJob['state']): Promise<MediaJob> {
+  async function waitFor(id: number, state: MediaJob['state'], removed = false): Promise<MediaJob> {
     // Completion is transient: capture its notification before automatic deletion.
     let completed: MediaJob | undefined;
     const unsubscribe = observeMediaJob(id, (row) => {
-      if (row.state === 'succeeded') completed = mediaJobDto(row);
+      if (row.state === state) completed = mediaJobDto(row);
     });
     try {
       const deadline = Date.now() + 5000;
@@ -126,7 +127,7 @@ test('media jobs', async () => {
         tickMediaWorker();
         const row = mediaJobRow(id);
         const job = row ? mediaJobDto(row) : completed;
-        if (job?.state === state) return job;
+        if (job?.state === state && (!removed || !row)) return job;
         await sleep(10);
       }
       assert.fail(`Job did not reach ${state}: ${JSON.stringify(mediaJobRow(id))}`);
@@ -358,12 +359,14 @@ test('media jobs', async () => {
     );
 
     holdQueue = true;
-    const pending = draft('cancel');
+    const pending = draft('cancel', { reviewBeforeSave: true });
     startMediaJob(requireMediaJob(pending.id), {}, false);
     await waitFor(pending.id, 'queued');
     const pendingId = requireMediaJob(pending.id).comfy_prompt_id!;
-    cancelMediaJob(requireMediaJob(pending.id));
-    await waitFor(pending.id, 'cancelled');
+    cancelMediaVariation(requireMediaJob(pending.id));
+    await waitFor(pending.id, 'cancelled', true);
+    assert.equal(mediaJobRow(pending.id), undefined);
+    assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(pending.draft!.id), null);
     assert.deepEqual(cancellations, [pendingId], 'Cancellation targets only the recorded job');
 
     putSettings({

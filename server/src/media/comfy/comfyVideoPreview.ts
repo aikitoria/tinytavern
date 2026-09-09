@@ -31,8 +31,23 @@ export class ComfyVideoPreview {
   private sizes = new Map<number, number>();
   private characters = 0;
 
-  private constructor(nodeId: string, frameCount: number, frameRate: number) {
-    this.metadata = { id: newRequestId(), nodeId, frameCount, frameRate };
+  private constructor(metadata: Omit<MediaVideoPreview, 'frames'>) {
+    this.metadata = metadata;
+  }
+
+  /** Reuse the clip identity and account for frames already held in the live cache. */
+  static restore(
+    metadata: Omit<MediaVideoPreview, 'frames'>,
+    frames: MediaVideoPreview['frames'] = {},
+  ) {
+    const { id, nodeId, frameCount, frameRate } = metadata;
+    const preview = new ComfyVideoPreview({ id, nodeId, frameCount, frameRate });
+    for (const [key, frame] of Object.entries(frames)) {
+      if (!frame) continue;
+      preview.sizes.set(Number(key), frame.length);
+      preview.characters += frame.length;
+    }
+    return preview;
   }
 
   static fromEvent(data: unknown, executingNode: string | null): ComfyVideoPreview | null {
@@ -47,7 +62,12 @@ export class ComfyVideoPreview {
     )
       return null;
     if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 60) return null;
-    return new ComfyVideoPreview(id, length, rate);
+    return new ComfyVideoPreview({
+      id: newRequestId(),
+      nodeId: id,
+      frameCount: length,
+      frameRate: rate,
+    });
   }
 
   accept(frame: Buffer): MediaVideoPreview | null {

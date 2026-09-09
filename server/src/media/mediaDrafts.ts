@@ -22,8 +22,12 @@ export function mediaDraftJobs(row: MediaJobRow): MediaJobRow[] {
   if (!row.draft_id) {
     return [row];
   }
+  return mediaDraftJobsById(row.draft_id);
+}
+
+export function mediaDraftJobsById(id: number): MediaJobRow[] {
   return stmt('SELECT * FROM media_jobs WHERE draft_id = ? ORDER BY created_at, id').all(
-    row.draft_id,
+    id,
   ) as unknown as MediaJobRow[];
 }
 
@@ -63,15 +67,23 @@ export function selectMediaVariation(row: MediaJobRow, body: Record<string, unkn
   return mediaJobDto(requireMediaJob(row.id));
 }
 
+/** Keep the cancellation ledger and its input owners until the worker confirms completion. */
+export function cancelMediaVariation(row: MediaJobRow) {
+  if (row.draft_id && mediaJobActive(row.state)) {
+    stmt(`UPDATE media_jobs SET configuration_json =
+      json_set(COALESCE(configuration_json, '{}'), '$.discardOnCancel', json('true'))
+      WHERE id = ?`).run(row.id);
+  }
+  const result = cancelMediaJob(requireMediaJob(row.id));
+  cleanupDiscardedMediaDraft(requireMediaJob(row.id));
+  return result;
+}
+
 /** Save one result without closing the draft or releasing its other variations. */
 export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
   const { source, asset } = candidate(row, body.assetId);
   if (draft.savedAssetIds.includes(asset.id)) return mediaJobDto(source);
-  const jobs = mediaDraftJobs(row);
-  if (jobs.some((job) => mediaJobActive(job.state))) {
-    throw new HttpError(409, 'Finish or cancel the running variation before accepting a result');
-  }
   const conversation =
     source.context_conversation_id === null
       ? null
@@ -147,12 +159,14 @@ export function discardMediaDraft(row: MediaJobRow, body: Record<string, unknown
   }
 }
 
-/** Remote execution must stop before discarded jobs release their input/result owners. */
+/** Remote execution must stop before discarded drafts or variations release their owners. */
 export function cleanupDiscardedMediaDraft(row: MediaJobRow): void {
   if (
     row.draft_id &&
     !mediaJobActive(row.state) &&
-    mediaDraft(row.draft_id).state === 'discarding'
+    (mediaDraft(row.draft_id).state === 'discarding' ||
+      (row.state === 'cancelled' &&
+        JSON.parse(row.configuration_json ?? '{}').discardOnCancel === true))
   ) {
     deleteMediaJob(row);
   }

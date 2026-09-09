@@ -1,10 +1,24 @@
-import type {
-  MediaAsset,
-  MediaJob,
-  MediaWorkflow,
-  MediaWorkflowInput,
-  MediaWorkflowValues,
+import { createMemo } from 'solid-js';
+import {
+  compileMediaWorkflow,
+  type MediaAsset,
+  type MediaJob,
+  type MediaWorkflow,
+  type MediaWorkflowInput,
+  type MediaWorkflowValues,
 } from '@tinytavern/shared';
+
+/** Job/value refreshes must not recreate the workflow controls and their DOM. */
+export function createMediaWorkflowControls(source: () => string | undefined) {
+  const json = createMemo(() => source() ?? '');
+  return createMemo(() => {
+    try {
+      return { controls: json() ? compileMediaWorkflow(json()).controls : [], error: '' };
+    } catch (err) {
+      return { controls: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+}
 
 /** Locked controls describe the captured job, even when a local draft or settings differ. */
 export function mediaWorkflowView(

@@ -3,7 +3,13 @@ import { spawn } from 'node:child_process';
 import { once, EventEmitter } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
 import { test, onTestFinished } from 'bun:test';
-import { preparePromptTrace, type PromptTrace, type PromptMessage } from '@tinytavern/shared';
+import {
+  newRequestId,
+  preparePromptTrace,
+  type MediaJob,
+  type PromptTrace,
+  type PromptMessage,
+} from '@tinytavern/shared';
 import type { Endpoint, ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
 import { requireTestIsolation } from '../support/isolation.ts';
 
@@ -488,6 +494,32 @@ test('application HTTP and WebSocket contracts', async () => {
       assert.equal(message.content, 'Hello world');
       assert.equal(message.imagePending, false);
     }
+  });
+
+  await step('media draft lookup survives deletion of its original job', async () => {
+    const first = await request<MediaJob>('POST', '/api/media/jobs', {
+      requestKey: newRequestId(),
+      operation: 'image',
+      prompt: 'First variation',
+      reviewBeforeSave: true,
+    });
+    const second = await request<MediaJob>('POST', `/api/media/jobs/${first.id}/rerun`, {
+      requestKey: newRequestId(),
+      expectedRevision: first.revision,
+      prompt: 'Second variation',
+    });
+    await request('DELETE', `/api/media/jobs/${first.id}?expectedRevision=${first.revision}`);
+    await request('GET', `/api/media/jobs/${first.id}/variations`, undefined, 404);
+    const remaining = await request<MediaJob[]>(
+      'GET',
+      `/api/media/drafts/${first.draft!.id}/variations`,
+    );
+    assert.deepEqual(
+      remaining.map((job) => job.id),
+      [second.id],
+    );
+    await request('DELETE', `/api/media/jobs/${second.id}?expectedRevision=${second.revision}`);
+    assert.deepEqual(await request('GET', `/api/media/drafts/${first.draft!.id}/variations`), []);
   });
 
   await step('incremental edits, stale same-leaf writes and branch restoration', async () => {

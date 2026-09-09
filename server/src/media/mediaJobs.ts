@@ -275,15 +275,6 @@ export function createMediaJob(
   const sourceDraft = source?.draft_id ? mediaDraft(source.draft_id) : null;
   const review = body.reviewBeforeSave === true || sourceDraft?.state === 'open';
   let draftId = review && sourceDraft?.state === 'open' ? sourceDraft.id : null;
-  if (draftId && sourceDraft?.state === 'open') {
-    const unfinished = stmt(`SELECT id FROM media_jobs WHERE draft_id = ?
-      AND (state NOT IN ('succeeded', 'failed', 'cancelled') OR submission_id IS NULL)`).get(
-      draftId,
-    );
-    if (unfinished) {
-      throw new HttpError(409, 'Finish or cancel the current variation before creating another');
-    }
-  }
   let id = 0;
   const now = Date.now();
 
@@ -730,9 +721,20 @@ export function deleteMediaJob(row: MediaJobRow): void {
   `)
     .all(row.id)
     .map((asset) => String(asset.path));
-  transaction(() => deleteMediaJobRecord(row.id));
+  transaction(() => {
+    if (row.draft_id) {
+      stmt('UPDATE media_drafts SET revision = revision + 1 WHERE id = ?').run(row.draft_id);
+    }
+    deleteMediaJobRecord(row.id);
+  });
   mediaLive.delete(row.id);
   deleteImageFiles(paths);
+  if (row.draft_id) {
+    const remaining = stmt(`SELECT j.id FROM media_jobs j
+      JOIN media_drafts d ON d.id = j.draft_id
+      WHERE j.draft_id = ? AND d.state = 'open' LIMIT 1`).get(row.draft_id);
+    if (remaining) publishMediaJob(Number(remaining.id));
+  }
   broadcast({ t: 'mediaJobDeleted', id: row.id });
 }
 

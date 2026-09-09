@@ -24,6 +24,7 @@ export interface MediaToolSession {
   id: string;
   operation: MediaOperation;
   jobId: number | null;
+  assetId?: number;
   contextConversationId: number | null;
   destination: 'gallery' | 'chat';
   prompt: string;

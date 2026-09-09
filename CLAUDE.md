@@ -16,6 +16,8 @@ TinyTavern uses Bun, SQLite, SolidJS and Vite. Prioritize performance and low la
 
 ## Tools and checks
 
+Never install a browser for testing, on the host or in containers. This includes Chromium and browser downloads through Playwright or similar tools.
+
 Use these disposable-container scripts; they have no host mounts, published ports or live credentials:
 
 ```sh

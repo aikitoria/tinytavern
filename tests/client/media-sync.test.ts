@@ -9,14 +9,21 @@ test('ordered media snapshots preserve early progress and reject stale history a
     value: () => ({ matches: false, addEventListener() {} }),
   });
   const modulePath = '../../client/src/state/store.ts';
-  const { state, handleServerEvent, refreshMediaJobs, applyMediaJob, mediaJobsByMessage } =
-    (await import(modulePath)) as {
-      state: { mediaJobs: Record<number, MediaJob> };
-      handleServerEvent(event: ServerEvent): void;
-      refreshMediaJobs(): Promise<void>;
-      applyMediaJob(job: MediaJob): void;
-      mediaJobsByMessage(): Map<number, MediaJob>;
-    };
+  const {
+    state,
+    handleServerEvent,
+    refreshMediaJobs,
+    applyMediaJob,
+    mediaJobsByMessage,
+    mediaJobWasDeleted,
+  } = (await import(modulePath)) as {
+    state: { mediaJobs: Record<number, MediaJob> };
+    handleServerEvent(event: ServerEvent): void;
+    refreshMediaJobs(): Promise<void>;
+    applyMediaJob(job: MediaJob): void;
+    mediaJobsByMessage(): Map<number, MediaJob>;
+    mediaJobWasDeleted(id: number): boolean;
+  };
   const job = (id: number) =>
     ({
       id,
@@ -63,6 +70,11 @@ test('ordered media snapshots preserve early progress and reject stale history a
       [],
       'Reconnect removes stale and previously unknown active jobs',
     );
+    assert.equal(
+      mediaJobWasDeleted(1),
+      false,
+      'An active snapshot cannot make an open editor abandon a possibly completed job',
+    );
 
     const refreshed = refreshMediaJobs();
     handleServerEvent({ t: 'mediaJob', job: job(3) });
@@ -70,6 +82,7 @@ test('ordered media snapshots preserve early progress and reject stale history a
     history([job(3)]);
     await refreshed;
     applyMediaJob(job(3));
+    assert.equal(mediaJobWasDeleted(3), true, 'Confirmed deletion lets the editor change jobs');
     assert.equal(
       state.mediaJobs[3],
       undefined,

@@ -38,6 +38,7 @@ function GalleryVideoPreview(props: { url: string }) {
       classList={{ playing: playing() }}
       src={props.url}
       muted
+      autoplay
       loop
       playsinline
       preload="none"
@@ -55,8 +56,6 @@ function GalleryTile(props: {
   selecting: boolean;
   tabStop: boolean;
   preview: boolean;
-  onPointerEnter: (event: PointerEvent) => void;
-  onPointerLeave: () => void;
   onFocus: () => void;
   onClick: () => void;
   onInspect?: () => void;
@@ -74,8 +73,6 @@ function GalleryTile(props: {
       class="gallery-tile overflow-hidden h-full absolute bg-panel rounded-tight [&::after]:absolute [&::after]:inset-0 [&::after]:rounded-[inherit] [&::after]:pointer-events-none [&.selected::after]:border-2 [&.selected::after]:border-solid [&.selected::after]:border-accent [&:focus-within::after]:border-2 [&:focus-within::after]:border-solid [&:focus-within::after]:border-accent [&.selecting_.gallery-image-button]:cursor-pointer [&.selecting_.gallery-image-button:disabled]:opacity-45 [&.selecting_.gallery-image-button:disabled]:cursor-wait [&:hover_.gallery-tile-caption]:opacity-100 [&:focus-within_.gallery-tile-caption]:opacity-100 [&.selected_.gallery-selection-check]:border-accent [&.selected_.gallery-selection-check]:bg-accent"
       classList={{ selected: props.selected, selecting: props.selecting }}
       role="listitem"
-      onPointerEnter={props.onPointerEnter}
-      onPointerLeave={props.onPointerLeave}
       style={{ left: `${props.cell.left}px`, width: `${props.cell.width}px` }}
     >
       <button
@@ -167,7 +164,6 @@ export default function GalleryGrid(props: {
   let stage!: HTMLDivElement;
   let frame = 0;
   let focusFrame = 0;
-  let previewTimer: ReturnType<typeof setTimeout> | undefined;
   let returnTop = 0;
   let returnId: number | null = null;
   let previous: GalleryLayout | undefined;
@@ -189,12 +185,7 @@ export default function GalleryGrid(props: {
   };
   const [width, setWidth] = createSignal(0);
   const [view, setView] = createSignal({ top: 0, height: 600 });
-  const [previewId, setPreviewId] = createSignal<number | null>(null);
-  const stopPreview = () => {
-    clearTimeout(previewTimer);
-    previewTimer = undefined;
-    setPreviewId(null);
-  };
+  const [documentVisible, setDocumentVisible] = createSignal(!document.hidden);
   const [focusedId, setFocusedId] = createSignal<number | null>(null);
   const layout = createMemo(() => layoutGallery(props.items, width(), props.targetHeight));
   const range = createMemo(
@@ -221,7 +212,6 @@ export default function GalleryGrid(props: {
     }
   };
   const onScroll = () => {
-    stopPreview();
     if (!frame) frame = requestAnimationFrame(updateViewport);
   };
   const focusButton = (id: number | null) => {
@@ -231,7 +221,7 @@ export default function GalleryGrid(props: {
   };
   onMount(() => {
     const onVisibilityChange = () => {
-      if (document.hidden) stopPreview();
+      setDocumentVisible(!document.hidden);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
@@ -297,11 +287,6 @@ export default function GalleryGrid(props: {
   onCleanup(() => {
     cancelAnimationFrame(frame);
     cancelAnimationFrame(focusFrame);
-    clearTimeout(previewTimer);
-  });
-
-  createEffect(() => {
-    if (props.hidden || props.active === false) stopPreview();
   });
 
   createEffect(() => {
@@ -408,70 +393,60 @@ export default function GalleryGrid(props: {
         style={{ height: `${layout().height}px` }}
       >
         <For each={renderedRows()}>
-          {(row) => (
-            <div
-              class="left-0 right-0 absolute"
-              role="presentation"
-              style={{ top: `${row.top}px`, height: `${row.height}px` }}
-            >
-              <For each={row.cells}>
-                {(cell) => (
-                  <GalleryTile
-                    onInspect={
-                      props.onInspect
-                        ? () => {
-                            returnTop = scrollTop();
-                            returnId = cell.item.id;
-                            stopPreview();
-                            props.onInspect!(cell.item);
-                          }
-                        : undefined
-                    }
-                    selectionNumber={
-                      props.selectionOrder?.includes(cell.item.id)
-                        ? props.selectionOrder.indexOf(cell.item.id) + 1
-                        : undefined
-                    }
-                    cell={cell}
-                    preview={previewId() === cell.item.id}
-                    onPointerEnter={(event) => {
-                      stopPreview();
-                      if (
-                        cell.item.media?.kind === 'video' &&
-                        event.pointerType !== 'touch' &&
-                        event.buttons === 0 &&
-                        !document.hidden &&
-                        !props.hidden &&
-                        props.active !== false
-                      ) {
-                        previewTimer = setTimeout(() => {
-                          previewTimer = undefined;
-                          setPreviewId(cell.item.id);
-                        }, 500);
+          {(row) => {
+            // Mounted overscan and keyboard-focused rows can lie outside the viewport.
+            // Share one visibility computation across every video in the row.
+            const preview = createMemo(() => {
+              if (props.hidden || props.active === false || !documentVisible()) return false;
+              const { top, height } = view();
+              return height > 0 && row.top < top + height && row.top + row.height > top;
+            });
+            return (
+              <div
+                class="left-0 right-0 absolute"
+                role="presentation"
+                style={{ top: `${row.top}px`, height: `${row.height}px` }}
+              >
+                <For each={row.cells}>
+                  {(cell) => (
+                    <GalleryTile
+                      onInspect={
+                        props.onInspect
+                          ? () => {
+                              returnTop = scrollTop();
+                              returnId = cell.item.id;
+                              props.onInspect!(cell.item);
+                            }
+                          : undefined
                       }
-                    }}
-                    onPointerLeave={stopPreview}
-                    count={props.items.length}
-                    selected={props.selectedIds.has(cell.item.id)}
-                    selecting={props.selecting}
-                    tabStop={
-                      focusedId() === cell.item.id || (focusedId() == null && cell.index === 0)
-                    }
-                    onFocus={() => setFocusedId(cell.item.id)}
-                    onClick={() => {
-                      stopPreview();
-                      if (props.selecting) props.onToggle(cell.item.id);
-                      else {
-                        returnTop = scrollTop();
-                        returnId = cell.item.id;
-                        props.onOpen(cell.item);
+                      selectionNumber={
+                        props.selectionOrder?.includes(cell.item.id)
+                          ? props.selectionOrder.indexOf(cell.item.id) + 1
+                          : undefined
                       }
-                    }}
-                  />
-                )}
-              </For>
-            </div>
-          )}
+                      cell={cell}
+                      preview={preview()}
+                      count={props.items.length}
+                      selected={props.selectedIds.has(cell.item.id)}
+                      selecting={props.selecting}
+                      tabStop={
+                        focusedId() === cell.item.id || (focusedId() == null && cell.index === 0)
+                      }
+                      onFocus={() => setFocusedId(cell.item.id)}
+                      onClick={() => {
+                        if (props.selecting) props.onToggle(cell.item.id);
+                        else {
+                          returnTop = scrollTop();
+                          returnId = cell.item.id;
+                          props.onOpen(cell.item);
+                        }
+                      }}
+                    />
+                  )}
+                </For>
+              </div>
+            );
+          }}
         </For>
       </div>
     </div>

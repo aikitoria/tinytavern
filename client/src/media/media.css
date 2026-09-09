@@ -13,7 +13,7 @@
   container-type: size;
 }
 
-/* Full-width rows keep previews, text and actions alongside one another. */
+/* Keep each job isolated from surrounding cards during preview and text updates. */
 
 .media-job-card {
   contain: layout style;
@@ -27,8 +27,17 @@
   background: #0009;
 }
 
-.media-job-streaming {
-  @apply block overflow-y-auto text-field;
+.media-job-card-active .media-job-status {
+  @apply text-secondary;
+}
+
+.media-job-card-failed .media-job-status {
+  @apply text-danger;
+}
+
+.media-job-excerpt {
+  @apply block overflow-y-auto;
+  scrollbar-gutter: stable;
 }
 
 .media-job-input > span:last-child:not(.media-job-input-missing) {

@@ -8,7 +8,6 @@ import {
   type MediaJobRow,
 } from '../media/mediaJobStore.ts';
 import {
-  cancelMediaJob,
   createMediaJob,
   createMediaJobFromAsset,
   deleteMediaJob,
@@ -18,8 +17,10 @@ import {
 } from '../media/mediaJobs.ts';
 import {
   acceptMediaVariation,
+  cancelMediaVariation,
   discardMediaDraft,
   mediaDraftJobs,
+  mediaDraftJobsById,
   selectMediaVariation,
 } from '../media/mediaDrafts.ts';
 import { tickMediaWorker } from '../media/mediaWorker.ts';
@@ -98,7 +99,7 @@ for (const action of ['prepare', 'render'] as const) {
     mutateJob((row, body) => startMediaJob(row, body, action === 'prepare'), true),
   );
 }
-route.post('/api/media/jobs/:id/cancel', mutateJob(cancelMediaJob, true));
+route.post('/api/media/jobs/:id/cancel', mutateJob(cancelMediaVariation, true));
 route.post('/api/media/jobs/:id/retry-retrieval', mutateJob(retryMediaRetrieval, true));
 route.post(
   '/api/media/jobs/:id/rerun',
@@ -124,4 +125,8 @@ route.del('/api/media/jobs/:id', ({ params, req }) => {
 
 route.get('/api/media/jobs/:id/variations', ({ params }) =>
   mediaDraftJobs(requireMediaJob(positiveId(params.id, 'job ID'))).map(mediaJobDto),
+);
+
+route.get('/api/media/drafts/:id/variations', ({ params }) =>
+  mediaDraftJobsById(positiveId(params.id, 'draft ID')).map(mediaJobDto),
 );

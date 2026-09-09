@@ -20,6 +20,8 @@ test('page location', async () => {
     '#71+/media/create-image+/jobs',
     '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
     '#71+/media/job/1',
+    '#71+/media/job/1?asset=42',
+    '#71+/media/job/1?asset=42+/jobs+/media/job/2?asset=43',
     '#71+/media/edit-image',
     '#71+/media/describe-image',
     '#70+/gallery/123?q=night+sky%2B%2F&sort=oldest+/jobs',
@@ -67,6 +69,13 @@ test('page location', async () => {
     null,
     'An explicit gallery URL can have no background chat',
   );
+  for (const asset of ['0', '-1', 'NaN', '1.5']) {
+    assert.equal(
+      formatPageLocation(parsePageLocation('#71+/media/job/1?asset=' + asset)),
+      '#71+/media/job/1',
+      'Invalid result IDs cannot select an asset',
+    );
+  }
 
   // Browser traversals are asynchronous. Model the history cursor separately from
   // the rendered page so Cancel must restore the actual entry, not just its URL.
@@ -518,6 +527,15 @@ test('dialog stack', async () => {
     11,
     'Unavailable ancestor jobs can fall back to a suitable gallery image',
   );
+  assert.equal(
+    restoreMediaInputs(
+      parsePageLocation('#71+/media/job/6?asset=11+/media/create-video?mode=first-frame'),
+      galleryItems,
+      { 6: { outputs: [image, otherImage], draft: { id: 4, selectedAssetId: 12 } } },
+    ).inputs[0].assetId,
+    11,
+    'A nested editor restores the result in its parent URL ahead of shared draft selection',
+  );
 
   // The route follows newly created job IDs; the immutable launch session may still have no ID.
   const existingEditor = stack.top()!;
@@ -536,6 +554,17 @@ test('dialog stack', async () => {
   );
   assert.equal(stack.findJob(2, reviewJobs), undefined, 'Different jobs open independently');
   const originalPage = existingEditor.page;
+  const selectedPage = stack.remember({
+    ...originalPage,
+    media: { ...originalPage.media, jobId: 11, assetId: 42 },
+  });
+  assert.equal(stack.top(), existingEditor, 'Variation URL updates preserve the mounted editor');
+  assert.equal(stack.top()!.media, session, 'Choosing a preview preserves the working draft');
+  const linked = createDialogStack();
+  linked.restore(parsePageLocation(formatPageLocation(selectedPage)));
+  assert.equal(linked.top()!.media!.jobId, 11);
+  assert.equal(linked.top()!.media!.assetId, 42, 'Reload restores the exact result selection');
+  stack.remember(originalPage);
   const listPage = parsePageLocation(formatPageLocation(originalPage) + '+/jobs');
   stack.push(listPage, originalPage);
   const target = stack.findJob(1, reviewJobs)!;

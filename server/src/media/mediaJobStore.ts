@@ -4,6 +4,7 @@ import type {
   MediaJob,
   MediaJobInputSnapshot,
   MediaJobState,
+  MediaVideoPreview,
   MediaWorkflow,
   MediaWorkflowValues,
   MediaOperation,
@@ -26,6 +27,10 @@ export interface MediaJobConfiguration {
   timeoutSeconds: number;
   temporary?: boolean;
   messageRenderOnly?: boolean;
+  /** Remove a cancelled review variation only after its remote execution has stopped. */
+  discardOnCancel?: boolean;
+  /** VHS sends this header once per sampler; retain it across worker reconnects, without frames. */
+  videoPreview?: Omit<MediaVideoPreview, 'frames'>;
   /** Historical job snapshots can retain a label even after its character was deleted. */
   galleryOutput?: {
     characterName: string;
