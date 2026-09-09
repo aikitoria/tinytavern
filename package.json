@@ -14,8 +14,7 @@
     "check": "npm run check -w server && npm run check -w client",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node tests/run.ts",
-    "test:e2e": "node tests/e2e/run.ts"
+    "test": "node tests/run.ts"
   },
   "allowScripts": {
     "esbuild@0.28.1": true

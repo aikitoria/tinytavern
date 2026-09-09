@@ -279,10 +279,7 @@ export function initMediaThumbnails(): void {
     }
     if (avatar) {
       for (const file of files) {
-        if (
-          (file.startsWith('avatar-thumb-') || file.startsWith('thumb-')) &&
-          !referenced.has(file)
-        )
+        if (file.startsWith('thumb-') && !referenced.has(file))
           removeTemporary(join(directory, file));
       }
     }

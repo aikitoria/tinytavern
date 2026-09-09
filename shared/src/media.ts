@@ -450,33 +450,3 @@ export function mediaWorkflowError(workflow: MediaWorkflow): string | null {
     return err instanceof Error ? err.message : String(err);
   }
 }
-
-/** Preserves names/JSON exactly while assigning stable IDs to old image workflows. */
-export function migrateMediaRendering(image: Record<string, unknown>): MediaRenderingSettings {
-  let legacy = Array.isArray(image.workflows)
-    ? (image.workflows as { name: string; json: string }[])
-    : [];
-  if (legacy.length === 0 && typeof image.workflowJson === 'string' && image.workflowJson.trim())
-    legacy = [{ name: 'Default', json: image.workflowJson }];
-  const workflows = legacy.map((value, index): MediaWorkflow => ({
-    id: `legacy-image-${index + 1}`,
-    name: value.name,
-    json: value.json,
-    operation: 'image',
-    referenceCount: 0,
-    galleryPromptPresetId: null,
-    chatPromptPresetId: null,
-  }));
-  const active =
-    workflows.find((value) => value.name === image.activeWorkflow) ??
-    (typeof image.workflowJson === 'string' && legacy.length === 1 ? workflows[0] : undefined);
-  const avatar = workflows.find((value) => value.name === image.avatarWorkflow);
-  return {
-    ...DEFAULT_MEDIA_RENDERING,
-    comfyUrl:
-      typeof image.comfyUrl === 'string' ? image.comfyUrl : DEFAULT_MEDIA_RENDERING.comfyUrl,
-    workflows,
-    defaults: active ? { [mediaWorkflowKey('image', 0)]: active.id } : {},
-    avatarWorkflowId: avatar?.id ?? null,
-  };
-}

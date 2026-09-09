@@ -1,0 +1,675 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+test('page location', async () => {
+  const modulePath = '../../client/src/state/pageLocation.ts';
+  const { parsePageLocation, formatPageLocation, pageStack } = await import(modulePath);
+  for (const hash of [
+    '#70',
+    '#+/gallery',
+    '#70+/gallery/123',
+    '#70+/gallery/123?q=night&character=uploads&sort=oldest',
+    '#70+/settings/media-rendering',
+    '#70+/settings/characters/12?detail=1',
+    '#70+/settings/templates/new?detail=1',
+    '#70+/conversation',
+    '#70/map',
+    '#70/trace',
+    '#70/map+/gallery/123',
+    '#70+/gallery/123+/jobs+/media/job/job-123',
+    '#71+/media/create-image+/jobs',
+    '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
+    '#71+/media/job/job-a',
+    '#71+/media/edit-image',
+    '#71+/media/describe-image',
+    '#70+/gallery/123?q=night+sky%2B%2F&sort=oldest+/jobs',
+    '#70+/conversation+/settings/characters/12?detail=1',
+  ]) {
+    assert.equal(formatPageLocation(parsePageLocation(hash)), hash, `Round trip ${hash}`);
+  }
+  assert.equal(
+    formatPageLocation(parsePageLocation('#71+/gallery/35?sort=newest+/media/video-first')),
+    '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
+  );
+  for (const old of [
+    '#71+/gallery/35?sort=newest+/media/create-video/e886b56a-cd06-490f-9c22-5dcecbf75623?mode=first-frame',
+    '#71+/gallery/35?sort=newest+/media/create-video/e886b56a-cd06-490f-9c22-5dcecbf75623?mode=references&context=71',
+  ]) {
+    assert.equal(
+      formatPageLocation(parsePageLocation(old)),
+      '#71+/gallery/35?sort=newest+/media/job/e886b56a-cd06-490f-9c22-5dcecbf75623',
+    );
+  }
+  for (const hash of [
+    '#71/jobs',
+    '#71/media/image?jobs=1',
+    '#71/media/video/job-id?jobs=1&context=71',
+  ]) {
+    const page = parsePageLocation(hash);
+    assert.equal(page.modal, 'media-jobs');
+    assert.equal(page.media, undefined, 'Legacy Jobs links cannot restore a media editor');
+    assert.equal(formatPageLocation(page), '#71+/jobs');
+  }
+  const legacyJobs = '#71/media/image?jobs=1&return=%2371%2Fgallery%2F35';
+  assert.equal(formatPageLocation(parsePageLocation(legacyJobs)), '#71+/gallery/35+/jobs');
+  const media = parsePageLocation('#70/media/video/job-123?return=%2370%2Fgallery%2F123');
+  assert.equal(media.chatId, 70);
+  assert.equal(
+    media.media.contextConversationId,
+    null,
+    'The background chat is separate from generation context',
+  );
+  assert.equal(pageStack(media)[1].modal, 'gallery');
+  assert.equal(pageStack(media)[1].galleryId, 123);
+  assert.equal(formatPageLocation(media), '#70+/gallery/123+/media/job/job-123');
+  assert.equal(
+    parsePageLocation('#+/gallery').chatId,
+    null,
+    'An explicit gallery URL can have no background chat',
+  );
+
+  // Browser traversals are asynchronous. Model the history cursor separately from
+  // the rendered page so Cancel must restore the actual entry, not just its URL.
+  const entries = [{ hash: '#70', state: null as Record<string, unknown> | null }];
+  let cursor = 0;
+  const traversals: (() => void)[] = [];
+  const browser = new EventTarget();
+  const location = { hash: '#70' };
+  const history = {
+    get state() {
+      return entries[cursor]!.state;
+    },
+    replaceState(state: Record<string, unknown>, _title: string, hash = location.hash) {
+      entries[cursor] = { hash, state };
+      location.hash = hash;
+    },
+    pushState(state: Record<string, unknown>, _title: string, hash: string) {
+      entries.splice(cursor + 1);
+      entries.push({ hash, state });
+      cursor++;
+      location.hash = hash;
+    },
+    go(delta: number) {
+      const target = cursor + delta;
+      if (target < 0 || target >= entries.length) return;
+      traversals.push(() => {
+        cursor = target;
+        location.hash = entries[cursor]!.hash;
+        const event = new Event('popstate');
+        Object.defineProperty(event, 'state', { value: entries[cursor]!.state });
+        browser.dispatchEvent(event);
+      });
+    },
+  };
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: browser });
+  Object.defineProperty(globalThis, 'location', { value: location });
+  Object.defineProperty(globalThis, 'history', { value: history });
+  const {
+    installPageNavigation,
+    writePageLocation,
+    applyPageLocation,
+    guardPageNavigation,
+    returnToPageLocation,
+  } = await import(modulePath);
+  let rendered = '#70';
+  installPageNavigation((page: unknown) => {
+    applyPageLocation(page, () => {
+      rendered = formatPageLocation(page);
+    });
+  });
+  function settle() {
+    let steps = 0;
+    while (traversals.length) {
+      assert(++steps < 20, 'History traversal must settle');
+      traversals.shift()!();
+    }
+  }
+  function open(hash: string) {
+    writePageLocation(parsePageLocation(hash), true);
+    rendered = hash;
+  }
+  open('#70+/gallery');
+  open('#70+/settings/general');
+  const initialEntries = entries.map((entry) => entry.hash);
+  let approve: (() => void) | undefined;
+  let guards = 0;
+  const unguard = guardPageNavigation((action: () => void) => {
+    guards++;
+    approve = action;
+  });
+  history.go(-1);
+  settle();
+  assert.equal(guards, 1);
+  assert.equal(cursor, 2, 'The guard opens at the original history entry');
+  assert.equal(location.hash, '#70+/settings/general');
+  assert.equal(rendered, '#70+/settings/general');
+  assert.deepEqual(
+    entries.map((entry) => entry.hash),
+    initialEntries,
+  );
+  approve = undefined; // Cancel: the navigation action is deliberately not called.
+  history.go(-1);
+  settle();
+  assert.equal(guards, 2, 'Back after Cancel still targets the same preceding page');
+  approve!();
+  settle();
+  assert.equal(cursor, 1);
+  assert.equal(rendered, '#70+/gallery');
+  assert.deepEqual(
+    entries.map((entry) => entry.hash),
+    initialEntries,
+  );
+
+  history.go(1);
+  settle();
+  assert.equal(cursor, 1, 'Forward also restores the origin before asking');
+  approve!();
+  settle();
+  assert.equal(cursor, 2);
+  assert.equal(rendered, '#70+/settings/general');
+
+  history.go(-2);
+  settle();
+  approve!();
+  settle();
+  assert.equal(cursor, 0, 'Multi-entry traversals preserve their original distance');
+  assert.equal(rendered, '#70');
+  assert.deepEqual(
+    entries.map((entry) => entry.hash),
+    initialEntries,
+  );
+  unguard();
+  history.go(1);
+  settle();
+  assert.equal(cursor, 1);
+  assert.equal(rendered, '#70+/gallery');
+  assert.equal(guards, 4, 'Unguarded navigation proceeds without another confirmation');
+
+  // Closing a pane uses its actual parent entry, without adding a duplicate Back step.
+  open('#70+/gallery/123');
+  open('#70+/gallery/123+/jobs');
+  const jobsCursor = cursor;
+  let fallback = false;
+  returnToPageLocation(parsePageLocation('#70+/gallery/123'), () => {
+    fallback = true;
+  });
+  settle();
+  assert.equal(fallback, false);
+  assert.equal(cursor, jobsCursor - 1);
+  assert.equal(rendered, '#70+/gallery/123');
+  history.go(1);
+  settle();
+  assert.equal(rendered, '#70+/gallery/123+/jobs', 'Forward reconstructs the child pane');
+  returnToPageLocation(parsePageLocation('#99'), () => {
+    fallback = true;
+  });
+  assert.equal(fallback, true, 'A reloaded link can close without an earlier parent history entry');
+
+  // Browser jumps guard every removed pane, but never editors retained underneath Jobs.
+  const draftHash = '#70+/gallery/123+/media/job/draft-a';
+  const jobsHash = draftHash + '+/jobs';
+  const otherHash = jobsHash + '+/media/job/draft-b';
+  open(draftHash);
+  open(jobsHash);
+  open(otherHash);
+  const guardOrder: string[] = [];
+  const retains = (target: unknown, hash: string) =>
+    pageStack(target).some((page: unknown) => formatPageLocation(page) === hash);
+  const removeDraftGuard = guardPageNavigation(
+    (action: () => void) => {
+      guardOrder.push('draft-a');
+      approve = action;
+    },
+    (target: unknown) => !retains(target, draftHash),
+  );
+  const removeJobGuard = guardPageNavigation(
+    (action: () => void) => {
+      guardOrder.push('draft-b');
+      action();
+    },
+    (target: unknown) => !retains(target, otherHash),
+  );
+  history.go(-1);
+  settle();
+  assert.deepEqual(guardOrder, ['draft-b']);
+  assert.equal(rendered, jobsHash);
+  removeJobGuard();
+  history.go(-2);
+  settle();
+  assert.deepEqual(guardOrder, ['draft-b', 'draft-a']);
+  assert.equal(rendered, jobsHash, 'A covered editor can cancel without losing any panes');
+  approve = undefined;
+  history.go(-2);
+  settle();
+  approve!();
+  settle();
+  assert.equal(rendered, '#70+/gallery/123+/jobs');
+  removeJobGuard();
+  removeDraftGuard();
+
+  const repeated = '#71+/gallery/35?sort=newest+/media/job/job-a+/jobs+/media/job/job-a';
+  assert.equal(
+    formatPageLocation(parsePageLocation(repeated)),
+    '#71+/gallery/35?sort=newest+/media/job/job-a',
+  );
+  assert.equal(
+    formatPageLocation(parsePageLocation(repeated + '+/jobs+/media/job/job-b')),
+    '#71+/gallery/35?sort=newest+/media/job/job-a+/jobs+/media/job/job-b',
+    'Unwinding repeated job panes keeps subsequent different panes',
+  );
+
+  const { navigatePageWithGuards } = await import(modulePath);
+  open('#70+/gallery/123+/media/job/job-a');
+  open('#70+/gallery/123+/media/job/job-a+/jobs');
+  const targetJob = parsePageLocation('#70+/gallery/123+/media/job/job-a');
+  let approveChild: (() => void) | undefined;
+  const unguardRetained = guardPageNavigation(
+    () => assert.fail('The retained editor must not be saved or discarded'),
+    (target: unknown) => !retains(target, formatPageLocation(targetJob)),
+  );
+  const unguardChild = guardPageNavigation((action: () => void) => {
+    approveChild = action;
+  });
+  let reopened = false;
+  navigatePageWithGuards(targetJob, () => {
+    reopened = true;
+    returnToPageLocation(targetJob, () => assert.fail('Reuse the existing history entry'));
+  });
+  assert.equal(reopened, false, 'Reopening waits for any removed child editor guard');
+  assert.equal(rendered, '#70+/gallery/123+/media/job/job-a+/jobs');
+  approveChild!();
+  settle();
+  assert.equal(reopened, true);
+  assert.equal(rendered, '#70+/gallery/123+/media/job/job-a');
+  unguardChild();
+  unguardRetained();
+
+  // Saving a removed child can replace its job ID without cancelling the intended return.
+  const stackModule = '../../client/src/state/dialogStack.ts';
+  const { dialogStack } = await import(stackModule);
+  const child = parsePageLocation('#70+/media/job/job-a+/jobs+/media/job/job-b');
+  open(formatPageLocation(child));
+  dialogStack.restore(child);
+  const stopSaveGuard = guardPageNavigation((action: () => void) => {
+    writePageLocation({ ...child, media: { ...child.media, jobId: 'saved-variation' } });
+    action();
+  });
+  let returnedAfterSave = false;
+  navigatePageWithGuards(parsePageLocation('#70+/media/job/job-a'), () => {
+    returnedAfterSave = true;
+  });
+  assert(
+    returnedAfterSave,
+    'Saving a child variation must still finish the return to the existing pane',
+  );
+  stopSaveGuard();
+  dialogStack.restore(parsePageLocation('#70'));
+});
+
+test('dialog stack', async () => {
+  const stackModule = '../../client/src/state/dialogStack.ts';
+  const locationModule = '../../client/src/state/pageLocation.ts';
+  const layersModule = '../../client/src/state/dialogLayers.ts';
+  const { createDialogStack } = await import(stackModule);
+  const { parsePageLocation, formatPageLocation, pageStack, paneLocation } = await import(
+    locationModule
+  );
+  const { createDialogLayers } = await import(layersModule);
+
+  const stack = createDialogStack();
+  const gallery = parsePageLocation('#71+/gallery/123?q=night+sky&character=4&sort=oldest');
+  stack.restore(gallery);
+  const galleryFrame = stack.top()!;
+  const localState = new WeakMap<object, object>();
+  const galleryEdits = { prompt: 'Unsaved gallery prompt', selected: [4, 7], scrollTop: 420 };
+  localState.set(galleryFrame, galleryEdits);
+  const jobs = parsePageLocation(formatPageLocation(gallery) + '+/jobs');
+  stack.push(jobs, gallery);
+  assert.equal(stack.frames().length, 2, 'Jobs from details does not create an empty draft');
+  assert.equal(stack.top()!.page.modal, 'media-jobs');
+  assert.equal(stack.top()!.media, undefined, 'Jobs has no editor session or draft');
+  assert.equal(stack.parent(), galleryFrame.page);
+  assert.equal(stack.pop(), galleryFrame.page);
+  assert.equal(localState.get(stack.top()!), galleryEdits);
+
+  const draft = parsePageLocation(formatPageLocation(gallery) + '+/media/create-image');
+  const session = {
+    id: 'session-a',
+    operation: 'image' as const,
+    jobId: null,
+    contextConversationId: null,
+    destination: 'gallery' as const,
+    prompt: 'Prompt from a chat selection',
+    inputs: [],
+    assets: [],
+  };
+  stack.push(draft, gallery, session);
+  const draftFrame = stack.top()!;
+  const draftEdits = {
+    instruction: 'My tuned instruction',
+    prompt: 'My tuned prompt',
+    referenceIds: [3, 6],
+    scrollTop: 870,
+  };
+  localState.set(draftFrame, draftEdits);
+  const draftJobs = parsePageLocation(formatPageLocation(draft) + '+/jobs');
+  stack.push(draftJobs, draft);
+  const jobsFrame = stack.top()!;
+  const other = parsePageLocation(formatPageLocation(draftJobs) + '+/media/job/job-b');
+  stack.push(other, draftJobs);
+  assert.equal(stack.frames().length, 4);
+  assert.equal(stack.retains(draftFrame, draftJobs), true);
+  assert.equal(stack.retains(draftFrame, gallery), false);
+  stack.restore(draftJobs);
+  assert.equal(stack.top(), jobsFrame, 'Browser Back preserves the mounted Jobs list');
+  stack.restore(draft);
+  assert.equal(stack.top(), draftFrame, 'Returning to a draft preserves its component identity');
+  assert.equal(localState.get(stack.top()!), draftEdits);
+  assert.equal(stack.top()!.media, session);
+  assert.equal(stack.frames()[0], galleryFrame);
+
+  // URL writes update only the top frame, keeping its ancestors and component identity.
+  const updated = stack.remember({
+    ...paneLocation(draft),
+    media: { ...draft.media!, jobId: 'job-a' },
+  });
+  assert.equal(stack.top(), draftFrame);
+  assert.equal(formatPageLocation(updated), formatPageLocation(gallery) + '+/media/job/job-a');
+  assert.equal(localState.get(stack.top()!), draftEdits);
+  const snapshot = formatPageLocation(updated) + '+/jobs+/media/job/job-b';
+  const restored = createDialogStack();
+  restored.restore(parsePageLocation(snapshot));
+  assert.deepEqual(
+    restored.frames().map((frame: { page: { modal: string } }) => frame.page.modal),
+    ['gallery', 'media-tools', 'media-jobs', 'media-tools'],
+  );
+  assert.equal(restored.frames()[0]!.page.galleryId, 123);
+  assert.equal(restored.frames()[0]!.page.query, 'night sky');
+  assert.equal(restored.frames()[1]!.media!.jobId, 'job-a');
+  assert.equal(restored.frames()[2]!.media, undefined, 'Restored Jobs has no editor session');
+  assert.equal(restored.frames()[3]!.media!.jobId, 'job-b');
+  assert.equal(
+    restored.frames()[1]!.media!.prompt,
+    '',
+    'Reload reconstructs panes, not unsaved form text',
+  );
+  assert.equal(pageStack(parsePageLocation(snapshot))[0]!.chatId, 71);
+  for (const text of ['Unsaved', 'tuned', 'selection', 'referenceIds', 'scrollTop', 'return='])
+    assert(!snapshot.includes(text));
+  restored.pop();
+  restored.pop();
+  restored.pop();
+  assert.equal(restored.top()!.page.galleryId, 123);
+  assert.equal(formatPageLocation(restored.pop()), '#71');
+  assert.equal(restored.frames().length, 0);
+
+  // Explicit modal activation is independent of mount order for hidden routed panes.
+  const layers = createDialogLayers();
+  let galleryActive = true;
+  let draftActive = false;
+  const galleryLayer = layers.register(() => galleryActive);
+  const draftLayer = layers.register(() => draftActive);
+  assert(galleryLayer.isTop());
+  galleryActive = false;
+  draftActive = true;
+  assert(draftLayer.isTop());
+  const pickerLayer = layers.register(() => draftActive);
+  assert(pickerLayer.isTop());
+  assert(!draftLayer.isTop());
+  const guardLayer = layers.register(() => true);
+  assert(guardLayer.isTop(), 'A navigation confirmation can cover a hidden editor');
+  pickerLayer.dispose();
+  assert(guardLayer.isTop(), 'Disposing a lower surface cannot change the top');
+  guardLayer.dispose();
+  assert(draftLayer.isTop());
+  draftLayer.dispose();
+  galleryActive = true;
+  assert(galleryLayer.isTop());
+  galleryLayer.dispose();
+
+  const inputsModule = '../../client/src/media/restoreInputs.ts';
+  const { restoreMediaInputs } = await import(inputsModule);
+  const image = { id: 11, kind: 'image', url: '/images/source.png', width: 640, height: 960 };
+  const otherImage = { ...image, id: 12, url: '/images/other.png' };
+  const video = { id: 13, kind: 'video', url: '/images/source.webm' };
+  const galleryItems = [
+    { id: 35, media: image },
+    { id: 36, media: video },
+  ];
+  const sourceUrl = '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame';
+  const sourcePage = parsePageLocation(sourceUrl);
+  assert.deepEqual(restoreMediaInputs(sourcePage, galleryItems, {}), {
+    inputs: [{ slot: 'first_frame', assetId: 11 }],
+    assets: [image],
+  });
+  const inferredStack = createDialogStack();
+  const infer = (page: unknown) => restoreMediaInputs(page, galleryItems, {});
+  inferredStack.restore(sourcePage, infer);
+  assert.equal(
+    inferredStack.top()!.media!.inputs[0].assetId,
+    11,
+    'Reload reselects the gallery starting image',
+  );
+  assert.equal(
+    inferredStack.top()!.media!.assets[0].height,
+    960,
+    'Restored input retains dimensions for workflow defaults',
+  );
+  inferredStack.top()!.media!.inputs = [];
+  inferredStack.restore(sourcePage, () => {
+    throw new Error('Retained panes must not re-infer inputs');
+  });
+  assert.deepEqual(
+    inferredStack.top()!.media!.inputs,
+    [],
+    'Returning to a mounted pane preserves deliberate deselection',
+  );
+  for (const [route, slot] of [
+    ['create-video?mode=references', 'reference1'],
+    ['edit-image', 'reference1'],
+    ['describe-image', 'source'],
+  ]) {
+    const page = parsePageLocation('#71+/gallery/35+/jobs+/media/' + route);
+    assert.equal(restoreMediaInputs(page, galleryItems, {}).inputs[0].slot, slot);
+  }
+  for (const hash of [
+    '#71+/gallery/35+/media/create-video',
+    '#71+/gallery/35+/media/create-image',
+    '#71+/gallery/35+/jobs',
+    '#71+/gallery/35+/media/job/saved-job',
+    '#71+/gallery/999+/media/create-video?mode=first-frame',
+    '#71+/gallery/36+/media/create-video?mode=first-frame',
+    '#71+/media/create-video?mode=first-frame',
+  ]) {
+    assert.equal(restoreMediaInputs(parsePageLocation(hash), galleryItems, {}), undefined, hash);
+  }
+  const sourceJobs = {
+    old: { outputs: [otherImage], draft: { id: 'review', selectedAssetId: 12 } },
+    current: { outputs: [], draft: { id: 'review', selectedAssetId: 12 } },
+  };
+  const nestedSource = parsePageLocation(
+    '#71+/gallery/35+/media/job/current+/jobs+/media/create-video?mode=first-frame',
+  );
+  assert.equal(
+    restoreMediaInputs(nestedSource, galleryItems, sourceJobs).inputs[0].assetId,
+    12,
+    'Nearest job uses its selected variation before a more distant gallery source',
+  );
+  assert.equal(
+    restoreMediaInputs(nestedSource, galleryItems, {}).inputs[0].assetId,
+    11,
+    'Unavailable ancestor jobs can fall back to a suitable gallery image',
+  );
+
+  // The route follows newly created job IDs; the immutable launch session may still have no ID.
+  const existingEditor = stack.top()!;
+  assert.equal(existingEditor.media.jobId, null);
+  assert.equal(existingEditor.page.media.jobId, 'job-a');
+  const reviewJobs = {
+    'job-a': { draft: { id: 'review-a' } },
+    'job-a-variation': { draft: { id: 'review-a' } },
+    'job-b': { draft: { id: 'review-b' } },
+  };
+  assert.equal(
+    stack.findJob('job-a', {}),
+    existingEditor,
+    'Job identity works before history DTOs load',
+  );
+  assert.equal(
+    stack.findJob('job-a-variation', reviewJobs),
+    existingEditor,
+    'A grouped variation returns to its existing editor',
+  );
+  assert.equal(stack.findJob('job-b', reviewJobs), undefined, 'Different jobs open independently');
+  const originalPage = existingEditor.page;
+  const listPage = parsePageLocation(formatPageLocation(originalPage) + '+/jobs');
+  stack.push(listPage, originalPage);
+  const target = stack.findJob('job-a', reviewJobs)!;
+  stack.restore(target.page);
+  assert.equal(stack.top(), existingEditor);
+  assert.equal(
+    localState.get(stack.top()!),
+    draftEdits,
+    'Returning from Jobs preserves tuned form state',
+  );
+  assert.equal(stack.frames().length, 2, 'Reopening leaves one job editor above gallery details');
+});
+
+test('ui back', async () => {
+  class Surface {
+    dataset: Record<string, string> = {};
+    hidden = false;
+    visibility = 'visible';
+    closest() {
+      return this.hidden ? this : null;
+    }
+    getClientRects() {
+      return this.hidden ? [] : [{}];
+    }
+  }
+
+  let surfaces: Surface[] = [];
+  const target = new EventTarget();
+  Object.defineProperty(globalThis, 'window', { value: target });
+  Object.defineProperty(globalThis, 'document', {
+    value: { querySelectorAll: () => surfaces.filter((surface) => 'uiBack' in surface.dataset) },
+  });
+  Object.defineProperty(globalThis, 'getComputedStyle', { value: (surface: Surface) => surface });
+
+  const modulePath = '../../client/src/state/uiBack.ts';
+  const { registerUiBack, installMouseBack } = await import(modulePath);
+  const stop = installMouseBack();
+  const actions: string[] = [];
+  function layer(name: string) {
+    const surface = new Surface();
+    surfaces.push(surface);
+    registerUiBack(surface, () => {
+      actions.push(name);
+      surfaces = surfaces.filter((item) => item !== surface);
+    });
+    return surface;
+  }
+  function mouse(type: string, button = 3) {
+    const event = new Event(type, { cancelable: true });
+    Object.defineProperty(event, 'button', { value: button });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+  function back(expected: boolean, pointer = true, auxiliary = true) {
+    const events = pointer
+      ? ['pointerdown', 'mousedown', 'pointerup', 'mouseup']
+      : ['mousedown', 'mouseup'];
+    if (auxiliary) events.push('auxclick');
+    for (const event of events) assert.equal(mouse(event), expected, event);
+  }
+
+  layer('gallery');
+  layer('detail');
+  layer('menu');
+  back(true);
+  assert.deepEqual(actions, ['menu'], 'One press closes only the topmost surface');
+  back(true);
+  assert.deepEqual(actions, ['menu', 'detail']);
+  back(true);
+  assert.deepEqual(actions, ['menu', 'detail', 'gallery']);
+  back(false);
+  assert.equal(actions.length, 3, 'Browser Back is untouched once no UI can close');
+
+  layer('page');
+  const hidden = layer('hidden editor back button');
+  hidden.hidden = true;
+  back(true);
+  assert.equal(actions.at(-1), 'page', 'Hidden UI cannot intercept Back');
+  back(false);
+  surfaces = [];
+
+  layer('settings');
+  const settings = surfaces[0]!;
+  registerUiBack(settings, () => {
+    actions.push('save guard');
+    layer('cancel save guard');
+  });
+  back(true);
+  assert.equal(actions.at(-1), 'save guard', 'Guard opened during release survives auxclick');
+  back(true);
+  assert.equal(actions.at(-1), 'cancel save guard');
+  assert(surfaces.includes(settings), 'Cancelling leaves the editor open');
+  surfaces = [];
+
+  back(false, false);
+  layer('mouse-only menu');
+  back(true, false, false);
+  layer('next mouse-only menu');
+  back(true, false);
+  assert.equal(
+    actions.at(-1),
+    'next mouse-only menu',
+    'Missing auxclick does not retain old actions',
+  );
+
+  layer('pointer-only menu');
+  assert(mouse('pointerdown'));
+  assert(mouse('pointerup'));
+  assert(mouse('auxclick'));
+  assert.equal(
+    actions.at(-1),
+    'pointer-only menu',
+    'Cancelled pointerdown can suppress mouse events',
+  );
+
+  layer('unchanged');
+  for (const button of [0, 1, 2, 4]) {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'auxclick']) {
+      assert.equal(mouse(type, button), false, 'Other buttons retain their normal behavior');
+    }
+  }
+  stop();
+  back(false);
+  assert.equal(surfaces.length, 1, 'Unmount removes the listeners');
+
+  const { installUiBack } = await import(modulePath);
+  const stopUi = installUiBack();
+  surfaces = [];
+  const previousActions = actions.length;
+  layer('gallery details');
+  layer('jobs');
+  layer('job');
+  layer('picker');
+  layer('dropdown');
+  function escape() {
+    const event = new Event('keydown', { cancelable: true });
+    Object.defineProperty(event, 'key', { value: 'Escape' });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+  for (let i = 0; i < 5; i++) assert(escape());
+  assert.deepEqual(actions.slice(previousActions), [
+    'dropdown',
+    'picker',
+    'job',
+    'jobs',
+    'gallery details',
+  ]);
+  assert(!escape(), 'Escape reaches inline editors when no dialog can close');
+  stopUi();
+});

@@ -1,5 +1,5 @@
 import type { GenerationKind, Message, MessageStatus, Role, TreeNode } from '@tinytavern/shared';
-import { stmt, toMessage, transaction } from './db.ts';
+import { deleteMessageSubtrees, stmt, toMessage, transaction } from './db.ts';
 import { collectMessageImages, collectSubtreeImages, deleteImageFiles } from './images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
 
@@ -266,9 +266,9 @@ function spliceMessageInTransaction(messageId: number): string[] {
   ];
   const leaf = getActiveLeafId(conversationId);
   // Delete siblings before reparenting children into their group.
-  for (const id of siblingIds) stmt('DELETE FROM messages WHERE id = ?').run(id);
+  deleteMessageSubtrees(siblingIds);
   stmt('UPDATE messages SET parent_id = ? WHERE parent_id = ?').run(parentId, messageId);
-  stmt('DELETE FROM messages WHERE id = ?').run(messageId);
+  deleteMessageSubtrees([messageId]);
   let newLeaf: number | null;
   if (leaf === messageId) {
     newLeaf = activeChildId != null ? descendToLeaf(activeChildId) : parentId;
@@ -354,7 +354,7 @@ export function deleteMessage(messageId: number): void {
   // Collect before the delete cascades; unlink only after the commit succeeds.
   const doomedImages = collectSubtreeImages(messageId);
   transaction(() => {
-    stmt('DELETE FROM messages WHERE id = ?').run(messageId);
+    deleteMessageSubtrees([messageId]);
     const leaf = getActiveLeafId(conversationId);
     if (leaf != null && !getRow(leaf)) {
       const sibling = newestChildId(conversationId, parentId);

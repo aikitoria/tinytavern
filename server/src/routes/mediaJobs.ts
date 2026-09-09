@@ -43,9 +43,9 @@ route.get('/api/media/jobs', ({ req }) => {
       throw new HttpError(400, 'Invalid media history cursor');
     }
     rows = stmt(`
-      SELECT * FROM media_jobs WHERE created_at < ? OR (created_at = ? AND id < ?)
+      SELECT * FROM media_jobs WHERE (created_at, id) < (?, ?)
       ORDER BY created_at DESC, id DESC LIMIT ?
-    `).all(timestamp, timestamp, id, limit);
+    `).all(timestamp, id, limit);
   }
   return (rows as unknown as MediaJobRow[]).map(mediaJobDto);
 });

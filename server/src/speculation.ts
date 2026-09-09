@@ -1,5 +1,5 @@
 import type { Message } from '@tinytavern/shared';
-import { stmt } from './db.ts';
+import { deleteMessageSubtrees, stmt } from './db.ts';
 import {
   activeGenerationToken,
   hasActiveGeneration,
@@ -11,7 +11,7 @@ import { getConversation } from './conversationStore.ts';
 import { hasConversationSubscribers, subscribedConversationIds } from './events.ts';
 import { getSettings } from './settingsStore.ts';
 import { broadcastTree } from './sync.ts';
-import { deleteImageFiles } from './images.ts';
+import { collectSubtreeImages, deleteImageFiles } from './images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
 import {
   appendMessage,
@@ -182,13 +182,16 @@ export function discardSpeculativeSwipes(conversationId?: number): void {
          UNION
          SELECT m.id FROM messages m JOIN doomed d ON m.parent_id = d.id
        )
-       SELECT DISTINCT j.value AS image FROM messages m, json_each(m.images_json) j
-       WHERE m.id IN (SELECT id FROM doomed)`,
+       SELECT DISTINCT image FROM message_media_files WHERE message_id IN (SELECT id FROM doomed)`,
     ).all(cid, cid) as { image: string }[]
   ).map((r) => r.image);
-  stmt(
-    "DELETE FROM messages WHERE generation_kind = 'speculative' AND (? IS NULL OR conversation_id = ?)",
-  ).run(cid, cid);
+  deleteMessageSubtrees(
+    stmt(
+      "SELECT id FROM messages WHERE generation_kind = 'speculative' AND (? IS NULL OR conversation_id = ?)",
+    )
+      .all(cid, cid)
+      .map((row) => Number(row.id)),
+  );
   for (const row of rows) bumpConversationRevision(row.conversation_id);
   deleteImageFiles(doomedImages);
   for (const row of rows) {
@@ -210,20 +213,16 @@ export function markSwipeRead(messageId: number): void {
 
 /** Prunes failed speculative siblings before choosing the next sibling. */
 export function nextUnreadSibling(message: Message): number | null {
-  const doomedImages = (
-    stmt(
-      `SELECT j.value AS image FROM messages m, json_each(m.images_json) j
-       WHERE m.conversation_id = ? AND m.parent_id IS ? AND m.id > ?
-       AND m.generation_kind = 'speculative' AND m.status IN ('error', 'stopped')`,
-    ).all(message.conversationId, message.parentId, message.id) as { image: string }[]
-  ).map((r) => r.image);
-  const removed = stmt(
-    `DELETE FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id > ?
-     AND generation_kind = 'speculative' AND status IN ('error', 'stopped')`,
-  ).run(message.conversationId, message.parentId, message.id);
-  if (removed.changes) bumpConversationRevision(message.conversationId);
+  const roots = stmt(`SELECT id FROM messages
+    WHERE conversation_id = ? AND parent_id IS ? AND id > ?
+      AND generation_kind = 'speculative' AND status IN ('error', 'stopped')`)
+    .all(message.conversationId, message.parentId, message.id)
+    .map((row) => Number(row.id));
+  const doomedImages = roots.flatMap(collectSubtreeImages);
+  const removed = deleteMessageSubtrees(roots);
+  if (removed) bumpConversationRevision(message.conversationId);
   deleteImageFiles(doomedImages);
-  if (removed.changes) broadcastTree(message.conversationId);
+  if (removed) broadcastTree(message.conversationId);
   const next = stmt(
     `SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id > ?
      ORDER BY id LIMIT 1`,

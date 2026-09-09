@@ -4,7 +4,14 @@ import type { MediaImageConfig } from '@tinytavern/shared';
 import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
 import type { MessageRow } from './conversationCopies.ts';
 import { characterChatName, type Conversation, type Message } from '@tinytavern/shared';
-import { stmt, toConversation, toMessage, transaction } from '../db.ts';
+import {
+  deleteConversationRows,
+  deleteMessageSubtrees,
+  stmt,
+  toConversation,
+  toMessage,
+  transaction,
+} from '../db.ts';
 import { getConversation, touchConversation } from '../conversationStore.ts';
 import { route, HttpError } from '../router.ts';
 import {
@@ -183,11 +190,11 @@ route.del('/api/conversations', () => {
   cancelSpeculativeRetries();
   for (const id of ids) stopConversationGenerations(id);
   const doomedImages = ids.flatMap(collectConversationImages);
-  const result = stmt('DELETE FROM conversations').run();
+  const deleted = deleteConversationRows(ids);
   for (const id of ids) takeDirtyMessageIds(id);
   deleteImageFiles(doomedImages);
   invalidate('conversations');
-  return { deleted: Number(result.changes) };
+  return { deleted };
 });
 
 route.post('/api/conversations', ({ body }) => {
@@ -287,7 +294,7 @@ route.del('/api/conversations/:id', ({ params, req }) => {
   requireQueryPrecondition(id, req.url);
   stopConversationGenerations(id);
   const doomedImages = collectConversationImages(id);
-  stmt('DELETE FROM conversations WHERE id = ?').run(id);
+  deleteConversationRows([id]);
   deleteImageFiles(doomedImages);
   takeDirtyMessageIds(id);
   invalidate('conversations');
@@ -548,12 +555,12 @@ route.post('/api/conversations/:id/delete-tail', ({ params, body }) => {
   stopConversationGenerations(id);
   const doomedImages = collectSiblingSubtreeImages(id, cutoff.parentId);
   const deleted = transaction(() => {
-    const result = stmt('DELETE FROM messages WHERE conversation_id = ? AND parent_id IS ?').run(
-      id,
-      cutoff.parentId,
-    );
+    const roots = stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ?')
+      .all(id, cutoff.parentId)
+      .map((row) => Number(row.id));
+    deleteMessageSubtrees(roots);
     setActiveLeaf(id, cutoff.parentId);
-    return result.changes;
+    return roots.length;
   });
   deleteImageFiles(doomedImages);
   touchConversation(id);
