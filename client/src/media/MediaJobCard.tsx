@@ -169,6 +169,7 @@ export default function MediaJobCard(props: {
           pending={previews().pending}
           fallback={job()}
           active={visible()}
+          pageActive={props.active}
           disabled={!canOpen()}
           onOpen={props.onOpen}
         />

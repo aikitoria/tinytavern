@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createEffect, createMemo, onCleanup } from 'solid-js';
 import { faImage, faSpinner, faVideo } from '@fortawesome/free-solid-svg-icons';
 import { mediaJobActive, type MediaJob } from '@tinytavern/shared';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
@@ -63,13 +63,26 @@ export default function MediaJobPreviews(props: {
   pending: MediaJob[];
   fallback: MediaJob;
   active: boolean;
+  pageActive?: boolean;
   disabled: boolean;
   onOpen: (job: MediaJob) => void;
 }) {
+  let strip!: HTMLDivElement;
+  const count = createMemo(() => props.results.length + props.pending.length);
+  createEffect(() => {
+    count();
+    if (props.pageActive === false) return;
+    const frame = requestAnimationFrame(() => {
+      strip.scrollLeft = strip.scrollWidth;
+    });
+    onCleanup(() => cancelAnimationFrame(frame));
+  });
+
   return (
     <div
+      ref={strip}
       class="flex gap-2 min-w-0 overflow-x-auto overflow-y-hidden [&.media-job-previews-multiple>button]:w-18"
-      classList={{ 'media-job-previews-multiple': props.results.length + props.pending.length > 1 }}
+      classList={{ 'media-job-previews-multiple': count() > 1 }}
       aria-label="Finished variations and live previews"
     >
       <For each={props.results}>
