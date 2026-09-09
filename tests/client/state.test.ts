@@ -351,24 +351,6 @@ test('client transport', async () => {
     assert.equal(await pending, false);
     assert.deepEqual(draftTexts, ['Original cancelled', 'Original']);
 
-    // Headers establish the listener; returning done must not wait for events or EOF.
-    const progressStream = controlledStream();
-    mockFetch(() => new Response(progressStream.body));
-    const progress: number[][] = [];
-    const previews: string[] = [];
-    const opened = await api.openAvatarRenderProgress(
-      'job',
-      (value: number, max: number) => progress.push([value, max]),
-      (preview: string) => previews.push(preview),
-    );
-    progressStream.write(
-      'data: {"value":1,"max":4}\ndata: {"preview":"data:image/png;base64,A"}\ndata: {"done":true}\n',
-    );
-    await opened.done;
-    assert.deepEqual(progress, [[1, 4]]);
-    assert.deepEqual(previews, ['data:image/png;base64,A']);
-    assert.equal(progressStream.cancelled, true, 'done releases the progress stream');
-
     const expected = { activeLeafId: null, mutationRevision: 42 };
     mockFetch((url, init) => {
       assert.equal(url, '/api/conversations/7/messages');

@@ -208,6 +208,28 @@ test('application HTTP and WebSocket contracts', async () => {
   });
 
   const conv = await request<{ id: number }>('POST', '/api/conversations', {});
+  await step('avatar adoption keeps an independent PNG after its source is deleted', async () => {
+    const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+    const png = makePlaceholderPng();
+    const response = await fetch(base + '/api/gallery/upload', { method: 'POST', body: png });
+    assert.equal(response.status, 200);
+    const item = (await response.json()) as { id: number; media: { id: number } };
+    const persona = await request<{ id: number }>('POST', '/api/personas', { name: 'Portrait' });
+    const path = `/api/personas/${persona.id}`;
+    await request('POST', `${path}/avatar`, { assetId: item.media.id });
+    await request('DELETE', `/api/gallery/${item.id}`, undefined, 204);
+    await request('POST', `${path}/avatar`, { assetId: item.media.id }, 409);
+    const saved = await request<{ avatarData: string }>('GET', `${path}/settings-export`);
+    assert.equal(saved.avatarData, `data:image/png;base64,${png.toString('base64')}`);
+    const jpeg = await fetch(base + '/api/gallery/upload', {
+      method: 'POST',
+      body: Bun.file('tests/fixtures/image.jpg'),
+    });
+    assert.equal(jpeg.status, 200);
+    const other = (await jpeg.json()) as typeof item;
+    await request('POST', `${path}/avatar`, { assetId: other.media.id }, 415);
+    assert.deepEqual(await request('GET', `${path}/settings-export`), saved);
+  });
   await request('PATCH', `/api/conversations/${conv.id}`, {
     ...guard(await tree(conv.id)),
     title: 'Test',
@@ -267,6 +289,44 @@ test('application HTTP and WebSocket contracts', async () => {
     const persisted = await tree(conv.id);
     assert.equal(persisted.messages[0]!.content, 'Hello');
     assert.equal(persisted.messages.find((message) => message.id === mid)!.status, 'done');
+  });
+
+  await step('image commands and revisions work without a rendering workflow', async () => {
+    const chat = await request<{ id: number }>('POST', '/api/conversations', {});
+    const viewer = await connect();
+    viewer.socket.send(JSON.stringify({ sub: chat.id }));
+    const generated = await request<{ toolMessageId: number }>(
+      'POST',
+      `/api/conversations/${chat.id}/tool`,
+      {
+        ...guard(await tree(chat.id)),
+        prompt: 'Describe a portrait',
+        label: 'Image prompt',
+      },
+    );
+    await viewer.wait(
+      (event) => event.t === 'final' && event.message.id === generated.toolMessageId,
+    );
+    const revised = await request<{ assistantMessageId: number }>(
+      'POST',
+      `/api/messages/${generated.toolMessageId}/regenerate`,
+      {
+        ...guard(await tree(chat.id)),
+        instruction: 'Add moonlight',
+      },
+    );
+    await viewer.wait(
+      (event) => event.t === 'final' && event.message.id === revised.assistantMessageId,
+    );
+    const snapshot = await tree(chat.id);
+    assert.equal(snapshot.activeLeafId, revised.assistantMessageId);
+    assert.equal(snapshot.messages[1]!.parentId, generated.toolMessageId);
+    for (const message of snapshot.messages) {
+      assert.equal(message.role, 'tool');
+      assert.equal(message.name, 'Image prompt');
+      assert.equal(message.content, 'Hello world');
+      assert.equal(message.imagePending, false);
+    }
   });
 
   await step('incremental edits, stale same-leaf writes and branch restoration', async () => {

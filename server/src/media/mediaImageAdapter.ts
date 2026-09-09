@@ -1,11 +1,11 @@
+import { getMessage, markMessageDirty } from '../conversations/tree.ts';
+import { broadcastTree } from '../realtime/sync.ts';
+import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import { newRequestId } from '@tinytavern/shared';
-import { readFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
-import type { Message, MediaJobInputSnapshot } from '@tinytavern/shared';
-import { IMAGES_DIR, stmt, toMediaAsset, transaction } from '../db/db.ts';
+import type { Message } from '@tinytavern/shared';
+import { stmt, transaction } from '../db/db.ts';
 import { createMediaJobFromRecipe, startMediaJob } from './mediaJobs.ts';
 import {
-  mediaLive,
   requireMediaJob,
   updateMediaJob,
   type MediaJobConfiguration,
@@ -14,16 +14,6 @@ import {
 import { tickMediaWorker } from './mediaWorker.ts';
 import { getMediaRecipe, messageRecipeId } from './mediaRecipes.ts';
 import { HttpError } from '../http/router.ts';
-import { consumeTemporaryMediaJob, startTemporaryMediaJob } from './temporaryMediaJob.ts';
-
-export interface ImageRenderRequest {
-  configuration: MediaJobConfiguration;
-  inputs: MediaJobInputSnapshot[];
-  prompt: string;
-  signal?: AbortSignal;
-  onProgress?: (value: number, max: number) => void;
-  onPreview?: (preview: string) => void;
-}
 
 /** A chat swipe reuses the full recipe, including image-edit inputs and output selection. */
 export function startMessageImageRender(
@@ -56,30 +46,23 @@ export function startMessageImageRender(
   return result;
 }
 
-/** Only the avatar preview needs raster bytes; the temporary asset is released after reading. */
-export async function renderImageBuffer(request: ImageRenderRequest) {
-  request.signal?.throwIfAborted();
-  return consumeTemporaryMediaJob(
-    startTemporaryMediaJob(request.configuration, request.inputs, request.prompt, request.inputs),
-    {
-      signal: request.signal,
-      onProgress: (row) => {
-        const progress = mediaLive.get(row.id)?.progress;
-        if (progress?.value !== undefined && progress.max !== undefined) {
-          request.onProgress?.(progress.value, progress.max);
-        }
-        if (progress?.preview) request.onPreview?.(progress.preview);
-      },
-    },
-    async (row) => {
-      const assetId = (JSON.parse(row.outputs_json) as number[])[0];
-      const assetRow = stmt('SELECT * FROM media_assets WHERE id = ?').get(assetId!);
-      if (!assetRow) throw new Error('The saved image result is unavailable');
-      const asset = toMediaAsset(assetRow);
-      const data = await readFile(join(IMAGES_DIR, basename(asset.url)), {
-        signal: request.signal,
-      });
-      return { ext: extname(asset.url), data };
-    },
-  );
+/** Fire-and-forget; failures surface as genMeta.imageError. */
+export function startImageRender(mid: number): void {
+  const message = getMessage(mid);
+  if (!message) return;
+  try {
+    startMessageImageRender(message);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[comfy] render failed for message ${mid}: ${error}`);
+    const row = getMessage(mid);
+    if (!row) return;
+    const meta = JSON.stringify({ ...(row.genMeta ?? {}), imageError: error });
+    stmt(
+      'UPDATE messages SET image_pending = 0, gen_meta_json = ? WHERE id = ? AND image_pending = 1',
+    ).run(meta, mid);
+    bumpConversationRevision(message.conversationId);
+    markMessageDirty(message.conversationId, mid);
+    broadcastTree(message.conversationId);
+  }
 }

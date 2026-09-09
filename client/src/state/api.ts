@@ -180,61 +180,6 @@ const streamAvatarPrompt = (
     onReasoning,
   );
 
-async function renderAvatar(
-  body: {
-    prompt: string;
-    image: MediaImageConfig;
-    jobId?: string;
-  },
-  signal?: AbortSignal,
-): Promise<Blob> {
-  const res = await fetch('/api/avatar/render', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: signal ?? null,
-  });
-  if (!res.ok) throw await errorFromResponse(res);
-  return res.blob();
-}
-
-/** Resolves after listener registration so rendering cannot race its first event. */
-async function openRenderProgress(
-  url: string,
-  jobId: string,
-  onProgress: (value: number, max: number) => void,
-  onPreview: (dataUrl: string) => void,
-  signal?: AbortSignal,
-): Promise<{ done: Promise<void> }> {
-  const res = await fetch(`${url}/${encodeURIComponent(jobId)}`, {
-    signal: signal ?? null,
-  });
-  if (!res.ok || !res.body) throw await errorFromResponse(res);
-  const done = readSseData(res.body, (data) => {
-    const payload = JSON.parse(data) as {
-      value?: unknown;
-      max?: unknown;
-      preview?: unknown;
-      done?: unknown;
-    };
-    if (typeof payload.value === 'number' && typeof payload.max === 'number' && payload.max > 0) {
-      onProgress(payload.value, payload.max);
-    }
-    if (typeof payload.preview === 'string' && payload.preview.startsWith('data:image/')) {
-      onPreview(payload.preview);
-    }
-    if (payload.done === true) return false;
-  });
-  return { done };
-}
-
-const openAvatarRenderProgress = (
-  jobId: string,
-  onProgress: (value: number, max: number) => void,
-  onPreview: (dataUrl: string) => void,
-  signal?: AbortSignal,
-) => openRenderProgress('/api/avatar/render-progress', jobId, onProgress, onPreview, signal);
-
 /** Resource methods share transport; DTOs and endpoint-specific transforms stay typed. */
 function resource<T>(name: string, preparePatch: (data: Partial<T>) => unknown = (data) => data) {
   const url = `/api/${name}`;
@@ -255,6 +200,8 @@ function entity<T>(name: string, preparePatch?: (data: Partial<T>) => unknown) {
 function avatarEntity<T>(name: string) {
   return {
     ...entity<T>(name),
+    useAvatarAsset: (id: number, assetId: number) =>
+      request<T>('POST', `/api/${name}/${id}/avatar`, { assetId }),
     uploadAvatar: (id: number, file: File) =>
       request<T>('PUT', `/api/${name}/${id}/avatar`, undefined, {
         rawBody: file,
@@ -521,8 +468,6 @@ export const api = {
     models: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
   },
   streamAvatarPrompt,
-  renderAvatar,
-  openAvatarRenderProgress,
 
   settings: () => request<Settings>('GET', '/api/settings'),
   putSettings: (

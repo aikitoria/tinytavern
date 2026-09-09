@@ -1,4 +1,3 @@
-import type { MediaImageConfig } from '@tinytavern/shared';
 // Keep route handlers synchronous between check and act: an `await` lets other
 // handlers or generation callbacks invalidate generation and active-leaf guards.
 import { copyConversation, insertCopiedMessage } from '../conversations/conversationCopies.ts';
@@ -16,6 +15,7 @@ import { getConversation, touchConversation } from '../conversations/conversatio
 import { route, HttpError } from '../http/router.ts';
 import {
   appendMessage,
+  insertMessageAfter,
   getActiveLeafId,
   getActivePath,
   getMessage,
@@ -58,7 +58,8 @@ import {
   collectSiblingSubtreeImages,
   deleteImageFiles,
 } from '../media/images.ts';
-import { parseImageConfig, startImageRender } from '../media/comfy/comfy.ts';
+import { parseImageConfig } from '../media/mediaSettings.ts';
+import { startImageRender } from '../media/mediaImageAdapter.ts';
 import { createImageRecipe } from '../media/mediaRecipes.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import {
@@ -100,6 +101,41 @@ export function spawnAssistantReply(
   prepareNextSwipe(msg.id);
   broadcastTree(conversation.id);
   return msg.id;
+}
+
+/** Commands and revisions share prompt finalization and the handoff to the media worker. */
+export function spawnToolReply(
+  conversation: Conversation,
+  prompt: BuiltPrompt,
+  label: string | null,
+  recipeId: number | null,
+  afterId?: number,
+): number {
+  const { id } =
+    afterId === undefined
+      ? appendMessage(
+          conversation.id,
+          'tool',
+          '',
+          conversation.activeLeafId,
+          'streaming',
+          null,
+          label,
+        )
+      : insertMessageAfter(conversation.id, 'tool', '', afterId, 'streaming', null, label);
+  if (recipeId)
+    stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
+      recipeId,
+      id,
+    );
+  touchConversation(conversation.id);
+  startGeneration(getConversation(conversation.id), id, undefined, {
+    prompt,
+    onDone: recipeId ? () => startImageRender(id) : undefined,
+  });
+  broadcastTree(conversation.id);
+  invalidate('conversations');
+  return id;
 }
 
 /** The placeholder title a greeting-less conversation gets from its first message. */
@@ -393,14 +429,7 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   const b = objectBody(body);
   const prompt = requiredString(b, 'prompt');
   const label = optionalNullableString(b, 'label');
-  let image: MediaImageConfig | null = null;
-  if (b.image != null) {
-    try {
-      image = parseImageConfig(b.image);
-    } catch (err) {
-      throw new HttpError(400, err instanceof Error ? err.message : String(err));
-    }
-  }
+  const image = b.image == null ? null : parseImageConfig(b.image);
   requireBodyPrecondition(id, b);
   // Don't refill speculation: swiping the previous reply requires a branch switch, which refills.
   cancelBackgroundSwipe(id);
@@ -411,31 +440,13 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
 
   // Snapshot pre-tool history so retries use the same context.
   const built = buildToolPrompt(conv, getActivePath(id), prompt);
-  const msg = appendMessage(
-    id,
-    'tool',
-    '',
-    conv.activeLeafId,
-    'streaming',
-    null,
+  const mid = spawnToolReply(
+    conv,
+    built,
     label?.trim() || null,
+    image ? createImageRecipe(image, '') : null,
   );
-  // Retain config for later alternatives; finalize() clears pending on non-done completion.
-  if (image) {
-    stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
-      createImageRecipe(image, ''),
-      msg.id,
-    );
-  }
-  touchConversation(id);
-  const renderImage = image;
-  startGeneration(getConversation(id), msg.id, undefined, {
-    prompt: built,
-    onDone: renderImage ? () => startImageRender(msg.id) : undefined,
-  });
-  broadcastTree(id);
-  invalidate('conversations');
-  return { toolMessageId: msg.id, activeLeafId: msg.id };
+  return { toolMessageId: mid, activeLeafId: mid };
 });
 
 /** The exact upstream request messages a generation on the current branch would send. */

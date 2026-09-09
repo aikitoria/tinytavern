@@ -1,36 +1,7 @@
 import type { ImageGenerationSettings } from '@tinytavern/shared';
-import { imageRevisionTemplateError } from '@tinytavern/shared';
+import { imageRevisionTemplateError, importImagePromptSet } from '@tinytavern/shared';
 import { HttpError } from '../http/router.ts';
 import { requireObject, requireString } from '../http/validation.ts';
-
-function validatePromptPreset(value: unknown): void {
-  const preset = requireObject(value, 'prompt preset');
-  requireString(preset.name, 'preset name');
-  requireString(preset.prompt, 'preset prompt');
-  if (preset.context !== undefined) {
-    requireString(preset.context, 'preset context');
-  }
-}
-
-function validatePromptPresets(value: unknown): void {
-  const sets = requireObject(value, 'promptPresets');
-  for (const [kind, entry] of Object.entries(sets)) {
-    const set = requireObject(entry, 'prompt preset set');
-    requireString(set.active, 'active preset');
-    if (!Array.isArray(set.presets)) {
-      throw new HttpError(400, 'presets must be an array');
-    }
-    for (const preset of set.presets) {
-      validatePromptPreset(preset);
-      if (kind === 'avatar') {
-        const context = (preset as Record<string, unknown>).context;
-        if (typeof context !== 'string' || !context.trim()) {
-          throw new HttpError(400, 'Avatar presets require a context template.');
-        }
-      }
-    }
-  }
-}
 
 export function parseImageGenerationSettings(
   value: unknown,
@@ -50,7 +21,15 @@ export function parseImageGenerationSettings(
     }
   }
   if (settings.promptPresets !== undefined) {
-    validatePromptPresets(settings.promptPresets);
+    try {
+      for (const [kind, set] of Object.entries(
+        requireObject(settings.promptPresets, 'promptPresets'),
+      )) {
+        importImagePromptSet(set, { presets: [], active: '' }, kind === 'avatar');
+      }
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
   }
   if (settings.promptRevisionTemplate !== undefined) {
     requireString(settings.promptRevisionTemplate, 'image revision template');

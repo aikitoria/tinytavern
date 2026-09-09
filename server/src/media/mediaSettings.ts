@@ -3,6 +3,7 @@ import {
   mediaInputSlots,
   mediaWorkflowError,
   mediaWorkflowKey,
+  type MediaImageConfig,
   type MediaPromptSettingsKey,
   type MediaOperation,
   type MediaPromptSettings,
@@ -72,6 +73,20 @@ export function parseMediaWorkflow(entry: unknown, ids?: Set<string>): MediaWork
   const invalid = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
   if (invalid) throw new HttpError(400, `${workflow.name}: ${invalid}`);
   return workflow;
+}
+
+/** Reject invalid workflows at route/save time before rendering starts. */
+export function parseImageConfig(raw: unknown): MediaImageConfig {
+  const obj =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const comfyUrl = parseComfyUrl(obj.comfyUrl);
+  const workflow = parseMediaWorkflow(obj.workflow);
+  if (workflow.operation !== 'image' || !workflow.json.trim()) {
+    throw new HttpError(400, 'Choose a configured Create image workflow');
+  }
+  return { workflow, comfyUrl };
 }
 
 export function parseMediaRendering(value: unknown): MediaRenderingSettings | undefined {

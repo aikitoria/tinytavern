@@ -1,13 +1,18 @@
 import SettingsTransferButtons from '../components/settings/SettingsTransferButtons.tsx';
-import { importImagePromptSet, transferObject, transferString } from '@tinytavern/shared';
+import {
+  nextCollectionId,
+  importImagePromptSet,
+  transferObject,
+  transferString,
+} from '@tinytavern/shared';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
   DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
   DEFAULT_AVATAR_CONTEXT,
 } from '@tinytavern/shared';
 import SettingsActions from '../components/settings/SettingsActions.tsx';
-import type { MediaImageConfig } from '@tinytavern/shared';
-import SettingLabel, { createDefaultField } from '../components/forms/SettingField.tsx';
+import type { MediaImageConfig, ImageGenerationSettings } from '@tinytavern/shared';
+import SettingLabel from '../components/forms/SettingField.tsx';
 import {
   faChevronLeft,
   faChevronRight,
@@ -52,18 +57,8 @@ import { useSettingsGuard } from '../components/settings/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 
-interface ImagePromptPreset {
-  name: string;
-  prompt: string;
-  /** Optional second message paired with this preset (avatar presets only). */
-  context?: string;
-}
-
-interface ImagePromptPresetSet {
-  presets: ImagePromptPreset[];
-  /** Name of the selected preset; '' selects the built-in default. */
-  active: string;
-}
+type ImagePromptPresetSet = NonNullable<ImageGenerationSettings['promptPresets']>[string];
+type ImagePromptPreset = ImagePromptPresetSet['presets'][number];
 
 type ImagePromptKind = ImageChatPromptKind | 'avatar';
 
@@ -90,12 +85,9 @@ const IMAGE_PROMPT_SECTIONS = [
   },
 ] as const;
 
-interface ImageGenSettings {
-  promptRevisionTemplate: string;
-  promptRevisionContext: string;
-  promptRevisionOriginal: string;
+type ImageGenSettings = ImageGenerationSettings & {
   promptPresets: Record<ImagePromptKind, ImagePromptPresetSet>;
-}
+};
 
 const DEFAULT_PROMPTS: Record<ImagePromptKind, string> = {
   ...DEFAULT_IMAGE_CHAT_PROMPTS,
@@ -324,71 +316,40 @@ function PromptPresetEditor(props: {
   ref?: PromptPresetEditorHandle | ((handle: PromptPresetEditorHandle) => void);
 }) {
   type Preset = ImagePromptPreset & { id: string };
-  let sequence = 0;
   const [presets, setPresets] = createSignal<Preset[]>([]);
-  /** Index into presets(); -1 = built-in Default. */
-  const [selected, setSelected] = createSignal(-1);
-  const [name, setName] = createSignal('');
-  const promptEl = createDefaultField(() => props.defaultPrompt);
-  const contextEl = createDefaultField(() => props.defaultContext ?? '');
-
-  const currentPresets = () => {
-    const idx = selected();
-    return presets().map((preset, i) => {
-      if (i !== idx) return preset;
-      return {
-        ...preset,
-        name: name().trim() || preset.name,
-        prompt: promptEl.value,
-        ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
-      };
-    });
-  };
-
-  const stash = () => setPresets(currentPresets());
-
-  const showPreset = (idx: number) => {
-    setSelected(idx);
-    collection.closeRename();
-    const preset = presets()[idx];
-    setName(preset?.name ?? '');
-    promptEl.value = preset?.prompt ?? props.defaultPrompt;
-    (promptEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
-    if (props.defaultContext !== undefined) {
-      contextEl.value = idx === -1 ? props.defaultContext : preset!.context!;
-      (contextEl.element() as HTMLTextAreaElement).readOnly = idx === -1;
-    }
-  };
-
+  const [selected, setSelected] = createSignal('');
   const collection = createNamedCollection<Preset>({
-    items: currentPresets,
-    selected: () => presets()[selected()]?.id ?? '',
+    items: presets,
+    selected,
     identify: (item) => item.id,
-    newName: () => numberedName('Preset', currentPresets()),
+    newName: () => numberedName('Preset', presets()),
     defaultLabel: 'Default',
     commit: (items, id) => {
       setPresets(items);
-      showPreset(items.findIndex((item) => item.id === id));
+      setSelected(id);
     },
-    create: (_source, name) => ({
-      id: String(++sequence),
+    create: (source, name) => ({
+      id: nextCollectionId(presets()),
       name,
-      prompt: promptEl.value,
-      ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
+      prompt: source?.prompt ?? props.defaultPrompt,
+      ...(props.defaultContext === undefined
+        ? {}
+        : { context: source?.context ?? props.defaultContext }),
     }),
   });
-
+  const { current, patch } = collection;
   const handle: PromptPresetEditorHandle = {
     get value() {
-      const current = currentPresets();
       return {
-        presets: current.map(({ id, ...preset }) => preset),
-        active: current[selected()]?.name ?? '',
+        presets: presets().map(({ id, ...preset }) => preset),
+        active: current()?.name ?? '',
       };
     },
     set value(next: ImagePromptPresetSet) {
-      setPresets(next.presets.map((preset) => ({ ...preset, id: String(++sequence) })));
-      showPreset(next.presets.findIndex((preset) => preset.name === next.active));
+      const items = next.presets.map((preset) => ({ ...preset, id: nextCollectionId([]) }));
+      setPresets(items);
+      setSelected(items.find((preset) => preset.name === next.active)?.id ?? '');
+      collection.closeRename();
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);
@@ -399,19 +360,21 @@ function PromptPresetEditor(props: {
       <collection.Toolbar
         ariaLabel="Prompt preset"
         nameLabel="Preset name"
-        name={name()}
-        onRename={setName}
-        defaultName={selected() < 0 ? '' : numberedName('Preset', presets(), selected())}
-        onFinishRename={stash}
+        defaultName={
+          current() ? numberedName('Preset', presets(), presets().indexOf(current()!)) : ''
+        }
         transfer={{
           type: `image-prompt:${props.transferKey}`,
           onError: props.onError,
           allowDefaultExport: true,
-          exportData: () => ({
-            name: selected() === -1 ? 'Default (imported)' : currentPresets()[selected()]!.name,
-            prompt: promptEl.value,
-            ...(props.defaultContext === undefined ? {} : { context: contextEl.value }),
-          }),
+          exportData: (preset) =>
+            preset
+              ? (({ id, ...value }) => value)(preset)
+              : {
+                  name: 'Default (imported)',
+                  prompt: props.defaultPrompt,
+                  ...(props.defaultContext === undefined ? {} : { context: props.defaultContext }),
+                },
           importData: (data, previous) => {
             const source = transferObject(data);
             const imported = importImagePromptSet(
@@ -419,20 +382,20 @@ function PromptPresetEditor(props: {
               { presets: [], active: '' },
               props.defaultContext !== undefined,
             ).presets[0]!;
-            if (
-              currentPresets().some(
-                (item) => item.id !== previous?.id && item.name === imported.name,
-              )
-            )
+            if (presets().some((item) => item.id !== previous?.id && item.name === imported.name))
               throw new Error('A preset with this name already exists');
-            return { ...imported, id: previous?.id ?? String(++sequence) };
+            return { ...imported, id: previous?.id ?? nextCollectionId(presets()) };
           },
         }}
       />
       <FormField
-        field={promptEl}
+        value={current()?.prompt ?? props.defaultPrompt}
+        defaultValue={props.defaultPrompt}
+        onChange={(prompt) => {
+          if (current()?.prompt !== prompt) patch({ prompt });
+        }}
         kind="macro"
-        readOnly={selected() === -1}
+        readOnly={!current()}
         label={
           props.promptLabel ??
           (props.defaultContext !== undefined ? 'System instruction' : 'Prompt text')
@@ -441,14 +404,18 @@ function PromptPresetEditor(props: {
       />
       <Show when={props.defaultContext !== undefined}>
         <FormField
-          field={contextEl}
+          value={current()?.context ?? props.defaultContext!}
+          defaultValue={props.defaultContext}
+          onChange={(context) => {
+            if (current()?.context !== context) patch({ context });
+          }}
           kind="macro"
-          readOnly={selected() === -1}
+          readOnly={!current()}
           label={props.contextLabel ?? 'Context'}
           extraKeys={props.contextExtraKeys}
         />
       </Show>
-      <Show when={selected() === -1}>
+      <Show when={!current()}>
         <span class="text-dim text-caption">Built-in default · create a preset to customize</span>
       </Show>
     </div>
@@ -506,19 +473,11 @@ export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) 
       );
       if (invalidRevision) throw new Error(invalidRevision);
       for (const { kind } of promptEditors) {
-        const names = values.imageGeneration.promptPresets[kind].presets.map(
-          (preset) => preset.name,
+        importImagePromptSet(
+          values.imageGeneration.promptPresets[kind],
+          { presets: [], active: '' },
+          kind === 'avatar',
         );
-        if (new Set(names).size !== names.length) {
-          throw new Error(
-            `${kind[0]!.toUpperCase()}${kind.slice(1)} prompt preset names must be unique.`,
-          );
-        }
-        if (names.some((name) => name.toLowerCase() === 'default')) {
-          throw new Error(
-            '“Default” is reserved for the built-in prompt. Choose another preset name.',
-          );
-        }
       }
       return values;
     },

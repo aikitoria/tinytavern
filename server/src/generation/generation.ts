@@ -227,7 +227,7 @@ export function startGeneration(
     ).catch((err: unknown) => {
       if (active.get(mid) !== gen) return;
       // Foreground retries resume partial content; speculation.ts owns background retries.
-      if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err, gen)) {
+      if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err)) {
         // Without prefills, retrying would append a fresh answer to the partial result.
         if (
           gen.requestContext?.endpoint.prefillMode === 'disabled' &&
@@ -301,6 +301,35 @@ function completionRequest(
   });
 }
 
+/** Chat and media prompts share cancellation, header/body deadlines and HTTP errors. */
+async function readCompletion(
+  endpoint: Endpoint,
+  messages: ChatMessage[],
+  parameters: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  onData: (data: string) => void | boolean,
+): Promise<void> {
+  const abort = new AbortController();
+  const idle = startCompletionIdleWatchdog((error) => abort.abort(error));
+  const combined = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
+  try {
+    combined.throwIfAborted();
+    const response = await completionRequest(endpoint, messages, true, parameters, combined);
+    idle.touch();
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Upstream error ${response.status}: ${text.slice(0, 500)}`);
+    }
+    if (!response.body) throw new Error('Upstream returned no response body');
+    await readSseData(response.body, onData, idle.touch);
+  } catch (error) {
+    if (abort.signal.aborted) throw abort.signal.reason;
+    throw error;
+  } finally {
+    idle.stop();
+  }
+}
+
 /**
  * Side-task completion without message rows or retries; callers handle failures.
  * A null conversation uses the global endpoint.
@@ -369,88 +398,70 @@ export async function streamEndpointCompletion(
   options?: StreamingCompletionOptions,
 ): Promise<string> {
   const prepared = prepareStandaloneCompletion(endpoint, messages, maxTokens, options);
-  const idleAbort = new AbortController();
-  const idle = startCompletionIdleWatchdog((error) => idleAbort.abort(error));
-  const requestSignal = signal ? AbortSignal.any([signal, idleAbort.signal]) : idleAbort.signal;
-  try {
-    requestSignal.throwIfAborted();
-    if (prepared.reasoningPrefill) options?.onReasoning?.(prepared.reasoningPrefill);
-    const res = await completionRequest(
-      endpoint,
-      prepared.messages,
-      true,
-      prepared.parameters,
-      requestSignal,
-    );
-    idle.touch();
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
-    }
-    if (!res.body) throw new Error('Upstream returned no response body');
-    let content = prepared.messagePrefill;
-    let emittedPrefill = false;
-    let emittedContent = false;
-    let receivedVisibleContent = false;
-    let refusal = '';
-    let sawReasoning = false;
-    let completed = false;
-    let finishReason: string | null = null;
-    await readSseData(
-      res.body,
-      completionDataReader(
-        (delta, reasoning, rejected) => {
-          if (delta) {
-            emittedContent = true;
-            if (!emittedPrefill && prepared.messagePrefill) {
-              emittedPrefill = true;
-              onDelta(prepared.messagePrefill);
-            }
-            if (delta.trim()) receivedVisibleContent = true;
-            content += delta;
-            onDelta(delta);
+  signal?.throwIfAborted();
+  if (prepared.reasoningPrefill) options?.onReasoning?.(prepared.reasoningPrefill);
+  let content = prepared.messagePrefill;
+  let emittedPrefill = false;
+  let emittedContent = false;
+  let receivedVisibleContent = false;
+  let refusal = '';
+  let sawReasoning = false;
+  let completed = false;
+  let finishReason: string | null = null;
+  await readCompletion(
+    endpoint,
+    prepared.messages,
+    prepared.parameters,
+    signal,
+    completionDataReader(
+      (delta, reasoning, rejected) => {
+        if (delta) {
+          emittedContent = true;
+          if (!emittedPrefill && prepared.messagePrefill) {
+            emittedPrefill = true;
+            onDelta(prepared.messagePrefill);
           }
-          refusal += rejected;
-          if (reasoning) {
-            sawReasoning = true;
-            if (!emittedContent) options?.onReasoning?.(reasoning);
-          }
-        },
-        (reason) => {
-          if (reason === null) completed = true;
-          else finishReason = reason;
-        },
-      ),
-      idle.touch,
-    );
-    if (options?.requireComplete && receivedVisibleContent) {
-      if (finishReason === 'length') {
-        throw new Error(
-          'Prompt was truncated by the token limit; review the partial text or prepare again',
-        );
-      }
-      const missingCompletion = !completed && !finishReason;
-      const interruptedCompletion = finishReason && finishReason !== 'stop';
-      if (missingCompletion || interruptedCompletion) {
-        throw new Error('Prompt completion ended before a complete reply; review or prepare again');
-      }
-    }
-    if (receivedVisibleContent) return content;
-    if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
-    if (sawReasoning) {
+          if (delta.trim()) receivedVisibleContent = true;
+          content += delta;
+          onDelta(delta);
+        }
+        refusal += rejected;
+        if (reasoning) {
+          sawReasoning = true;
+          if (!emittedContent) options?.onReasoning?.(reasoning);
+        }
+      },
+      (reason) => {
+        if (reason === null) completed = true;
+        else finishReason = reason;
+      },
+    ),
+  );
+  if (options?.requireComplete && receivedVisibleContent) {
+    if (finishReason === 'length') {
       throw new Error(
-        'The model returned only reasoning and no message content (reasoning models may need a larger token budget)',
+        'Prompt was truncated by the token limit; review the partial text or prepare again',
       );
     }
-    throw new Error('The model returned an empty reply');
-  } finally {
-    idle.stop();
+    const missingCompletion = !completed && !finishReason;
+    const interruptedCompletion = finishReason && finishReason !== 'stop';
+    if (missingCompletion || interruptedCompletion) {
+      throw new Error('Prompt completion ended before a complete reply; review or prepare again');
+    }
   }
+  if (receivedVisibleContent) return content;
+  if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
+  if (sawReasoning) {
+    throw new Error(
+      'The model returned only reasoning and no message content (reasoning models may need a larger token budget)',
+    );
+  }
+  throw new Error('The model returned an empty reply');
 }
 
-function isTransientFailure(err: unknown, gen: ActiveGen): boolean {
-  if (gen.meta.error?.startsWith('Upstream idle timeout')) return true;
+function isTransientFailure(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
+  if (message.startsWith('Upstream idle timeout')) return true;
   const status = message.match(/^Upstream error (\d{3})/);
   if (status) {
     const code = Number(status[1]);
@@ -502,71 +513,6 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   if (prefilled && endpoint.prefillMode === 'deepseek') messages.at(-1)!.prefix = true;
   const p = endpoint.genParams;
 
-  // Idle watchdog: abort if the backend goes silent (including before headers).
-  const idle = startCompletionIdleWatchdog((error) => {
-    gen.meta.error = error.message;
-    gen.abort.abort();
-  });
-
-  try {
-    const res = await completionRequest(
-      endpoint,
-      messages,
-      true,
-      {
-        ...generationParameters(p),
-        ...(prefilled && endpoint.prefillMode === 'vllm'
-          ? { continue_final_message: true, add_generation_prompt: false }
-          : {}),
-      },
-      gen.abort.signal,
-    );
-    idle.touch();
-
-    if (!res.ok || !res.body) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Upstream error ${res.status}: ${text.slice(0, 500)}`);
-    }
-    // Prefixed history can cause "Name:" echoes even with prefills disabled.
-    await consumeStream(res.body, gen, namePrefill, isResume, idle.touch);
-  } finally {
-    idle.stop();
-  }
-}
-
-function snapshotRequestContext(
-  conversation: Conversation,
-  gen: ActiveGen,
-): NonNullable<ActiveGen['requestContext']> {
-  const resolved = resolveEndpoint(conversation);
-  const endpoint: Endpoint = {
-    ...resolved,
-    genParams: { ...resolved.genParams },
-  };
-  // Use this reply's ancestors, regardless of the currently active sibling.
-  const message = gen.promptOverride ? null : getMessage(gen.mid);
-  const source =
-    gen.promptOverride ??
-    buildChatMessages(
-      conversation,
-      getPathToMessage(message?.parentId ?? null),
-      // Regenerations keep the speaker name stamped on their sibling.
-      message?.name ?? null,
-    );
-  const built: BuiltPrompt = {
-    ...source,
-    messages: source.messages.map((message) => ({ ...message })),
-  };
-  return { endpoint, built };
-}
-
-async function consumeStream(
-  body: NonNullable<Awaited<ReturnType<typeof fetch>>['body']>,
-  gen: ActiveGen,
-  namePrefill: string | null,
-  isResume: boolean,
-  resetIdle: () => void,
-): Promise<void> {
   // Hold initial characters to strip echoed "Name:" prefixes.
   let holdback: string | null = namePrefill && !isResume ? '' : null;
   const passContent = (d: string): string => {
@@ -597,14 +543,21 @@ async function consumeStream(
     });
   });
   try {
-    await readSseData(
-      body,
+    await readCompletion(
+      endpoint,
+      messages,
+      {
+        ...generationParameters(p),
+        ...(prefilled && endpoint.prefillMode === 'vllm'
+          ? { continue_final_message: true, add_generation_prompt: false }
+          : {}),
+      },
+      gen.abort.signal,
       (data) => {
         if (active.get(gen.mid) !== gen) return false;
         processData(data);
         return active.get(gen.mid) === gen;
       },
-      resetIdle,
     );
   } catch (err) {
     // Preserve held text for retries, except an exact name prefill that the retry re-sends.
@@ -623,4 +576,30 @@ async function consumeStream(
     broadcastConv(gen.conversationId, { t: 'delta', mid: gen.mid, d: holdback });
   }
   finalize(gen, 'done');
+}
+
+function snapshotRequestContext(
+  conversation: Conversation,
+  gen: ActiveGen,
+): NonNullable<ActiveGen['requestContext']> {
+  const resolved = resolveEndpoint(conversation);
+  const endpoint: Endpoint = {
+    ...resolved,
+    genParams: { ...resolved.genParams },
+  };
+  // Use this reply's ancestors, regardless of the currently active sibling.
+  const message = gen.promptOverride ? null : getMessage(gen.mid);
+  const source =
+    gen.promptOverride ??
+    buildChatMessages(
+      conversation,
+      getPathToMessage(message?.parentId ?? null),
+      // Regenerations keep the speaker name stamped on their sibling.
+      message?.name ?? null,
+    );
+  const built: BuiltPrompt = {
+    ...source,
+    messages: source.messages.map((message) => ({ ...message })),
+  };
+  return { endpoint, built };
 }

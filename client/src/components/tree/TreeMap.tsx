@@ -1,3 +1,4 @@
+import { createPanZoom } from '../../panZoom.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
@@ -66,9 +67,7 @@ export default function TreeMap() {
   let edgesCanvas!: HTMLCanvasElement;
 
   // Mirror the mutable camera into `view` once per frame for culling and snippet swaps.
-  let scale = 1;
-  let x = 0;
-  let y = 0;
+  const camera = { x: 0, y: 0, scale: 1 };
   const [view, setView] = createSignal({ x: 0, y: 0, scale: 1 });
   const [viewport, setViewport] = createSignal({ w: 0, h: 0 });
   let rafId = 0;
@@ -208,7 +207,7 @@ export default function TreeMap() {
   });
 
   const apply = () => {
-    content.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    content.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`;
     scheduleFrame();
   };
 
@@ -223,6 +222,7 @@ export default function TreeMap() {
       edgesCanvas.width = w;
       edgesCanvas.height = h;
     }
+    const { x, y, scale } = camera;
     const ctx = edgesCanvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -263,7 +263,7 @@ export default function TreeMap() {
     if (rafId) return;
     rafId = requestAnimationFrame(() => {
       rafId = 0;
-      setView({ x, y, scale });
+      setView({ ...camera });
       drawEdges();
     });
   };
@@ -281,27 +281,29 @@ export default function TreeMap() {
     const px = cx - rect.left;
     const py = cy - rect.top;
     const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
-    x = px - ((px - x) * clamped) / scale;
-    y = py - ((py - y) * clamped) / scale;
-    scale = clamped;
+    camera.x = px - ((px - camera.x) * clamped) / camera.scale;
+    camera.y = py - ((py - camera.y) * clamped) / camera.scale;
+    camera.scale = clamped;
     apply();
   };
 
+  const gesture = createPanZoom(camera, apply, zoomAt);
+
   const zoomStep = (factor: number) => {
     const rect = root.getBoundingClientRect();
-    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, scale * factor);
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, camera.scale * factor);
   };
 
   const fitBounds = (left: number, top: number, w: number, h: number, maxScale = MAX_SCALE) => {
     const vp = viewport();
     if (!vp.w || !vp.h || !w || !h) return;
     const pad = 40;
-    scale = Math.min(
+    camera.scale = Math.min(
       maxScale,
       Math.max(FIT_MIN_SCALE, Math.min((vp.w - 2 * pad) / w, (vp.h - 2 * pad) / h)),
     );
-    x = (vp.w - w * scale) / 2 - left * scale;
-    y = (vp.h - h * scale) / 2 - top * scale;
+    camera.x = (vp.w - w * camera.scale) / 2 - left * camera.scale;
+    camera.y = (vp.h - h * camera.scale) / 2 - top * camera.scale;
     apply();
   };
 
@@ -320,8 +322,8 @@ export default function TreeMap() {
       state.tree.activeLeafId != null ? positions().get(state.tree.activeLeafId) : undefined;
     const vp = viewport();
     if (!p || !vp.w || !vp.h) return;
-    x = vp.w / 2 - (p.x + CARD_W / 2) * scale;
-    y = vp.h / 2 - (p.y + CARD_H / 2) * scale;
+    camera.x = vp.w / 2 - (p.x + CARD_W / 2) * camera.scale;
+    camera.y = vp.h / 2 - (p.y + CARD_H / 2) * camera.scale;
     apply();
   };
 
@@ -354,13 +356,7 @@ export default function TreeMap() {
   let panClickResetTimer: number | undefined;
   let downX = 0;
   let downY = 0;
-  let dragStartX = 0;
-  let dragStartY = 0;
   let pinching = false;
-  let pinchStartDist = 0;
-  let pinchStartScale = 1;
-  let lastMidX = 0;
-  let lastMidY = 0;
   /** Vertical drags scroll cards within the map's touch-action:none surface. */
   let cardScroll: Element | null = null;
   let touchDecided = false;
@@ -377,17 +373,14 @@ export default function TreeMap() {
     panMoved = false;
     downX = e.clientX;
     downY = e.clientY;
-    dragStartX = e.clientX - x;
-    dragStartY = e.clientY - y;
+    gesture.startPan(e);
     root.classList.add('treemap-panning');
     e.preventDefault();
   };
   const onMouseMove = (e: MouseEvent) => {
     if (!panning) return;
     if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) panMoved = true;
-    x = e.clientX - dragStartX;
-    y = e.clientY - dragStartY;
-    apply();
+    gesture.pan(e);
   };
   const onMouseUp = () => {
     if (!panning) return;
@@ -405,12 +398,6 @@ export default function TreeMap() {
     }
   };
 
-  const distance = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-  const midpoint = (a: Touch, b: Touch) => ({
-    x: (a.clientX + b.clientX) / 2,
-    y: (a.clientY + b.clientY) / 2,
-  });
-
   const onTouchStart = (e: TouchEvent) => {
     if ((e.target as Element).closest('.treemap-toolbar')) return;
     if (e.touches.length === 2) {
@@ -418,11 +405,7 @@ export default function TreeMap() {
       panning = false;
       cardScroll = null;
       panMoved = true; // a pinch must never end in a card click
-      pinchStartDist = distance(e.touches[0]!, e.touches[1]!);
-      pinchStartScale = scale;
-      const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      lastMidX = mid.x;
-      lastMidY = mid.y;
+      gesture.startPinch(e.touches[0]!, e.touches[1]!);
       e.preventDefault();
     } else if (e.touches.length === 1) {
       pinching = false;
@@ -432,8 +415,7 @@ export default function TreeMap() {
       cardScrolling = false;
       downX = e.touches[0]!.clientX;
       downY = e.touches[0]!.clientY;
-      dragStartX = downX - x;
-      dragStartY = downY - y;
+      gesture.startPan(e.touches[0]!);
       lastScrollY = downY;
       const card = (e.target as Element).closest('.treemap-card:not(.treemap-card-mini)');
       const body = card?.querySelector('.msg-swipe');
@@ -443,16 +425,7 @@ export default function TreeMap() {
   const onTouchMove = (e: TouchEvent) => {
     if (pinching && e.touches.length === 2) {
       e.preventDefault();
-      const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      x += mid.x - lastMidX;
-      y += mid.y - lastMidY;
-      lastMidX = mid.x;
-      lastMidY = mid.y;
-      zoomAt(
-        mid.x,
-        mid.y,
-        pinchStartScale * (distance(e.touches[0]!, e.touches[1]!) / pinchStartDist),
-      );
+      gesture.pinch(e.touches[0]!, e.touches[1]!);
     } else if (panning && e.touches.length === 1) {
       const touch = e.touches[0]!;
       const dx = touch.clientX - downX;
@@ -465,13 +438,11 @@ export default function TreeMap() {
       }
       e.preventDefault();
       if (cardScrolling && cardScroll) {
-        cardScroll.scrollTop -= (touch.clientY - lastScrollY) / scale;
+        cardScroll.scrollTop -= (touch.clientY - lastScrollY) / camera.scale;
         lastScrollY = touch.clientY;
         return;
       }
-      x = touch.clientX - dragStartX;
-      y = touch.clientY - dragStartY;
-      apply();
+      gesture.pan(touch);
     }
   };
   const onTouchEnd = (e: TouchEvent) => {
@@ -483,8 +454,7 @@ export default function TreeMap() {
       touchDecided = true;
       downX = e.touches[0]!.clientX;
       downY = e.touches[0]!.clientY;
-      dragStartX = downX - x;
-      dragStartY = downY - y;
+      gesture.startPan(e.touches[0]!);
     } else if (e.touches.length === 0) {
       pinching = false;
       panning = false;
@@ -501,7 +471,7 @@ export default function TreeMap() {
     )
       return;
     e.preventDefault();
-    zoomAt(e.clientX, e.clientY, scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
+    zoomAt(e.clientX, e.clientY, camera.scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
   };
 
   // Frame small trees in full; large trees open around the active branch.

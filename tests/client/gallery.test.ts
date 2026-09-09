@@ -1,6 +1,31 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
+test('pinch translation and release preserve the pan origin', async () => {
+  const { createPanZoom } = await import('../../client/src/panZoom.ts');
+  const camera = { x: 0, y: 0, scale: 1 };
+  const point = (clientX: number, clientY = 0) => ({ clientX, clientY });
+  const gesture = createPanZoom(
+    camera,
+    () => {},
+    (_x, _y, scale) => {
+      camera.scale = scale;
+    },
+  );
+  gesture.startPan(point(10, 20));
+  gesture.pan(point(30, 50));
+  gesture.startPinch(point(0), point(10));
+  gesture.pinch(point(0), point(20));
+  gesture.pinch(point(10), point(30));
+  assert.deepEqual(camera, { x: 35, y: 30, scale: 2 });
+  gesture.startPan(point(10));
+  gesture.pan(point(12, 3));
+  assert.deepEqual(camera, { x: 37, y: 33, scale: 2 });
+  gesture.startPinch(point(0), point(0));
+  gesture.pinch(point(0), point(20));
+  assert.equal(camera.scale, 2);
+});
+
 // Model browser scroll clamping for both chat and prompt streaming.
 function scrollArea(clientHeight: number, scrollHeight: number) {
   let top = 0;

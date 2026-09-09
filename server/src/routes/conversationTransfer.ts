@@ -18,7 +18,7 @@ import { deleteImageFiles, rasterImageFormat } from '../media/images.ts';
 import { HttpError, route } from '../http/router.ts';
 import { getPathToMessage } from '../conversations/tree.ts';
 import { positiveId, requireObject as object, requireString } from '../http/validation.ts';
-import { parseImageConfig } from '../media/comfy/comfy.ts';
+import { parseImageConfig } from '../media/mediaSettings.ts';
 import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
 import {
   exportImageRecipes,

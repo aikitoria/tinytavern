@@ -275,13 +275,11 @@ export function importRendering(value: unknown, settings: Settings): Settings['m
 
 export function importImagePromptSet(
   value: unknown,
-  current: {
-    presets: { name: string; prompt: string; context?: string }[];
-    active: string;
-  },
+  current: NonNullable<Settings['imageGeneration']['promptPresets']>[string],
   avatar: boolean,
 ) {
   const source = transferObject(value);
+  transferString(source.active, 'Active preset');
   const presets = current.presets.map((item) => ({ ...item }));
   const seen = new Set<string>();
   for (const item of transferArray(source.presets)) {
@@ -294,6 +292,8 @@ export function importImagePromptSet(
       prompt: transferString(item.prompt, 'Prompt'),
       ...(avatar ? { context: transferString(item.context, 'Context') } : {}),
     };
+    if (avatar && !preset.context!.trim())
+      throw new Error('Avatar presets require a context template.');
     const existing = namedItem(presets, name);
     if (existing) presets[presets.indexOf(existing)] = preset;
     else presets.push(preset);

@@ -1,3 +1,4 @@
+import { createPanZoom } from '../../panZoom.ts';
 import { onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { registerUiBack } from '../../state/uiBack.ts';
@@ -5,21 +6,13 @@ import { registerUiBack } from '../../state/uiBack.ts';
 export default function ImageViewer(props: { src: string; onClose: () => void }) {
   let overlay!: HTMLDivElement;
   let img!: HTMLImageElement;
-  let scale = 1;
-  let x = 0;
-  let y = 0;
+  const camera = { x: 0, y: 0, scale: 1 };
   let dragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
   let pinching = false;
-  let pinchStartDist = 0;
-  let pinchStartScale = 1;
-  let lastMidX = 0;
-  let lastMidY = 0;
   let enteredFullscreen = false;
   let previouslyFocused: HTMLElement | null = null;
   const apply = () => {
-    img.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${scale})`;
+    img.style.transform = `translate(-50%, -50%) translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`;
   };
 
   /** Zoom so the viewport point (cx, cy) stays fixed on the image. */
@@ -28,92 +21,60 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
     const dx = cx - (rect.left + rect.width / 2);
     const dy = cy - (rect.top + rect.height / 2);
     const clamped = Math.min(10, Math.max(0.1, next));
-    const delta = clamped - scale;
-    x -= (dx * delta) / scale;
-    y -= (dy * delta) / scale;
-    scale = clamped;
+    const delta = clamped - camera.scale;
+    camera.x -= (dx * delta) / camera.scale;
+    camera.y -= (dy * delta) / camera.scale;
+    camera.scale = clamped;
     apply();
   };
 
+  const gesture = createPanZoom(camera, apply, zoomAt);
+
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    zoomAt(e.clientX, e.clientY, scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
+    zoomAt(e.clientX, e.clientY, camera.scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
   };
 
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     dragging = true;
-    dragStartX = e.clientX - x;
-    dragStartY = e.clientY - y;
+    gesture.startPan(e);
     overlay.classList.add('dragging');
     e.preventDefault();
   };
   const onMouseMove = (e: MouseEvent) => {
     if (!dragging) return;
-    x = e.clientX - dragStartX;
-    y = e.clientY - dragStartY;
-    apply();
+    gesture.pan(e);
   };
   const onMouseUp = () => {
     dragging = false;
     overlay.classList.remove('dragging');
   };
 
-  const distance = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-  const midpoint = (a: Touch, b: Touch) => ({
-    x: (a.clientX + b.clientX) / 2,
-    y: (a.clientY + b.clientY) / 2,
-  });
-
   const onTouchStart = (e: TouchEvent) => {
     if (e.touches.length === 2) {
       pinching = true;
       dragging = false;
-      pinchStartDist = distance(e.touches[0]!, e.touches[1]!);
-      pinchStartScale = scale;
-      const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      lastMidX = mid.x;
-      lastMidY = mid.y;
+      gesture.startPinch(e.touches[0]!, e.touches[1]!);
       e.preventDefault();
     } else if (e.touches.length === 1) {
       pinching = false;
       dragging = true;
-      dragStartX = e.touches[0]!.clientX - x;
-      dragStartY = e.touches[0]!.clientY - y;
+      gesture.startPan(e.touches[0]!);
+    } else {
+      pinching = false;
+      dragging = false;
     }
   };
   const onTouchMove = (e: TouchEvent) => {
     if (pinching && e.touches.length === 2) {
       e.preventDefault();
-      const mid = midpoint(e.touches[0]!, e.touches[1]!);
-      x += mid.x - lastMidX;
-      y += mid.y - lastMidY;
-      lastMidX = mid.x;
-      lastMidY = mid.y;
-      zoomAt(
-        mid.x,
-        mid.y,
-        pinchStartScale * (distance(e.touches[0]!, e.touches[1]!) / pinchStartDist),
-      );
+      gesture.pinch(e.touches[0]!, e.touches[1]!);
     } else if (dragging && e.touches.length === 1) {
       e.preventDefault();
-      x = e.touches[0]!.clientX - dragStartX;
-      y = e.touches[0]!.clientY - dragStartY;
-      apply();
+      gesture.pan(e.touches[0]!);
     }
   };
-  const onTouchEnd = (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      pinching = false;
-      dragging = true;
-      dragStartX = e.touches[0]!.clientX - x;
-      dragStartY = e.touches[0]!.clientY - y;
-    } else if (e.touches.length === 0) {
-      pinching = false;
-      dragging = false;
-    }
-  };
-
   const onKey = (e: KeyboardEvent) => {
     // Capture before ChatView can swipe siblings and unmount the viewer's message.
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -150,9 +111,9 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
   };
 
   const reset = () => {
-    scale = 1;
-    x = 0;
-    y = 0;
+    camera.scale = 1;
+    camera.x = 0;
+    camera.y = 0;
     apply();
   };
 
@@ -197,8 +158,8 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
         // Direct listeners allow preventDefault; Solid's delegated touch listeners are passive.
         on:touchstart={onTouchStart}
         on:touchmove={onTouchMove}
-        on:touchend={onTouchEnd}
-        on:touchcancel={onTouchEnd}
+        on:touchend={onTouchStart}
+        on:touchcancel={onTouchStart}
       >
         <img
           ref={img}

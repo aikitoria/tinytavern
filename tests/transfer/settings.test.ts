@@ -14,6 +14,7 @@ test('settings transfer', async () => {
     importRendering,
     exportPromptCollection,
     importPromptCollection,
+    importImagePromptSet,
   } = await import('@tinytavern/shared');
   type Settings = import('@tinytavern/shared').Settings;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
@@ -27,6 +28,19 @@ test('settings transfer', async () => {
   );
   assert.equal(namedItem([{ name: 'Style' }, { name: 'STYLE' }], 'style'), undefined);
   assert.equal(namedItem([{ name: 'Style' }, { name: 'STYLE' }], 'Style')?.name, 'Style');
+  const { parseImageGenerationSettings } = await import('../../server/src/media/imageSettings.ts');
+  const portrait = { name: 'Portrait', prompt: 'Paint a portrait', context: '{{description}}' };
+  const imageSet = { presets: [portrait], active: portrait.name };
+  assert.deepEqual(importImagePromptSet(imageSet, { presets: [], active: '' }, true), imageSet);
+  for (const presets of [
+    [{ ...portrait, context: ' ' }],
+    [{ ...portrait, name: 'Default' }],
+    [portrait, { ...portrait, name: 'portrait' }],
+  ]) {
+    const invalid = { presets, active: portrait.name };
+    assert.throws(() => importImagePromptSet(invalid, imageSet, true));
+    assert.throws(() => parseImageGenerationSettings({ promptPresets: { avatar: invalid } }));
+  }
   const settings: Settings = clone(DEFAULT_SETTINGS);
   settings.chatVideoPrompts = {
     presets: [

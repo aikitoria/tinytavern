@@ -1,8 +1,9 @@
-import { newRequestId } from '@tinytavern/shared';
+import { mediaJobActive, newRequestId, type MediaAsset } from '@tinytavern/shared';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
-import { api } from '../state/api.ts';
+import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { api, ApiError } from '../state/api.ts';
+import { applyMediaJob, state, toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import Modal from '../components/ui/Modal.tsx';
 import PromptGenerationStatus from '../media/PromptGenerationStatus.tsx';
@@ -10,7 +11,7 @@ import { avatarPromptTemplates, avatarRenderConfig } from './imageGeneration.tsx
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 
-/** Prompt and render previews stay transient until "Use this avatar" uploads the PNG. */
+/** Render jobs retain previews until acceptance copies the asset directly to the avatar. */
 export default function AvatarGenerateModal(props: {
   kind: 'character' | 'persona';
   id: number;
@@ -19,72 +20,74 @@ export default function AvatarGenerateModal(props: {
   const [text, setText] = createSignal('');
   const [reasoning, setReasoning] = createSignal('');
   const [streaming, setStreaming] = createSignal(true);
-  const [rendering, setRendering] = createSignal(false);
+  const [submitting, setSubmitting] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
-  const [imageUrl, setImageUrl] = createSignal<string | null>(null);
-  const [previewUrl, setPreviewUrl] = createSignal<string | null>(null);
-  const [progress, setProgress] = createSignal<{ value: number; max: number } | null>(null);
+  const [jobId, setJobId] = createSignal<number>();
+  const [result, setResult] = createSignal<MediaAsset>();
   const [error, setError] = createSignal('');
   const promptAbort = new AbortController();
-  let renderAbort: AbortController | undefined;
+  const job = () => state.mediaJobs[jobId()!];
+  const rendering = () => submitting() || (job() !== undefined && mediaJobActive(job()!.state));
+  const progress = () => job()?.progress;
+  const previewUrl = () => (rendering() ? progress()?.preview : undefined);
+  const imageUrl = () => result()?.url;
+  let requestKey = newRequestId();
   let disposed = false;
+
+  createEffect(() => {
+    const current = job();
+    if (current?.state === 'succeeded') setResult(current.outputs[0]);
+    if (current?.error) setError(current.error);
+  });
+
+  const discard = async (id: number) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const current = await api.mediaJob(id);
+        await api.discardMediaDraft(current, current.draft!.revision);
+        return;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return;
+        if (!(err instanceof ApiError && err.status === 409 && attempt === 0)) throw err;
+      }
+    }
+  };
 
   const render = async () => {
     const image = avatarRenderConfig();
     const prompt = text().trim();
-    if (!image) {
-      setError('Select a workflow in Settings → Media rendering first.');
+    if (!image || !prompt) {
+      setError(
+        !image ? 'Select a workflow in Settings → Media rendering first.' : 'Write a prompt first.',
+      );
       return;
     }
-    if (!prompt) {
-      setError('Write a prompt first.');
-      return;
-    }
-    const abort = new AbortController();
-    renderAbort = abort;
-    const jobId = newRequestId();
-    setProgress(null);
-    setPreviewUrl(null);
-    setRendering(true);
+    setSubmitting(true);
     setError('');
     try {
-      // Subscribe before rendering to capture the first step; progress must not block rendering.
-      try {
-        const stream = await api.openAvatarRenderProgress(
-          jobId,
-          (value, max) => {
-            if (!disposed && renderAbort === abort) setProgress({ value, max });
-          },
-          (preview) => {
-            if (!disposed && renderAbort === abort) setPreviewUrl(preview);
-          },
-          abort.signal,
-        );
-        void stream.done.catch(() => undefined);
-      } catch (err) {
-        if (abort.signal.aborted) return;
-        console.warn('[avatar] progress stream unavailable:', err);
-      }
-      const blob = await api.renderAvatar({ prompt, image, jobId }, abort.signal);
-      if (disposed || abort.signal.aborted || renderAbort !== abort) return;
-      const url = URL.createObjectURL(blob);
-      const old = imageUrl();
-      setImageUrl(url);
-      setPreviewUrl(null);
-      if (old) URL.revokeObjectURL(old);
+      const values = {
+        operation: 'image' as const,
+        workflowId: image.workflow.id,
+        prompt,
+        inputs: [],
+        reviewBeforeSave: true,
+      };
+      const current = job();
+      const saved = current?.submitted
+        ? await api.rerunMediaJob(current, requestKey, values)
+        : current
+          ? await api.editMediaJob(current, values)
+          : await api.createMediaJob(values, requestKey);
+      requestKey = newRequestId();
+      applyMediaJob(saved);
+      setJobId(saved.id);
+      if (disposed) return;
+      applyMediaJob(await api.mediaJobAction(saved, 'render'));
     } catch (err) {
-      if (!disposed && !abort.signal.aborted) setError(errorMessage(err));
+      if (!disposed) setError(errorMessage(err));
     } finally {
-      // Also closes the progress subscription after success/failure.
-      abort.abort();
-      if (renderAbort === abort) {
-        renderAbort = undefined;
-        if (!disposed) {
-          setProgress(null);
-          setPreviewUrl(null);
-          setRendering(false);
-        }
-      }
+      setSubmitting(false);
+      if (disposed && jobId()) void discard(jobId()!).catch((err) => toast(errorMessage(err)));
     }
   };
 
@@ -127,22 +130,20 @@ export default function AvatarGenerateModal(props: {
   onCleanup(() => {
     disposed = true;
     promptAbort.abort();
-    renderAbort?.abort();
-    const url = imageUrl();
-    if (url) URL.revokeObjectURL(url);
+    // A pending request performs cleanup after its response establishes the job identity.
+    if (!submitting() && jobId()) void discard(jobId()!).catch((err) => toast(errorMessage(err)));
   });
 
   const save = async () => {
-    const url = imageUrl();
-    if (!url) return;
+    const asset = result();
+    if (!asset) return;
     setSaving(true);
     setError('');
     try {
-      const blob = await (await fetch(url)).blob();
-      const file = new File([blob], 'avatar.png', { type: blob.type || 'image/png' });
-      // The avatar route enforces PNG — a non-PNG workflow output fails here.
-      if (props.kind === 'character') await api.characters.uploadAvatar(props.id, file);
-      else await api.personas.uploadAvatar(props.id, file);
+      await api[props.kind === 'character' ? 'characters' : 'personas'].useAvatarAsset(
+        props.id,
+        asset.id,
+      );
       props.onClose();
     } catch (err) {
       setError(errorMessage(err));

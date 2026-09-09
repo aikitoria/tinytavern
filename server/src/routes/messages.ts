@@ -32,7 +32,7 @@ import {
 } from '../generation/generation.ts';
 import { broadcastTree } from '../realtime/sync.ts';
 import { invalidate, hasConversationSubscribers } from '../realtime/events.ts';
-import { spawnAssistantReply } from './conversations.ts';
+import { spawnAssistantReply, spawnToolReply } from './conversations.ts';
 import { getConversation, touchConversation } from '../conversations/conversationStore.ts';
 import { objectBody, optionalNumber, positiveId, requiredString } from '../http/validation.ts';
 import { requireBodyPrecondition, requireQueryPrecondition } from './shared/mutationGuard.ts';
@@ -43,7 +43,7 @@ import {
   nextUnreadSibling,
   prepareNextSwipe,
 } from '../generation/speculation.ts';
-import { parseImageConfig, startImageRender } from '../media/comfy/comfy.ts';
+import { parseImageConfig } from '../media/mediaSettings.ts';
 import {
   buildSteeredPrompt,
   buildSteeredToolPrompt,
@@ -250,11 +250,7 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
     if (msg.imagePending) throw new HttpError(409, 'an image render is running for this message');
     let recipeId = messageRecipeId(msg);
     if (b.image !== undefined) {
-      try {
-        recipeId = createImageRecipe(parseImageConfig(b.image), msg.content);
-      } catch (err) {
-        throw new HttpError(400, err instanceof Error ? err.message : String(err));
-      }
+      recipeId = createImageRecipe(parseImageConfig(b.image), msg.content);
     }
     const prompt = buildSteeredToolPrompt(
       conv,
@@ -263,32 +259,10 @@ route.post('/api/messages/:id/regenerate', ({ params, body }) => {
       msg.reasoning,
       instruction,
     );
-    const next = insertMessageAfter(
-      msg.conversationId,
-      'tool',
-      '',
-      msg.id,
-      'streaming',
-      null,
-      msg.name,
-    );
-    if (recipeId) {
-      stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
-        recipeId,
-        next.id,
-      );
-    }
-    touchConversation(msg.conversationId);
-    const renderImage = recipeId;
-    startGeneration(getConversation(msg.conversationId), next.id, undefined, {
-      prompt,
-      onDone: renderImage ? () => startImageRender(next.id) : undefined,
-    });
-    broadcastTree(msg.conversationId);
-    invalidate('conversations');
+    const mid = spawnToolReply(conv, prompt, msg.name, recipeId, msg.id);
     return {
       activeLeafId: getActiveLeafId(msg.conversationId),
-      assistantMessageId: next.id,
+      assistantMessageId: mid,
     };
   }
   // A function replacer keeps '$' sequences in the instruction literal.
@@ -564,11 +538,7 @@ route.post('/api/messages/:id/render-image', ({ params, body }) => {
   if (!msg.content.trim()) throw new HttpError(400, 'message has no description to render');
   let recipeId = messageRecipeId(msg);
   if ('workflow' in b || 'comfyUrl' in b) {
-    try {
-      recipeId = createImageRecipe(parseImageConfig(b), msg.content);
-    } catch (err) {
-      throw new HttpError(400, err instanceof Error ? err.message : String(err));
-    }
+    recipeId = createImageRecipe(parseImageConfig(b), msg.content);
   }
   const job = startMessageImageRender(msg, recipeId);
   return { rendering: true, jobId: job.id };
