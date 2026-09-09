@@ -23,6 +23,7 @@ import {
   faArrowDown,
   faImage,
   faDownload,
+  faExpand,
   faCircleInfo,
   faChevronLeft,
   faChevronRight,
@@ -50,6 +51,7 @@ import {
   type MediaOperation,
 } from '@tinytavern/shared';
 import Modal from '../components/ui/Modal.tsx';
+import ImageViewer from '../components/ui/ImageViewer.tsx';
 import Select from '../components/ui/Select.tsx';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import PromptGenerationStatus from './PromptGenerationStatus.tsx';
@@ -101,6 +103,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const paneActive = useDialogActive();
+  const [fullSizeImage, setFullSizeImage] = createSignal<string | null>(null);
   const [picker, setPicker] = createSignal<MediaJobInput['slot'] | 'references' | null>(null);
   const [referenceCount, setReferenceCount] = createSignal(
     operationHasReferences(session.operation) ? 1 : 0,
@@ -746,11 +749,18 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           <Show
                             when={candidate.asset.kind === 'video'}
                             fallback={
-                              <img
-                                class="media-result block object-contain w-full max-h-[100cqh]"
-                                src={candidate.asset.url}
-                                alt="Generated image"
-                              />
+                              <button
+                                type="button"
+                                class="grid place-items-center w-full min-h-0 overflow-hidden p-0 border-0 rounded-none bg-clear cursor-zoom-in [&:hover:not(:disabled)]:bg-clear"
+                                aria-label="Open full-size image; zoom and pan"
+                                onClick={() => setFullSizeImage(candidate.asset.url)}
+                              >
+                                <img
+                                  class="media-result block object-contain w-full max-h-[100cqh]"
+                                  src={candidate.asset.url}
+                                  alt="Generated image"
+                                />
+                              </button>
                             }
                           >
                             <MediaPlayer
@@ -847,6 +857,22 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             asset={candidate().asset}
                             player={() => videoPlayer}
                           />
+                        </Show>
+                        <Show when={candidate().asset.kind === 'image'}>
+                          <button
+                            type="button"
+                            title="Open full-size image"
+                            aria-label="Open full-size image"
+                            onClick={() => setFullSizeImage(candidate().asset.url)}
+                          >
+                            <FontAwesomeIcon icon={faExpand} size={14} />{' '}
+                            <Show
+                              when={candidate().asset.width && candidate().asset.height}
+                              fallback="Full size"
+                            >
+                              {candidate().asset.width} × {candidate().asset.height}
+                            </Show>
+                          </button>
                         </Show>
                       </div>
                     )}
@@ -1230,6 +1256,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           </div>
         </div>
       </Modal>
+      <Show when={fullSizeImage()}>
+        {(url) => <ImageViewer src={url()} onClose={() => setFullSizeImage(null)} />}
+      </Show>
       <Show when={resultDetails()}>
         {(details) => (
           <MediaResultDetails
