@@ -24,8 +24,6 @@ Containers run as UID/GID `1000:1000`; use that user for setup or adjust ownersh
 
 Open **https://<host>:5487**. Data is stored in `./data`; preserve it and `.secrets`.
 To update, pull the latest code and rerun the Compose command above.
-Existing databases must use schema 68 or newer supported by the build;
-see [database compatibility](docs/database-schema.md) before upgrading older installations.
 
 ## Get started
 
@@ -35,6 +33,5 @@ see [database compatibility](docs/database-schema.md) before upgrading older ins
 
 For images and videos, set a reachable ComfyUI URL and paste API-format workflows
 under **Settings → Media rendering**, then open **Gallery → Tools**.
-ComfyUI needs the targeted cancellation and file cleanup APIs described in [AGENTS.md](AGENTS.md).
 
 Development commands and architectural rules live in [AGENTS.md](AGENTS.md).

@@ -56,7 +56,7 @@ Database backup: `docker compose exec tinytavern bun server/src/backup.ts /data/
 
 - Shared contracts start in `shared/src/index.ts`; media contracts are in `shared/src/media.ts`. Persistent state is server-authoritative; clients retain drafts and navigation only.
 - All application SQL uses memoized `stmt()` in `server/src/db.ts`. Keep SQLite writes synchronous. An `await` between validation and mutation breaks guard-and-act atomicity; revalidate every precondition after unavoidable awaits.
-- Schema lives in `server/src/schema.ts`. Minimum supported version is 68; future migrations start at 69. Update both fresh schema and migrations, never replay seeds on existing data. See `docs/database-schema.md` for persistent representations to migrate.
+- Schema lives in `server/src/schema.ts`. Minimum supported version is 68; future migrations start at 69. Update both fresh schema and migrations, including persisted JSON, file references and ownership. Never replay seeds on existing data.
 - New route modules must be imported for side effects by `server/src/index.ts`. Entity CRUD uses `defineEntityRoutes`/`createEntityWriter`; extend their field specs rather than duplicating handlers.
 - Preserve conversation active-leaf/mutation-revision guards and settings/job/draft revision guards. Protected default prompts/templates remain read-only. Settings transfer excludes credentials and resolves references by name, never imported IDs.
 - Use `deleteMessageSubtrees`/`deleteConversationRows` for deletion; direct recursive cascades fail on deep trees. Repair the active path inside the transaction. `setActiveLeaf` repoints every ancestor's active child without touching conversation recency.

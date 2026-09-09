@@ -70,7 +70,7 @@ let version = Number(stmt('PRAGMA user_version').get()!.user_version);
 if (version !== 0 && (version < BASELINE_VERSION || version > SCHEMA_VERSION)) {
   throw new Error(
     `Unsupported database schema ${version}; this build supports ${BASELINE_VERSION}–${SCHEMA_VERSION}. ` +
-      'Older databases must be upgraded before using this baseline; see docs/database-schema.md.',
+      'Older databases must be upgraded with a compatible build first.',
   );
 }
 
@@ -110,7 +110,6 @@ if (version === 0) {
 }
 
 // Future upgrades go here, starting at 69. Also update schema.ts and fresh seeds above.
-// See docs/database-schema.md for persisted JSON, file ownership and deployment notes.
 function migrate(target: number, apply: () => void): void {
   if (version >= target) return;
   transaction(() => {
