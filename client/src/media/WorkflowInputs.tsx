@@ -1,6 +1,6 @@
 import { For, Show, createUniqueId } from 'solid-js';
 import type { MediaWorkflowInput, MediaWorkflowValues } from '@tinytavern/shared';
-import Select from '../components/Select.tsx';
+import Select from '../components/ui/Select.tsx';
 import ResolutionHelp from './ResolutionHelp.tsx';
 
 export default function WorkflowInputs(props: {

@@ -1,32 +1,37 @@
-import { publicAvatar } from '../mediaUrls.ts';
-import { defineAvatarRoutes } from './avatarRoutes.ts';
+import { publicAvatar } from '../media/mediaUrls.ts';
+import { defineAvatarRoutes } from './shared/avatarRoutes.ts';
 import {
   namedItem,
   DEFAULT_CUSTOM_TEMPLATE,
   ENTITY_FIELDS,
   type Character,
 } from '@tinytavern/shared';
-import { stmt, toCharacter } from '../db.ts';
-import { invalidate } from '../events.ts';
-import { buildCharacterCard, isPng, makePlaceholderPng, parseCharacterCard } from '../pngCard.ts';
-import { route, HttpError } from '../router.ts';
-import type { Ctx } from '../router.ts';
+import { stmt, toCharacter } from '../db/db.ts';
+import { invalidate } from '../realtime/events.ts';
+import {
+  buildCharacterCard,
+  isPng,
+  makePlaceholderPng,
+  parseCharacterCard,
+} from '../characters/pngCard.ts';
+import { route, HttpError } from '../http/router.ts';
+import type { Ctx } from '../http/router.ts';
 import {
   optionalBoolean,
   optionalNullableString,
   optionalString,
   positiveId,
-} from '../validation.ts';
-import type { JsonObject } from '../validation.ts';
+} from '../http/validation.ts';
+import type { JsonObject } from '../http/validation.ts';
 import {
   copyAvatarFiles,
   deleteAvatarFiles,
   deleteObsoleteAvatarFiles,
   readAvatarFile,
   saveAvatar,
-} from './avatarStore.ts';
-import { defineEntityRoutes, entityFields, referenceValue } from './entityRoutes.ts';
-import { rowById } from './entityUtils.ts';
+} from '../characters/avatarStore.ts';
+import { defineEntityRoutes, entityFields, referenceValue } from './shared/entityRoutes.ts';
+import { rowById } from './shared/entityUtils.ts';
 
 const customTemplateFields = Object.entries(DEFAULT_CUSTOM_TEMPLATE);
 

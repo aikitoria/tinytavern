@@ -1,11 +1,11 @@
 import { newRequestId } from '@tinytavern/shared';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { api } from '../state/api.ts';
 import { errorMessage } from '../util.ts';
-import Modal from '../components/Modal.tsx';
-import PromptGenerationStatus from '../components/PromptGenerationStatus.tsx';
+import Modal from '../components/ui/Modal.tsx';
+import PromptGenerationStatus from '../media/PromptGenerationStatus.tsx';
 import { avatarPromptTemplates, avatarRenderConfig } from './imageGeneration.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';

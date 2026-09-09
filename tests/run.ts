@@ -82,7 +82,7 @@ process.once('SIGTERM', stop);
 try {
   // Initialize SQLite once for the entire run, before any test worker can import server code.
   Object.assign(process.env, environment(seed));
-  const { db } = await import('../server/src/db.ts');
+  const { db } = await import('../server/src/db/db.ts');
   db.close(true);
   let next = 0;
   await Promise.all(

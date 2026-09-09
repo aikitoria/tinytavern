@@ -11,10 +11,11 @@ test('media input prompts', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
-  const { stmt, mediaAssetForPath, invalidateMediaAsset } = await import('../../server/src/db.ts');
-  const { saveImage, deleteImageFiles } = await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt, mediaAssetForPath, invalidateMediaAsset } =
+    await import('../../server/src/db/db.ts');
+  const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const {
     createMediaJob,
     editMediaJob,
@@ -22,10 +23,11 @@ test('media input prompts', async () => {
     startMediaJob,
     cancelMediaJob,
     deleteMediaJob,
-  } = await import('../../server/src/mediaJobs.ts');
-  const { requireMediaJob } = await import('../../server/src/mediaJobStore.ts');
-  const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
-  const { expandTemplate } = await import('../../server/src/prompt.ts');
+  } = await import('../../server/src/media/mediaJobs.ts');
+  const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { saveMediaRecipe, getMediaRecipe } =
+    await import('../../server/src/media/mediaRecipes.ts');
+  const { expandTemplate } = await import('../../server/src/generation/prompt.ts');
   const imageWorkflow = imageConfig(
     '{"1":{"inputs":{"prompt":"{{prompt}}"}}}',
     'http://unused.invalid',

@@ -2,7 +2,7 @@ import type { SQLQueryBindings } from 'bun:sqlite';
 import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
-const { stmt } = await import('../../server/src/db.ts');
+const { stmt } = await import('../../server/src/db/db.ts');
 
 /** Insert fixture rows directly, independently of the operation being tested. */
 export function insertFixture(table: string, values: Record<string, SQLQueryBindings>): number {

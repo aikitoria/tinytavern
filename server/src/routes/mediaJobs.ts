@@ -1,12 +1,12 @@
-import { route, HttpError, type Ctx } from '../router.ts';
-import { objectBody, positiveId } from '../validation.ts';
-import { stmt } from '../db.ts';
+import { route, HttpError, type Ctx } from '../http/router.ts';
+import { objectBody, positiveId } from '../http/validation.ts';
+import { stmt } from '../db/db.ts';
 import {
   activeMediaJobs,
   mediaJobDto,
   requireMediaJob,
   type MediaJobRow,
-} from '../mediaJobStore.ts';
+} from '../media/mediaJobStore.ts';
 import {
   cancelMediaJob,
   createMediaJob,
@@ -15,16 +15,16 @@ import {
   editMediaJob,
   retryMediaRetrieval,
   startMediaJob,
-} from '../mediaJobs.ts';
+} from '../media/mediaJobs.ts';
 import {
   acceptMediaVariation,
   discardMediaDraft,
   mediaDraftJobs,
   selectMediaVariation,
-} from '../mediaDrafts.ts';
-import { tickMediaWorker } from '../mediaWorker.ts';
-import { getMediaAssetInputs, getMediaAssetResultDetails } from '../mediaRecipes.ts';
-import { publicMediaAsset } from '../mediaUrls.ts';
+} from '../media/mediaDrafts.ts';
+import { tickMediaWorker } from '../media/mediaWorker.ts';
+import { getMediaAssetInputs, getMediaAssetResultDetails } from '../media/mediaRecipes.ts';
+import { publicMediaAsset } from '../media/mediaUrls.ts';
 
 function jobForMutation(id: number, body: Record<string, unknown>) {
   if (!Number.isSafeInteger(body.expectedRevision)) {

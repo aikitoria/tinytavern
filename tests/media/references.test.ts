@@ -20,12 +20,13 @@ test('media source images', async () => {
   writeFileSync(signingKey, '11'.repeat(32));
   process.env.MEDIA_SIGNING_KEY_FILE = signingKey;
   const { stmt, IMAGES_DIR, mediaAssetForPath, invalidateMediaAsset } =
-    await import('../../server/src/db.ts');
-  const { saveImage, sweepOrphanedImages } = await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
-  const { updateMediaJob } = await import('../../server/src/mediaJobStore.ts');
-  const { finishMediaJob } = await import('../../server/src/mediaJobResults.ts');
+    await import('../../server/src/db/db.ts');
+  const { saveImage, sweepOrphanedImages } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveMediaRecipe, getMediaRecipe } =
+    await import('../../server/src/media/mediaRecipes.ts');
+  const { updateMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { finishMediaJob } = await import('../../server/src/media/mediaJobResults.ts');
   await import('../../server/src/routes/mediaJobs.ts');
   await import('../../server/src/routes/gallery.ts');
 
@@ -93,7 +94,7 @@ test('media source images', async () => {
 
   const { server, base, request } = await testApi();
   try {
-    const { appendMessage } = await import('../../server/src/tree.ts');
+    const { appendMessage } = await import('../../server/src/conversations/tree.ts');
     conversationFixture({ id: 1, title: 'Video chat' });
     const message = appendMessage(1, 'tool', 'Saved prompt', null);
     stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(

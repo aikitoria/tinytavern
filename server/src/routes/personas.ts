@@ -1,10 +1,10 @@
 import { ENTITY_FIELDS } from '@tinytavern/shared';
-import { publicAvatar } from '../mediaUrls.ts';
-import { defineAvatarRoutes } from './avatarRoutes.ts';
+import { publicAvatar } from '../media/mediaUrls.ts';
+import { defineAvatarRoutes } from './shared/avatarRoutes.ts';
 import type { Persona } from '@tinytavern/shared';
-import { stmt, toPersona } from '../db.ts';
-import { copyAvatarFiles, deleteAvatarFiles } from './avatarStore.ts';
-import { defineEntityRoutes, entityFields } from './entityRoutes.ts';
+import { stmt, toPersona } from '../db/db.ts';
+import { copyAvatarFiles, deleteAvatarFiles } from '../characters/avatarStore.ts';
+import { defineEntityRoutes, entityFields } from './shared/entityRoutes.ts';
 
 defineEntityRoutes<Persona>({
   table: 'personas',

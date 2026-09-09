@@ -1,8 +1,8 @@
 import { Show, createSignal } from 'solid-js';
 import { faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
 import type { MediaAsset, MediaJobInput, MediaOperation } from '@tinytavern/shared';
-import DropdownSurface from '../components/DropdownSurface.tsx';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import DropdownSurface from '../components/ui/DropdownSurface.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { openMediaTool } from './navigation.ts';
 
 export default function MediaActions(props: {

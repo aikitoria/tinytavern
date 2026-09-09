@@ -49,11 +49,11 @@ import {
   type MediaJobInput,
   type MediaOperation,
 } from '@tinytavern/shared';
-import Modal from '../components/Modal.tsx';
-import Select from '../components/Select.tsx';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
-import PromptGenerationStatus from '../components/PromptGenerationStatus.tsx';
-import GalleryModal from '../components/GalleryModal.tsx';
+import Modal from '../components/ui/Modal.tsx';
+import Select from '../components/ui/Select.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
+import PromptGenerationStatus from './PromptGenerationStatus.tsx';
+import GalleryModal from '../components/gallery/GalleryModal.tsx';
 import SamplerProgress from '../images/SamplerProgress.tsx';
 import { api } from '../state/api.ts';
 import { applyMediaJob, handleServerEvent, state, toast } from '../state/store.ts';

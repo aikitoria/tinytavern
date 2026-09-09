@@ -7,13 +7,13 @@ databaseCase('chat prompt', async () => {
 
   const { systemNote } = await import('@tinytavern/shared');
 
-  type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
-  type ChatMessage = import('../../server/src/prompt.ts').ChatMessage;
+  type BuiltPrompt = import('../../server/src/generation/prompt.ts').BuiltPrompt;
+  type ChatMessage = import('../../server/src/generation/prompt.ts').ChatMessage;
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
   const { appendChatMessage, withDisabledPrefillSpeakerNote } =
-    await import('../../server/src/prompt.ts');
+    await import('../../server/src/generation/prompt.ts');
 
   const messages: ChatMessage[] = [];
   appendChatMessage(messages, { role: 'user', content: 'first' });
@@ -64,9 +64,9 @@ databaseCase('chat prompt', async () => {
     assert.equal(systemNote(`[System Note]\n[${label}]\nCustom`), '[System Note]\nCustom');
   }
 
-  const { stmt, toConversation } = await import('../../server/src/db.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { buildChatMessages } = await import('../../server/src/prompt.ts');
+  const { stmt, toConversation } = await import('../../server/src/db/db.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { buildChatMessages } = await import('../../server/src/generation/prompt.ts');
   const characterId = Number(
     stmt(
       "INSERT INTO characters(name, personality, created_at) VALUES ('Layout character', 'Visible personality', 1)",
@@ -124,7 +124,7 @@ databaseCase('chat prompt', async () => {
   );
 
   const { resolveSteerTemplate, appendImagePromptRevisionTask } =
-    await import('../../server/src/prompt.ts');
+    await import('../../server/src/generation/prompt.ts');
   stmt(
     'UPDATE templates SET steer_template = ?, prefix_names = 1, speaker_handoff_template = ? WHERE id = ?',
   ).run('Adjust {{instruction}} exactly.', 'Speak as {{speaker}} only.', templateId);
@@ -171,9 +171,10 @@ databaseCase('chat prompt', async () => {
 
 databaseCase('completion config', async () => {
   type Endpoint = import('@tinytavern/shared').Endpoint;
-  const { prepareStandaloneCompletion } = await import('../../server/src/completionConfig.ts');
+  const { prepareStandaloneCompletion } =
+    await import('../../server/src/generation/completionConfig.ts');
 
-  type ChatMessage = import('../../server/src/prompt.ts').ChatMessage;
+  type ChatMessage = import('../../server/src/generation/prompt.ts').ChatMessage;
 
   const endpoint: Endpoint = {
     id: 1,
@@ -259,11 +260,11 @@ databaseCase('draft completion', async () => {
 
   requireTestIsolation();
   const { buildDraftCompletionMessages, DraftSuffixFilter } =
-    await import('../../server/src/draftCompletionPrompt.ts');
-  const { stmt, toConversation } = await import('../../server/src/db.ts');
-  const { getSettings } = await import('../../server/src/settingsStore.ts');
-  const { appendMessage } = await import('../../server/src/tree.ts');
-  const { buildChatMessages } = await import('../../server/src/prompt.ts');
+    await import('../../server/src/generation/draftCompletionPrompt.ts');
+  const { stmt, toConversation } = await import('../../server/src/db/db.ts');
+  const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { appendMessage } = await import('../../server/src/conversations/tree.ts');
+  const { buildChatMessages } = await import('../../server/src/generation/prompt.ts');
 
   const conversation = toConversation(
     stmt(

@@ -22,12 +22,12 @@ test('media restart', async () => {
 
   requireTestIsolation();
   const { stmt, IMAGES_DIR, DATA_DIR, mediaAssetForPath, toMediaAsset } =
-    await import('../../server/src/db.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { saveImage, deleteImageFiles } = await import('../../server/src/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { createMediaJob, startMediaJob } = await import('../../server/src/mediaJobs.ts');
-  const { requireMediaJob, mediaJobRow } = await import('../../server/src/mediaJobStore.ts');
+    await import('../../server/src/db/db.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { createMediaJob, startMediaJob } = await import('../../server/src/media/mediaJobs.ts');
+  const { requireMediaJob, mediaJobRow } = await import('../../server/src/media/mediaJobStore.ts');
 
   const videoPath = join(DATA_DIR, 'restart-fixture.webm');
   await promisify(execFile)('ffmpeg', [

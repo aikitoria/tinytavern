@@ -1,5 +1,5 @@
 import { Show, createResource } from 'solid-js';
-import Modal from '../components/Modal.tsx';
+import Modal from '../components/ui/Modal.tsx';
 import { api } from '../state/api.ts';
 import { toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';

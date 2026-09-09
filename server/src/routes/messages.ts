@@ -1,9 +1,9 @@
-import { publicMessage } from '../mediaUrls.ts';
+import { publicMessage } from '../media/mediaUrls.ts';
 // Keep check-and-act synchronous: an await lets handlers and generation callbacks
 // interleave, reopening double-generation and active-leaf races.
-import { copyMessageImages } from './conversationCopies.ts';
-import { stmt, transaction } from '../db.ts';
-import { route, HttpError } from '../router.ts';
+import { copyMessageImages } from '../conversations/conversationCopies.ts';
+import { stmt, transaction } from '../db/db.ts';
+import { route, HttpError } from '../http/router.ts';
 import {
   activateMessage,
   appendMessage,
@@ -17,7 +17,7 @@ import {
   rotateDown,
   spliceMessage,
   spliceMessages,
-} from '../tree.ts';
+} from '../conversations/tree.ts';
 import {
   activeGenerationMessageIds,
   hasActiveGeneration,
@@ -29,26 +29,30 @@ import {
   supportsAssistantContinuation,
   startGeneration,
   stopGeneration,
-} from '../generation.ts';
-import { broadcastTree } from '../sync.ts';
-import { invalidate, hasConversationSubscribers } from '../events.ts';
+} from '../generation/generation.ts';
+import { broadcastTree } from '../realtime/sync.ts';
+import { invalidate, hasConversationSubscribers } from '../realtime/events.ts';
 import { spawnAssistantReply } from './conversations.ts';
-import { getConversation, touchConversation } from '../conversationStore.ts';
-import { objectBody, optionalNumber, positiveId, requiredString } from '../validation.ts';
-import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
+import { getConversation, touchConversation } from '../conversations/conversationStore.ts';
+import { objectBody, optionalNumber, positiveId, requiredString } from '../http/validation.ts';
+import { requireBodyPrecondition, requireQueryPrecondition } from './shared/mutationGuard.ts';
 import {
   cancelBackgroundSwipe,
   discardSpeculativeSwipes,
   markSwipeRead,
   nextUnreadSibling,
   prepareNextSwipe,
-} from '../speculation.ts';
-import { parseImageConfig, startImageRender } from '../comfy.ts';
-import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../prompt.ts';
-import { bumpConversationRevision } from '../conversationRevision.ts';
-import { deleteImageFiles } from '../images.ts';
-import { startMessageImageRender } from '../mediaImageAdapter.ts';
-import { createImageRecipe, messageRecipeId } from '../mediaRecipes.ts';
+} from '../generation/speculation.ts';
+import { parseImageConfig, startImageRender } from '../media/comfy/comfy.ts';
+import {
+  buildSteeredPrompt,
+  buildSteeredToolPrompt,
+  resolveSteerTemplate,
+} from '../generation/prompt.ts';
+import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
+import { deleteImageFiles } from '../media/images.ts';
+import { startMessageImageRender } from '../media/mediaImageAdapter.ts';
+import { createImageRecipe, messageRecipeId } from '../media/mediaRecipes.ts';
 
 function requireMessage(id: number) {
   const msg = getMessage(id);

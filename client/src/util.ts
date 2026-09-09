@@ -1,7 +1,7 @@
 import { useDialogActive, useDialogPage } from './state/dialogContext.ts';
 import { readPageLocation, writePageLocation } from './state/pageLocation.ts';
 import { createEffect, createSignal, onMount, untrack } from 'solid-js';
-import { useSettingsGuard, useSettingsNavigation } from './components/SettingsGuard.tsx';
+import { useSettingsGuard, useSettingsNavigation } from './components/settings/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
 import { confirmAction } from './state/confirm.ts';
 

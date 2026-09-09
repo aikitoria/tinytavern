@@ -1,10 +1,10 @@
 import type { Server } from 'bun';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { stat } from 'node:fs/promises';
-import { caddyEnabled } from './mediaUrls.ts';
-import { AVATAR_DIR, IMAGES_DIR, db } from './db.ts';
-import { stopAllGenerations } from './generation.ts';
-import { apiRoutes, apiError } from './router.ts';
+import { caddyEnabled } from './media/mediaUrls.ts';
+import { AVATAR_DIR, IMAGES_DIR, db } from './db/db.ts';
+import { stopAllGenerations } from './generation/generation.ts';
+import { apiRoutes, apiError } from './http/router.ts';
 import {
   websocket,
   bindWebSocketServer,
@@ -12,20 +12,20 @@ import {
   setSubscribeHandler,
   setUnsubscribeHandler,
   type SocketState,
-} from './events.ts';
-import { sendTreeTo } from './sync.ts';
-import { cancelBackgroundSwipe, prepareActiveSwipe } from './speculation.ts';
+} from './realtime/events.ts';
+import { sendTreeTo } from './realtime/sync.ts';
+import { cancelBackgroundSwipe, prepareActiveSwipe } from './generation/speculation.ts';
 import {
   configuredIpAllowlist,
   isRequestIpAllowed,
   isRequestOriginAllowed,
   requestIp,
-} from './ipAccess.ts';
-import { isRequestAuthenticated } from './auth.ts';
-import { sweepOrphanedImages } from './images.ts';
-import { initMediaWorker, stopMediaWorker } from './mediaWorker.ts';
-import { activeMediaJobs } from './mediaJobStore.ts';
-import { initMediaThumbnails, stopMediaThumbnails } from './mediaThumbnails.ts';
+} from './http/ipAccess.ts';
+import { isRequestAuthenticated } from './http/auth.ts';
+import { sweepOrphanedImages } from './media/images.ts';
+import { initMediaWorker, stopMediaWorker } from './media/mediaWorker.ts';
+import { activeMediaJobs } from './media/mediaJobStore.ts';
+import { initMediaThumbnails, stopMediaThumbnails } from './media/mediaThumbnails.ts';
 import './routes/conversations.ts';
 import './routes/messages.ts';
 import './routes/gallery.ts';

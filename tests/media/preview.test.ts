@@ -14,14 +14,14 @@ test('media latency', async () => {
   requireTestIsolation();
   // No interval tick can rescue a stalled transition in this test.
   process.env.COMFY_POLL_MS = '60000';
-  const { stmt } = await import('../../server/src/db.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { createMediaJob, startMediaJob } = await import('../../server/src/mediaJobs.ts');
+  const { stmt } = await import('../../server/src/db/db.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { createMediaJob, startMediaJob } = await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaLive, observeMediaJob } =
-    await import('../../server/src/mediaJobStore.ts');
+    await import('../../server/src/media/mediaJobStore.ts');
   const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
-    await import('../../server/src/mediaWorker.ts');
+    await import('../../server/src/media/mediaWorker.ts');
 
   const submissions = new Map<
     number,

@@ -1,23 +1,23 @@
 import type { MediaImageConfig } from '@tinytavern/shared';
-import { imageRenderConfiguration } from '../mediaRecipes.ts';
+import { imageRenderConfiguration } from '../media/mediaRecipes.ts';
 import { characterChatName, expandPromptSlots } from '@tinytavern/shared';
-import { parseImageConfig, renderToBuffer } from '../comfy.ts';
-import { streamChatCompletion } from '../generation.ts';
-import { getPersona } from '../prompt.ts';
-import { getSettings } from '../settingsStore.ts';
-import { route, HttpError } from '../router.ts';
-import type { Ctx } from '../router.ts';
-import { objectBody, positiveId } from '../validation.ts';
+import { parseImageConfig, renderToBuffer } from '../media/comfy/comfy.ts';
+import { streamChatCompletion } from '../generation/generation.ts';
+import { getPersona } from '../generation/prompt.ts';
+import { getSettings } from '../settings/settingsStore.ts';
+import { route, HttpError } from '../http/router.ts';
+import type { Ctx } from '../http/router.ts';
+import { objectBody, positiveId } from '../http/validation.ts';
 import {
   finishRenderProgress,
   publishRenderPreview,
   publishRenderProgress,
   renderJobId,
   streamRenderProgress,
-} from '../renderProgress.ts';
-import { streamResponse } from './streamResponse.ts';
-import { rowById } from './entityUtils.ts';
-import type { AvatarKind } from './avatarStore.ts';
+} from '../media/renderProgress.ts';
+import { streamResponse } from '../http/streamResponse.ts';
+import { rowById } from './shared/entityUtils.ts';
+import type { AvatarKind } from '../characters/avatarStore.ts';
 
 /** Nothing is persisted here; the normal PUT avatar route saves and enforces PNG. */
 

@@ -6,7 +6,7 @@ import { requireTestIsolation } from './isolation.ts';
 
 requireTestIsolation();
 const { db, stmt, transaction, invalidateMediaAsset, DATA_DIR } =
-  await import('../../server/src/db.ts');
+  await import('../../server/src/db/db.ts');
 const tables = stmt('PRAGMA table_list')
   .all()
   .filter((row) => row.schema === 'main' && row.type === 'table' && row.name !== 'sqlite_schema')

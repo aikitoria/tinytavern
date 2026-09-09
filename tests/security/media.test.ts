@@ -17,7 +17,7 @@ test('media url', async () => {
   writeFileSync(keyFile, key.toString('hex'));
   process.env.MEDIA_SIGNING_KEY_FILE = keyFile;
   const { signMediaUrl, publicAvatar, publicMessage, publicGalleryItem } =
-    await import('../../server/src/mediaUrls.ts');
+    await import('../../server/src/media/mediaUrls.ts');
   const realNow = Date.now;
   Date.now = () => 1_000_000_000;
   try {
@@ -41,7 +41,7 @@ test('media url', async () => {
     assert.equal(avatar.avatar, '/avatars/character-1.png?v=42');
     assert.equal(publicMessage(undefined), undefined);
     assert.equal(publicMessage(null), null);
-    const { toMessage, toGalleryItem, stmt } = await import('../../server/src/db.ts');
+    const { toMessage, toGalleryItem, stmt } = await import('../../server/src/db/db.ts');
     stmt('INSERT INTO avatar_thumbnails(source, thumbnail, thumbnail_size) VALUES (?, ?, 128)').run(
       avatar.avatar,
       '/avatars/thumb-character-1-1-1.jpg',

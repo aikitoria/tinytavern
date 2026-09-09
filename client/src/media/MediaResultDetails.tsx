@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import Modal from '../components/Modal.tsx';
+import Modal from '../components/ui/Modal.tsx';
 import type { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 
 export default function MediaResultDetails(props: {

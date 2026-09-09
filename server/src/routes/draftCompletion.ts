@@ -1,14 +1,17 @@
-import { route, HttpError } from '../router.ts';
-import type { Ctx } from '../router.ts';
-import { getActivePath } from '../tree.ts';
-import { buildChatMessages } from '../prompt.ts';
-import { buildDraftCompletionMessages, DraftSuffixFilter } from '../draftCompletionPrompt.ts';
-import { hasForegroundGeneration, streamChatCompletion } from '../generation.ts';
-import { requireExpectedActiveLeaf } from '../concurrency.ts';
-import { objectBody, optionalNullableId, optionalNumber, positiveId } from '../validation.ts';
-import { streamResponse } from './streamResponse.ts';
-import { getSettings } from '../settingsStore.ts';
-import { getConversation } from '../conversationStore.ts';
+import { route, HttpError } from '../http/router.ts';
+import type { Ctx } from '../http/router.ts';
+import { getActivePath } from '../conversations/tree.ts';
+import { buildChatMessages } from '../generation/prompt.ts';
+import {
+  buildDraftCompletionMessages,
+  DraftSuffixFilter,
+} from '../generation/draftCompletionPrompt.ts';
+import { hasForegroundGeneration, streamChatCompletion } from '../generation/generation.ts';
+import { requireExpectedActiveLeaf } from '../conversations/concurrency.ts';
+import { objectBody, optionalNullableId, optionalNumber, positiveId } from '../http/validation.ts';
+import { streamResponse } from '../http/streamResponse.ts';
+import { getSettings } from '../settings/settingsStore.ts';
+import { getConversation } from '../conversations/conversationStore.ts';
 
 const DRAFT_COMPLETION_MAX_TOKENS = 1024;
 const streaming = new Set<number>();

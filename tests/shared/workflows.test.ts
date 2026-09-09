@@ -13,7 +13,7 @@ test('media workflow', async () => {
   } = await import('@tinytavern/shared');
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
   const { parseMediaRendering, parseMediaPrompts } =
-    await import('../../server/src/mediaSettings.ts');
+    await import('../../server/src/media/mediaSettings.ts');
 
   const workflow: MediaWorkflow = {
     id: 'three',
@@ -472,7 +472,7 @@ test('workflow inputs', async () => {
 });
 
 test('comfy graph progress', async () => {
-  const { ComfyGraphProgress } = await import('../../server/src/comfyGraphProgress.ts');
+  const { ComfyGraphProgress } = await import('../../server/src/media/comfy/comfyGraphProgress.ts');
 
   const progress = new ComfyGraphProgress({
     load: { class_type: 'CheckpointLoader' },

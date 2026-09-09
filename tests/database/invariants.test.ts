@@ -12,11 +12,11 @@ test('deep tree delete', async () => {
 
   requireTestIsolation();
   const { stmt, transaction, deleteMessageSubtrees, IMAGES_DIR } =
-    await import('../../server/src/db.ts');
+    await import('../../server/src/db/db.ts');
   const { deleteMessage, spliceMessage, getMessage, getActiveLeafId, setActiveLeaf } =
-    await import('../../server/src/tree.ts');
-  const { saveImage } = await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+    await import('../../server/src/conversations/tree.ts');
+  const { saveImage } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   await import('../../server/src/routes/conversations.ts');
   const { server, request: send } = await testApi();
   const conversation = () => conversationFixture({ title: 'Deep' });
@@ -191,7 +191,7 @@ test('online backup preserves committed state and refuses replacement', async ()
   const { spawnSync } = await import('node:child_process');
   const { join } = await import('node:path');
   const { readFileSync, statSync } = await import('node:fs');
-  const { db, stmt, DATA_DIR } = await import('../../server/src/db.ts');
+  const { db, stmt, DATA_DIR } = await import('../../server/src/db/db.ts');
   const binary = new Uint8Array([0, 255, 128, 13]);
   const roundTrip = stmt('SELECT ? AS bytes').get(binary)!.bytes;
   assert(roundTrip instanceof Uint8Array);
@@ -200,7 +200,7 @@ test('online backup preserves committed state and refuses replacement', async ()
   const mid = messageFixture(cid, { role: 'user', content: 'backupftsprobe' });
   const target = join(DATA_DIR, 'backup.db');
   const run = () =>
-    spawnSync(process.execPath, ['server/src/backup.ts', target], { encoding: 'utf8' });
+    spawnSync(process.execPath, ['server/src/db/backup.ts', target], { encoding: 'utf8' });
   db.exec('BEGIN');
   try {
     stmt("UPDATE messages SET content='uncommitted' WHERE id=?").run(mid);

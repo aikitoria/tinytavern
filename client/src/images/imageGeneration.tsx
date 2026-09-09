@@ -1,13 +1,13 @@
-import SettingsTransferButtons from '../components/SettingsTransferButtons.tsx';
+import SettingsTransferButtons from '../components/settings/SettingsTransferButtons.tsx';
 import { importImagePromptSet, transferObject, transferString } from '@tinytavern/shared';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
   DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
   DEFAULT_AVATAR_CONTEXT,
 } from '@tinytavern/shared';
-import SettingsActions from '../components/SettingsActions.tsx';
+import SettingsActions from '../components/settings/SettingsActions.tsx';
 import type { MediaImageConfig } from '@tinytavern/shared';
-import SettingLabel, { createDefaultField } from '../components/SettingField.tsx';
+import SettingLabel, { createDefaultField } from '../components/forms/SettingField.tsx';
 import {
   faChevronLeft,
   faChevronRight,
@@ -16,7 +16,7 @@ import {
   faSpinner,
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
@@ -39,16 +39,16 @@ import {
   toast,
 } from '../state/store.ts';
 import { createSavedFlash, errorMessage } from '../util.ts';
-import ImageViewer from '../components/ImageViewer.tsx';
+import ImageViewer from '../components/ui/ImageViewer.tsx';
 import MediaPlayer from '../media/MediaPlayer.tsx';
 import MediaActions from '../media/MediaActions.tsx';
 import { openMediaTool, openMediaRerun } from '../media/navigation.ts';
-import MacroHelp from '../components/MacroHelp.tsx';
-import Markdown from '../components/Markdown.tsx';
-import { createNamedCollection } from '../components/NamedCollectionEditor.tsx';
-import FormField, { createFormFields } from '../components/FormFields.tsx';
+import MacroHelp from '../components/forms/MacroHelp.tsx';
+import Markdown from '../components/ui/Markdown.tsx';
+import { createNamedCollection } from '../components/forms/NamedCollectionEditor.tsx';
+import FormField, { createFormFields } from '../components/forms/FormFields.tsx';
 import { createSettingsSubmission } from '../state/settingsSubmission.ts';
-import { useSettingsGuard } from '../components/SettingsGuard.tsx';
+import { useSettingsGuard } from '../components/settings/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 

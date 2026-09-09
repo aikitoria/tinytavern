@@ -13,16 +13,16 @@ test('media description', async () => {
 
   requireTestIsolation();
   process.env.COMFY_POLL_MS = '30';
-  const { stmt, mediaAssetForPath } = await import('../../server/src/db.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { saveImage } = await import('../../server/src/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveImage } = await import('../../server/src/media/images.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { describeImage, descriptionWorkflow } =
-    await import('../../server/src/mediaDescription.ts');
+    await import('../../server/src/media/mediaDescription.ts');
   const { initMediaWorker, stopMediaWorker, tickMediaWorker } =
-    await import('../../server/src/mediaWorker.ts');
-  const { comfyTextOutput } = await import('../../server/src/comfyTextOutput.ts');
-  const { apiRoutes } = await import('../../server/src/router.ts');
+    await import('../../server/src/media/mediaWorker.ts');
+  const { comfyTextOutput } = await import('../../server/src/media/comfy/comfyTextOutput.ts');
+  const { apiRoutes } = await import('../../server/src/http/router.ts');
   await import('../../server/src/routes/gallery.ts');
 
   assert.deepEqual(getSettings().mediaRendering.workflows, []);

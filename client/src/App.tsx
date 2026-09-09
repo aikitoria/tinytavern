@@ -3,15 +3,15 @@ import { DialogContext } from './state/dialogContext.ts';
 import { For, Show, Switch, Match, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { installUiBack, registerUiBack } from './state/uiBack.ts';
 import { booting, state, setState, streamingMessage } from './state/store.ts';
-import Sidebar from './components/Sidebar.tsx';
-import Header from './components/Header.tsx';
-import ChatView from './components/ChatView.tsx';
-import Composer from './components/Composer.tsx';
-import MapSearch from './components/MapSearch.tsx';
-import SettingsModal from './components/SettingsModal.tsx';
-import ConversationSettings from './components/ConversationSettings.tsx';
-import PasswordGate from './components/PasswordGate.tsx';
-import ConfirmDialogHost from './components/ConfirmDialogHost.tsx';
+import Sidebar from './components/layout/Sidebar.tsx';
+import Header from './components/layout/Header.tsx';
+import ChatView from './components/chat/ChatView.tsx';
+import Composer from './components/chat/Composer.tsx';
+import MapSearch from './components/tree/MapSearch.tsx';
+import SettingsModal from './components/settings/SettingsModal.tsx';
+import ConversationSettings from './components/chat/ConversationSettings.tsx';
+import PasswordGate from './components/layout/PasswordGate.tsx';
+import ConfirmDialogHost from './components/ui/ConfirmDialogHost.tsx';
 import { authPhase } from './state/auth.ts';
 import {
   clearMessageSelection,
@@ -19,8 +19,8 @@ import {
   messageSelectionActive,
   selectedMessageRange,
 } from './state/messageSelection.ts';
-import MessageSelectionBar from './components/MessageSelectionBar.tsx';
-import GalleryModal from './components/GalleryModal.tsx';
+import MessageSelectionBar from './components/chat/MessageSelectionBar.tsx';
+import GalleryModal from './components/gallery/GalleryModal.tsx';
 import MediaToolsModal from './media/MediaToolsModal.tsx';
 import MediaJobsModal from './media/MediaJobsModal.tsx';
 

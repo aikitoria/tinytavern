@@ -17,17 +17,17 @@ test('media prompts', async () => {
 
   requireTestIsolation();
   process.env.COMFY_POLL_MS = '5';
-  const { stmt, toConversation } = await import('../../server/src/db.ts');
-  const { buildToolPrompt } = await import('../../server/src/prompt.ts');
-  const { getActivePath } = await import('../../server/src/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt, toConversation } = await import('../../server/src/db/db.ts');
+  const { buildToolPrompt } = await import('../../server/src/generation/prompt.ts');
+  const { getActivePath } = await import('../../server/src/conversations/tree.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { createMediaJob, editMediaJob, startMediaJob, cancelMediaJob } =
-    await import('../../server/src/mediaJobs.ts');
+    await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaLive, mediaJobDto } =
-    await import('../../server/src/mediaJobStore.ts');
+    await import('../../server/src/media/mediaJobStore.ts');
   const { initMediaWorker, stopMediaWorker, tickMediaWorker } =
-    await import('../../server/src/mediaWorker.ts');
-  const { treeSnapshot } = await import('../../server/src/sync.ts');
+    await import('../../server/src/media/mediaWorker.ts');
+  const { treeSnapshot } = await import('../../server/src/realtime/sync.ts');
 
   const endpointId = insertFixture('endpoints', {
     name: 'Captured',

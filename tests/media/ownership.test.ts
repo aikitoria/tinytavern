@@ -6,10 +6,10 @@ databaseCase('media ownership', async () => {
   const { existsSync, readdirSync, writeFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { stmt, IMAGES_DIR, mediaAssetForPath, transaction } =
-    await import('../../server/src/db.ts');
+    await import('../../server/src/db/db.ts');
   const { saveImage, copyImage, deleteImageFiles, sweepOrphanedImages, reserveMediaFile } =
-    await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+    await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const path = saveImage('.png', makePlaceholderPng());
   const asset = mediaAssetForPath(path)!;
   assert.equal(path, `/images/media-${asset.id}.png`);
@@ -75,7 +75,7 @@ databaseCase('media ownership', async () => {
     mediaAssetForPath(input)!.id,
   );
   stmt('UPDATE media_assets SET recipe_id = 901 WHERE path = ?').run(duplicate);
-  const { invalidateMediaAsset } = await import('../../server/src/db.ts');
+  const { invalidateMediaAsset } = await import('../../server/src/db/db.ts');
   invalidateMediaAsset(duplicate);
   deleteImageFiles([input, duplicate]);
   assert.equal(
@@ -91,9 +91,9 @@ databaseCase('media ownership', async () => {
 });
 
 databaseCase('media attachment ownership', async () => {
-  const { stmt } = await import('../../server/src/db.ts');
+  const { stmt } = await import('../../server/src/db/db.ts');
   const { mediaCharacterIds, setMediaCharacters } =
-    await import('../../server/src/mediaCharacters.ts');
+    await import('../../server/src/media/mediaCharacters.ts');
   const cid = conversationFixture({ character_id: 1, title: 'Attachments' });
   const paths = ['/images/101.png', '/images/102.png', '/images/103.png'] as const;
   const mid = messageFixture(cid, {
@@ -175,17 +175,18 @@ databaseCase('media characters', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
 
-  const { stmt, mediaAssetForPath } = await import('../../server/src/db.ts');
-  const { saveImage, copyImage, reserveMediaFile } = await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+  const { stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { saveImage, copyImage, reserveMediaFile } =
+    await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { mediaCharacterIds, setMediaCharacters, captureMediaCharacters } =
-    await import('../../server/src/mediaCharacters.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+    await import('../../server/src/media/mediaCharacters.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { createMediaJob, startMediaJob, createMediaJobFromAsset } =
-    await import('../../server/src/mediaJobs.ts');
-  const { requireMediaJob, mediaJobDto } = await import('../../server/src/mediaJobStore.ts');
-  const { recordMediaResult } = await import('../../server/src/mediaJobResults.ts');
-  const { getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
+    await import('../../server/src/media/mediaJobs.ts');
+  const { requireMediaJob, mediaJobDto } = await import('../../server/src/media/mediaJobStore.ts');
+  const { recordMediaResult } = await import('../../server/src/media/mediaJobResults.ts');
+  const { getMediaRecipe } = await import('../../server/src/media/mediaRecipes.ts');
   const characters = ['Ashina', 'Haeun'].map((name) =>
     insertFixture('characters', { name, created_at: 1 }),
   );
@@ -292,14 +293,14 @@ databaseCase('temporary media job', async () => {
   const { existsSync } = await import('node:fs');
   const { basename, join } = await import('node:path');
   type MediaJobState = import('@tinytavern/shared').MediaJobState;
-  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db.ts');
-  const { saveImage } = await import('../../server/src/images.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { consumeTemporaryMediaJob } = await import('../../server/src/temporaryMediaJob.ts');
+  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { saveImage } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { consumeTemporaryMediaJob } = await import('../../server/src/media/temporaryMediaJob.ts');
   const { requireMediaJob, mediaJobRow, hasMediaJobObservers } =
-    await import('../../server/src/mediaJobStore.ts');
-  const { stopMediaWorker } = await import('../../server/src/mediaWorker.ts');
-  const { deleteMediaJob } = await import('../../server/src/mediaJobs.ts');
+    await import('../../server/src/media/mediaJobStore.ts');
+  const { stopMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
+  const { deleteMediaJob } = await import('../../server/src/media/mediaJobs.ts');
   stopMediaWorker(); // Exercise consumption and cancellation without starting remote work.
 
   const files = new Map<number, string>();

@@ -50,25 +50,27 @@ Image builds do not deploy. Dependency changes require rebuilding and deploying 
 For Caddy-only deployment, build that service and use `up -d --no-deps --no-build caddy-dev` or `caddy-prod`. Reload certificates through `docker compose -f <compose-file> exec <caddy-service> tinytavern-caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile`.
 Only Caddy publishes ports. Bun serves internal HTTP/WS; Caddy serves signed media and the production client, and proxies Vite in dev. Preserve private proxy-header validation and source-IP/origin/session checks.
 Compose creates the Comfy network. Optional `.env` values `TINYTAVERN_COMFY_NETWORK` and `TINYTAVERN_COMFY_NETWORK_EXTERNAL=true` select an existing network.
-Database backup: `docker compose exec tinytavern bun server/src/backup.ts /data/backups/<unique-name>.db`. This uses an online SQLite snapshot; never copy an active database directly. A full backup also needs media and `.secrets/`.
+Database backup: `docker compose exec tinytavern bun server/src/db/backup.ts /data/backups/<unique-name>.db`. This uses an online SQLite snapshot; never copy an active database directly. A full backup also needs media and `.secrets/`.
 
 ## Architecture and invariants
 
+- Server modules are grouped under `server/src/`: `db/`, `http/`, `realtime/`, `conversations/`, `generation/`, `media/` (with `comfy/` integration), `characters/` and `settings/`. HTTP endpoints live in `routes/`; reusable route helpers live in `routes/shared/`. Keep direct module imports and register routes in the root `index.ts`.
 - Shared contracts start in `shared/src/index.ts`; media contracts are in `shared/src/media.ts`. Persistent state is server-authoritative; clients retain drafts and navigation only.
-- All application SQL uses memoized `stmt()` in `server/src/db.ts`. Keep SQLite writes synchronous. An `await` between validation and mutation breaks guard-and-act atomicity; revalidate every precondition after unavoidable awaits.
-- Schema lives in `server/src/schema.ts`. Minimum supported version is 68; future migrations start at 69. Update both fresh schema and migrations, including persisted JSON, file references and ownership. Never replay seeds on existing data.
+- All application SQL uses memoized `stmt()` in `server/src/db/db.ts`. Keep SQLite writes synchronous. An `await` between validation and mutation breaks guard-and-act atomicity; revalidate every precondition after unavoidable awaits.
+- Schema lives in `server/src/db/schema.ts`. Minimum supported version is 68; future migrations start at 69. Update both fresh schema and migrations, including persisted JSON, file references and ownership. Never replay seeds on existing data.
 - New route modules must be imported for side effects by `server/src/index.ts`. Entity CRUD uses `defineEntityRoutes`/`createEntityWriter`; extend their field specs rather than duplicating handlers.
 - Preserve conversation active-leaf/mutation-revision guards and settings/job/draft revision guards. Protected default prompts/templates remain read-only. Settings transfer excludes credentials and resolves references by name, never imported IDs.
 - Use `deleteMessageSubtrees`/`deleteConversationRows` for deletion; direct recursive cascades fail on deep trees. Repair the active path inside the transaction. `setActiveLeaf` repoints every ancestor's active child without touching conversation recency.
-- Block deletion splices children upward and removes sibling swipes; swipe deletion removes that sibling's subtree. Copies own independent media files. Read `tree.ts` before changing these operations.
+- Block deletion splices children upward and removes sibling swipes; swipe deletion removes that sibling's subtree. Copies own independent media files. Read `server/src/conversations/tree.ts` before changing these operations.
 - Streaming buffers stay in memory and persist at completion/cancellation/failure or graceful shutdown. Guard callbacks by generation identity because continuation reuses message IDs. Preserve speculative-generation limits and cancellation on context/subscription changes.
 - `treePatch` includes all node structure but only changed message bodies; apply parent changes too. Ordered `Message.media` is the sole live attachment array. Sign outgoing media DTOs only, never DB/export paths.
+- Client components are grouped under `client/src/components/`: `chat/`, `tree/`, `gallery/`, `layout/`, `settings/` (including `tabs/`), `forms/` and `ui/`. Media-specific components live in `client/src/media/`.
 - Client editors use imperative ref `.value`/`.checked`; custom Select/MacroTextarea honor that contract. Reuse shared controls, `DropdownSurface`, settings submission and Save/Discard/Cancel guards.
 - Routed panes stay mounted beneath child panes to retain edits and scroll. Preserve leave guards, socket identity checks, reconnect resync and authoritative swipe completion. See `state/dialogStack.ts`, `pageLocation.ts`, `uiBack.ts`, `ws.ts` and `store.ts`.
 
 ## Media
 
-- Use the shared job pipeline for chat, gallery, avatars and description. Entry points: `routes/mediaJobs.ts`, `mediaJobs.ts`, `mediaJobStore.ts`, `mediaDrafts.ts`, `mediaWorker.ts`, `mediaRecipes.ts`, `mediaFiles.ts`, `mediaRemote.ts`. UI lives in `client/src/media/` and `Gallery*.tsx`.
+- Use the shared job pipeline for chat, gallery, avatars and description. The HTTP entry point is `server/src/routes/mediaJobs.ts`; pipeline modules live in `server/src/media/`: `mediaJobs.ts`, `mediaJobStore.ts`, `mediaDrafts.ts`, `mediaWorker.ts`, `mediaRecipes.ts`, `mediaFiles.ts`, `mediaRemote.ts`. UI lives in `client/src/media/` and `client/src/components/gallery/`.
 - Users supply Comfy API-format workflows; do not seed or search for production workflows. Inspect installed nodes under `/raid/workspaces/comfy/ComfyUI`. Comfy must support `DELETE /view` and targeted `POST /api/jobs/:id/cancel`.
 - Operations and slots come from `MEDIA_OPERATIONS`; image editing uses one to three references. Do not restore the removed first-and-last-frame video operation. Media workflows have exactly one output node; videos are original AV1 WebM. Description outputs text through its own validation.
 - Binding and exposed controls live in `shared/src/workflowInputs.ts`. Use a Comfy primitive Text node for `{{prompt}}` to preserve braces during export. Reserved loader filenames are `source.png`, `first_frame.png`, and `reference1.png`–`reference3.png`; annotated `_meta.title` exposes controls. Preserve graph wiring and captured workflow snapshots.

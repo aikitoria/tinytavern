@@ -82,16 +82,17 @@ test('settings transfer', async () => {
   assert(!JSON.stringify(chat).includes('systemPrompt'));
   assert(!JSON.stringify(settings.galleryVideoPrompts).includes('chatPrompt'));
 
-  const { stmt } = await import('../../server/src/db.ts');
-  const { getSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt } = await import('../../server/src/db/db.ts');
+  const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
   await import('../../server/src/routes/templates.ts');
   await import('../../server/src/routes/presets.ts');
   await import('../../server/src/routes/personas.ts');
   await import('../../server/src/routes/endpoints.ts');
   await import('../../server/src/routes/characters.ts');
   await import('../../server/src/routes/settings.ts');
-  const { makePlaceholderPng, parseCharacterCard } = await import('../../server/src/pngCard.ts');
-  const { readAvatarFile } = await import('../../server/src/routes/avatarStore.ts');
+  const { makePlaceholderPng, parseCharacterCard } =
+    await import('../../server/src/characters/pngCard.ts');
+  const { readAvatarFile } = await import('../../server/src/characters/avatarStore.ts');
   const { server, base, request: send } = await testApi();
   const request = (method: string, path: string, body?: unknown, status = 200) =>
     send(method, path, body, status);

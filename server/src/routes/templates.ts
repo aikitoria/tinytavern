@@ -1,6 +1,6 @@
 import { ENTITY_FIELDS, type Template } from '@tinytavern/shared';
-import { toTemplate } from '../db.ts';
-import { defineEntityRoutes, entityFields } from './entityRoutes.ts';
+import { toTemplate } from '../db/db.ts';
+import { defineEntityRoutes, entityFields } from './shared/entityRoutes.ts';
 
 defineEntityRoutes<Template>({
   table: 'templates',

@@ -1,7 +1,7 @@
 import { Show } from 'solid-js';
 import { faExpand } from '@fortawesome/free-solid-svg-icons';
 import type { MediaAsset } from '@tinytavern/shared';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 

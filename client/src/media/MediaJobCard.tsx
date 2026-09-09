@@ -7,7 +7,7 @@ import {
   type Conversation,
   type MediaJob,
 } from '@tinytavern/shared';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import SamplerProgress from '../images/SamplerProgress.tsx';
 import VideoPreview from './VideoPreview.tsx';
 import { createStreamScroll } from '../streamScroll.ts';

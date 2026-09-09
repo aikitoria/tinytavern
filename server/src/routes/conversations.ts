@@ -1,8 +1,8 @@
 import type { MediaImageConfig } from '@tinytavern/shared';
 // Keep route handlers synchronous between check and act: an `await` lets other
 // handlers or generation callbacks invalidate generation and active-leaf guards.
-import { copyConversation, insertCopiedMessage } from './conversationCopies.ts';
-import type { MessageRow } from './conversationCopies.ts';
+import { copyConversation, insertCopiedMessage } from '../conversations/conversationCopies.ts';
+import type { MessageRow } from '../conversations/conversationCopies.ts';
 import { characterChatName, type Conversation, type Message } from '@tinytavern/shared';
 import {
   deleteConversationRows,
@@ -11,9 +11,9 @@ import {
   toConversation,
   toMessage,
   transaction,
-} from '../db.ts';
-import { getConversation, touchConversation } from '../conversationStore.ts';
-import { route, HttpError } from '../router.ts';
+} from '../db/db.ts';
+import { getConversation, touchConversation } from '../conversations/conversationStore.ts';
+import { route, HttpError } from '../http/router.ts';
 import {
   appendMessage,
   getActiveLeafId,
@@ -22,8 +22,8 @@ import {
   getPathToMessage,
   setActiveLeaf,
   takeDirtyMessageIds,
-} from '../tree.ts';
-import { requireReference } from './entityUtils.ts';
+} from '../conversations/tree.ts';
+import { requireReference } from './shared/entityUtils.ts';
 import {
   buildChatMessages,
   buildToolPrompt,
@@ -31,9 +31,9 @@ import {
   getPersona,
   substituteMacros,
   withDisabledPrefillSpeakerNote,
-} from '../prompt.ts';
-import type { BuiltPrompt } from '../prompt.ts';
-import { clearSettingReference, getSettings } from '../settingsStore.ts';
+} from '../generation/prompt.ts';
+import type { BuiltPrompt } from '../generation/prompt.ts';
+import { clearSettingReference, getSettings } from '../settings/settingsStore.ts';
 import {
   chatCompletionOnce,
   hasActiveGeneration,
@@ -42,25 +42,25 @@ import {
   mergeLiveBuffers,
   startGeneration,
   stopConversationGenerations,
-} from '../generation.ts';
-import { broadcastTree, treeSnapshot } from '../sync.ts';
-import { invalidate, hasConversationSubscribers } from '../events.ts';
+} from '../generation/generation.ts';
+import { broadcastTree, treeSnapshot } from '../realtime/sync.ts';
+import { invalidate, hasConversationSubscribers } from '../realtime/events.ts';
 import {
   cancelBackgroundSwipe,
   cancelSpeculativeRetries,
   prepareActiveSwipe,
   prepareNextSwipe,
   discardSpeculativeSwipes,
-} from '../speculation.ts';
-import { requireBodyPrecondition, requireQueryPrecondition } from './mutationGuard.ts';
+} from '../generation/speculation.ts';
+import { requireBodyPrecondition, requireQueryPrecondition } from './shared/mutationGuard.ts';
 import {
   collectConversationImages,
   collectSiblingSubtreeImages,
   deleteImageFiles,
-} from '../images.ts';
-import { parseImageConfig, startImageRender } from '../comfy.ts';
-import { createImageRecipe } from '../mediaRecipes.ts';
-import { bumpConversationRevision } from '../conversationRevision.ts';
+} from '../media/images.ts';
+import { parseImageConfig, startImageRender } from '../media/comfy/comfy.ts';
+import { createImageRecipe } from '../media/mediaRecipes.ts';
+import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import {
   objectBody,
   optionalNullableId,
@@ -68,7 +68,7 @@ import {
   optionalString,
   positiveId,
   requiredString,
-} from '../validation.ts';
+} from '../http/validation.ts';
 
 /** Regeneration preserves sibling speaker names; promptOverride keeps retries consistent. */
 export function spawnAssistantReply(

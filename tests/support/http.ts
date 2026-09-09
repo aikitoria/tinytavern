@@ -4,7 +4,7 @@ import { requireTestIsolation } from './isolation.ts';
 /** Only serves route modules explicitly imported by the caller. */
 export async function testApi() {
   requireTestIsolation();
-  const { apiRoutes } = await import('../../server/src/router.ts');
+  const { apiRoutes } = await import('../../server/src/http/router.ts');
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,

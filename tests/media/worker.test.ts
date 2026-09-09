@@ -18,19 +18,19 @@ test('media jobs', async () => {
   requireTestIsolation();
   process.env.COMFY_POLL_MS = '5';
 
-  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { saveImage, deleteImageFiles } = await import('../../server/src/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { requireMediaJob, mediaJobRow, mediaJobDto, updateMediaJob, observeMediaJob } =
-    await import('../../server/src/mediaJobStore.ts');
+    await import('../../server/src/media/mediaJobStore.ts');
   const { createMediaJob, createMediaJobFromAsset, editMediaJob, startMediaJob, cancelMediaJob } =
-    await import('../../server/src/mediaJobs.ts');
+    await import('../../server/src/media/mediaJobs.ts');
   const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
-    await import('../../server/src/mediaWorker.ts');
-  const { drainRemoteCleanup } = await import('../../server/src/mediaRemote.ts');
-  const { startMessageImageRender } = await import('../../server/src/mediaImageAdapter.ts');
-  const { appendMessage, getMessage } = await import('../../server/src/tree.ts');
+    await import('../../server/src/media/mediaWorker.ts');
+  const { drainRemoteCleanup } = await import('../../server/src/media/mediaRemote.ts');
+  const { startMessageImageRender } = await import('../../server/src/media/mediaImageAdapter.ts');
+  const { appendMessage, getMessage } = await import('../../server/src/conversations/tree.ts');
 
   const raster = makePlaceholderPng();
   const base = 'http://127.0.0.1:1';

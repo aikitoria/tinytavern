@@ -1,6 +1,6 @@
-import { mediaCharacters } from '../mediaCharacters.ts';
-import { getSettings } from '../settingsStore.ts';
-import { getMediaRecipe, imageRenderConfiguration } from '../mediaRecipes.ts';
+import { mediaCharacters } from '../media/mediaCharacters.ts';
+import { getSettings } from '../settings/settingsStore.ts';
+import { getMediaRecipe, imageRenderConfiguration } from '../media/mediaRecipes.ts';
 import { readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type { GenerationKind, MessageStatus, Role } from '@tinytavern/shared';
@@ -11,15 +11,15 @@ import {
   toConversation,
   toMessage,
   transaction,
-} from '../db.ts';
-import { invalidate } from '../events.ts';
-import { mergeLiveBuffers } from '../generation.ts';
-import { deleteImageFiles, rasterImageFormat } from '../images.ts';
-import { HttpError, route } from '../router.ts';
-import { getPathToMessage } from '../tree.ts';
-import { positiveId, requireObject as object, requireString } from '../validation.ts';
-import { parseImageConfig } from '../comfy.ts';
-import { mediaPromptBuffers } from '../mediaJobStore.ts';
+} from '../db/db.ts';
+import { invalidate } from '../realtime/events.ts';
+import { mergeLiveBuffers } from '../generation/generation.ts';
+import { deleteImageFiles, rasterImageFormat } from '../media/images.ts';
+import { HttpError, route } from '../http/router.ts';
+import { getPathToMessage } from '../conversations/tree.ts';
+import { positiveId, requireObject as object, requireString } from '../http/validation.ts';
+import { parseImageConfig } from '../media/comfy/comfy.ts';
+import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
 import {
   exportImageRecipes,
   importRecipeImages,
@@ -27,7 +27,7 @@ import {
   validateImageRecipeOwnership,
   type DecodedTransferImage,
   type TransferImageRecipe,
-} from '../conversationImageRecipes.ts';
+} from '../conversations/conversationImageRecipes.ts';
 
 const FORMAT = 'tinytavern-conversation';
 const VERSION = 1;

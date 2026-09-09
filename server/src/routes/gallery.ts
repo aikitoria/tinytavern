@@ -1,20 +1,24 @@
-import { mediaCharacterIds, mediaCharacterNames, setMediaCharacters } from '../mediaCharacters.ts';
-import { publicGalleryItem } from '../mediaUrls.ts';
-import { insertGalleryAsset } from '../galleryStore.ts';
+import {
+  mediaCharacterIds,
+  mediaCharacterNames,
+  setMediaCharacters,
+} from '../media/mediaCharacters.ts';
+import { publicGalleryItem } from '../media/mediaUrls.ts';
+import { insertGalleryAsset } from '../media/galleryStore.ts';
 import type { GalleryItem } from '@tinytavern/shared';
 import {
   mediaAssetForPath,
   stmt,
   toGalleryItem as canonicalGalleryItem,
   transaction,
-} from '../db.ts';
-import { invalidate, observeInvalidation } from '../events.ts';
-import { copyImage, deleteImageFiles, rasterImageFormat, saveImage } from '../images.ts';
-import { imageDimensions } from '../imageDimensions.ts';
-import { HttpError, route } from '../router.ts';
-import { objectBody, optionalString, positiveId } from '../validation.ts';
-import { describeImage, descriptionWorkflow } from '../mediaDescription.ts';
-import { streamResponse } from './streamResponse.ts';
+} from '../db/db.ts';
+import { invalidate, observeInvalidation } from '../realtime/events.ts';
+import { copyImage, deleteImageFiles, rasterImageFormat, saveImage } from '../media/images.ts';
+import { imageDimensions } from '../media/imageDimensions.ts';
+import { HttpError, route } from '../http/router.ts';
+import { objectBody, optionalString, positiveId } from '../http/validation.ts';
+import { describeImage, descriptionWorkflow } from '../media/mediaDescription.ts';
+import { streamResponse } from '../http/streamResponse.ts';
 
 observeInvalidation((entity) => {
   if (entity === 'characters') invalidate('gallery');

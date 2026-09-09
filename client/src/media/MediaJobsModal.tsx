@@ -1,8 +1,8 @@
 import { Show, createMemo, createSignal, onMount } from 'solid-js';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import type { MediaJob } from '@tinytavern/shared';
-import Modal from '../components/Modal.tsx';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
+import Modal from '../components/ui/Modal.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { api } from '../state/api.ts';
 import { useDialogActive } from '../state/dialogContext.ts';
 import { applyMediaJob, handleServerEvent, openModal, state, toast } from '../state/store.ts';

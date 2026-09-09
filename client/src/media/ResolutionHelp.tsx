@@ -1,7 +1,7 @@
 import { For, createSignal } from 'solid-js';
 import { faCircleQuestion } from '@fortawesome/free-regular-svg-icons';
-import FontAwesomeIcon from '../components/FontAwesomeIcon.tsx';
-import DropdownSurface from '../components/DropdownSurface.tsx';
+import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
+import DropdownSurface from '../components/ui/DropdownSurface.tsx';
 
 const RESOLUTIONS = [
   ['0.2', '608 x 352'],

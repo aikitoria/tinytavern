@@ -75,7 +75,7 @@ test('sse', async () => {
 });
 
 test('server response', async () => {
-  const { streamResponse } = await import('../../server/src/routes/streamResponse.ts');
+  const { streamResponse } = await import('../../server/src/http/streamResponse.ts');
   const frames = async (response: Response) =>
     (await response.text())
       .split('\n')
@@ -131,9 +131,9 @@ test('video preview', async () => {
   const { mergeMediaProgress } = await import('@tinytavern/shared');
   type MediaProgress = import('@tinytavern/shared').MediaProgress;
   const { ComfyVideoPreview, parseVideoPreviewFrame } =
-    await import('../../server/src/comfyVideoPreview.ts');
+    await import('../../server/src/media/comfy/comfyVideoPreview.ts');
 
-  const { parsePreviewFrame } = await import('../../server/src/comfyPreview.ts');
+  const { parsePreviewFrame } = await import('../../server/src/media/comfy/comfyPreview.ts');
 
   const { previewJpeg, videoPreviewFrame } = await import('../support/videoPreview.ts');
 
@@ -231,7 +231,7 @@ test('image dimensions', async () => {
   const { join } = await import('node:path');
 
   const { imageDimensions, imageFileDimensions } =
-    await import('../../server/src/imageDimensions.ts');
+    await import('../../server/src/media/imageDimensions.ts');
 
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',

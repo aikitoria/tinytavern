@@ -1,7 +1,7 @@
 import { ENTITY_FIELDS } from '@tinytavern/shared';
 import type { Preset } from '@tinytavern/shared';
-import { toPreset } from '../db.ts';
-import { defineEntityRoutes, entityFields } from './entityRoutes.ts';
+import { toPreset } from '../db/db.ts';
+import { defineEntityRoutes, entityFields } from './shared/entityRoutes.ts';
 
 defineEntityRoutes<Preset>({
   table: 'presets',

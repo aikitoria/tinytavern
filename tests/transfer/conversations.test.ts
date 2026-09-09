@@ -6,16 +6,17 @@ import { basename, join } from 'node:path';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 databaseCase('conversation transfer', async () => {
-  const { IMAGES_DIR, stmt } = await import('../../server/src/db.ts');
-  const { deleteImageFiles, saveImage } = await import('../../server/src/images.ts');
+  const { IMAGES_DIR, stmt } = await import('../../server/src/db/db.ts');
+  const { deleteImageFiles, saveImage } = await import('../../server/src/media/images.ts');
   const { exportPortableConversation, importPortableConversation } =
     await import('../../server/src/routes/conversationTransfer.ts');
-  const { getPathToMessage } = await import('../../server/src/tree.ts');
+  const { getPathToMessage } = await import('../../server/src/conversations/tree.ts');
 
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const png = makePlaceholderPng();
   const sourceImages = [saveImage('.png', png), saveImage('.png', png)];
-  const { createImageRecipe, getMediaRecipe } = await import('../../server/src/mediaRecipes.ts');
+  const { createImageRecipe, getMediaRecipe } =
+    await import('../../server/src/media/mediaRecipes.ts');
   const now = Date.now();
   const sourceConversationId = conversationFixture({
     title: 'Portable tree',
@@ -163,7 +164,7 @@ databaseCase('conversation transfer', async () => {
   // Missing video files prove exports omit their bytes, including the selected attachment.
   const rasterPaths = importedPrompt.media.map((asset) => asset.url);
   const mixedPaths = ['/images/omitted-first.webm', ...rasterPaths, '/images/omitted-last.webm'];
-  const { mediaPromptBuffers } = await import('../../server/src/mediaJobStore.ts');
+  const { mediaPromptBuffers } = await import('../../server/src/media/mediaJobStore.ts');
   mediaPromptBuffers.set(importedPrompt.id, {
     prompt: 'Video prompt currently streaming',
     reasoning: '',
@@ -200,13 +201,13 @@ databaseCase('conversation transfer', async () => {
 });
 
 databaseCase('conversation copy', async () => {
-  type MessageRow = import('../../server/src/routes/conversationCopies.ts').MessageRow;
-  const { IMAGES_DIR, stmt, toConversation, toMessage } = await import('../../server/src/db.ts');
-  const { saveImage, deleteImageFiles } = await import('../../server/src/images.ts');
+  type MessageRow = import('../../server/src/conversations/conversationCopies.ts').MessageRow;
+  const { IMAGES_DIR, stmt, toConversation, toMessage } = await import('../../server/src/db/db.ts');
+  const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
   const { copyConversation, copyMessageImages, insertCopiedMessage } =
-    await import('../../server/src/routes/conversationCopies.ts');
-  const { createImageRecipe } = await import('../../server/src/mediaRecipes.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+    await import('../../server/src/conversations/conversationCopies.ts');
+  const { createImageRecipe } = await import('../../server/src/media/mediaRecipes.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
 
   const png = makePlaceholderPng();
   const images = ['/images/missing.png', saveImage('.png', png), saveImage('.png', png)];
@@ -308,18 +309,19 @@ databaseCase('media transfer', async () => {
   type MediaJobInput = import('@tinytavern/shared').MediaJobInput;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
   const { IMAGES_DIR, stmt, mediaAssetForPath, invalidateMediaAsset } =
-    await import('../../server/src/db.ts');
+    await import('../../server/src/db/db.ts');
   const { saveImage, deleteImageFiles, collectConversationImages } =
-    await import('../../server/src/images.ts');
+    await import('../../server/src/media/images.ts');
   const { exportPortableConversation, importPortableConversation } =
     await import('../../server/src/routes/conversationTransfer.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { createMediaJobFromAsset, deleteMediaJob } = await import('../../server/src/mediaJobs.ts');
-  const { getSettings } = await import('../../server/src/settingsStore.ts');
-  const { requireMediaJob } = await import('../../server/src/mediaJobStore.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { createMediaJobFromAsset, deleteMediaJob } =
+    await import('../../server/src/media/mediaJobs.ts');
+  const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
 
   const { mediaCharacterIds, setMediaCharacters } =
-    await import('../../server/src/mediaCharacters.ts');
+    await import('../../server/src/media/mediaCharacters.ts');
   const organizationCharacters = ['Ashina', 'Haeun'].map((name) =>
     Number(
       stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid,

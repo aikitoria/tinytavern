@@ -4,10 +4,10 @@ import {
   isRequestAuthenticated,
   passwordMatches,
   startSession,
-} from '../auth.ts';
-import { requestIp } from '../ipAccess.ts';
-import { route, HttpError } from '../router.ts';
-import { objectBody } from '../validation.ts';
+} from '../http/auth.ts';
+import { requestIp } from '../http/ipAccess.ts';
+import { route, HttpError } from '../http/router.ts';
+import { objectBody } from '../http/validation.ts';
 
 const failures = new Map<string, { count: number; lastAt: number; blockedUntil: number }>();
 const FAILURE_WINDOW_MS = 5 * 60 * 1000;

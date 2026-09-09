@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
 
 databaseCase('server completion', async () => {
-  const { stmt } = await import('../../server/src/db.ts');
+  const { stmt } = await import('../../server/src/db/db.ts');
   const { chatCompletionOnce, streamChatCompletion } =
-    await import('../../server/src/generation.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+    await import('../../server/src/generation/generation.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'test',
     base_url: 'https://upstream.invalid/v1///',
@@ -148,12 +148,12 @@ databaseCase('generation stream', async () => {
 
   const { setImmediate: flush } = await import('node:timers/promises');
 
-  type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
-  const { stmt, toConversation } = await import('../../server/src/db.ts');
+  type BuiltPrompt = import('../../server/src/generation/prompt.ts').BuiltPrompt;
+  const { stmt, toConversation } = await import('../../server/src/db/db.ts');
   const { startGeneration, stopAllGenerations, mergeLiveBuffers } =
-    await import('../../server/src/generation.ts');
-  const { getMessage } = await import('../../server/src/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+    await import('../../server/src/generation/generation.ts');
+  const { getMessage } = await import('../../server/src/conversations/tree.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'Test',
     base_url: 'http://test.invalid',
@@ -280,13 +280,14 @@ databaseCase('generation persistence', async () => {
 
   const { jest } = await import('bun:test');
 
-  type BuiltPrompt = import('../../server/src/prompt.ts').BuiltPrompt;
-  const { stmt, toConversation } = await import('../../server/src/db.ts');
+  type BuiltPrompt = import('../../server/src/generation/prompt.ts').BuiltPrompt;
+  const { stmt, toConversation } = await import('../../server/src/db/db.ts');
   const { startGeneration, stopGeneration, stopAllGenerations, mergeLiveBuffers } =
-    await import('../../server/src/generation.ts');
-  const { getMessage } = await import('../../server/src/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
-  const { getConversationRevision } = await import('../../server/src/conversationRevision.ts');
+    await import('../../server/src/generation/generation.ts');
+  const { getMessage } = await import('../../server/src/conversations/tree.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getConversationRevision } =
+    await import('../../server/src/conversations/conversationRevision.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'test',
     base_url: 'https://upstream.invalid/v1',
@@ -412,7 +413,7 @@ databaseCase('generation persistence', async () => {
 
 databaseCase('prompt reasoning', async () => {
   type Endpoint = import('@tinytavern/shared').Endpoint;
-  const { streamEndpointCompletion } = await import('../../server/src/generation.ts');
+  const { streamEndpointCompletion } = await import('../../server/src/generation/generation.ts');
   const { streamTextCompletion } = await import('../../client/src/state/api.ts');
   const endpoint: Endpoint = {
     id: 1,

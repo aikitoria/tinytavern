@@ -4,29 +4,34 @@ import {
   MEDIA_PROMPT_SETTINGS_KEYS,
   mediaPromptSettingsKey,
 } from '@tinytavern/shared';
-import { route, HttpError } from '../router.ts';
+import { route, HttpError } from '../http/router.ts';
 import {
   getSettings,
   putSettings,
   SETTINGS_REFERENCE_TABLES,
   type SettingsReferenceKey,
-} from '../settingsStore.ts';
-import { disconnectAllForAuthChange, invalidate } from '../events.ts';
-import { requireReference } from './entityUtils.ts';
+} from '../settings/settingsStore.ts';
+import { disconnectAllForAuthChange, invalidate } from '../realtime/events.ts';
+import { requireReference } from './shared/entityUtils.ts';
 import {
   objectBody,
   optionalBoolean,
   optionalNullableId,
   optionalNumber,
   optionalString,
-} from '../validation.ts';
-import { discardSpeculativeSwipes, prepareSubscribedSwipes } from '../speculation.ts';
-import { subscribedConversationIds } from '../events.ts';
-import { bumpAllConversationRevisions } from '../conversationRevision.ts';
-import { broadcastTree } from '../sync.ts';
-import { clearSession, setAccessPassword, startSession, validateNewPassword } from '../auth.ts';
-import { parseImageGenerationSettings } from '../imageSettings.ts';
-import { parseMediaRendering, parseMediaPrompts } from '../mediaSettings.ts';
+} from '../http/validation.ts';
+import { discardSpeculativeSwipes, prepareSubscribedSwipes } from '../generation/speculation.ts';
+import { subscribedConversationIds } from '../realtime/events.ts';
+import { bumpAllConversationRevisions } from '../conversations/conversationRevision.ts';
+import { broadcastTree } from '../realtime/sync.ts';
+import {
+  clearSession,
+  setAccessPassword,
+  startSession,
+  validateNewPassword,
+} from '../http/auth.ts';
+import { parseImageGenerationSettings } from '../media/imageSettings.ts';
+import { parseMediaRendering, parseMediaPrompts } from '../media/mediaSettings.ts';
 
 route.get('/api/settings', () => getSettings());
 

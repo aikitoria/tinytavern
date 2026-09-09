@@ -11,26 +11,26 @@ test('media drafts', async () => {
   const { imageConfig } = await import('../support/imageConfig.ts');
 
   requireTestIsolation();
-  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settingsStore.ts');
+  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { createMediaJob, createMediaJobFromAsset, startMediaJob, deleteMediaJob } =
-    await import('../../server/src/mediaJobs.ts');
+    await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, updateMediaJob, mediaJobDto, mediaDraft } =
-    await import('../../server/src/mediaJobStore.ts');
+    await import('../../server/src/media/mediaJobStore.ts');
   const { recordMediaResult, completeMediaJob, finishMediaJob } =
-    await import('../../server/src/mediaJobResults.ts');
+    await import('../../server/src/media/mediaJobResults.ts');
   const { getMediaAssetResultDetails, saveMediaRecipe, getMediaRecipe } =
-    await import('../../server/src/mediaRecipes.ts');
+    await import('../../server/src/media/mediaRecipes.ts');
   const {
     acceptMediaVariation,
     selectMediaVariation,
     discardMediaDraft,
     cleanupDiscardedMediaDraft,
-  } = await import('../../server/src/mediaDrafts.ts');
-  const { appendMessage } = await import('../../server/src/tree.ts');
+  } = await import('../../server/src/media/mediaDrafts.ts');
+  const { appendMessage } = await import('../../server/src/conversations/tree.ts');
   const { saveImage, deleteImageFiles, sweepOrphanedImages } =
-    await import('../../server/src/images.ts');
+    await import('../../server/src/media/images.ts');
   function job(body: Parameters<typeof createMediaJob>[0] = {}, source?: number) {
     return createMediaJob(
       { requestKey: newRequestId(), operation: 'image', ...body },
@@ -52,8 +52,8 @@ test('media drafts', async () => {
       [
         '-e',
         `
-      const { mediaDraft } = await import('./server/src/mediaJobStore.ts');
-      const { db } = await import('./server/src/db.ts');
+      const { mediaDraft } = await import('./server/src/media/mediaJobStore.ts');
+      const { db } = await import('./server/src/db/db.ts');
       process.stdout.write(JSON.stringify(mediaDraft(${id})));
       db.close(true);
     `,
@@ -187,7 +187,8 @@ test('media drafts', async () => {
     { status: 409 },
     'Stale selection cannot overwrite a newer choice',
   );
-  const { initMediaWorker, stopMediaWorker } = await import('../../server/src/mediaWorker.ts');
+  const { initMediaWorker, stopMediaWorker } =
+    await import('../../server/src/media/mediaWorker.ts');
   const oldSaved = job({
     prompt: 'Saved before upgrade',
   });

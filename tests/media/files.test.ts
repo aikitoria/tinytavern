@@ -9,9 +9,10 @@ databaseCase('media files', async () => {
   const { promisify } = await import('node:util');
   const { readFileSync, readdirSync, unlinkSync, writeFileSync } = await import('node:fs');
   const { basename, join } = await import('node:path');
-  const { IMAGES_DIR, stmt } = await import('../../server/src/db.ts');
-  const { downloadMedia, InvalidMediaOutput } = await import('../../server/src/mediaFiles.ts');
-  const { makePlaceholderPng } = await import('../../server/src/pngCard.ts');
+  const { IMAGES_DIR, stmt } = await import('../../server/src/db/db.ts');
+  const { downloadMedia, InvalidMediaOutput } =
+    await import('../../server/src/media/mediaFiles.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const runFile = promisify(execFile);
 
   const sourcePath = join(IMAGES_DIR, 'source.webm');
@@ -123,17 +124,17 @@ databaseCase('media thumbnails', async () => {
   const { DEFAULT_SETTINGS, GENERAL_TRANSFER_FIELDS } = await import('@tinytavern/shared');
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
   const { IMAGES_DIR, AVATAR_DIR, stmt, toGalleryItem, mediaAssetForPath } =
-    await import('../../server/src/db.ts');
+    await import('../../server/src/db/db.ts');
   const { saveImage, deleteImageFiles, sweepOrphanedImages, rasterImageFormat } =
-    await import('../../server/src/images.ts');
-  const { imageDimensions } = await import('../../server/src/imageDimensions.ts');
-  const { getSettings } = await import('../../server/src/settingsStore.ts');
-  const { invalidate } = await import('../../server/src/events.ts');
+    await import('../../server/src/media/images.ts');
+  const { imageDimensions } = await import('../../server/src/media/imageDimensions.ts');
+  const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { invalidate } = await import('../../server/src/realtime/events.ts');
   const { initMediaThumbnails, stopMediaThumbnails } =
-    await import('../../server/src/mediaThumbnails.ts');
-  const { publicAvatar } = await import('../../server/src/mediaUrls.ts');
+    await import('../../server/src/media/mediaThumbnails.ts');
+  const { publicAvatar } = await import('../../server/src/media/mediaUrls.ts');
   const { saveAvatar, deleteAvatarFiles, readAvatarFile } =
-    await import('../../server/src/routes/avatarStore.ts');
+    await import('../../server/src/characters/avatarStore.ts');
   await import('../../server/src/routes/gallery.ts');
   await import('../../server/src/routes/settings.ts');
 
