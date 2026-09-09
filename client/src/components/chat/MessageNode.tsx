@@ -41,6 +41,7 @@ import Markdown from '../ui/Markdown.tsx';
 import Modal from '../ui/Modal.tsx';
 import PromptGenerationStatus from '../../media/PromptGenerationStatus.tsx';
 import MediaPromptMenuItems from '../../media/MediaPromptMenuItems.tsx';
+import { followMessageStream } from '../../messageStreamScroll.ts';
 
 // On touch layouts, only the last-tapped message shows actions.
 const [touchedId, setTouchedId] = createSignal<number | null>(null);
@@ -48,7 +49,11 @@ const [touchedId, setTouchedId] = createSignal<number | null>(null);
 // At most one ⋯ menu is open at a time across the message list.
 const [moreMenuId, setMoreMenuId] = createSignal<number | null>(null);
 
-export default function MessageNode(props: { message: Message; inMap?: boolean }) {
+export default function MessageNode(props: {
+  message: Message;
+  inMap?: boolean;
+  active?: boolean;
+}) {
   const [editing, setEditing] = createSignal(false);
   const [showReasoning, setShowReasoning] = createSignal(false);
   let editArea: HTMLTextAreaElement | undefined;
@@ -569,6 +574,15 @@ export default function MessageNode(props: { message: Message; inMap?: boolean }
         {/* At the swipe position only the content region slides; the name row and tools stay put. */}
         <div
           class="msg-swipe"
+          ref={(element) => {
+            if (props.inMap)
+              followMessageStream(
+                element,
+                () => (streaming() ? props.message.generationToken : null),
+                () => props.active !== false,
+              );
+          }}
+          tabIndex={props.inMap ? 0 : undefined}
           classList={{
             'swipe-in-next': enterAs === 'sibling' && enterDir === 1,
             'swipe-in-prev': enterAs === 'sibling' && enterDir === -1,

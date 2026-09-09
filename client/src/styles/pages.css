@@ -1,4 +1,4 @@
-/* Shared shell for full-screen workspaces such as Gallery and Settings. */
+/* Shared shell for Chat, Gallery and Settings. */
 .modal-backdrop.fullscreen-backdrop {
   /* Full viewport bounds are independent of the editor's changing contents. */
   contain: strict;
@@ -9,8 +9,8 @@
   content-visibility: hidden;
 }
 
-.fullscreen-page .modal-head {
-  @apply flex-none min-h-bar py-1 px-4 bg-chrome border-subtle;
+:where(.page-header) {
+  @apply flex items-center flex-none min-h-bar gap-3 py-1 px-4 bg-chrome border-b border-b-solid border-b-subtle;
 }
 
 .fullscreen-page .modal-title {

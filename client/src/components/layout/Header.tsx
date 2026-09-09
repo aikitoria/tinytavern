@@ -1,9 +1,10 @@
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
-import { faGear, faPen } from '@fortawesome/free-solid-svg-icons';
+import { faBarsProgress, faGear, faPen } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { Show, createSignal } from 'solid-js';
 import { api } from '../../state/api.ts';
 import {
+  activeMediaJobCount,
   closeSidebar,
   openModal,
   selectedConversation,
@@ -14,6 +15,7 @@ import {
 } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
 import Select from '../ui/Select.tsx';
+import { openMediaJobs } from '../../media/navigation.ts';
 
 const VIEWS = [
   { mode: 'chat', label: 'Chat' },
@@ -118,11 +120,11 @@ export default function Header() {
   };
 
   return (
-    <header class="header z-10 min-h-bar border-b border-b-solid border-b-subtle flex items-center gap-3 relative bg-chrome py-1 px-4 small-touch:absolute small-touch:z-55 small-touch:gap-2 small-touch:overflow-hidden small-touch:invisible pt-[calc(var(--space-1)_+_env(safe-area-inset-top))] small-touch:inset-[0_0_auto_min(85vw,_var(--sidebar-w))] small-touch:min-h-[calc(var(--bar-h)_+_env(safe-area-inset-top))] small-touch:p-[calc(var(--space-1)_+_env(safe-area-inset-top))_var(--space-3)_var(--space-1)]">
+    <header class="header page-header z-10 relative small-touch:absolute small-touch:z-55 small-touch:gap-2 small-touch:overflow-hidden small-touch:invisible pt-[calc(var(--space-1)_+_env(safe-area-inset-top))] small-touch:inset-[0_0_auto_min(85vw,_var(--sidebar-w))] small-touch:min-h-[calc(var(--bar-h)_+_env(safe-area-inset-top))] small-touch:p-[calc(var(--space-1)_+_env(safe-area-inset-top))_var(--space-3)_var(--space-1)]">
       <Show
         when={selectedConversation()}
         fallback={
-          <span class="header-title max-w-full truncate font-semibold text-heading leading-tight small-touch:text-mobile-title">
+          <span class="header-title flex-1 min-w-0 truncate font-semibold text-heading leading-tight small-touch:text-mobile-title">
             TinyTavern
           </span>
         }
@@ -130,13 +132,13 @@ export default function Header() {
         {(conv) => (
           <>
             <div class="flex items-center flex-1 min-w-0 gap-2">
-              <div class="flex items-center flex-1 min-w-0 [&_.header-title]:shrink [&:hover_.header-rename-btn]:opacity-100 [&:hover_.header-rename-btn]:visible [&:focus-within_.header-rename-btn]:opacity-100 [&:focus-within_.header-rename-btn]:visible">
+              <div class="flex items-center flex-1 min-w-0 gap-2">
                 <Show
                   when={!editing()}
                   fallback={
                     <input
                       ref={titleInput}
-                      class="py-0 px-2 max-w-105 font-semibold text-heading"
+                      class="min-w-0 max-w-105 h-control font-semibold text-heading"
                       aria-label="Conversation title"
                       onBlur={commitRename}
                       onKeyDown={(e) => {
@@ -151,7 +153,7 @@ export default function Header() {
                     {conv().title}
                   </span>
                   <button
-                    class="icon-btn header-rename-btn opacity-0 invisible small-touch:display-none"
+                    class="icon-btn small-touch:display-none"
                     title="Rename conversation"
                     aria-label="Rename conversation"
                     onClick={startRename}
@@ -160,14 +162,14 @@ export default function Header() {
                   </button>
                 </Show>
               </div>
-              <div class="header-context overflow-x-auto rounded-none inline-flex items-center min-w-0 gap-1 p-0 ml-auto bg-clear border-clear small-touch:display-none max-w-[min(45vw,_520px)]">
+              <div class="header-context overflow-x-auto inline-flex items-center min-w-0 gap-2 ml-auto small-touch:display-none max-w-[min(45vw,_520px)]">
                 <Select
-                  class={`min-h-8 w-auto max-w-45 py-0.5 px-1 text-control bg-clear truncate min-w-0 rounded-sm border-clear text-base leading-compact flex-initial [&:hover:not(:disabled)]:text-foreground [&:hover:not(:disabled)]:bg-hover [&:hover:not(:disabled)]:border-transparent [&:focus-visible]:text-foreground [&:focus-visible]:bg-hover [&:focus-visible]:border-transparent [&_.select-caret]:display-none [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5 [&:is(:hover,_:focus-visible):not(:disabled)_.header-context-value]:text-foreground [&:disabled]:opacity-100 ${activeEndpoint() ? '' : 'header-context-warn'}`}
+                  class={`w-auto max-w-45 flex-initial [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5 ${activeEndpoint() ? '' : 'header-context-warn'}`}
                   value={String(contextValue('endpointId') ?? '')}
                   buttonLabel={
                     <>
-                      <span class="text-small-label flex-none text-muted">Endpoint</span>
-                      <span class="header-context-value text-control text-ellipsis min-w-0 overflow-hidden">
+                      <span class="flex-none text-dim compact:display-none">Endpoint</span>
+                      <span class="header-context-value truncate min-w-0">
                         {activeEndpoint()?.name ?? 'None'}
                       </span>
                     </>
@@ -194,12 +196,12 @@ export default function Header() {
                   ]}
                 />
                 <Select
-                  class="min-h-8 w-auto max-w-45 py-0.5 px-1 text-control bg-clear truncate min-w-0 rounded-sm border-clear text-base leading-compact flex-initial [&:hover:not(:disabled)]:text-foreground [&:hover:not(:disabled)]:bg-hover [&:hover:not(:disabled)]:border-transparent [&:focus-visible]:text-foreground [&:focus-visible]:bg-hover [&:focus-visible]:border-transparent [&_.select-caret]:display-none [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5 [&:is(:hover,_:focus-visible):not(:disabled)_.header-context-value]:text-foreground [&:disabled]:opacity-100"
+                  class="w-auto max-w-45 flex-initial [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5"
                   value={String(contextValue('personaId') ?? '')}
                   buttonLabel={
                     <>
-                      <span class="text-small-label flex-none text-muted">Persona</span>
-                      <span class="header-context-value text-control text-ellipsis min-w-0 overflow-hidden">
+                      <span class="flex-none text-dim compact:display-none">Persona</span>
+                      <span class="header-context-value truncate min-w-0">
                         {personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}
                       </span>
                     </>
@@ -225,7 +227,7 @@ export default function Header() {
               </div>
             </div>
             <Select
-              class="header-view-btn min-h-8 w-auto py-1 px-2 text-control border-transparent flex-none inline-flex items-center gap-2 bg-clear text-base leading-compact [&:hover:not(:disabled)]:text-foreground [&:hover:not(:disabled)]:bg-hover [&:hover:not(:disabled)]:border-transparent [&:focus-visible]:text-foreground [&:focus-visible]:bg-hover [&:focus-visible]:border-transparent"
+              class="header-view-btn w-auto flex-none"
               value={state.viewMode}
               ariaLabel={`View: ${activeView().label}`}
               menuClass="header-view-menu [&_.menu-check]:ml-auto [&_.menu-check]:text-accent"
@@ -234,17 +236,40 @@ export default function Header() {
               options={VIEWS.map(({ mode, label }) => ({ value: mode, label }))}
               onChange={(value) => setView(value as (typeof VIEWS)[number]['mode'])}
             />
-            <button
-              class="icon-btn"
-              title="Conversation settings"
-              aria-label="Conversation settings"
-              onClick={() => show('conversation')}
-            >
-              <FontAwesomeIcon icon={faGear} size={16} />
-            </button>
           </>
         )}
       </Show>
+      <div class="flex items-center gap-2 flex-none">
+        <button
+          type="button"
+          class="icon-btn header-jobs-btn w-auto gap-1 px-1"
+          title={
+            activeMediaJobCount() ? `Media jobs (${activeMediaJobCount()} running)` : 'Media jobs'
+          }
+          aria-label="Media jobs"
+          onClick={() => {
+            closeSidebar();
+            openMediaJobs();
+          }}
+        >
+          <FontAwesomeIcon icon={faBarsProgress} size={14} />
+          <span class="text-sm small-touch:display-none">Jobs</span>
+          <Show when={activeMediaJobCount()}>
+            <span class="text-caption tabular-nums">({activeMediaJobCount()})</span>
+          </Show>
+        </button>
+        <Show when={selectedConversation()}>
+          <button
+            type="button"
+            class="icon-btn header-settings-btn"
+            title="Conversation settings"
+            aria-label="Conversation settings"
+            onClick={() => show('conversation')}
+          >
+            <FontAwesomeIcon icon={faGear} size={14} />
+          </button>
+        </Show>
+      </div>
     </header>
   );
 }

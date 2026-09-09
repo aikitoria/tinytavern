@@ -25,9 +25,16 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import { mediaJobActive, type GalleryItem } from '@tinytavern/shared';
+import type { GalleryItem } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
-import { applyGalleryItem, openModal, setState, state, toast } from '../../state/store.ts';
+import {
+  activeMediaJobCount,
+  applyGalleryItem,
+  openModal,
+  setState,
+  state,
+  toast,
+} from '../../state/store.ts';
 import { confirmAction } from '../../state/confirm.ts';
 import { filterGallery, indexGallery } from '../../galleryModel.ts';
 import { errorMessage } from '../../util.ts';
@@ -163,12 +170,6 @@ export interface GalleryPickerOptions {
 }
 
 export default function GalleryModal(props: { picker?: GalleryPickerOptions; active?: boolean }) {
-  const runningJobs = createMemo(
-    () =>
-      Object.values(state.mediaJobs).filter(
-        (job) => job.operation !== 'image-describe' && mediaJobActive(job.state),
-      ).length,
-  );
   const galleryItems = () =>
     props.picker ? state.gallery.filter((item) => item.media?.kind === 'image') : state.gallery;
   const [pickedIds, setPickedIds] = createSignal<number[]>(
@@ -653,7 +654,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             <Show when={!selectionMode()}>
               <button type="button" aria-label="Media jobs" onClick={openMediaJobs}>
                 <FontAwesomeIcon icon={faBarsProgress} size={14} />
-                Jobs{runningJobs() ? ` (${runningJobs()})` : ''}
+                Jobs{activeMediaJobCount() ? ` (${activeMediaJobCount()})` : ''}
               </button>
             </Show>
           </Show>

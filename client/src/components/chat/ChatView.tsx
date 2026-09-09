@@ -50,7 +50,7 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
       !event.metaKey &&
       !event.altKey &&
       state.modal === null &&
-      state.viewMode === 'chat' &&
+      state.viewMode !== 'map' &&
       event.target instanceof HTMLElement &&
       (event.target === document.body || scroller.contains(event.target)) &&
       !event.target.closest('input, textarea, select, [contenteditable]') &&
@@ -95,15 +95,16 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
 
   createEffect(() => {
     if (state.tree.conversationId == null) return;
+    if (state.viewMode === 'map') return;
     scroll.reset();
     requestAnimationFrame(() => {
-      if (props.active !== false) scroll.follow();
+      if (props.active !== false && state.viewMode !== 'map') scroll.follow();
     });
   });
 
   // Catch layout changes beyond token updates, including markdown and font settling.
   const resizeObserver = new ResizeObserver(() => {
-    if (props.active !== false) scroll.follow();
+    if (props.active !== false && state.viewMode !== 'map') scroll.follow();
   });
   onCleanup(() => resizeObserver.disconnect());
 
@@ -112,7 +113,7 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
     const last = path[path.length - 1];
     void last?.content.length;
     void last?.reasoning?.length;
-    if (props.active !== false) scroll.follow();
+    if (props.active !== false && state.viewMode !== 'map') scroll.follow();
   });
 
   return (
@@ -155,7 +156,7 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
           <Show
             when={state.viewMode === 'chat'}
             fallback={
-              <Show when={state.viewMode === 'trace'} fallback={<TreeMap />}>
+              <Show when={state.viewMode === 'trace'} fallback={<TreeMap active={props.active} />}>
                 <TraceView pendingMessage={props.pendingMessage ?? ''} />
               </Show>
             }

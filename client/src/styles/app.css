@@ -145,12 +145,6 @@
 
 /* ---- Header ---- */
 
-.header-rename-btn {
-  transition:
-    opacity 0.12s,
-    visibility 0.12s;
-}
-
 .header-context {
   scrollbar-width: none;
 }

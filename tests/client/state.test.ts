@@ -67,6 +67,15 @@ test('pending prompt trace preserves history and replaces only its editable tail
   assert.equal(withDraft.messages[4]!.reasoning_content, prompt.reasoningPrefill);
   const awaitingReply = preparePromptTrace({ ...trace, messages: prompt.messages }, '');
   assert.equal(awaitingReply.prefillMessageIndex, 2);
+  const live = { ...trace, stream: { messageId: 12, generationToken: 34, namePrefix: '' } };
+  const streaming = preparePromptTrace(live, 'Draft for the next turn');
+  assert.strictEqual(
+    streaming.messages,
+    live.messages,
+    'Live history never acquires another seed or an unsent draft',
+  );
+  assert.equal(streaming.prefillMessageIndex, null);
+  assert.equal(streaming.pendingMessageIndex, null);
 });
 
 test('client sync', async () => {

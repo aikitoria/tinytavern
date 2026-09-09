@@ -1,6 +1,6 @@
 import { readSseData, prepareChatMessages } from '@tinytavern/shared';
 import { publicMessage } from '../media/mediaUrls.ts';
-import type { Conversation, Endpoint, GenMeta, Message } from '@tinytavern/shared';
+import type { Conversation, Endpoint, GenMeta, Message, PromptTrace } from '@tinytavern/shared';
 import { stmt, toEndpoint, toMessage, transaction } from '../db/db.ts';
 import { getMessage, getPathToMessage } from '../conversations/tree.ts';
 import { buildChatMessages } from './prompt.ts';
@@ -79,6 +79,31 @@ export function isBackgroundGeneration(mid: number): boolean {
 
 export function activeGenerationToken(mid: number): number | null {
   return active.get(mid)?.generationToken ?? null;
+}
+
+/** Expose only prompt data from the immutable request, never endpoint credentials. */
+export function activePromptTrace(mid: number): PromptTrace | null {
+  const gen = active.get(mid);
+  if (!gen?.requestContext) return null;
+  const { endpoint, built } = gen.requestContext;
+  const { messages } = prepareChatMessages(
+    { ...built, namePrefill: null },
+    { prefillMode: endpoint.prefillMode, content: '', reasoning: '' },
+  );
+  return {
+    messages: withEndpointSystemPrompt(endpoint, messages),
+    reasoningPrefill: null,
+    messagePrefill: null,
+    namePrefill: null,
+    disabledPrefillSpeakerNote: null,
+    prefillMode: endpoint.prefillMode,
+    userMessagePrefix: '',
+    stream: {
+      messageId: mid,
+      generationToken: gen.generationToken,
+      namePrefix: endpoint.prefillMode === 'disabled' ? '' : (built.namePrefill ?? ''),
+    },
+  };
 }
 
 export function promoteBackgroundGeneration(mid: number): boolean {

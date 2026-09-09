@@ -45,6 +45,7 @@ import {
 import { clearSettingReference, getSettings } from '../settings/settingsStore.ts';
 import {
   chatCompletionOnce,
+  activePromptTrace,
   hasActiveGeneration,
   hasActiveNonToolGeneration,
   hasForegroundGeneration,
@@ -462,6 +463,9 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
 route.get('/api/conversations/:id/trace', ({ params }) => {
   const conv = getConversation(positiveId(params.id));
   const history = getActivePath(conv.id);
+  const streaming = history.findLast((message) => message.status === 'streaming');
+  const liveTrace = streaming ? activePromptTrace(streaming.id) : null;
+  if (liveTrace) return liveTrace;
   const built = buildChatMessages(conv, history);
   const endpointId = conv.endpointId ?? getSettings().activeEndpointId;
   const endpointRow = endpointId

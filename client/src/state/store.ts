@@ -112,6 +112,14 @@ export function toast(text: string, kind: ToastKind = 'error'): void {
 /** App-lifetime root avoids Solid's warning about unowned computations; never disposed. */
 const globalMemo = <T>(fn: () => T) => createRoot(() => createMemo(fn));
 
+export const activeMediaJobCount = globalMemo(() => {
+  let count = 0;
+  for (const job of Object.values(state.mediaJobs)) {
+    if (job.operation !== 'image-describe' && mediaJobActive(job.state)) count++;
+  }
+  return count;
+});
+
 export const mediaJobsByMessage = globalMemo(() => {
   const jobs = new Map<number, MediaJob>();
   for (const job of Object.values(state.mediaJobs)) {

@@ -3,7 +3,7 @@ import { faCopy } from '@fortawesome/free-regular-svg-icons';
 import { For, Show, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
 import { preparePromptTrace } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
-import { state, toast } from '../../state/store.ts';
+import { state, streamingMessage, toast } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 
@@ -60,10 +60,21 @@ export default function TraceView(props: { pendingMessage: string }) {
       revision: state.tree.mutationRevision,
       settingsRevision: state.settings.revision,
       connected: state.connected,
+      generation: streamingMessage()?.generationToken,
     }),
     (key) => (key.id != null ? api.trace(key.id) : Promise.resolve(null)),
   );
   const isCommand = () => props.pendingMessage.trimStart().startsWith('/');
+  const liveMessage = createMemo(() => {
+    const stream = trace()?.stream;
+    const message = stream ? state.tree.messages[stream.messageId] : undefined;
+    return message?.generationToken === stream?.generationToken ? message : undefined;
+  });
+  const liveContent = () => {
+    const content = liveMessage()?.content ?? '';
+    const name = trace()?.stream?.namePrefix;
+    return name ? (content ? `${name} ${content}` : name) : content;
+  };
   const prepared = createMemo(() => {
     if (trace.error || trace.loading) return null;
     const current = trace();
@@ -87,9 +98,13 @@ export default function TraceView(props: { pendingMessage: string }) {
           <>
             <p
               class="hint"
-              title="The next chat request, including endpoint additions, your pending message, and enabled reasoning and message prefills."
+              title={
+                trace()?.stream
+                  ? 'The captured request and its live reply.'
+                  : 'The next chat request, including endpoint additions, your pending message, and enabled reasoning and message prefills.'
+              }
             >
-              Next request · {t().messages.length}{' '}
+              {trace()?.stream ? 'Current request' : 'Next request'} · {t().messages.length}{' '}
               {t().messages.length === 1 ? 'message' : 'messages'}
             </p>
             <Show when={isCommand()}>
@@ -127,6 +142,29 @@ export default function TraceView(props: { pendingMessage: string }) {
                 </div>
               )}
             </For>
+            <Show when={liveMessage()}>
+              {(message) => (
+                <div class="trace-live flex flex-col gap-1">
+                  <Show when={message().reasoning}>
+                    <TraceMessage
+                      role="assistant"
+                      label={`${message().role} reasoning (live)`}
+                      content={message().reasoning!}
+                    />
+                  </Show>
+                  <TraceMessage
+                    role={message().role}
+                    label={`${message().role} (live)`}
+                    content={liveContent()}
+                  />
+                </div>
+              )}
+            </Show>
+            <Show when={trace()?.stream && props.pendingMessage.trim()}>
+              <p class="hint">
+                Your pending message will appear in the next request after this reply finishes.
+              </p>
+            </Show>
           </>
         )}
       </Show>

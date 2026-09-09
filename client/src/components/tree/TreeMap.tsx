@@ -61,7 +61,7 @@ interface Edge {
   onPath: boolean;
 }
 
-export default function TreeMap() {
+export default function TreeMap(props: { active?: boolean }) {
   let root!: HTMLDivElement;
   let content!: HTMLDivElement;
   let edgesCanvas!: HTMLCanvasElement;
@@ -71,6 +71,7 @@ export default function TreeMap() {
   const [view, setView] = createSignal({ x: 0, y: 0, scale: 1 });
   const [viewport, setViewport] = createSignal({ w: 0, h: 0 });
   let rafId = 0;
+  const [following, setFollowing] = createSignal(true);
 
   // Key positions by id to preserve message references and avoid remounting cards.
   const layout = createMemo(() => {
@@ -277,6 +278,7 @@ export default function TreeMap() {
 
   /** Zoom so the viewport point (cx, cy) stays fixed in world space. */
   const zoomAt = (cx: number, cy: number, next: number) => {
+    setFollowing(false);
     const rect = root.getBoundingClientRect();
     const px = cx - rect.left;
     const py = cy - rect.top;
@@ -308,6 +310,7 @@ export default function TreeMap() {
   };
 
   const fit = () => {
+    setFollowing(false);
     const b = layout().bounds;
     fitBounds(0, 0, b.w, b.h);
   };
@@ -322,6 +325,14 @@ export default function TreeMap() {
       state.tree.activeLeafId != null ? positions().get(state.tree.activeLeafId) : undefined;
     const vp = viewport();
     if (!p || !vp.w || !vp.h) return;
+    // A followed stream must show the full card, including its scrolling body.
+    if (
+      camera.scale < MINI_SCALE &&
+      state.tree.messages[state.tree.activeLeafId!]?.status === 'streaming'
+    ) {
+      fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
+      return;
+    }
     camera.x = vp.w / 2 - (p.x + CARD_W / 2) * camera.scale;
     camera.y = vp.h / 2 - (p.y + CARD_H / 2) * camera.scale;
     apply();
@@ -370,6 +381,7 @@ export default function TreeMap() {
     clearTimeout(panClickResetTimer);
     panClickResetTimer = undefined;
     panning = true;
+    setFollowing(false);
     panMoved = false;
     downX = e.clientX;
     downY = e.clientY;
@@ -402,6 +414,7 @@ export default function TreeMap() {
     if ((e.target as Element).closest('.treemap-toolbar')) return;
     if (e.touches.length === 2) {
       pinching = true;
+      setFollowing(false);
       panning = false;
       cardScroll = null;
       panMoved = true; // a pinch must never end in a card click
@@ -442,6 +455,7 @@ export default function TreeMap() {
         lastScrollY = touch.clientY;
         return;
       }
+      setFollowing(false);
       gesture.pan(touch);
     }
   };
@@ -476,13 +490,34 @@ export default function TreeMap() {
 
   // Frame small trees in full; large trees open around the active branch.
   let initialCameraDone = false;
+  createEffect(
+    on(
+      () => state.tree.conversationId,
+      () => {
+        initialCameraDone = false;
+        setFollowing(true);
+      },
+    ),
+  );
   createEffect(() => {
-    if (initialCameraDone || !viewport().w || !viewport().h || positions().size === 0) return;
+    const follow = following();
+    const leaf = state.tree.activeLeafId;
+    positions();
+    viewport();
+    if (props.active === false || !viewport().w || !viewport().h || positions().size === 0) return;
+    if (initialCameraDone) {
+      if (follow && !mapSearchQuery().trim()) centerActive();
+      return;
+    }
     initialCameraDone = true;
     const b = layout().bounds;
     const vp = viewport();
-    const active =
-      state.tree.activeLeafId != null ? state.tree.messages[state.tree.activeLeafId] : undefined;
+    const active = leaf != null ? state.tree.messages[leaf] : undefined;
+    if (active?.status === 'streaming') {
+      const p = positions().get(active.id)!;
+      fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
+      return;
+    }
     if (
       !active ||
       ordered().length <= 8 ||
@@ -512,6 +547,7 @@ export default function TreeMap() {
   createEffect(
     on([mapSearchQuery, searchMatches, searchParent, viewport], ([, matches, parent, vp]) => {
       if (!matches?.size || !vp.w || !vp.h) return;
+      setFollowing(false);
       let left = Infinity;
       let top = Infinity;
       let right = -Infinity;
@@ -533,6 +569,7 @@ export default function TreeMap() {
   createEffect(
     on(mapSearchTarget, (target) => {
       if (!target) return;
+      setFollowing(false);
       const p = positions().get(target.messageId);
       if (p) fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
     }),
@@ -614,7 +651,7 @@ export default function TreeMap() {
                   </div>
                 }
               >
-                <MessageNode message={message} inMap />
+                <MessageNode message={message} inMap active={props.active} />
               </Show>
             </div>
           )}
@@ -653,9 +690,13 @@ export default function TreeMap() {
         </button>
         <button
           class="icon-btn"
-          title="Center on the active message"
+          title="Center and follow the active message"
           aria-label="Center active message"
-          onClick={centerActive}
+          aria-pressed={following()}
+          onClick={() => {
+            setFollowing(true);
+            centerActive();
+          }}
         >
           <FontAwesomeIcon icon={faCrosshairs} size={16} />
         </button>

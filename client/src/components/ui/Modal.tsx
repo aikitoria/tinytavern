@@ -117,7 +117,13 @@ export default function Modal(props: {
             lastFocused = event.target as HTMLElement;
           }}
         >
-          <div class="modal-head flex items-center justify-between gap-3 py-3 px-4 border-b border-b-solid border-b-line small-touch:py-1 small-touch:px-3 small-touch:min-h-11.5">
+          <div
+            class={
+              props.fullscreen
+                ? 'modal-head page-header justify-between small-touch:px-3'
+                : 'modal-head flex items-center justify-between gap-3 py-3 px-4 border-b border-b-solid border-b-line small-touch:py-1 small-touch:px-3 small-touch:min-h-11.5'
+            }
+          >
             <span
               class="modal-title font-semibold text-heading leading-tight small-touch:text-mobile-title"
               id={titleId}

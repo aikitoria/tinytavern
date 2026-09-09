@@ -391,6 +391,7 @@ test('application HTTP and WebSocket contracts', async () => {
           );
         }
         const start = completionRequests.length;
+        hold = true;
         const sent = await request<{ assistantMessageId: number }>(
           'POST',
           `/api/conversations/${chat.id}/messages`,
@@ -399,8 +400,44 @@ test('application HTTP and WebSocket contracts', async () => {
             content: pendingMessage,
           },
         );
+        await viewer.wait((event) => event.t === 'delta' && event.mid === sent.assistantMessageId);
+        const liveTrace = await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`);
+        const liveTree = await tree(chat.id);
+        const liveMessage = liveTree.messages.find(
+          (message) => message.id === sent.assistantMessageId,
+        )!;
+        assert.deepEqual(liveTrace.stream, {
+          messageId: sent.assistantMessageId,
+          generationToken: liveMessage.generationToken,
+          namePrefix: mode === 'disabled' ? '' : 'Guest:',
+        });
+        assert.deepEqual(
+          liveTrace.messages,
+          preview.messages.slice(0, preview.prefillMessageIndex ?? undefined),
+        );
+        assert(liveMessage.content.includes('Hello'), 'Reply text is supplied by the tree stream');
+        assert.equal(liveTrace.reasoningPrefill, null, 'Live buffers already include the seed');
+        await request('PATCH', `/api/endpoints/${endpoint.id}`, {
+          systemPromptPrefix: 'Edited while streaming\n',
+        });
+        assert.deepEqual(
+          await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`),
+          liveTrace,
+          'Active trace retains the captured request after settings edits',
+        );
+        await request('PATCH', `/api/endpoints/${endpoint.id}`, {
+          systemPromptPrefix: 'Endpoint prefix\n',
+        });
+        assert(held);
+        finish(held);
+        held = undefined;
+        hold = false;
         await viewer.wait(
           (event) => event.t === 'final' && event.message.id === sent.assistantMessageId,
+        );
+        assert.equal(
+          (await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`)).stream,
+          undefined,
         );
         const actual = completionRequests.slice(start).find((entry) => entry.stream)!;
         assert.deepEqual(

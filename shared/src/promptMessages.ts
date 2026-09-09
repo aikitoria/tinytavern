@@ -20,11 +20,13 @@ export interface ChatPrompt {
 export interface PromptTrace extends ChatPrompt {
   prefillMode: Endpoint['prefillMode'];
   userMessagePrefix: string;
+  /** The captured request history; reply buffers arrive through the existing tree stream. */
+  stream?: { messageId: number; generationToken: number; namePrefix: string };
 }
 
 /** A fresh reply prefill belongs after a user turn, never inside a historical assistant turn. */
 export function preparePromptTrace(trace: PromptTrace, pendingMessage: string) {
-  if (!pendingMessage.trim() && trace.messages.at(-1)?.role !== 'user') {
+  if (trace.stream || (!pendingMessage.trim() && trace.messages.at(-1)?.role !== 'user')) {
     return {
       messages: trace.messages,
       prefilled: false,

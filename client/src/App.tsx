@@ -51,7 +51,7 @@ export default function App() {
   return (
     <Show when={authPhase() !== 'locked'} fallback={<PasswordGate />}>
       <div
-        class="app isolate flex h-full small-touch:[&:where(.sidebar-open)_.header]:visible narrow:[&:where(.sidebar-open)_.header-view-btn]:display-none narrow:[&:where(.sidebar-open)_.header>.icon-btn]:display-none narrow:[&:where(.sidebar-open)_.header]:px-2"
+        class="app isolate flex h-full small-touch:[&:where(.sidebar-open)_.header]:visible narrow:[&:where(.sidebar-open)_.header-view-btn]:display-none narrow:[&:where(.sidebar-open)_.header-settings-btn]:display-none narrow:[&:where(.sidebar-open)_.header]:px-2"
         classList={{ 'sidebar-open': state.sidebarOpen, 'workspace-covered': workspaceCovered() }}
       >
         <Show when={!bootGone()}>
