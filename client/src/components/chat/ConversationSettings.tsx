@@ -1,3 +1,4 @@
+import { entityOptions, editReferencedEntity } from '../../state/entityReferences.ts';
 import { useDialogNavigationGuard } from '../../state/dialogContext.ts';
 import { createDefaultField } from '../forms/SettingField.tsx';
 import FormField from '../forms/FormFields.tsx';
@@ -163,10 +164,7 @@ function Editor(props: {
         value={draft.personaId?.toString() ?? ''}
         ariaLabel="Conversation persona"
         onChange={(next) => setDraft('personaId', numberOrNull(next))}
-        options={[
-          { value: '', label: '— none —' },
-          ...state.personas.map((p) => ({ value: String(p.id), label: p.name })),
-        ]}
+        options={[{ value: '', label: '— none —' }, ...entityOptions('personas', state.personas)]}
       />
       <FormField
         field={endpointField}
@@ -175,8 +173,15 @@ function Editor(props: {
         ariaLabel="Conversation endpoint"
         onChange={(next) => setDraft('endpointId', numberOrNull(next))}
         options={[
-          { value: '', label: '— global default —' },
-          ...state.endpoints.map((ep) => ({ value: String(ep.id), label: ep.name })),
+          {
+            value: '',
+            label: '— global default —',
+            edit:
+              state.settings.activeEndpointId != null
+                ? () => editReferencedEntity('endpoints', state.settings.activeEndpointId!)
+                : undefined,
+          },
+          ...entityOptions('endpoints', state.endpoints),
         ]}
       />
       <FormField
@@ -207,8 +212,7 @@ function Editor(props: {
           {error()}
         </p>
       </Show>
-      <SettingsActions inline save={save} saved={saved()}>
-        <button onClick={discard}>Discard</button>
+      <SettingsActions inline save={save} discard={discard} saved={saved()}>
         <button onClick={duplicateChat}>Duplicate chat</button>
         <button
           title="Export messages and images; videos are omitted"

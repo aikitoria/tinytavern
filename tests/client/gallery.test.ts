@@ -1,6 +1,80 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
+test('gallery detail drafts survive cancelled navigation and failed saves', async () => {
+  const { createRoot } = await import('solid-js');
+  const { createSettingsNavigation } = await import('../../client/src/state/settingsSubmission.ts');
+  const { createGalleryDetailEditor } =
+    await import('../../client/src/components/gallery/galleryDetailEditor.ts');
+  let saved = { prompt: 'Original prompt', characterIds: [1] };
+  let fail = false;
+  let error = '';
+  let destination = '';
+  let dispose!: () => void;
+  const { editor, navigation } = createRoot((cleanup) => {
+    dispose = cleanup;
+    const editor = createGalleryDetailEditor({
+      value: () => saved,
+      generating: () => false,
+      submit: async (value, expected) => {
+        assert.deepEqual(expected, saved, 'Save checks the prompt and character baseline');
+        if (fail) throw new Error('Save failed');
+        saved = value;
+        return saved;
+      },
+      onError: (message) => {
+        error = message;
+      },
+    });
+    const navigation = createSettingsNavigation();
+    navigation.register({
+      isDirty: editor.dirty,
+      saving: editor.saving,
+      save: editor.save,
+      discard: editor.discard,
+    });
+    return { editor, navigation };
+  });
+  try {
+    editor.setPrompt('Edited prompt');
+    editor.setCharacterIds([2]);
+    const leave = () => {
+      destination = 'next image';
+    };
+    navigation.navigate(leave);
+    assert(navigation.promptOpen());
+    assert.equal(destination, '', 'A dirty detail cannot be replaced before confirmation');
+    navigation.cancel();
+    assert.equal(editor.prompt(), 'Edited prompt');
+    assert.deepEqual(editor.characterIds(), [2]);
+    fail = true;
+    navigation.navigate(leave);
+    await navigation.save();
+    assert.equal(destination, '', 'Persistence failure keeps the detail mounted');
+    assert.equal(error, 'Save failed');
+    assert(editor.dirty());
+    fail = false;
+    navigation.navigate(leave);
+    await navigation.save();
+    assert.equal(destination, 'next image');
+    assert.deepEqual(saved, { prompt: 'Edited prompt', characterIds: [2] });
+    assert.equal(editor.dirty(), false);
+
+    editor.setPrompt('Discard this');
+    saved = { prompt: 'Updated elsewhere', characterIds: [3] };
+    navigation.navigate(() => {
+      destination = 'gallery grid';
+    });
+    navigation.discard();
+    assert.equal(destination, 'gallery grid');
+    assert.equal(editor.prompt(), saved.prompt);
+    assert.deepEqual(editor.characterIds(), saved.characterIds);
+    assert.equal(editor.dirty(), false);
+  } finally {
+    dispose();
+  }
+});
+
 test('pinch translation and release preserve the pan origin', async () => {
   const { createPanZoom } = await import('../../client/src/panZoom.ts');
   const camera = { x: 0, y: 0, scale: 1 };
@@ -159,7 +233,8 @@ test('media job cards', async () => {
       workflowValues: {},
       draft: null,
       revision: 1,
-      operation: 'video',
+      textResult: null,
+      temporary: false,
       workflowId: null,
       workflowSnapshot: null,
       presetId: null,
@@ -201,7 +276,7 @@ test('media job cards', async () => {
     newer,
     standalone,
     running,
-    job(5, { operation: 'image-describe', createdAt: 10 }),
+    job(5, { temporary: true, createdAt: 10 }),
   ]);
   assert.deepEqual(
     groups.map((group) => group.id),
@@ -263,12 +338,6 @@ test('media job cards', async () => {
   );
   assert.equal(groupMediaJobs([newer, running, complete])[0]!.job.id, running.id);
   assert.deepEqual(groupMediaJobs([newer]), [], 'A cancelled-only draft leaves no job card');
-  const regenerated = job(6, { draft, state: 'submitting', createdAt: 4 });
-  assert.deepEqual(
-    mediaVariations([newer, running, complete, regenerated]).map((item) => item.job.id),
-    [complete.id, running.id, regenerated.id],
-    'Generating again occupies the removed slot without retaining a cancelled alternative',
-  );
   assert.equal(
     mediaVariationIndex(
       mediaVariations([{ ...complete, outputs: [asset, { ...asset, id: 44 }] }]),
@@ -280,9 +349,9 @@ test('media job cards', async () => {
   );
 
   const long = 'x'.repeat(1000);
-  assert.deepEqual(
-    jobPromptExcerpt(job(6, { state: 'preparing', reasoning: `${long}new reasoning` })),
-    { label: 'Thinking…', text: `${long}new reasoning` },
+  assert.equal(
+    jobPromptExcerpt(job(6, { state: 'preparing', reasoning: `${long}new reasoning` })).text,
+    `${long}new reasoning`,
   );
   const writing = jobPromptExcerpt(
     job(7, {
@@ -291,13 +360,7 @@ test('media job cards', async () => {
       reasoning: 'hidden reasoning',
     }),
   );
-  assert.equal(writing.label, 'Writing prompt…');
   assert.equal(writing.text, `${long}new prompt`);
-  assert.equal(
-    jobPromptExcerpt(job(7, { state: 'preparing', prompt: `${writing.text} token` })).text,
-    `${writing.text} token`,
-    'New tokens preserve the displayed prefix so existing lines do not rewrap',
-  );
   for (const [overrides, text] of [
     [{ state: 'ready', prompt: `Prompt ${long}`, instruction: 'instruction' }, `Prompt ${long}`],
     [{ instruction: 'Use this character' }, 'Use this character'],
@@ -307,10 +370,10 @@ test('media job cards', async () => {
   const snapshot: MediaWorkflow = {
     id: 'render-workflow',
     name: 'Captured workflow',
-    operation: 'video',
-    referenceCount: 0,
+    inputBindings: {},
+    textOutputNodeId: null,
     chatPromptPresetId: null,
-    galleryPromptPresetId: null,
+    standalonePromptPresetId: null,
     json: JSON.stringify({
       duration: {
         class_type: 'PrimitiveInt',

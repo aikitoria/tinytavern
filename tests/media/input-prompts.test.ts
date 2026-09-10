@@ -6,7 +6,6 @@ import { test } from 'bun:test';
 test('media input prompts', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
   type MediaJob = import('@tinytavern/shared').MediaJob;
-  type MediaOperation = import('@tinytavern/shared').MediaOperation;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
@@ -32,12 +31,12 @@ test('media input prompts', async () => {
     '{"1":{"inputs":{"prompt":"{{prompt}}"}}}',
     'http://unused.invalid',
   ).workflow;
-  const operations: MediaOperation[] = ['image-edit', 'video-first', 'video-references'];
+  const operations: string[] = ['image-edit', 'video-first', 'video-references'];
   const workflows: MediaWorkflow[] = operations.map((operation) => ({
     ...imageWorkflow,
     id: operation,
-    operation,
-    referenceCount: operation === 'video-first' ? 0 : 3,
+    standalonePromptPresetId: operation,
+    chatPromptPresetId: operation,
     json: JSON.stringify({
       '1': {
         inputs:
@@ -53,10 +52,10 @@ test('media input prompts', async () => {
     }),
   }));
   const template =
-    '{{#if FIRST_FRAME_PROMPT}}FIRST<{{first_frame_prompt}}>{{/if}}' +
-    '{{#if reference1_prompt}}REF1<{{reference1_prompt}}>{{#if reference3_prompt}}THIRD{{/if}}{{/if}}' +
-    '{{#if reference2_prompt}}REF2<{{reference2_prompt}}>{{/if}}' +
-    '{{#if reference3_prompt}}REF3<{{reference3_prompt}}>{{/if}}';
+    '{{#if INPUT1_PROMPT}}INPUT1<{{input1_prompt}}>{{#if input3_prompt}}THIRD{{/if}}{{/if}}' +
+    '{{#if input2_prompt}}INPUT2<{{input2_prompt}}>{{/if}}' +
+    '{{#if input3_prompt}}INPUT3<{{input3_prompt}}>{{/if}}' +
+    '{{input4_prompt}}{{input64_prompt}}';
   const endpointId = insertFixture('endpoints', {
     name: 'Test',
     base_url: 'http://unused.invalid',
@@ -65,7 +64,6 @@ test('media input prompts', async () => {
   const presets = operations.map((operation) => ({
     id: operation,
     name: operation,
-    operation,
     systemPrompt: template,
     userMessage: template,
     reasoningPrefill: template,
@@ -79,24 +77,11 @@ test('media input prompts', async () => {
       workflows,
       comfyUrl: 'http://unused.invalid',
     },
-    galleryImagePrompts: {
-      presets: presets.filter((preset) => preset.operation.startsWith('image')),
-      defaults: { 'image-edit': 'image-edit' },
-    },
-    galleryVideoPrompts: {
-      presets: presets.filter((preset) => preset.operation.startsWith('video')),
-      defaults: { 'video-first': 'video-first', 'video-references': 'video-references' },
-    },
-    chatVideoPrompts: {
-      presets: operations
-        .filter((operation) => operation.startsWith('video'))
-        .map((operation) => ({
-          id: operation,
-          name: operation,
-          operation,
-          chatPrompt: '[System Note]\n' + template,
-        })),
-      defaults: { 'video-first': 'video-first', 'video-references': 'video-references' },
+    mediaStandalonePrompts: { folders: [], presets, defaultPresetId: null },
+    mediaChatPrompts: {
+      folders: [],
+      presets: operations.map((id) => ({ id, name: id, chatPrompt: '[System Note]\n' + template })),
+      defaultPresetId: null,
     },
   });
   function image(prompt: string | null) {
@@ -121,7 +106,7 @@ test('media input prompts', async () => {
     return { id: mediaAssetForPath(path)!.id, path, recipeId, galleryId };
   }
   const original =
-    '  A portrait\n\n\nwith {{instruction}} and {{#if reference2_prompt}}literal{{/if}}.  ';
+    '  A portrait\n\n\nwith {{instruction}} and {{#if input2_prompt}}literal{{/if}}.  ';
   const first = image(original);
   const upload = image(null);
   const blank = image(' \n ');
@@ -145,14 +130,9 @@ test('media input prompts', async () => {
     cancelMediaJob(requireMediaJob(job.id));
     return context;
   }
-  const job = (
-    operation: MediaOperation,
-    inputs: unknown[],
-    contextConversationId: number | null = null,
-  ) =>
+  const job = (operation: string, inputs: unknown[], contextConversationId: number | null = null) =>
     createMediaJob({
       requestKey: newRequestId(),
-      operation,
       workflowId: operation,
       inputs,
       contextConversationId,
@@ -180,7 +160,7 @@ test('media input prompts', async () => {
     'Editing a draft retains each unchanged input snapshot',
   );
   const context = prepare(unchanged);
-  const expected = `REF1<${original}>`;
+  const expected = `INPUT1<${original}>`;
   for (const value of Object.values(context.template)) assert.equal(value, expected);
   const recipeId = saveMediaRecipe(
     { comfyUrl: 'http://unused.invalid', workflow: workflows[0]!, timeoutSeconds: 60 },
@@ -208,9 +188,31 @@ test('media input prompts', async () => {
     'Replacing a slot captures its new image prompt',
   );
   assert.equal(changed.inputs[1]!.prompt, '');
+  const reordered = job('image-edit', [
+    { slot: 'reference3', assetId: replacement.id },
+    { slot: 'reference2', assetId: upload.id },
+    { slot: 'reference1', assetId: blank.id },
+  ]);
+  assert.equal(
+    prepare(reordered).template.userMessage,
+    'INPUT3<New source prompt>',
+    'Empty prompts retain their positions and request order does not determine numbering',
+  );
+  const swapped = editMediaJob(requireMediaJob(reordered.id), {
+    inputs: [
+      { slot: 'reference3', assetId: blank.id },
+      { slot: 'reference2', assetId: upload.id },
+      { slot: 'reference1', assetId: replacement.id },
+    ],
+  });
+  assert.equal(
+    prepare(swapped).template.userMessage,
+    'INPUT1<New source prompt>',
+    'Moving an image to another input changes its positional prompt macro',
+  );
   const newSelection = firstFrame(first.id);
   assert.equal(newSelection.inputs[0]!.prompt, 'Changed later');
-  assert.equal(prepare(newSelection).template.userMessage, 'FIRST<Changed later>');
+  assert.equal(prepare(newSelection).template.userMessage, 'INPUT1<Changed later>');
   assert.equal(
     getMediaRecipe(first.recipeId!).prompt,
     original,
@@ -223,7 +225,7 @@ test('media input prompts', async () => {
   const describedUpload = firstFrame(upload.id);
   assert.equal(
     prepare(describedUpload).template.userMessage,
-    'FIRST<  Uploaded image description  >',
+    'INPUT1<  Uploaded image description  >',
   );
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', upload.galleryId);
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', first.galleryId);
@@ -246,14 +248,26 @@ test('media input prompts', async () => {
               { slot: 'reference3', assetId: blank.id },
             ];
       const prepared = prepare(job(operation, inputs, contextConversationId));
-      const body =
-        operation === 'video-first' ? 'FIRST<New source prompt>' : 'REF1<New source prompt>';
+      const body = 'INPUT1<New source prompt>';
       assert.equal(
         prepared.template.userMessage,
         contextConversationId === null ? body : '[System Note]\n' + body,
       );
     }
   }
+  const unsupportedNames = '{{first_frame_prompt}}|{{source_prompt}}|{{reference1_prompt}}';
+  putSettings({
+    ...getSettings(),
+    mediaStandalonePrompts: {
+      ...getSettings().mediaStandalonePrompts,
+      presets: presets.map((preset) => ({ ...preset, systemPrompt: unsupportedNames })),
+    },
+  });
+  assert.equal(
+    prepare(firstFrame(replacement.id)).template.systemPrompt,
+    unsupportedNames,
+    'Input-name macros have no aliases; unknown tokens retain the normal template behavior',
+  );
   stmt('DELETE FROM gallery_items WHERE id = ?').run(first.galleryId);
   deleteImageFiles([first.path]);
   const saved = getMediaRecipe(recipeId);
@@ -265,11 +279,170 @@ test('media input prompts', async () => {
   );
   assert.equal(saved.inputs[1]!.prompt, '');
   assert.equal(
-    expandTemplate('{{#if reference1_prompt}}Outer{{#if reference2_prompt}}Inner{{/if}}{{/if}}', {
-      reference1_prompt: 'yes',
-      reference2_prompt: 'yes',
+    expandTemplate('{{#if input1_prompt}}Outer{{#if input2_prompt}}Inner{{/if}}{{/if}}', {
+      input1_prompt: 'yes',
+      input2_prompt: 'yes',
     }),
     'OuterInner',
   );
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
+});
+
+test('named automatic inputs honor manual choices, snapshot avatars and roll back failed fills', async () => {
+  const { existsSync, readdirSync } = await import('node:fs');
+  const { basename, join } = await import('node:path');
+  const { newRequestId } = await import('@tinytavern/shared');
+  const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { saveImage } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveAvatar, readAvatarFile } = await import('../../server/src/characters/avatarStore.ts');
+  const { createMediaJob, editMediaJob, startMediaJob, cancelMediaJob, deleteMediaJob } =
+    await import('../../server/src/media/mediaJobs.ts');
+  const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const raster = makePlaceholderPng();
+  const characterId = insertFixture('characters', { name: 'Input character', created_at: 1 });
+  const avatar = saveAvatar('character', characterId, raster);
+  stmt('UPDATE characters SET avatar=? WHERE id=?').run(avatar, characterId);
+  const conversationId = conversationFixture({ character_id: characterId });
+  const path = saveImage('.png', raster);
+  insertFixture('gallery_items', {
+    character_name: '',
+    prompt: 'Manual input description',
+    image: path,
+    created_at: 1,
+    updated_at: 1,
+  });
+  const assetId = mediaAssetForPath(path)!.id;
+  const workflow: import('@tinytavern/shared').MediaWorkflow = {
+    id: 'named',
+    name: 'Arbitrary inputs',
+    standalonePromptPresetId: null,
+    chatPromptPresetId: 'named',
+    textOutputNodeId: null,
+    inputBindings: {
+      chat: { identity: 'character-avatar', style: 'character-avatar', backdrop: 'selected:1' },
+      avatar: { identity: 'character-avatar', style: 'character-avatar', backdrop: 'selected:1' },
+    },
+    json: JSON.stringify({
+      identity: {
+        class_type: 'LoadImage',
+        inputs: { image: 'example.png' },
+        _meta: { title: 'Identity [image:identity]' },
+      },
+      style: {
+        class_type: 'LoadImage',
+        inputs: { image: 'example.png' },
+        _meta: { title: 'Style [image:style]' },
+      },
+      backdrop: {
+        class_type: 'LoadImage',
+        inputs: { image: 'example.png' },
+        _meta: { title: 'Backdrop [image:backdrop]' },
+      },
+      text: {
+        class_type: 'PrimitiveString',
+        inputs: { value: 'Sample' },
+        _meta: { title: 'Prompt [prompt]' },
+      },
+    }),
+  };
+  putSettings({
+    ...getSettings(),
+    mediaRendering: { ...getSettings().mediaRendering, workflows: [workflow] },
+    mediaChatPrompts: {
+      folders: [],
+      presets: [{ id: 'named', name: 'Named', chatPrompt: 'Input: {{input3_prompt}}' }],
+      defaultPresetId: null,
+    },
+  });
+  const draft = createMediaJob({
+    requestKey: newRequestId(),
+    workflowId: workflow.id,
+    reviewBeforeSave: true,
+    contextConversationId: conversationId,
+    inputs: [{ slot: 'style', assetId }],
+    fillInputs: { selectedAssetIds: [assetId] },
+  });
+  assert.equal(
+    draft.inputs.find((input) => input.slot === 'style')!.assetId,
+    assetId,
+    'Manual input overrides automatic binding',
+  );
+  assert.equal(
+    draft.inputs.find((input) => input.slot === 'backdrop')!.prompt,
+    'Manual input description',
+  );
+  const identityId = draft.inputs.find((input) => input.slot === 'identity')!.assetId;
+  assert.notEqual(identityId, assetId);
+  const ownedPath = String(stmt('SELECT path FROM media_assets WHERE id=?').get(identityId)!.path);
+  assert(existsSync(join(IMAGES_DIR, basename(ownedPath))));
+  const again = editMediaJob(requireMediaJob(draft.id), {
+    fillInputs: { selectedAssetIds: [assetId] },
+  });
+  assert.deepEqual(
+    again.inputs,
+    draft.inputs,
+    'Repeated fill preserves prior selections and copied avatar',
+  );
+  startMediaJob(requireMediaJob(draft.id), {}, true);
+  const context = JSON.parse(requireMediaJob(draft.id).context_json!);
+  assert(
+    context.messages.at(-1).content.includes('Input: Manual input description'),
+    'Prompt numbering follows workflow order, not the order inputs were filled',
+  );
+  cancelMediaJob(requireMediaJob(draft.id));
+  deleteMediaJob(requireMediaJob(draft.id));
+  assert(
+    !existsSync(join(IMAGES_DIR, basename(ownedPath))),
+    'Discarding the job releases its private avatar copy',
+  );
+  assert.deepEqual(
+    readAvatarFile('character', characterId),
+    raster,
+    'Source avatar survives cleanup',
+  );
+  const snapshot = createMediaJob({
+    requestKey: newRequestId(),
+    workflowId: workflow.id,
+    fillInputs: { avatar: { kind: 'character', id: characterId }, selectedAssetIds: [assetId] },
+  });
+  assert.equal(
+    snapshot.inputs.find((input) => input.slot === 'identity')!.assetId,
+    snapshot.inputs.find((input) => input.slot === 'style')!.assetId,
+    'One copied avatar serves repeated bindings',
+  );
+  deleteMediaJob(requireMediaJob(snapshot.id));
+  const missing = createMediaJob({
+    requestKey: newRequestId(),
+    workflowId: workflow.id,
+    prompt: 'Transform',
+    fillInputs: {},
+  });
+  assert.deepEqual(missing.inputs, []);
+  assert.throws(
+    () => startMediaJob(requireMediaJob(missing.id), {}, false),
+    /required images/,
+    'Never execute sample image filenames when required selections are absent',
+  );
+  deleteMediaJob(requireMediaJob(missing.id));
+  const before = readdirSync(IMAGES_DIR).sort();
+  const jobCount = stmt('SELECT count(*) AS n FROM media_jobs').get()!.n;
+  assert.throws(
+    () =>
+      createMediaJob({
+        requestKey: newRequestId(),
+        workflowId: workflow.id,
+        contextConversationId: conversationId,
+        fillInputs: { selectedAssetIds: [987654321] },
+      }),
+    /image|available|found/i,
+  );
+  assert.deepEqual(
+    readdirSync(IMAGES_DIR).sort(),
+    before,
+    'A failed later binding removes earlier copied files',
+  );
+  assert.equal(stmt('SELECT count(*) AS n FROM media_jobs').get()!.n, jobCount);
+  assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
 });

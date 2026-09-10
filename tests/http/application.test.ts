@@ -12,6 +12,7 @@ import {
 } from '@tinytavern/shared';
 import type { Endpoint, ServerEvent, Settings, TreeSnapshot } from '@tinytavern/shared';
 import { requireTestIsolation } from '../support/isolation.ts';
+import { mockComfy, serveComfy } from '../support/comfy.ts';
 
 // Exercise the public boundary once; feature suites cover combinations directly.
 test('application HTTP and WebSocket contracts', async () => {
@@ -496,10 +497,131 @@ test('application HTTP and WebSocket contracts', async () => {
     }
   });
 
+  await step(
+    'avatar preparation and text acceptance use the shared media HTTP and socket contracts',
+    async () => {
+      const protocol = mockComfy({
+        submit(_body, execution) {
+          execution.state = 'done';
+          execution.outputs = { output: { text: ['Description from Comfy'] } };
+        },
+      });
+      const comfy = serveComfy(protocol.fetch);
+      const previous = await request<Settings>('GET', '/api/settings');
+      try {
+        const avatarWorkflow = {
+          id: 'avatar-http',
+          name: 'Avatar HTTP',
+          inputBindings: {},
+          textOutputNodeId: null,
+          chatPromptPresetId: null,
+          standalonePromptPresetId: null,
+          json: '{"output":{"inputs":{"text":"{{prompt}}"}}}',
+        };
+        const textWorkflow = {
+          ...avatarWorkflow,
+          id: 'text-http',
+          name: 'Text HTTP',
+          textOutputNodeId: 'output',
+          json: '{"output":{"inputs":{}}}',
+        };
+        await request('PUT', '/api/settings', {
+          expectedRevision: previous.revision,
+          mediaRendering: {
+            ...previous.mediaRendering,
+            comfyUrl: comfy.url,
+            workflows: [...previous.mediaRendering.workflows, avatarWorkflow, textWorkflow],
+          },
+        });
+        const character = await request<{ id: number }>('POST', '/api/characters', {
+          name: 'Avatar HTTP subject',
+          personality: 'Authoritative avatar description',
+        });
+        const avatar = await request<MediaJob>('POST', '/api/media/jobs', {
+          requestKey: newRequestId(),
+          workflowId: avatarWorkflow.id,
+          avatarContext: { kind: 'character', id: character.id },
+          reviewBeforeSave: true,
+        });
+        await request('POST', `/api/media/jobs/${avatar.id}/prepare`, {
+          expectedRevision: avatar.revision,
+        });
+        const ready = await first.wait(
+          (event) =>
+            event.t === 'mediaJob' && event.job.id === avatar.id && event.job.state === 'ready',
+        );
+        assert(ready.t === 'mediaJob');
+        assert.deepEqual(ready.job.avatarContext, { kind: 'character', id: character.id });
+        assert(ready.job.prompt.includes('Hello world'));
+        assert(
+          completionRequests
+            .at(-1)!
+            .messages.some((message) =>
+              message.content.includes('Authoritative avatar description'),
+            ),
+        );
+        await request('POST', `/api/media/jobs/${avatar.id}/discard`, {
+          expectedRevision: ready.job.revision,
+          expectedDraftRevision: ready.job.draft!.revision,
+        });
+
+        const chat = await request<{ id: number }>('POST', '/api/conversations', {});
+        const draft = await request<MediaJob>('POST', '/api/media/jobs', {
+          requestKey: newRequestId(),
+          workflowId: textWorkflow.id,
+          contextConversationId: chat.id,
+          destination: 'chat',
+          reviewBeforeSave: true,
+        });
+        await request('POST', `/api/media/jobs/${draft.id}/render`, {
+          expectedRevision: draft.revision,
+        });
+        const done = await first.wait(
+          (event) =>
+            event.t === 'mediaJob' && event.job.id === draft.id && event.job.state === 'succeeded',
+        );
+        assert(done.t === 'mediaJob');
+        const acceptance = {
+          assetId: null,
+          expectedRevision: done.job.revision,
+          expectedDraftRevision: done.job.draft!.revision,
+          ...guard(await tree(chat.id)),
+        };
+        await request(
+          'POST',
+          `/api/media/jobs/${draft.id}/accept`,
+          { ...acceptance, expectedRevision: -1 },
+          409,
+        );
+        const saved = await request<MediaJob>(
+          'POST',
+          `/api/media/jobs/${draft.id}/accept`,
+          acceptance,
+        );
+        const message = (await tree(chat.id)).messages.find((item) => item.id === saved.messageId)!;
+        assert.equal(message.content, 'Description from Comfy');
+        assert.deepEqual(message.media, []);
+        await request('POST', `/api/media/jobs/${draft.id}/discard`, {
+          expectedRevision: saved.revision,
+          expectedDraftRevision: saved.draft!.revision,
+        });
+        assert((await tree(chat.id)).messages.some((item) => item.id === saved.messageId));
+        assert.deepEqual(comfy.errors, []);
+      } finally {
+        const current = await request<Settings>('GET', '/api/settings');
+        await request('PUT', '/api/settings', {
+          expectedRevision: current.revision,
+          mediaRendering: previous.mediaRendering,
+        });
+        await comfy.stop();
+      }
+    },
+  );
+
   await step('media draft lookup survives deletion of its original job', async () => {
     const first = await request<MediaJob>('POST', '/api/media/jobs', {
       requestKey: newRequestId(),
-      operation: 'image',
+
       prompt: 'First variation',
       reviewBeforeSave: true,
     });

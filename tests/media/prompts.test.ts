@@ -11,7 +11,6 @@ test('media prompts', async () => {
 
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
-  const { chatImagePromptPresets } = await import('@tinytavern/shared');
   type MediaJob = import('@tinytavern/shared').MediaJob;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
 
@@ -21,7 +20,7 @@ test('media prompts', async () => {
   const { buildToolPrompt } = await import('../../server/src/generation/prompt.ts');
   const { getActivePath } = await import('../../server/src/conversations/tree.ts');
   const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const { createMediaJob, editMediaJob, startMediaJob, cancelMediaJob } =
+  const { createMediaJob, editMediaJob, startMediaJob, cancelMediaJob, runMediaFavorite } =
     await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaLive, mediaJobDto } =
     await import('../../server/src/media/mediaJobStore.ts');
@@ -44,10 +43,10 @@ test('media prompts', async () => {
   const workflow: MediaWorkflow = {
     id: 'video',
     name: 'Video',
-    operation: 'video',
-    referenceCount: 0,
+    inputBindings: {},
+    textOutputNodeId: null,
     json: '{"1":{"inputs":{"prompt":"{{prompt}}","seed":{{seed}}}}}',
-    galleryPromptPresetId: 'formatted',
+    standalonePromptPresetId: 'formatted',
     chatPromptPresetId: 'formatted',
   };
   const templateId = insertFixture('templates', {
@@ -63,36 +62,37 @@ test('media prompts', async () => {
     activeEndpointId: endpointId,
     defaultTemplateId: templateId,
     mediaRendering: {
+      ...getSettings().mediaRendering,
       comfyUrl: 'http://comfy.invalid',
       workflows: [workflow],
-      defaults: { 'video:0': workflow.id },
+      defaultWorkflowId: workflow.id,
       avatarWorkflowId: null,
       jobTimeoutSeconds: 60,
     },
-    chatVideoPrompts: {
+    mediaChatPrompts: {
+      folders: [],
       presets: [
         {
           id: 'formatted',
           name: 'Formatted',
-          operation: 'video',
           chatPrompt: 'Chat video formatting\nTask: {{instruction}}',
         },
       ],
-      defaults: {},
+      defaultPresetId: null,
     },
-    galleryVideoPrompts: {
+    mediaStandalonePrompts: {
+      folders: [],
       presets: [
         {
           id: 'formatted',
           name: 'Formatted',
-          operation: 'video',
           systemPrompt: 'Use these exact video instructions',
           userMessage: '\nTask: {{instruction}}',
           reasoningPrefill: 'Think carefully',
           messagePrefill: 'Scene: ',
         },
       ],
-      defaults: {},
+      defaultPresetId: null,
     },
   });
 
@@ -152,6 +152,60 @@ test('media prompts', async () => {
   }
 
   try {
+    const favoriteChat = conversationFixture({ title: 'Favorite chat' });
+    const favoriteRoot = messageFixture(favoriteChat, {
+      role: 'user',
+      content: 'Favorite context',
+    });
+    stmt('UPDATE conversations SET active_leaf_id=? WHERE id=?').run(favoriteRoot, favoriteChat);
+    const favorite = {
+      id: 'quick',
+      name: 'Quick scene',
+      presetId: 'formatted',
+      workflowId: workflow.id,
+    };
+    putSettings({ ...getSettings(), mediaFavorites: [favorite] });
+    const favoriteBefore = stmt(
+      'SELECT active_leaf_id,mutation_revision FROM conversations WHERE id=?',
+    ).get(favoriteChat)!;
+    const favoriteBody = {
+      requestKey: testRequestKey('favorite'),
+      contextConversationId: favoriteChat,
+      expectedActiveLeafId: favoriteBefore.active_leaf_id,
+      expectedMutationRevision: favoriteBefore.mutation_revision,
+    };
+    const quick = runMediaFavorite(favorite.id, favoriteBody);
+    assert.equal(quick.workflowId, workflow.id);
+    assert.equal(quick.presetId, 'formatted');
+    assert.equal(quick.state, 'preparing');
+    assert.equal(requireMediaJob(quick.id).auto_render, 1);
+    const quickContext = JSON.parse(requireMediaJob(quick.id).context_json!);
+    assert(
+      quickContext.messages.some((message: { content: string }) =>
+        message.content.includes('Favorite context'),
+      ),
+    );
+    assert(quickContext.messages.at(-1).content.includes('Chat video formatting'));
+    assert.equal(
+      runMediaFavorite(favorite.id, favoriteBody).id,
+      quick.id,
+      'A retried favorite does not append another tool message or job',
+    );
+    const jobsBeforeConflict = stmt('SELECT count(*) AS n FROM media_jobs').get()!.n;
+    assert.throws(
+      () =>
+        runMediaFavorite(favorite.id, {
+          ...favoriteBody,
+          requestKey: testRequestKey('stale-favorite'),
+        }),
+      /changed|conflict|stale/i,
+    );
+    assert.equal(
+      stmt('SELECT count(*) AS n FROM media_jobs').get()!.n,
+      jobsBeforeConflict,
+      'Stale favorite creation rolls back atomically',
+    );
+    cancelMediaJob(requireMediaJob(quick.id));
     initMediaWorker();
     const expected = buildToolPrompt(
       toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId)!),
@@ -160,7 +214,7 @@ test('media prompts', async () => {
     );
     const job = createMediaJob({
       requestKey: testRequestKey('snapshot'),
-      operation: 'video',
+      workflowId: 'video',
       instruction: 'Use literal {{context}} in the title',
       contextConversationId: conversationId,
       destination: 'chat',
@@ -255,7 +309,7 @@ test('media prompts', async () => {
     finishReason = 'length';
     const truncated = createMediaJob({
       requestKey: testRequestKey('truncated'),
-      operation: 'video',
+      workflowId: 'video',
       instruction: 'Move slowly',
     });
     startMediaJob(requireMediaJob(truncated.id), { autoRender: true }, true);
@@ -275,7 +329,7 @@ test('media prompts', async () => {
     holdStream = true;
     const interrupted = createMediaJob({
       requestKey: testRequestKey('cancel-prompt'),
-      operation: 'video',
+      workflowId: 'video',
       instruction: 'Move slowly',
       contextConversationId: conversationId,
       destination: 'chat',
@@ -330,68 +384,56 @@ test('media prompts', async () => {
       ...workflow,
       id: 'image',
       name: 'Image',
-      operation: 'image',
-      galleryPromptPresetId: 'gallery-image',
-      chatPromptPresetId: 'gallery-image',
+      standalonePromptPresetId: 'gallery-image',
+      chatPromptPresetId: 'chat-image',
     };
     const editWorkflow: MediaWorkflow = {
       ...imageWorkflow,
       id: 'edit',
       name: 'Edit',
-      operation: 'image-edit',
-      referenceCount: 1,
+      inputBindings: {},
+      textOutputNodeId: null,
       json: '{"1":{"inputs":{"prompt":"{{prompt}}","image":"{{reference1}}"}}}',
-      galleryPromptPresetId: 'gallery-edit',
-      chatPromptPresetId: 'gallery-edit',
+      standalonePromptPresetId: 'gallery-edit',
+      chatPromptPresetId: 'reference-style',
     };
     putSettings({
       ...getSettings(),
-      imageGeneration: {
-        ...DEFAULT_SETTINGS.imageGeneration,
-        promptPresets: {
-          describe: {
-            active: 'My character',
-            presets: [{ name: 'My character', prompt: 'My character style for {{char}}' }],
+      mediaChatPrompts: {
+        folders: [],
+        defaultPresetId: null,
+        presets: [
+          {
+            id: 'chat-image',
+            name: 'Image',
+            chatPrompt:
+              '{{#if instruction}}[System Note]\nMy directed style for {{char}}: {{instruction}}{{/if}}{{#if no_instruction}}[System Note]\nMy character style for {{char}}{{/if}}',
           },
-          characterInstruction: {
-            active: 'My directed character',
-            presets: [
-              {
-                name: 'My directed character',
-                prompt: 'My directed style for {{char}}: {{instruction}}',
-              },
-            ],
+          {
+            id: 'portrait',
+            name: 'My portrait',
+            chatPrompt: 'My portrait style for {{char}}: {{instruction}}',
           },
-          faceInstruction: {
-            active: 'My portrait',
-            presets: [
-              { name: 'My portrait', prompt: 'My portrait style for {{char}}: {{instruction}}' },
-            ],
+          {
+            id: 'reference-style',
+            name: 'Reference style',
+            chatPrompt:
+              'Reference style for {{char}}: {{instruction}}\n{{#if input1_prompt}}Source: {{input1_prompt}}{{/if}}',
           },
-          references: {
-            active: 'Reference style',
-            presets: [
-              {
-                name: 'Reference style',
-                prompt:
-                  'Reference style for {{char}}: {{instruction}}\n{{#if reference1_prompt}}Source: {{reference1_prompt}}{{/if}}',
-              },
-            ],
-          },
-        },
+        ],
       },
       mediaRendering: {
         ...getSettings().mediaRendering,
         workflows: [imageWorkflow, editWorkflow],
-        defaults: { 'image:0': 'image', 'image-edit:1': 'edit' },
+        defaultWorkflowId: 'image',
       },
-      galleryImagePrompts: {
-        defaults: { image: 'gallery-image', 'image-edit': 'gallery-edit' },
+      mediaStandalonePrompts: {
+        folders: [],
+        defaultPresetId: null,
         presets: [
           {
             id: 'gallery-image',
             name: 'Gallery image only',
-            operation: 'image',
             systemPrompt: 'Gallery-only system',
             userMessage: 'Gallery: {{instruction}}',
             reasoningPrefill: '',
@@ -400,7 +442,6 @@ test('media prompts', async () => {
           {
             id: 'gallery-edit',
             name: 'Edit only',
-            operation: 'image-edit',
             systemPrompt: 'Edit-only system',
             userMessage: 'Edit: {{instruction}}',
             reasoningPrefill: '',
@@ -409,8 +450,8 @@ test('media prompts', async () => {
         ],
       },
     });
-    const portrait = chatImagePromptPresets(getSettings().imageGeneration, true).find(
-      (preset) => preset.name === 'Face — My portrait',
+    const portrait = getSettings().mediaChatPrompts.presets.find(
+      (preset) => preset.id === 'portrait',
     )!;
     const prepareImage = async (
       key: string,
@@ -420,7 +461,6 @@ test('media prompts', async () => {
     ) => {
       const draft = createMediaJob({
         requestKey: testRequestKey(key),
-        operation: 'image',
         contextConversationId: context,
         reviewBeforeSave: true,
         destination: context === null ? 'gallery' : 'chat',
@@ -444,9 +484,16 @@ test('media prompts', async () => {
     const chatDefault = await prepareImage('chat-image-default', conversationId);
     assert(
       JSON.parse(chatDefault.context_json!).messages.at(-1).content.includes('My directed style'),
-      'Chat image default uses the active chat preset, ignoring workflow and gallery defaults',
+      'The workflow selects the chat preset independently of standalone defaults',
     );
     assert(!chatDefault.context_json!.includes('MUST NOT USE'));
+    assert.equal(
+      JSON.parse(chatDefault.context_json!)
+        .messages.at(-1)
+        .content.match(/\[System Note\]/g)?.length,
+      1,
+      'Conditional chat presets retain one system-note marker',
+    );
     const blankInstruction = await prepareImage(
       'chat-image-blank',
       conversationId,
@@ -475,7 +522,6 @@ test('media prompts', async () => {
     ] as const) {
       const invalid = createMediaJob({
         requestKey: testRequestKey(key),
-        operation: 'image',
         contextConversationId: context,
         reviewBeforeSave: true,
         instruction: 'Test',
@@ -494,14 +540,12 @@ test('media prompts', async () => {
     );
     const edit = createMediaJob({
       requestKey: testRequestKey('edit-with-chat-destination'),
-      operation: 'image',
       contextConversationId: conversationId,
       destination: 'chat',
       reviewBeforeSave: true,
       instruction: 'Change the lighting',
     });
     editMediaJob(requireMediaJob(edit.id), {
-      operation: 'image-edit',
       workflowId: 'edit',
       presetId: null,
       inputs: [{ assetId: sourceId, slot: 'reference1' }],
@@ -519,19 +563,11 @@ test('media prompts', async () => {
       'Switching from chat image creation to references keeps the exact chat prefix and uses the active reference prompt',
     );
     assert.equal(JSON.parse(editReady.context_json!).template.reasoningPrefill, 'Chat reasoning');
-    const referencePreset = chatImagePromptPresets(
-      getSettings().imageGeneration,
-      false,
-      'image-edit',
-    ).find((preset) => preset.name === 'Image from references — Reference style')!;
-    assert(referencePreset, 'Reference presets are available without an instruction');
-    assert.deepEqual(
-      chatImagePromptPresets(getSettings().imageGeneration, true, 'image-edit'),
-      chatImagePromptPresets(getSettings().imageGeneration, false, 'image-edit'),
+    assert(
+      getSettings().mediaChatPrompts.presets.some((preset) => preset.id === 'reference-style'),
     );
     const standaloneEdit = createMediaJob({
       requestKey: testRequestKey('edit-with-gallery-destination'),
-      operation: 'image-edit',
       workflowId: 'edit',
       reviewBeforeSave: true,
       instruction: 'Change the lighting',
@@ -549,12 +585,14 @@ test('media prompts', async () => {
     );
     putSettings({
       ...getSettings(),
-      mediaRendering: { ...getSettings().mediaRendering, workflows: [workflow] },
+      mediaRendering: {
+        ...getSettings().mediaRendering,
+        workflows: [{ ...workflow, chatPromptPresetId: null }],
+      },
     });
     pauseReasoning = true;
     const thinking = createMediaJob({
       requestKey: testRequestKey('thinking-preview'),
-      operation: 'video',
       workflowId: workflow.id,
       contextConversationId: conversationId,
       destination: 'chat',

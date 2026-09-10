@@ -1,11 +1,29 @@
 /* Settings layout uses the same page shell and controls as Gallery. */
 
+.settings-table {
+  @apply border-collapse text-label;
+}
+
+.settings-table th {
+  @apply text-foreground font-semibold text-left;
+}
+
+.settings-table :is(th, td) {
+  @apply py-1 px-1 align-middle;
+}
+
+.settings-table :is(th, td):first-child {
+  padding-left: 0;
+}
+
+.settings-table :is(th, td):last-child {
+  padding-right: 0;
+}
+
 .settings-nav-item.active {
   background: color-mix(in srgb, var(--bg-raised) 50%, var(--bg-chrome));
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
 }
-
-/* Native details must not leave a flex gap for their hidden content. */
 
 /* The shell footer sits outside every editor's scroll container. */
 

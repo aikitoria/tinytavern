@@ -44,7 +44,11 @@ export default function AvatarRow(props: {
         type="file"
         accept="image/png"
         hidden
-        onChange={(e) => void uploadFile(e.currentTarget.files?.[0])}
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          void uploadFile(file);
+        }}
       />
     </div>
   );

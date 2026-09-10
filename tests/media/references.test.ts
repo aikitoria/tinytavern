@@ -52,19 +52,19 @@ test('media source images', async () => {
     {
       id: 'first',
       name: 'First frame',
-      operation: 'video-first',
-      referenceCount: 0,
+      inputBindings: {},
+      textOutputNodeId: null,
       json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","image":"{{first_frame}}"}}}',
-      galleryPromptPresetId: null,
+      standalonePromptPresetId: null,
       chatPromptPresetId: null,
     },
     {
       id: 'references',
       name: 'References',
-      operation: 'video-references',
-      referenceCount: 3,
+      inputBindings: {},
+      textOutputNodeId: null,
       json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","images":["{{reference1}}","{{reference2}}","{{reference3}}"]}}}',
-      galleryPromptPresetId: null,
+      standalonePromptPresetId: null,
       chatPromptPresetId: null,
     },
   ];
@@ -222,7 +222,7 @@ test('media source images', async () => {
       })) as MediaJob;
       assert.deepEqual(rerun.inputs, [], 'Reruns leave missing input selectors empty');
       assert.equal(rerun.workflowSnapshot!.id, workflows[index]!.id);
-      assert.equal(rerun.workflowSnapshot!.referenceCount, workflows[index]!.referenceCount);
+      assert.equal(rerun.workflowSnapshot!.json, workflows[index]!.json);
       const render = await fetch(`${base}/api/media/jobs/${rerun.id}/render`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

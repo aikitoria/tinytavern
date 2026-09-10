@@ -1,37 +1,45 @@
 # TinyTavern
 
-A self-hosted chat interface for OpenAI-compatible APIs, with branching conversations
-and ComfyUI image and video generation. Works on desktop and mobile.
+TinyTavern is a chat app you run yourself. Connect a local model or an OpenAI-compatible
+service, talk with characters, and create images and videos through ComfyUI.
 
-- Edit messages, swipe through alternative replies, and explore a conversation tree.
-- Create characters and personas, including SillyTavern PNG card import/export.
-- Customize prompts, templates, models, and sampling settings.
-- Generate images and videos in the background; review variations and save them to a gallery.
-- Sync chats across devices, search history, and import/export conversations.
+Edit messages, try alternative replies, and explore different paths through a conversation.
+Your chats and gallery stay together, whether you open them on your phone or desktop.
 
-## Install
+## Run it
 
-Requires Docker with Compose, a TLS certificate, and an OpenAI-compatible API.
-Containers run as UID/GID `1000:1000`; use that user for setup or adjust ownership.
+You’ll need Docker with Compose and an HTTPS certificate.
+Place the certificate in `certs/cert.pem` and its private key in `certs/key.pem`, then run:
 
-1. Put your certificate in `certs/cert.pem` and private key in `certs/key.pem`.
-2. Run:
+```sh
+./scripts/init-caddy.sh --media-dirs
+docker compose -f docker-compose.yml up --build -d tinytavern caddy-prod
+```
 
-   ```sh
-   ./scripts/init-caddy.sh --media-dirs
-   docker compose -f docker-compose.yml up --build -d tinytavern caddy-prod
-   ```
+Open **https://<host>:5487** in your browser, using your server’s address in place of `<host>`.
 
-Open **https://<host>:5487**. Data is stored in `./data`; preserve it and `.secrets`.
+## Start chatting
+
+1. Open **Settings → Model connections**. Add your model’s API URL (including `/v1`),
+   enter an API key if needed, choose a model, and save the connection.
+2. Start a new chat with **Assistant** and send a message.
+3. For character chats, create a character or import a SillyTavern PNG card under **Settings → Characters**.
+
+To require sign-in, set a password under **Settings → General**.
+
+## Make images and videos
+
+Set your ComfyUI address under **Settings → Generation settings**, then add a workflow
+exported in API format under **Settings → Workflows**.
+Open **Gallery → Tools → Generate media**, choose a workflow, and add any input images.
+Prepare a prompt or write your own, then click **Generate**. Review the variations and **Save** your favorites.
+
+Text workflows return text you can copy or reuse as a prompt. When generating from a chat,
+**Add** saves the text as a message. Avatar generation uses the same model connection settings
+and skips prompt preparation for workflows without a prompt input.
+
+## Updates and backups
+
 To update, pull the latest code and rerun the Compose command above.
-
-## Get started
-
-1. Add your API under **Settings → Endpoints** (base URL including `/v1`), choose a model, and select it as active.
-2. Start a chat with **Assistant**, or create/import a character.
-3. Set a password under **Settings → General** if you want sign-in. No password is configured by default.
-
-For images and videos, set a reachable ComfyUI URL and paste API-format workflows
-under **Settings → Media rendering**, then open **Gallery → Tools**.
-
-Development commands and architectural rules live in [AGENTS.md](AGENTS.md).
+Keep `data/` and `.secrets/`; they hold your saved work and access keys.
+Setup details, backup commands, and development guidance are in [AGENTS.md](AGENTS.md).

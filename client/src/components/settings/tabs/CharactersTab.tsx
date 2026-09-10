@@ -1,16 +1,15 @@
-import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
-import { faChevronDown, faChevronRight, faPen, faXmark } from '@fortawesome/free-solid-svg-icons';
-import FontAwesomeIcon from '../../ui/FontAwesomeIcon.tsx';
+import { entityOptions, editReferencedEntity } from '../../../state/entityReferences.ts';
+import SettingsSection from '../SettingsSection.tsx';
+import SettingLabel from '../../forms/SettingField.tsx';
+import { createFolderBrowser } from '../FolderEntityList.tsx';
 import { For, Show, createSignal } from 'solid-js';
 import type { Character } from '@tinytavern/shared';
 import { DEFAULT_PROMPT_TEMPLATE } from '@tinytavern/shared';
 import { api } from '../../../state/api.ts';
-import { createCharacterGroups } from '../../../state/characterGroups.ts';
 import { state } from '../../../state/store.ts';
 import { avatarGenerationAvailable } from '../../../images/imageGeneration.tsx';
 import AvatarGenerateModal from '../../../images/AvatarGenerateModal.tsx';
 import { createEntityEditor, download, errorMessage } from '../../../util.ts';
-import { confirmAction } from '../../../state/confirm.ts';
 import Avatar from '../../ui/Avatar.tsx';
 import AvatarRow from '../../forms/AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
@@ -18,19 +17,13 @@ import FormField, { createFormFields } from '../../forms/FormFields.tsx';
 import TemplateFields, { type TemplateFieldsHandle } from '../../forms/TemplateFields.tsx';
 import MacroHelp from '../../forms/MacroHelp.tsx';
 import MacroTextarea from '../../forms/MacroTextarea.tsx';
-import Modal from '../../ui/Modal.tsx';
 import Select from '../../ui/Select.tsx';
+import { avatarEditorSnapshot } from '../../../state/editorSync.ts';
 
 export default function CharactersTab() {
   const [customPrompt, setCustomPrompt] = createSignal(false);
   const [customTemplate, setCustomTemplate] = createSignal(false);
   const [avatarGen, setAvatarGen] = createSignal(false);
-  const [characterQuery, setCharacterQuery] = createSignal('');
-  const [folderDialog, setFolderDialog] = createSignal<{ id: number | null } | null>(null);
-  const [folderName, setFolderName] = createSignal('');
-  const folderNameField = createDefaultField(() => '');
-  const [folderError, setFolderError] = createSignal('');
-  const [folderSaving, setFolderSaving] = createSignal(false);
   const form = createFormFields({
     name: '',
     chatName: '',
@@ -50,6 +43,7 @@ export default function CharactersTab() {
   const editor = createEntityEditor({
     ...api.characters,
     items: () => state.characters,
+    snapshot: avatarEditorSnapshot,
     load: (character) => {
       form.load({
         ...character,
@@ -78,82 +72,35 @@ export default function CharactersTab() {
     deletePrompt: 'Delete this character?',
   });
 
-  const [collapsedFolders, setCollapsedFolders] = createSignal<ReadonlySet<number>>(new Set());
-  const toggleFolder = (id: number) => {
-    setCollapsedFolders((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const { rootCharacters, charactersInFolder, searchActive, matchingCharacterCount } =
-    createCharacterGroups(characterQuery);
-
-  const editFolder = (id: number | null, currentName = '') => {
-    setFolderName(currentName);
-    setFolderError('');
-    setFolderDialog({ id });
-  };
-
-  const saveFolder = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const dialog = folderDialog();
-    const name = folderName().trim();
-    if (!dialog || !name || folderSaving()) return;
-    setFolderSaving(true);
-    setFolderError('');
-    try {
-      if (dialog.id == null) await api.characterFolders.create({ name });
-      else await api.characterFolders.patch(dialog.id, { name });
-      setFolderDialog(null);
-    } catch (err) {
-      setFolderError(errorMessage(err));
-    } finally {
-      setFolderSaving(false);
-    }
-  };
-
-  const deleteFolder = async (id: number, name: string) => {
-    if (
-      !(await confirmAction({
-        title: 'Delete folder?',
-        message: `Delete “${name}”? Its characters will move to the root.`,
-        confirmLabel: 'Delete folder',
-        danger: true,
-      }))
-    )
-      return;
-    try {
-      await api.characterFolders.remove(id);
-    } catch (err) {
-      editor.setStatus(errorMessage(err));
-    }
-  };
-
-  const CharacterButton = (props: { character: Character; child?: boolean }) => (
-    <button
-      class="character-tree-entry"
-      classList={{
-        active: editor.selectedId() === props.character.id,
-        'character-tree-child': props.child,
-      }}
-      onClick={() => editor.select(props.character.id)}
-    >
-      <Avatar src={props.character.avatarThumbnail} name={props.character.name} />{' '}
-      {props.character.name}
-    </button>
-  );
+  const folders = createFolderBrowser({
+    items: () => state.characters,
+    folders: () => state.characterFolders,
+    folderId: (item) => item.folderId,
+    selectedId: editor.selectedId,
+    select: editor.select,
+    label: (item) => (
+      <>
+        <Avatar src={item.avatarThumbnail} name={item.name} /> {item.name}
+      </>
+    ),
+    noun: 'characters',
+    create: (name) => api.characterFolders.create({ name }),
+    rename: (id, name) => api.characterFolders.patch(id, { name }),
+    remove: api.characterFolders.remove,
+    onError: editor.setStatus,
+  });
 
   const importCards = async (files: readonly File[]) => {
     if (files.length === 0) return;
+    const current = editor.capture();
     const imported: Character[] = [];
     const failed: string[] = [];
     for (const [index, file] of files.entries()) {
-      editor.setStatus(
-        files.length === 1 ? 'Importing…' : `Importing ${index + 1} of ${files.length}…`,
-        'info',
-      );
+      if (current())
+        editor.setStatus(
+          files.length === 1 ? 'Importing…' : `Importing ${index + 1} of ${files.length}…`,
+          'info',
+        );
       try {
         imported.push(await api.characters.importCard(file));
       } catch (err) {
@@ -161,6 +108,7 @@ export default function CharactersTab() {
       }
     }
     const last = imported.at(-1);
+    if (!current()) return;
     if (last) {
       // Load the response directly to avoid racing WS-triggered list refetches.
       editor.adopt(last);
@@ -180,6 +128,7 @@ export default function CharactersTab() {
     <>
       <EntityEditorPane
         editor={editor}
+        sectionType="characters"
         items={state.characters}
         itemLabel={(character) => (
           <>
@@ -189,7 +138,7 @@ export default function CharactersTab() {
         newLabel="New"
         listActions={
           <>
-            <button onClick={() => editFolder(null)}>Folder</button>
+            <folders.NewButton />
             <button title="Import character PNGs" onClick={() => cardInput.click()}>
               Import
             </button>
@@ -207,91 +156,18 @@ export default function CharactersTab() {
             />
           </>
         }
-        listSearch={
-          <div class="mb-2 [&_.search-input]:min-h-control">
-            <input
-              class="search-input flex-1 min-w-0"
-              placeholder="Search characters…"
-              value={characterQuery()}
-              onInput={(event) => setCharacterQuery(event.currentTarget.value)}
-            />
-          </div>
-        }
-        listContent={
-          <>
-            <For each={state.characterFolders}>
-              {(folder) => (
-                <Show when={!searchActive() || charactersInFolder(folder.id).length > 0}>
-                  <section class="character-folder">
-                    <div class="character-folder-row">
-                      <button
-                        class="character-folder-toggle"
-                        aria-expanded={searchActive() || !collapsedFolders().has(folder.id)}
-                        title={
-                          searchActive()
-                            ? 'Matching characters'
-                            : collapsedFolders().has(folder.id)
-                              ? 'Expand folder'
-                              : 'Collapse folder'
-                        }
-                        onClick={() => {
-                          if (!searchActive()) toggleFolder(folder.id);
-                        }}
-                      >
-                        <span class="w-2.5 text-center text-muted grow-0 shrink-0 basis-2.5">
-                          {searchActive() || !collapsedFolders().has(folder.id) ? (
-                            <FontAwesomeIcon icon={faChevronDown} size={10} />
-                          ) : (
-                            <FontAwesomeIcon icon={faChevronRight} size={12} />
-                          )}
-                        </span>
-                        <span class="text-ellipsis overflow-hidden">{folder.name}</span>
-                      </button>
-                      <button
-                        class="character-folder-action"
-                        title="Rename folder"
-                        aria-label={`Rename ${folder.name}`}
-                        onClick={() => editFolder(folder.id, folder.name)}
-                      >
-                        <FontAwesomeIcon icon={faPen} size={14} />
-                      </button>
-                      <button
-                        class="character-folder-action"
-                        title="Delete folder"
-                        aria-label={`Delete ${folder.name}`}
-                        onClick={() => void deleteFolder(folder.id, folder.name)}
-                      >
-                        <FontAwesomeIcon icon={faXmark} size={14} />
-                      </button>
-                    </div>
-                    <Show when={searchActive() || !collapsedFolders().has(folder.id)}>
-                      <For each={charactersInFolder(folder.id)}>
-                        {(character) => <CharacterButton character={character} child />}
-                      </For>
-                      <Show when={!searchActive() && charactersInFolder(folder.id).length === 0}>
-                        <span class="character-folder-empty">Empty folder</span>
-                      </Show>
-                    </Show>
-                  </section>
-                </Show>
-              )}
-            </For>
-            <For each={rootCharacters()}>
-              {(character) => <CharacterButton character={character} />}
-            </For>
-            <Show when={searchActive() && matchingCharacterCount() === 0}>
-              <p class="hint py-1 px-2">No matches.</p>
-            </Show>
-          </>
-        }
+        listContent={<folders.List />}
         extraActions={
           <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
             Export PNG
           </button>
         }
       >
-        <section class="settings-section">
-          <h3>Basics</h3>
+        <SettingsSection
+          title="Basics"
+          id="character-basics"
+          fields={['name', 'chatName', 'folderId']}
+        >
           <Show when={editor.selectedId() !== 'new'}>
             <AvatarRow
               src={editor.selected()?.avatar}
@@ -323,18 +199,15 @@ export default function CharactersTab() {
             field={form.fields.folderId}
             label="Folder"
             ariaLabel="Character folder"
-            options={[
-              { value: '', label: 'No folder' },
-              ...state.characterFolders.map((folder) => ({
-                value: String(folder.id),
-                label: folder.name,
-              })),
-            ]}
+            options={[{ value: '', label: 'Root' }, ...folders.options()]}
           />
-        </section>
+        </SettingsSection>
 
-        <section class="settings-section">
-          <h3>Roleplay</h3>
+        <SettingsSection
+          title="Roleplay"
+          id="character-roleplay"
+          fields={['personality', 'scenario', 'examples', 'firstMessage']}
+        >
           <For
             each={
               [
@@ -362,10 +235,13 @@ export default function CharactersTab() {
               />
             )}
           </For>
-        </section>
+        </SettingsSection>
 
-        <section class="settings-section">
-          <h3>Prompting</h3>
+        <SettingsSection
+          title="Prompting"
+          id="character-prompting"
+          fields={['presetId', 'customPrompt', 'templateId', 'customTemplate']}
+        >
           <div class="form-stack field-group" role="group" aria-label="System prompt settings">
             <SettingLabel field={form.fields.presetId}>System prompt</SettingLabel>
             <Select
@@ -373,8 +249,15 @@ export default function CharactersTab() {
               ariaLabel="Character system prompt"
               onChange={(value) => setCustomPrompt(value === 'custom')}
               options={[
-                { value: '', label: 'Global default' },
-                ...state.presets.map((p) => ({ value: String(p.id), label: p.name })),
+                {
+                  value: '',
+                  label: 'Global default',
+                  edit:
+                    state.settings.defaultPresetId != null
+                      ? () => editReferencedEntity('presets', state.settings.defaultPresetId!)
+                      : undefined,
+                },
+                ...entityOptions('presets', state.presets),
                 { value: 'custom', label: 'Custom prompt…' },
               ]}
             />
@@ -404,8 +287,15 @@ export default function CharactersTab() {
                   };
               }}
               options={[
-                { value: '', label: 'Global default' },
-                ...state.templates.map((t) => ({ value: String(t.id), label: t.name })),
+                {
+                  value: '',
+                  label: 'Global default',
+                  edit:
+                    state.settings.defaultTemplateId != null
+                      ? () => editReferencedEntity('templates', state.settings.defaultTemplateId!)
+                      : undefined,
+                },
+                ...entityOptions('templates', state.templates),
                 { value: 'custom', label: 'Custom template…' },
               ]}
             />
@@ -413,65 +303,22 @@ export default function CharactersTab() {
               <TemplateFields ref={templateFields} inline />
             </div>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section class="settings-section">
-          <h3>Generation</h3>
+        <SettingsSection
+          title="Generation"
+          id="character-generation"
+          fields={['disableBackgroundSwipeGeneration']}
+        >
           <FormField
             kind="check"
             field={form.fields.disableBackgroundSwipeGeneration}
             label="Disable background swipe generation"
             hint="Overrides the global setting for all chats with this character."
           />
-        </section>
+        </SettingsSection>
       </EntityEditorPane>
-      <Show when={folderDialog()}>
-        {(dialog) => (
-          <Modal
-            title={dialog().id == null ? 'Create folder' : 'Rename folder'}
-            class="confirm-modal [&.confirm-modal]:h-auto [&.confirm-modal]:w-full [&.confirm-modal]:max-w-107.5 [&.confirm-modal]:max-h-[min(80dvh,_520px)] [&_.modal-body]:p-5 small-touch:[&.confirm-modal]:border small-touch:[&.confirm-modal]:border-solid small-touch:[&.confirm-modal]:border-line small-touch:[&.confirm-modal]:rounded-lg small-touch:[&.confirm-modal]:pt-0"
-            backdropClass="confirm-backdrop z-400 small-touch:[&.confirm-backdrop]:p-4"
-            onClose={() => setFolderDialog(null)}
-          >
-            <form
-              class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2 [&>label]:font-medium [&>label]:mt-0 [&>label]:text-foreground"
-              onSubmit={saveFolder}
-            >
-              <SettingLabel field={folderNameField} for="folder-name">
-                Folder name
-              </SettingLabel>
-              <input
-                ref={folderNameField.ref}
-                id="folder-name"
-                data-modal-initial-focus
-                value={folderName()}
-                onInput={(event) => setFolderName(event.currentTarget.value)}
-              />
-              <Show when={folderError()}>
-                <p class="notice notice-error" role="alert">
-                  {folderError()}
-                </p>
-              </Show>
-              <div class="form-actions flex items-center gap-2 flex-wrap mt-4 mt-5">
-                <button
-                  class="primary-btn"
-                  type="submit"
-                  disabled={!folderName().trim() || folderSaving()}
-                >
-                  {folderSaving() ? 'Saving…' : dialog().id == null ? 'Create' : 'Rename'}
-                </button>
-                <button
-                  type="button"
-                  disabled={folderSaving()}
-                  onClick={() => setFolderDialog(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </Modal>
-        )}
-      </Show>
+      <folders.Dialog />
     </>
   );
 }

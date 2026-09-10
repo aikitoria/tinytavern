@@ -1,6 +1,11 @@
-import { createSignal } from 'solid-js';
+import { createSignal, useContext } from 'solid-js';
+import { faUpload, faDownload } from '@fortawesome/free-solid-svg-icons';
+import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { transferData, transferDocument } from '@tinytavern/shared';
 import { errorMessage } from '../../util.ts';
+import { createAsyncScope } from '../../state/asyncScope.ts';
+import { readPageLocation } from '../../state/pageLocation.ts';
+import { SettingsDraftContext } from './SettingsDraftContext.ts';
 
 export default function SettingsTransferButtons(props: {
   type: string;
@@ -10,16 +15,25 @@ export default function SettingsTransferButtons(props: {
   importLabel?: string;
   exportLabel?: string;
   disabledExport?: boolean;
+  disabledImport?: boolean;
 }) {
   let input!: HTMLInputElement;
+  const draft = useContext(SettingsDraftContext);
+  const capture = createAsyncScope(() => [
+    props.type,
+    readPageLocation(),
+    draft?.identity?.(),
+    draft?.read(),
+  ]);
   const [busy, setBusy] = createSignal(false);
-  const run = async (action: () => void | Promise<void>) => {
+  const run = async (action: (current: () => boolean) => void | Promise<void>) => {
     if (busy()) return;
+    const current = capture();
     setBusy(true);
     try {
-      await action();
+      await action(current);
     } catch (error) {
-      props.onError(errorMessage(error));
+      if (current()) props.onError(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -46,16 +60,31 @@ export default function SettingsTransferButtons(props: {
           const file = input.files?.[0];
           input.value = '';
           if (file)
-            void run(async () =>
-              props.importData(transferData(JSON.parse(await file.text()), props.type)),
-            );
+            void run(async (current) => {
+              const text = await file.text();
+              if (current()) await props.importData(transferData(JSON.parse(text), props.type));
+            });
         }}
       />
-      <button disabled={busy()} onClick={() => input.click()}>
-        {props.importLabel ?? 'Import'}
+      <button
+        type="button"
+        class="icon-btn"
+        title={props.importLabel ?? 'Import'}
+        aria-label={props.importLabel ?? 'Import'}
+        disabled={busy() || props.disabledImport}
+        onClick={() => input.click()}
+      >
+        <FontAwesomeIcon icon={faDownload} size={16} />
       </button>
-      <button disabled={busy() || props.disabledExport} onClick={() => void run(exportFile)}>
-        {props.exportLabel ?? 'Export'}
+      <button
+        type="button"
+        class="icon-btn"
+        title={props.exportLabel ?? 'Export'}
+        aria-label={props.exportLabel ?? 'Export'}
+        disabled={busy() || props.disabledExport}
+        onClick={() => void run(exportFile)}
+      >
+        <FontAwesomeIcon icon={faUpload} size={16} />
       </button>
     </>
   );

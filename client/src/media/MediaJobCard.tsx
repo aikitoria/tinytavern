@@ -1,24 +1,17 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { faImage, faVideo, faComments, faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import {
-  faImage,
-  faVideo,
-  faComments,
-  faSpinner,
-  faArrowRight,
-} from '@fortawesome/free-solid-svg-icons';
-import {
-  MEDIA_OPERATIONS,
   mediaJobActive,
+  mediaInputLabel,
   type Character,
   type Conversation,
   type MediaJob,
 } from '@tinytavern/shared';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import SamplerProgress from '../images/SamplerProgress.tsx';
+import MediaJobStatus from './MediaJobStatus.tsx';
 import MediaJobPreviews from './MediaJobPreviews.tsx';
 import { createStreamScroll } from '../streamScroll.ts';
 import {
-  MEDIA_INPUT_LABELS,
   MEDIA_JOB_STATUS,
   jobPromptExcerpt,
   mediaJobPreviews,
@@ -38,11 +31,8 @@ export default function MediaJobCard(props: {
   const job = () => props.group.job;
   const active = () => mediaJobActive(job().state);
   const preparing = () => job().state === 'preparing';
-  const label = () =>
-    MEDIA_OPERATIONS.find((operation) => operation.id === job().operation)?.label ??
-    'Unavailable operation';
-  const canOpen = () =>
-    !props.disabled && MEDIA_OPERATIONS.some((operation) => operation.id === job().operation);
+  const label = () => job().workflowSnapshot?.name ?? 'Media generation';
+  const canOpen = () => !props.disabled;
   const conversation = () => props.conversations.get(job().contextConversationId!);
   const characters = createMemo(() => {
     const ids = new Set(job().characterIds);
@@ -77,7 +67,6 @@ export default function MediaJobCard(props: {
     <article
       class="media-job-card flex flex-col min-w-0 gap-3 p-3 border border-solid border-subtle rounded-md bg-panel"
       classList={{
-        'media-job-card-active': active(),
         'media-job-card-failed': job().state === 'failed',
       }}
       aria-label={`${label()}: ${status()}`}
@@ -92,7 +81,12 @@ export default function MediaJobCard(props: {
             disabled={!canOpen()}
           >
             <FontAwesomeIcon
-              icon={job().operation.startsWith('video') ? faVideo : faImage}
+              icon={
+                job().outputs.some((asset) => asset.kind === 'video') ||
+                Boolean(job().progress?.videoPreview)
+                  ? faVideo
+                  : faImage
+              }
               size={13}
               class="text-dim shrink-0"
             />
@@ -202,42 +196,7 @@ export default function MediaJobCard(props: {
         </div>
       </div>
       <footer class="flex items-center flex-wrap min-w-0 gap-x-3 gap-y-2 pt-2 border-t border-t-solid border-t-subtle text-tiny text-dim">
-        <span class="media-job-status inline-flex items-center gap-1.5 shrink-0" role="status">
-          <Show when={active()}>
-            <FontAwesomeIcon
-              icon={faSpinner}
-              size={11}
-              class="spinner inline-block size-2.5 flex-none origin-center"
-            />
-          </Show>
-          {status()}
-        </span>
-        <Show when={active() && !preparing()}>
-          <Show when={job().progress?.node}>
-            {(node) => (
-              <span class="truncate max-w-48 text-muted" title={node().name}>
-                {node().name}
-              </span>
-            )}
-          </Show>
-          <div
-            class="flex items-center flex-wrap gap-x-3 gap-y-1 tabular-nums"
-            aria-label="Rendering progress"
-          >
-            <Show when={job().progress?.graph?.max}>
-              <div class="flex items-center gap-1.5 whitespace-nowrap [&_.img-progress]:w-12">
-                <span>Nodes</span>
-                <SamplerProgress progress={job().progress?.graph} />
-              </div>
-            </Show>
-            <Show when={job().progress?.max}>
-              <div class="flex items-center gap-1.5 whitespace-nowrap [&_.img-progress]:w-12">
-                <span>Steps</span>
-                <SamplerProgress progress={job().progress} />
-              </div>
-            </Show>
-          </div>
-        </Show>
+        <MediaJobStatus job={job()} label={status()} />
         <Show when={job().inputs.length}>
           <div
             class="flex items-center flex-wrap justify-end gap-1.5 ml-auto text-tiny text-muted"
@@ -247,7 +206,7 @@ export default function MediaJobCard(props: {
               {(input) => (
                 <div
                   class="media-job-input relative size-6 overflow-hidden rounded-xs bg-chrome [&_img]:object-cover [&_img]:size-full [&>span:last-child:not(.media-job-input-missing)]:absolute [&>span:last-child:not(.media-job-input-missing)]:right-0 [&>span:last-child:not(.media-job-input-missing)]:bottom-0 [&>span:last-child:not(.media-job-input-missing)]:text-white [&>span:last-child:not(.media-job-input-missing)]:text-micro [&>span:last-child:not(.media-job-input-missing)]:px-0.5"
-                  title={`${MEDIA_INPUT_LABELS[input.slot]}${inputAssets().has(input.assetId) ? '' : ' · Image unavailable'}`}
+                  title={`${mediaInputLabel(input.slot)}${inputAssets().has(input.assetId) ? '' : ' · Image unavailable'}`}
                 >
                   <Show
                     when={inputAssets().get(input.assetId)}
@@ -255,7 +214,7 @@ export default function MediaJobCard(props: {
                       <span
                         class="media-job-input-missing grid place-items-center size-full"
                         role="img"
-                        aria-label={`${MEDIA_INPUT_LABELS[input.slot]} unavailable`}
+                        aria-label={`${mediaInputLabel(input.slot)} unavailable`}
                       >
                         <FontAwesomeIcon icon={faImage} size={12} />
                       </span>
@@ -264,7 +223,7 @@ export default function MediaJobCard(props: {
                     {(asset) => (
                       <img
                         src={asset().thumbnail ?? asset().url}
-                        alt={MEDIA_INPUT_LABELS[input.slot]}
+                        alt={mediaInputLabel(input.slot)}
                         loading="lazy"
                         decoding="async"
                       />

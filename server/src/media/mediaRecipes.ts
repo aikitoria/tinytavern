@@ -92,24 +92,28 @@ export function getMediaRecipe(id: number): MediaRecipe {
   };
 }
 
+/** Older recipes can recover their seed while their original job still exists. */
+export function mediaRecipeSeed(recipe: Pick<MediaRecipe, 'id' | 'configuration'>): number | null {
+  return (
+    recipe.configuration.seed ??
+    (stmt('SELECT seed FROM media_jobs WHERE recipe_id = ?').get(recipe.id)?.seed as
+      number | null | undefined) ??
+    null
+  );
+}
+
 export function getMediaAssetResultDetails(assetId: number): MediaResultDetails {
   const asset = stmt(`SELECT recipe_id FROM media_assets a
     WHERE id = ? AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)`).get(assetId);
   if (!asset) throw new HttpError(404, 'Media asset not found');
   if (!asset.recipe_id) throw new HttpError(404, 'The rendering recipe is unavailable');
   const recipe = getMediaRecipe(Number(asset.recipe_id));
-  // Older recipes can recover their seed while their original job still exists.
-  const seed =
-    recipe.configuration.seed ??
-    (stmt('SELECT seed FROM media_jobs WHERE recipe_id = ?').get(recipe.id)?.seed as
-      number | null | undefined) ??
-    null;
   return {
     instruction: recipe.instruction,
     prompt: recipe.prompt,
     workflowSnapshot: recipe.configuration.workflow ?? null,
     workflowValues: recipe.configuration.workflowValues ?? {},
-    seed,
+    seed: mediaRecipeSeed(recipe),
   };
 }
 

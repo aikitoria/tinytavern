@@ -3,6 +3,8 @@ import {
   DEFAULT_SETTINGS,
   MEDIA_PROMPT_SETTINGS_KEYS,
   mediaPromptSettingsKey,
+  mediaInputSlots,
+  compileMediaWorkflow,
 } from '@tinytavern/shared';
 import { route, HttpError } from '../http/router.ts';
 import {
@@ -31,7 +33,11 @@ import {
   validateNewPassword,
 } from '../http/auth.ts';
 import { parseImageGenerationSettings } from '../media/imageSettings.ts';
-import { parseMediaRendering, parseMediaPrompts } from '../media/mediaSettings.ts';
+import {
+  parseMediaRendering,
+  parseMediaPrompts,
+  parseMediaFavorites,
+} from '../media/mediaSettings.ts';
 
 route.get('/api/settings', () => getSettings());
 
@@ -108,19 +114,18 @@ route.put('/api/settings', ({ req, headers, body }) => {
     next.imageGeneration = { ...current.imageGeneration, ...imageGeneration };
   if (mediaRendering !== undefined) next.mediaRendering = mediaRendering;
   Object.assign(next, mediaPrompts);
+  next.mediaFavorites = parseMediaFavorites(b.mediaFavorites) ?? current.mediaFavorites;
   next.mediaRendering = {
     ...next.mediaRendering,
     workflows: next.mediaRendering.workflows.map((workflow) => {
       const result = { ...workflow };
-      for (const field of ['galleryPromptPresetId', 'chatPromptPresetId'] as const) {
+      for (const field of ['standalonePromptPresetId', 'chatPromptPresetId'] as const) {
         const selected = workflow[field];
         if (selected === null) continue;
         const chat = field === 'chatPromptPresetId';
-        const key = mediaPromptSettingsKey(workflow.operation, chat);
-        const preset = next[key].presets.find(
-          (item) => item.id === selected && item.operation === workflow.operation,
-        );
-        if (preset && (!chat || workflow.operation.startsWith('video'))) continue;
+        const key = mediaPromptSettingsKey(chat);
+        const preset = next[key].presets.find((item) => item.id === selected);
+        if (preset) continue;
         if (!(key in mediaPrompts))
           throw new HttpError(
             400,
@@ -131,6 +136,29 @@ route.put('/api/settings', ({ req, headers, body }) => {
       return result;
     }),
   };
+  // Remove only favorites whose referenced entity was explicitly deleted in this update.
+  next.mediaFavorites = next.mediaFavorites.filter((favorite) => {
+    const preset = next.mediaChatPrompts.presets.find((item) => item.id === favorite.presetId);
+    const workflow = next.mediaRendering.workflows.find((item) => item.id === favorite.workflowId);
+    if (!preset && 'mediaChatPrompts' in mediaPrompts && b.mediaFavorites === undefined)
+      return false;
+    if (!workflow && mediaRendering !== undefined && b.mediaFavorites === undefined) return false;
+    if (
+      !preset ||
+      !('chatPrompt' in preset) ||
+      !workflow ||
+      !workflow.json.trim() ||
+      workflow.textOutputNodeId !== null ||
+      mediaInputSlots(workflow).length ||
+      !compileMediaWorkflow(workflow.json).slots.has('prompt')
+    ) {
+      throw new HttpError(
+        400,
+        `${favorite.name}: favorites require a chat prompt preset and a configured workflow with a prompt and no image inputs`,
+      );
+    }
+    return true;
+  });
   putSettings(next);
   if (accessPassword !== undefined) {
     setAccessPassword(accessPassword as string | null);

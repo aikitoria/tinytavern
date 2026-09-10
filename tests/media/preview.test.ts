@@ -59,7 +59,7 @@ test('media latency', async () => {
       assert.equal(body.extra_data.preview_method, 'taesd');
       assert.equal(extra.VHS_MetadataImage, false);
       assert.equal(extra.VHS_KeepIntermediate, false);
-      assert.equal(extra.VHS_latentpreview, videoJobs.has(body.extra_data.tinytavern_job_id));
+      assert.equal(extra.VHS_latentpreview, true);
       assert.equal(extra.VHS_latentpreviewrate, 0);
       submissions.set(body.extra_data.tinytavern_job_id, {
         accept,
@@ -111,10 +111,10 @@ test('media latency', async () => {
   const workflow: MediaWorkflow = {
     id: 'latency',
     name: 'Latency',
-    operation: 'image',
-    referenceCount: 0,
+    inputBindings: {},
+    textOutputNodeId: null,
     json: '{"loader":{"class_type":"Loader","inputs":{}},"sampler":{"class_type":"Test","_meta":{"title":"Motion sampler"},"inputs":{"model":["loader",0],"prompt":"{{prompt}}","seed":{{seed}}}}}',
-    galleryPromptPresetId: null,
+    standalonePromptPresetId: null,
     chatPromptPresetId: null,
   };
   const endpointId = Number(
@@ -127,8 +127,8 @@ test('media latency', async () => {
     mediaRendering: {
       ...getSettings().mediaRendering,
       comfyUrl: base,
-      workflows: [workflow, { ...workflow, id: 'video', operation: 'video' }],
-      defaults: { 'image:0': workflow.id, 'video:0': 'video' },
+      workflows: [workflow, { ...workflow, id: 'video', name: 'Video' }],
+      defaultWorkflowId: workflow.id,
     },
   });
   const subscriptions: (() => void)[] = [];
@@ -145,7 +145,7 @@ test('media latency', async () => {
     for (const mode of ['render', 'prepare-and-render', 'prepare-then-render', 'video']) {
       const job = createMediaJob({
         requestKey: testRequestKey(mode),
-        operation: mode === 'video' ? 'video' : 'image',
+        workflowId: mode === 'video' ? 'video' : workflow.id,
         prompt: 'Image prompt',
         instruction: 'Create an image',
         destination: 'gallery',

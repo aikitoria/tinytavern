@@ -2,6 +2,7 @@ import {
   mediaJobActive,
   newRequestId,
   type MediaJobInput,
+  type MediaInputFillContext,
   type MediaJobInputSnapshot,
 } from '@tinytavern/shared';
 import { cancelMediaJob, createMediaJob, deleteMediaJob, startMediaJob } from './mediaJobs.ts';
@@ -21,14 +22,15 @@ export function startTemporaryMediaJob(
   inputs: MediaJobInput[],
   prompt = '',
   inputSnapshots?: MediaJobInputSnapshot[],
+  fillInputs?: MediaInputFillContext,
 ): MediaJobRow {
   return transaction(() => {
     const draft = createMediaJob(
       {
         requestKey: newRequestId(),
-        operation: configuration.workflow.operation,
         workflowId: configuration.workflow.id,
         inputs,
+        fillInputs,
         prompt,
         destination: 'gallery',
       },

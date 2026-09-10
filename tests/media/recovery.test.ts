@@ -149,9 +149,9 @@ test('media restart', async () => {
   const workflow: MediaWorkflow = {
     id: 'restart-video',
     name: 'Video from first frame',
-    operation: 'video-first',
-    referenceCount: 0,
-    galleryPromptPresetId: null,
+    inputBindings: {},
+    textOutputNodeId: null,
+    standalonePromptPresetId: null,
     chatPromptPresetId: null,
     json: JSON.stringify({
       load: { class_type: 'LoadImage', inputs: { image: '{{first_frame}}' } },
@@ -164,9 +164,10 @@ test('media restart', async () => {
   putSettings({
     ...getSettings(),
     mediaRendering: {
+      ...getSettings().mediaRendering,
       comfyUrl: `http://127.0.0.1:${port}`,
       workflows: [workflow],
-      defaults: {},
+      defaultWorkflowId: null,
       avatarWorkflowId: null,
       jobTimeoutSeconds: 60,
     },
@@ -177,7 +178,7 @@ test('media restart', async () => {
   ).run(inputPath);
   const draft = createMediaJob({
     requestKey: testRequestKey('restart-idempotency'),
-    operation: 'video-first',
+
     workflowId: workflow.id,
     prompt: 'Slow camera move',
     inputs: [{ slot: 'first_frame', assetId: mediaAssetForPath(inputPath)!.id }],
@@ -208,7 +209,7 @@ test('media restart', async () => {
     children.delete(child);
   }
   async function until(check: () => boolean, label: string) {
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + 3000;
     while (!check()) {
       if (failure) {
         throw failure;

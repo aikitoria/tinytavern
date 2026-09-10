@@ -8,8 +8,8 @@ import {
   type PageLocation,
 } from '../state/pageLocation.ts';
 import { batch } from 'solid-js';
-import { dialogStack, nextDialogId, type DialogFrame } from '../state/dialogStack.ts';
-import type { MediaAsset, MediaJobInput, MediaOperation } from '@tinytavern/shared';
+import { dialogStack, type DialogFrame } from '../state/dialogStack.ts';
+import type { MediaAsset, MediaJobInput } from '@tinytavern/shared';
 import {
   applyMediaJob,
   openModal,
@@ -21,8 +21,9 @@ import {
 import { api } from '../state/api.ts';
 
 export interface MediaToolSession {
-  id: string;
-  operation: MediaOperation;
+  /** Stable retry identity, independent of the browser's local dialog numbering. */
+  requestKey: string;
+  workflowId: string | null;
   jobId: number | null;
   assetId?: number;
   contextConversationId: number | null;
@@ -42,11 +43,11 @@ function revisitDialog(frame: DialogFrame | undefined): boolean {
 }
 
 export function openMediaTool(
-  operation: MediaOperation,
+  workflowId: string | null = null,
   options: {
     conversationId?: number | null;
     prompt?: string;
-    input?: { asset: MediaAsset; slot: MediaJobInput['slot'] };
+    input?: { asset: MediaAsset; slot?: MediaJobInput['slot'] };
     jobId?: number;
   } = {},
 ): void {
@@ -55,13 +56,13 @@ export function openMediaTool(
   const input = options.input;
   const conversationId = options.conversationId ?? null;
   const session: MediaToolSession = {
-    id: nextDialogId(),
-    operation,
+    requestKey: newRequestId(),
+    workflowId,
     jobId: options.jobId ?? null,
     contextConversationId: conversationId,
     destination: conversationId === null ? 'gallery' : 'chat',
     prompt: options.prompt ?? '',
-    inputs: input ? [{ slot: input.slot, assetId: input.asset.id }] : [],
+    inputs: input?.slot ? [{ slot: input.slot, assetId: input.asset.id }] : [],
     assets: input ? [input.asset] : [],
   };
   const current = readPageLocation();
@@ -90,19 +91,18 @@ export async function openMediaRerun(
     reviewBeforeSave: true,
   });
   applyMediaJob(job);
-  openMediaTool(job.operation, { jobId: job.id, conversationId });
+  openMediaTool(job.workflowId, { jobId: job.id, conversationId });
 }
 
-export const MEDIA_TOOL_LINKS = [
-  { operation: 'image', label: 'Create image' },
-  { operation: 'image-edit', label: 'Edit image' },
-  { operation: 'video', label: 'Create video' },
-] as const;
-
-export const CHAT_MEDIA_TOOL_LINKS = [
-  { operation: 'image', label: 'Create image from chat' },
-  { operation: 'video', label: 'Create video from chat' },
-] as const;
+export function mediaToolLinks() {
+  return [
+    { workflowId: null, label: 'Generate media' },
+    ...state.settings.mediaRendering.shortcuts.map((shortcut) => ({
+      workflowId: shortcut.workflowId,
+      label: shortcut.name,
+    })),
+  ];
+}
 
 export function restorePage(page: PageLocation): void {
   const chatId = state.conversations.some((chat) => chat.id === page.chatId) ? page.chatId : null;

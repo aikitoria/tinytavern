@@ -1,9 +1,9 @@
-import { Show, createSignal } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
-import type { MediaAsset, MediaJobInput, MediaOperation } from '@tinytavern/shared';
+import type { MediaAsset } from '@tinytavern/shared';
 import DropdownSurface from '../components/ui/DropdownSurface.tsx';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import { openMediaTool } from './navigation.ts';
+import { mediaToolLinks, openMediaTool } from './navigation.ts';
 
 export default function MediaActions(props: {
   asset: MediaAsset;
@@ -13,12 +13,12 @@ export default function MediaActions(props: {
 }) {
   const [open, setOpen] = createSignal(false);
   let button!: HTMLButtonElement;
-  const launch = (operation: MediaOperation, slot: MediaJobInput['slot']) => {
+  const launch = (workflowId: string | null) => {
     if (props.disabled) return;
     setOpen(false);
-    openMediaTool(operation, {
+    openMediaTool(workflowId, {
       conversationId: props.conversationId,
-      input: { asset: props.asset, slot },
+      input: { asset: props.asset },
     });
   };
   return (
@@ -48,15 +48,13 @@ export default function MediaActions(props: {
         keyboardNavigation
         autoFocus
       >
-        <button role="menuitem" onClick={() => launch('image-edit', 'reference1')}>
-          Edit image
-        </button>
-        <button role="menuitem" onClick={() => launch('video-first', 'first_frame')}>
-          Create video
-        </button>
-        <button role="menuitem" onClick={() => launch('video-references', 'reference1')}>
-          Reference for a video
-        </button>
+        <For each={mediaToolLinks()}>
+          {(tool) => (
+            <button role="menuitem" onClick={() => launch(tool.workflowId)}>
+              {tool.label}
+            </button>
+          )}
+        </For>
       </DropdownSurface>
     </Show>
   );

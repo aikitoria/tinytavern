@@ -9,29 +9,39 @@ test('page location', async () => {
     '#+/gallery',
     '#70+/gallery/123',
     '#70+/gallery/123?q=night&character=uploads&sort=oldest',
-    '#70+/settings/media-rendering',
+    '#70+/settings/generation-settings',
     '#70+/settings/characters/12?detail=1',
-    '#70+/settings/templates/new?detail=1',
+    '#70+/settings/workflows/image-edit?detail=1',
+    '#70+/settings/workflows/12?detail=1',
+    '#70+/settings/chat-templates/new?detail=1',
     '#70+/conversation',
     '#70/map',
     '#70/trace',
     '#70/map+/gallery/123',
     '#70+/gallery/123+/jobs+/media/job/123',
-    '#71+/media/create-image+/jobs',
-    '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
+    '#71+/media/generate+/jobs',
+    '#71+/gallery/35?sort=newest+/media/generate?workflow=animate',
     '#71+/media/job/1',
     '#71+/media/job/1?asset=42',
     '#71+/media/job/1?asset=42+/jobs+/media/job/2?asset=43',
-    '#71+/media/edit-image',
-    '#71+/media/describe-image',
+    '#71+/media/generate?workflow=edit',
     '#70+/gallery/123?q=night+sky%2B%2F&sort=oldest+/jobs',
     '#70+/conversation+/settings/characters/12?detail=1',
   ]) {
     assert.equal(formatPageLocation(parsePageLocation(hash)), hash, `Round trip ${hash}`);
   }
+  for (const [old, current] of [
+    ['presets', 'system-prompts'],
+    ['media-rendering', 'generation-settings'],
+  ] as const) {
+    assert.equal(
+      formatPageLocation(parsePageLocation(`#70+/settings/${old}/new?detail=1`)),
+      `#70+/settings/${current}/new?detail=1`,
+    );
+  }
   assert.equal(
     formatPageLocation(parsePageLocation('#71+/gallery/35?sort=newest+/media/video-first')),
-    '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame',
+    '#71+/gallery/35?sort=newest+/media/generate',
   );
   for (const old of [
     '#71+/gallery/35?sort=newest+/media/create-video/8?mode=first-frame',
@@ -53,6 +63,15 @@ test('page location', async () => {
     assert.equal(formatPageLocation(page), '#71+/jobs');
   }
   const legacyJobs = '#71/media/image?jobs=1&return=%2371%2Fgallery%2F35';
+  assert.equal(
+    formatPageLocation(
+      parsePageLocation(
+        '#70+/gallery/123+/settings/generation-settings+/settings/workflows/example?detail=1',
+      ),
+    ),
+    '#70+/gallery/123+/settings/workflows/example?detail=1',
+    'Old nested settings URLs restore only the last requested editor',
+  );
   assert.equal(formatPageLocation(parsePageLocation(legacyJobs)), '#71+/gallery/35+/jobs');
   const media = parsePageLocation('#70/media/video/123?return=%2370%2Fgallery%2F123');
   assert.equal(media.chatId, 70);
@@ -352,8 +371,91 @@ test('page location', async () => {
   go(1);
   assert.equal(location.hash, editorHash, 'Forward can reopen the editor after returning to Jobs');
   assert.equal(dialogStack.frames()[1], originalJobs);
+  const storeModule = '../../client/src/state/store.ts';
+  const referencesModule = '../../client/src/state/entityReferences.ts';
+  const { openDialog, openModal } = await import(storeModule);
+  const { editReferencedEntity } = await import(referencesModule);
+  applyPageLocation(galleryPage, () => dialogStack.restore(galleryPage));
+  const retainedGallery = dialogStack.top()!;
+  openDialog({ chatId: null, modal: 'settings', settingsTab: 'generation-settings' });
+  const settings = dialogStack.top()!;
+  let approveSettings: (() => void) | undefined;
+  const removeSettingsGuard = guardPageNavigation(
+    (action: () => void) => {
+      approveSettings = action;
+    },
+    (target: unknown) => !dialogStack.retains(settings, target),
+  );
+  editReferencedEntity('workflows', 'example');
+  assert(approveSettings, 'Changing settings editors guards the current draft');
+  assert.equal(dialogStack.top(), settings);
+  assert.equal(dialogStack.frames().length, 2, 'No second settings panel while awaiting the guard');
+  approveSettings = undefined; // Cancel keeps the original editor.
+  editReferencedEntity('workflows', 'example');
+  approveSettings!();
+  removeSettingsGuard();
+  const workflowEditor = dialogStack.top()!;
+  assert.equal(workflowEditor.page.settingsEntity, 'example');
+  assert.equal(dialogStack.frames().length, 2);
+  assert.equal(dialogStack.frames()[0], retainedGallery);
+  editReferencedEntity('workflows', 'example');
+  assert.equal(
+    dialogStack.top(),
+    workflowEditor,
+    'Looking up the current entity retains its open draft',
+  );
+  openModal('settings');
+  assert.equal(dialogStack.top(), workflowEditor, 'The settings button also reuses the panel');
+  openMediaTool('example');
+  const settingsChild = dialogStack.top()!;
+  let approveSettingsChild: (() => void) | undefined;
+  const removeChildGuard = guardPageNavigation(
+    (action: () => void) => {
+      approveSettingsChild = action;
+    },
+    (target: unknown) => !dialogStack.retains(settingsChild, target),
+  );
+  editReferencedEntity('workflows', 'example');
+  assert(approveSettingsChild, 'Returning to existing settings guards the removed child');
+  assert.equal(dialogStack.top(), settingsChild);
+  approveSettingsChild!();
+  removeChildGuard();
+  assert.equal(dialogStack.top(), workflowEditor);
+  assert.equal(dialogStack.frames().length, 2, 'Returning cannot stack settings panels');
   restoreDialogs = undefined;
   dialogStack.restore(parsePageLocation('#70'));
+
+  // Native hash changes have no app history state, but must preserve the dirty
+  // editor and the original entry until its guard approves the new location.
+  open('#70+/settings/general');
+  const nativeOrigin = cursor;
+  let approveNative: (() => void) | undefined;
+  const removeNativeGuard = guardPageNavigation((action: () => void) => {
+    approveNative = action;
+  });
+  const enterHash = (hash: string) => {
+    entries.splice(cursor + 1);
+    entries.push({ hash, state: null });
+    cursor++;
+    location.hash = hash;
+    const event = new Event('popstate');
+    Object.defineProperty(event, 'state', { value: null });
+    browser.dispatchEvent(event);
+    settle();
+  };
+  enterHash('#70+/settings/characters');
+  assert(approveNative, 'An address-bar hash change must consult the settings guard');
+  at(nativeOrigin, '#70+/settings/general');
+  approveNative = undefined; // Cancel leaves the new target available through Forward.
+  go(1);
+  assert(approveNative);
+  at(nativeOrigin, '#70+/settings/general');
+  (approveNative as unknown as () => void)();
+  settle();
+  at(nativeOrigin + 1, '#70+/settings/characters');
+  removeNativeGuard();
+  go(-1);
+  at(nativeOrigin, '#70+/settings/general');
 });
 
 test('dialog stack', async () => {
@@ -379,10 +481,10 @@ test('dialog stack', async () => {
   assert.equal(stack.pop(), galleryFrame.page);
   assert.equal(stack.top(), galleryFrame, 'Returning preserves the mounted gallery');
 
-  const draft = parsePageLocation(formatPageLocation(gallery) + '+/media/create-image');
+  const draft = parsePageLocation(formatPageLocation(gallery) + '+/media/generate');
   const session = {
-    id: 'session-a',
-    operation: 'image' as const,
+    requestKey: '12345678901234567890',
+    workflowId: null,
     jobId: null,
     contextConversationId: null,
     destination: 'gallery' as const,
@@ -472,14 +574,14 @@ test('dialog stack', async () => {
     { id: 35, media: image },
     { id: 36, media: video },
   ];
-  const sourceUrl = '#71+/gallery/35?sort=newest+/media/create-video?mode=first-frame';
+  const sourceUrl = '#71+/gallery/35?sort=newest+/media/generate?workflow=animate';
   const sourcePage = parsePageLocation(sourceUrl);
   const inferredStack = createDialogStack();
   inferredStack.restore(sourcePage, (page: unknown) => restoreMediaInputs(page, galleryItems, {}));
   const inferred = inferredStack.top()!.media!;
   assert.deepEqual(
     { inputs: inferred.inputs, assets: inferred.assets },
-    { inputs: [{ slot: 'first_frame', assetId: 11 }], assets: [image] },
+    { inputs: [], assets: [image] },
     'Reload reselects the source and retains dimensions for workflow defaults',
   );
   inferredStack.top()!.media!.inputs = [];
@@ -491,22 +593,12 @@ test('dialog stack', async () => {
     [],
     'Returning to a mounted pane preserves deliberate deselection',
   );
-  for (const [route, slot] of [
-    ['create-video?mode=references', 'reference1'],
-    ['edit-image', 'reference1'],
-    ['describe-image', 'source'],
-  ]) {
-    const page = parsePageLocation('#71+/gallery/35+/jobs+/media/' + route);
-    assert.equal(restoreMediaInputs(page, galleryItems, {}).inputs[0].slot, slot);
-  }
   for (const hash of [
-    '#71+/gallery/35+/media/create-video',
-    '#71+/gallery/35+/media/create-image',
     '#71+/gallery/35+/jobs',
     '#71+/gallery/35+/media/job/10',
-    '#71+/gallery/999+/media/create-video?mode=first-frame',
-    '#71+/gallery/36+/media/create-video?mode=first-frame',
-    '#71+/media/create-video?mode=first-frame',
+    '#71+/gallery/999+/media/generate?workflow=animate',
+    '#71+/gallery/36+/media/generate?workflow=animate',
+    '#71+/media/generate?workflow=animate',
   ]) {
     assert.equal(restoreMediaInputs(parsePageLocation(hash), galleryItems, {}), undefined, hash);
   }
@@ -515,24 +607,24 @@ test('dialog stack', async () => {
     7: { outputs: [], draft: { id: 4, selectedAssetId: 12 } },
   };
   const nestedSource = parsePageLocation(
-    '#71+/gallery/35+/media/job/7+/jobs+/media/create-video?mode=first-frame',
+    '#71+/gallery/35+/media/job/7+/jobs+/media/generate?workflow=animate',
   );
   assert.equal(
-    restoreMediaInputs(nestedSource, galleryItems, sourceJobs).inputs[0].assetId,
+    restoreMediaInputs(nestedSource, galleryItems, sourceJobs).assets[0].id,
     12,
     'Nearest job uses its selected variation before a more distant gallery source',
   );
   assert.equal(
-    restoreMediaInputs(nestedSource, galleryItems, {}).inputs[0].assetId,
+    restoreMediaInputs(nestedSource, galleryItems, {}).assets[0].id,
     11,
     'Unavailable ancestor jobs can fall back to a suitable gallery image',
   );
   assert.equal(
     restoreMediaInputs(
-      parsePageLocation('#71+/media/job/6?asset=11+/media/create-video?mode=first-frame'),
+      parsePageLocation('#71+/media/job/6?asset=11+/media/generate?workflow=animate'),
       galleryItems,
       { 6: { outputs: [image, otherImage], draft: { id: 4, selectedAssetId: 12 } } },
-    ).inputs[0].assetId,
+    ).assets[0].id,
     11,
     'A nested editor restores the result in its parent URL ahead of shared draft selection',
   );

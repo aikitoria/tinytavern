@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 69;
+export const SCHEMA_VERSION = 73;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -177,12 +177,12 @@ CREATE TABLE media_owners (
 CREATE TABLE media_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
-  operation TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'draft',
   workflow_id TEXT,
   preset_id TEXT,
   instruction TEXT NOT NULL DEFAULT '',
   prompt TEXT NOT NULL DEFAULT '',
+  result_text TEXT,
   inputs_json TEXT NOT NULL DEFAULT '[]',
   configuration_json TEXT,
   context_json TEXT,
@@ -411,25 +411,64 @@ CREATE TRIGGER media_draft_delete AFTER DELETE ON media_jobs BEGIN
     AND NOT EXISTS (SELECT 1 FROM media_jobs WHERE draft_id = old.draft_id);
 END;
 
-CREATE TRIGGER media_gallery_input_delete AFTER DELETE ON gallery_items BEGIN
-  UPDATE media_assets SET reference_deleted = 1 WHERE path = old.image
-    AND NOT EXISTS (SELECT 1 FROM gallery_items WHERE image = old.image);
+CREATE TRIGGER media_asset_reference_delete AFTER UPDATE OF reference_deleted ON media_assets
+WHEN old.reference_deleted = 0 AND new.reference_deleted = 1 BEGIN
   UPDATE media_recipes SET inputs_json = (
     SELECT json_group_array(json_set(input.value, '$.assetId',
-      CASE WHEN json_extract(input.value, '$.assetId') =
-        (SELECT id FROM media_assets WHERE path = old.image AND reference_deleted = 1)
+      CASE WHEN json_extract(input.value, '$.assetId') = new.id
       THEN NULL ELSE json_extract(input.value, '$.assetId') END))
     FROM json_each(media_recipes.inputs_json) input
   ) WHERE id IN (
-    SELECT owner_id FROM media_owners WHERE owner_type = 'recipe' AND asset_id IN
-      (SELECT id FROM media_assets WHERE path = old.image AND reference_deleted = 1)
+    SELECT owner_id FROM media_owners WHERE owner_type = 'recipe' AND asset_id = new.id
   );
-  DELETE FROM media_owners WHERE asset_id IN
-    (SELECT id FROM media_assets WHERE path = old.image AND reference_deleted = 1)
+  DELETE FROM media_owners WHERE asset_id = new.id
     AND (owner_type = 'recipe' OR (owner_type = 'job' AND slot LIKE 'input:%'
       AND EXISTS (SELECT 1 FROM media_jobs WHERE id = media_owners.owner_id
         AND state IN ('draft', 'ready', 'succeeded', 'failed', 'cancelled'))));
 END;
 
+CREATE TRIGGER media_message_reference_insert AFTER INSERT ON messages BEGIN
+  UPDATE media_assets SET reference_deleted = 0 WHERE reference_deleted = 1
+    AND path IN (SELECT value FROM json_each(new.images_json));
+END;
 
+CREATE TRIGGER media_message_reference_update AFTER UPDATE OF images_json ON messages
+WHEN old.images_json IS NOT new.images_json BEGIN
+  UPDATE media_assets SET reference_deleted = 0 WHERE reference_deleted = 1
+    AND path IN (SELECT value FROM json_each(new.images_json));
+  UPDATE media_assets SET reference_deleted = 1 WHERE reference_deleted = 0
+    AND path IN (SELECT value FROM json_each(old.images_json))
+    AND path NOT IN (SELECT value FROM json_each(new.images_json))
+    AND NOT EXISTS (SELECT 1 FROM gallery_items WHERE image = media_assets.path)
+    AND NOT EXISTS (SELECT 1 FROM media_owners WHERE asset_id = media_assets.id
+      AND owner_type = 'message' AND owner_id != new.id);
+END;
+
+CREATE TRIGGER media_message_reference_delete AFTER DELETE ON messages BEGIN
+  UPDATE media_assets SET reference_deleted = 1 WHERE reference_deleted = 0
+    AND path IN (SELECT value FROM json_each(old.images_json))
+    AND NOT EXISTS (SELECT 1 FROM gallery_items WHERE image = media_assets.path)
+    AND NOT EXISTS (SELECT 1 FROM media_owners WHERE asset_id = media_assets.id
+      AND owner_type = 'message');
+END;
+
+CREATE TRIGGER media_gallery_reference_insert AFTER INSERT ON gallery_items BEGIN
+  UPDATE media_assets SET reference_deleted = 0 WHERE path = new.image AND reference_deleted = 1;
+END;
+
+CREATE TRIGGER media_gallery_reference_update AFTER UPDATE OF image ON gallery_items
+WHEN old.image IS NOT new.image BEGIN
+  UPDATE media_assets SET reference_deleted = 0 WHERE path = new.image AND reference_deleted = 1;
+  UPDATE media_assets SET reference_deleted = 1 WHERE path = old.image AND reference_deleted = 0
+    AND NOT EXISTS (SELECT 1 FROM gallery_items WHERE image = old.image)
+    AND NOT EXISTS (SELECT 1 FROM media_owners WHERE asset_id = media_assets.id
+      AND owner_type = 'message');
+END;
+
+CREATE TRIGGER media_gallery_input_delete AFTER DELETE ON gallery_items BEGIN
+  UPDATE media_assets SET reference_deleted = 1 WHERE path = old.image AND reference_deleted = 0
+    AND NOT EXISTS (SELECT 1 FROM gallery_items WHERE image = old.image)
+    AND NOT EXISTS (SELECT 1 FROM media_owners WHERE asset_id = media_assets.id
+      AND owner_type = 'message');
+END;
 `;

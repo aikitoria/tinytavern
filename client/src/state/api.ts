@@ -163,24 +163,6 @@ export async function streamTextCompletion(
   return text;
 }
 
-const streamAvatarPrompt = (
-  kind: 'character' | 'persona',
-  id: number,
-  prompt: string,
-  context: string,
-  onDelta: (text: string) => void,
-  signal?: AbortSignal,
-  onReasoning?: (delta: string) => void,
-) =>
-  streamTextCompletion(
-    `/api/${kind === 'character' ? 'characters' : 'personas'}/${id}/avatar/prompt`,
-    { prompt, context },
-    onDelta,
-    'avatar prompt',
-    signal,
-    onReasoning,
-  );
-
 /** Resource methods share transport; DTOs and endpoint-specific transforms stay typed. */
 function resource<T>(name: string, preparePatch: (data: Partial<T>) => unknown = (data) => data) {
   const url = `/api/${name}`;
@@ -230,6 +212,20 @@ export const api = {
     return request<MediaJob[]>('GET', `/api/media/jobs${query}`);
   },
   mediaJob: (id: number) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
+  runMediaFavorite: (
+    id: string,
+    conversationId: number,
+    tree: MutationState,
+    requestKey: string,
+    instruction = '',
+  ) =>
+    request<MediaJob>('POST', `/api/media/favorites/${encodeURIComponent(id)}/run`, {
+      contextConversationId: conversationId,
+      requestKey,
+      instruction,
+      expectedActiveLeafId: tree.activeLeafId,
+      expectedMutationRevision: tree.mutationRevision,
+    }),
   createMediaJob: (draft: MediaJobDraft, requestKey: string) =>
     request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
   mediaAssetInputs: (assetId: number) =>
@@ -269,7 +265,7 @@ export const api = {
     }),
   acceptMediaVariation: (
     job: MediaJob,
-    assetId: number,
+    assetId: number | null,
     expectedDraftRevision: number,
     tree: MutationState,
   ) =>
@@ -465,7 +461,6 @@ export const api = {
     ...entity<Endpoint>('endpoints', prepareEndpointPatch),
     models: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
   },
-  streamAvatarPrompt,
 
   settings: () => request<Settings>('GET', '/api/settings'),
   putSettings: (

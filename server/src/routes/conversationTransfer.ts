@@ -234,8 +234,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
         imageAssetIds.push(addImage(path));
       }
       const renderRecipeId =
-        row.render_recipe_id &&
-        !getMediaRecipe(row.render_recipe_id).configuration.workflow.operation.startsWith('video')
+        row.render_recipe_id && (imageAssetIds.length > 0 || paths.length === 0)
           ? row.render_recipe_id
           : null;
       const current = live.get(row.id);
@@ -427,10 +426,10 @@ function parsePortableConversation(raw: unknown): {
       const workflow = {
         id: `imported-message-${id}`,
         name: 'Imported image workflow',
-        operation: 'image' as const,
-        referenceCount: 0 as const,
+        inputBindings: {},
+        textOutputNodeId: null,
         json: string(imported.workflow, 'imageRender.workflow'),
-        galleryPromptPresetId: null,
+        standalonePromptPresetId: null,
         chatPromptPresetId: null,
       };
       const configuration = imageRenderConfiguration(

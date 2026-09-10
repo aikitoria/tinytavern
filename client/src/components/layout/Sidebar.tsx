@@ -26,6 +26,8 @@ import { errorMessage } from '../../util.ts';
 import { confirmAction } from '../../state/confirm.ts';
 import Avatar from '../ui/Avatar.tsx';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
+import ReferenceEditButton from '../ui/ReferenceEditButton.tsx';
+import { editReferencedEntity } from '../../state/entityReferences.ts';
 
 interface SearchResult {
   conversation: Conversation;
@@ -227,6 +229,24 @@ export default function Sidebar() {
     );
   };
 
+  const CharacterChoice = (props: { character: Character; child?: boolean }) => (
+    <div class="flex items-center gap-1 [&>button:first-child]:flex-1 [&>button:first-child]:min-w-0">
+      <button
+        classList={{ 'new-chat-folder-child': props.child }}
+        onClick={() => create(props.character.id)}
+      >
+        <Avatar src={props.character.avatarThumbnail} name={props.character.name} />{' '}
+        {props.character.name}
+      </button>
+      <ReferenceEditButton
+        label={props.character.name}
+        onClick={() => {
+          closeNewChatMenu();
+          editReferencedEntity('characters', props.character.id);
+        }}
+      />
+    </div>
+  );
   return (
     <aside
       class="sidebar w-sidebar border-r border-r-solid border-r-subtle flex flex-col relative bg-chrome shrink-0 [&_.avatar]:text-sm [&_.avatar]:size-6.5 small-touch:fixed small-touch:z-60 small-touch:[&.open]:shadow-clear small-touch:inset-[0_auto_0_0] small-touch:w-[min(85vw,_var(--sidebar-w))] small-touch:pt-[env(safe-area-inset-top)]"
@@ -341,12 +361,7 @@ export default function Sidebar() {
                 </button>
                 <Show when={searchActive() || !collapsedCharacterFolders().has(folder.id)}>
                   <For each={charactersInFolder(folder.id)}>
-                    {(character) => (
-                      <button class="new-chat-folder-child" onClick={() => create(character.id)}>
-                        <Avatar src={character.avatarThumbnail} name={character.name} />{' '}
-                        {character.name}
-                      </button>
-                    )}
+                    {(character) => <CharacterChoice character={character} child />}
                   </For>
                 </Show>
               </div>
@@ -354,11 +369,7 @@ export default function Sidebar() {
           )}
         </For>
         <For each={rootCharacters()}>
-          {(character) => (
-            <button onClick={() => create(character.id)}>
-              <Avatar src={character.avatarThumbnail} name={character.name} /> {character.name}
-            </button>
-          )}
+          {(character) => <CharacterChoice character={character} />}
         </For>
         <Show when={searchActive() && matchingCharacterCount() === 0}>
           <p class="hint py-1 px-2">No matches.</p>

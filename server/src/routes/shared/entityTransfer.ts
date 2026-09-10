@@ -3,6 +3,7 @@ import {
   ENTITY_TRANSFER_FIELDS,
   entityTransferData,
   namedItem,
+  takeNamedCollectionItem,
   transferArray,
   transferData,
   transferDocument,
@@ -72,24 +73,21 @@ export function defineEntityTransfer<T extends { id: number }>(
     try {
       const data = transferData(input.document, `${single ? 'entity' : 'page'}:${type}`);
       const source = single ? { items: [data] } : transferObject(data);
-      const incoming = transferArray(source.items);
+      const incoming = transferArray(source.items).map((entry) => entityTransferData(type, entry));
       const all = rows(cfg.table);
       const candidates: (Record<string, unknown> & { name: string })[] = all.map((row) => ({
         ...row,
         name: String(row.name),
       }));
-      const names = new Set(all.map((row) => String(row.name)));
-      const seen = new Set<string>();
-      const plan = incoming.map((entry) => {
-        const item = entityTransferData(type, entry);
+      const names = new Set([...all, ...incoming].map((row) => String(row.name)));
+      const remaining = new Set(candidates);
+      const plan = incoming.map((item) => {
         const name = String(item.name);
-        if (seen.has(name.toLowerCase())) throw new HttpError(400, 'Duplicate names in the import');
-        seen.add(name.toLowerCase());
         const matching = single
           ? input.targetId === null
             ? undefined
             : rowById(cfg.table, positiveId(String(input.targetId)))
-          : namedItem(candidates, name);
+          : takeNamedCollectionItem(candidates, remaining, name);
         const protectedRow = matching && cfg.readOnlyColumn && matching[cfg.readOnlyColumn] === 1;
         const current = protectedRow ? undefined : matching;
         if (protectedRow) {

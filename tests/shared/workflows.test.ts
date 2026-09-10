@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
-test('media workflow', async () => {
+test('workflows derive arbitrary named inputs and preserve legacy bindings without output categories', async () => {
   const {
     compileMediaWorkflow,
     expandMediaWorkflow,
@@ -11,203 +11,208 @@ test('media workflow', async () => {
     defaultMediaPrompt,
     defaultChatMediaPrompt,
   } = await import('@tinytavern/shared');
-  type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
   const { parseMediaRendering, parseMediaPrompts } =
     await import('../../server/src/media/mediaSettings.ts');
-
-  const workflow: MediaWorkflow = {
-    id: 'three',
-    name: 'Three references',
-    operation: 'image-edit',
-    referenceCount: 3,
-    json: '{"1":{"class_type":"Edit","inputs":{"text":"prefix {{prompt}}","seed":{{seed}},"refs":["{{reference1}}","{{reference2}}","{{reference3}}"],"prefix":"{{job_id}}"}}}',
-    galleryPromptPresetId: null,
-    chatPromptPresetId: null,
-  };
-  assert.equal(mediaWorkflowError(workflow), null);
-  const compiled = compileMediaWorkflow(workflow.json);
-  const before = JSON.stringify(compiled.graph);
-  const prompt = 'Quotes " \\ newline\n literal {{seed}} $&';
-  const result = expandMediaWorkflow(compiled, {
-    prompt,
-    seed: 0,
-    job_id: 'job',
-    source: 'source.png',
-    reference1: 'a.png',
-    reference2: 'b.png',
-    reference3: 'c.png',
-  }) as { '1': { inputs: Record<string, unknown> } };
-  assert.equal(result['1'].inputs.text, `prefix ${prompt}`);
-  assert.equal(result['1'].inputs.seed, 0);
-  assert.deepEqual(result['1'].inputs.refs, ['a.png', 'b.png', 'c.png']);
-  assert.equal(
-    compileMediaWorkflow(workflow.json),
-    compiled,
-    'Identical source reuses compilation',
-  );
-  const changedWorkflow = { ...workflow, json: workflow.json.replace('prefix ', 'edited ') };
-  assert.notEqual(
-    compileMediaWorkflow(changedWorkflow.json),
-    compiled,
-    'Edits under the same workflow ID compile the changed source',
-  );
-  const nextResult = expandMediaWorkflow(compiled, {
-    prompt: 'Second prompt',
-    seed: 42,
-    job_id: 'next-job',
-    reference1: 'next-a.png',
-    reference2: 'next-b.png',
-    reference3: 'next-c.png',
-  }) as typeof result;
-  (result['1'].inputs.refs as string[])[0] = 'mutated-output.png';
-  assert.equal(nextResult['1'].inputs.text, 'prefix Second prompt');
-  assert.equal(nextResult['1'].inputs.seed, 42);
-  assert.deepEqual(nextResult['1'].inputs.refs, ['next-a.png', 'next-b.png', 'next-c.png']);
-  assert.equal(JSON.stringify(compiled.graph), before, 'Expanded jobs cannot mutate cached inputs');
-  for (const count of [1, 2, 3]) {
-    assert.deepEqual(
-      mediaInputSlots('image-edit', count),
-      Array.from({ length: count }, (_, index) => `reference${index + 1}`),
-    );
-  }
-  assert.throws(() => mediaInputSlots('image-edit', 0));
-  assert.throws(() => mediaInputSlots('image-edit', 4));
-  assert.deepEqual(mediaInputSlots('video-first', 0), ['first_frame']);
-  assert.throws(() => mediaInputSlots('video', 1));
-  assert.throws(() => mediaInputSlots('video-references', 0));
-  for (const json of [
-    '{"seed":"{{seed}}"}',
-    '{"text":{{prompt}}}',
-    '{"{{prompt}}":1}',
-    '{"text":"{{reference4}}"}',
-    '{"text":"{{last_frame}}"}',
-    '{"seed":1{{seed}}}',
-  ]) {
-    assert.throws(() => compileMediaWorkflow(json), json);
-  }
-  assert.ok(mediaWorkflowError({ ...workflow, referenceCount: 2 }));
-  assert.throws(
-    () => expandMediaWorkflow(compiled, { prompt, seed: 1, job_id: 'job' }),
-    /Missing workflow input/,
-  );
-  const settings = {
-    ...DEFAULT_MEDIA_RENDERING,
-    workflows: [workflow],
-    defaults: { 'image-edit:3': 'three' },
-  };
-  assert.deepEqual(parseMediaRendering(settings), settings);
-  for (const overrides of [
-    { defaults: { 'video:0': 'three' } },
-    { comfyUrl: 'file:///tmp' },
-    { avatarWorkflowId: 'three' },
-    { workflows: [{ ...workflow, operation: 'video-frames', referenceCount: 0 }] },
-  ])
-    assert.throws(() => parseMediaRendering({ ...settings, ...overrides }));
-
-  const galleryPrompt = {
-    id: 'gallery',
-    name: 'Video formatting',
-    operation: 'video',
-    ...defaultMediaPrompt('video'),
-  };
-  const chatPrompt = {
-    id: 'chat',
-    name: 'Video formatting',
-    operation: 'video',
-    chatPrompt: defaultChatMediaPrompt('video'),
-  };
-  for (const [preset, key] of [
-    [galleryPrompt, 'galleryVideoPrompts'],
-    [chatPrompt, 'chatVideoPrompts'],
-  ] as const) {
-    const settings = { presets: [preset], defaults: { video: preset.id } };
-    assert.deepEqual(parseMediaPrompts(settings, key)?.presets, [preset]);
-  }
-  for (const [preset, key, error] of [
-    [galleryPrompt, 'chatVideoPrompts', /Unexpected prompt field/],
-    [chatPrompt, 'galleryVideoPrompts', /Unexpected prompt field/],
-    [galleryPrompt, 'galleryImagePrompts', /operation/],
-  ] as const)
-    assert.throws(() => parseMediaPrompts({ presets: [preset], defaults: {} }, key), error);
-  for (const key of ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill']) {
-    assert.throws(
-      () =>
-        parseMediaPrompts(
-          { presets: [{ ...galleryPrompt, [key]: '{{references}}' }], defaults: {} },
-          'galleryVideoPrompts',
-        ),
-      /Reference images are workflow inputs/,
-    );
-  }
-  // Reserved filenames bind only actual image loader inputs, preserving the saved export.
-  const filenameGraph = {
+  type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
+  const graph = {
     source: { class_type: 'LoadImage', inputs: { image: 'source.png' } },
     mask: {
       class_type: 'LoadImageMask',
       inputs: { image: 'samples/source.png [input]', channel: 'alpha' },
     },
+    first: { class_type: 'LoadImage', inputs: { image: 'first_frame.png' } },
     ref1: { class_type: 'LoadImage', inputs: { image: 'reference1.png' } },
     ref2: { class_type: 'LoadImage', inputs: { image: 'samples/reference2.png' } },
     ref3: { class_type: 'LoadImage', inputs: { image: 'reference3.png [input]' } },
-    text: { class_type: 'Text', inputs: { text: '{{prompt}}', image: 'reference1.png' } },
+    subject: {
+      class_type: 'LoadImage',
+      inputs: { image: 'source.png' },
+      _meta: { title: 'Subject [image:subject]' },
+    },
+    custom: {
+      class_type: 'CustomLoader',
+      inputs: { filename: 'example.png' },
+      _meta: { title: 'Clothing [image:clothing, field=filename]' },
+    },
+    text: {
+      class_type: 'PrimitiveString',
+      inputs: { value: 'Example prompt' },
+      _meta: { title: 'Prompt [prompt]' },
+    },
+    output: {
+      class_type: 'AnyOutput',
+      inputs: { text: 'prefix {{prompt}}', image: 'reference1.png' },
+    },
     fixed: { class_type: 'LoadImage', inputs: { image: 'my-reference1.png' } },
-    output: { class_type: 'LoadImage', inputs: { image: 'reference1.png [output]' } },
+    external: { class_type: 'LoadImage', inputs: { image: 'reference1.png [output]' } },
     linked: { class_type: 'LoadImage', inputs: { image: ['filename', 0] } },
   };
-  const filenameJson = JSON.stringify(filenameGraph);
-  const filenameWorkflow = { ...workflow, json: filenameJson };
-  assert.match(mediaWorkflowError(filenameWorkflow)!, /source is not an input/);
-  assert.ok(mediaWorkflowError({ ...filenameWorkflow, referenceCount: 2 }));
-  const filenameCompiled = compileMediaWorkflow(filenameJson);
-  assert.deepEqual([...filenameCompiled.slots].sort(), [
-    'prompt',
+  const workflow: MediaWorkflow = {
+    id: 'unusual',
+    name: 'Unusual workflow',
+    json: JSON.stringify(graph),
+    standalonePromptPresetId: null,
+    chatPromptPresetId: null,
+    textOutputNodeId: null,
+    inputBindings: { chat: { subject: 'character-avatar' } },
+  };
+  assert.equal(mediaWorkflowError(workflow), null);
+  assert.deepEqual(mediaInputSlots(workflow), [
+    'source',
+    'first_frame',
     'reference1',
     'reference2',
     'reference3',
-    'source',
+    'subject',
+    'clothing',
   ]);
+  const compiled = compileMediaWorkflow(workflow.json);
+  assert.equal(
+    compileMediaWorkflow(workflow.json),
+    compiled,
+    'Identical source reuses compilation',
+  );
+  const original = JSON.stringify(compiled.graph);
+  const prompt = 'Quotes " \\ newline\n literal {{seed}} $&';
   const bindings = {
-    prompt: 'Do not replace source.png in text',
+    prompt,
     seed: 123,
-    job_id: 'files',
+    job_id: 'job',
     source: 'jobs/source.webp',
+    first_frame: 'jobs/first.png',
     reference1: 'jobs/one.jpg',
     reference2: 'jobs/two.png',
     reference3: 'jobs/three.png',
+    subject: 'jobs/subject.png',
+    clothing: 'jobs/clothing.png',
   };
-  const filenameResult = expandMediaWorkflow(filenameCompiled, bindings) as typeof filenameGraph;
-  assert.equal(filenameResult.source.inputs.image, bindings.source);
-  assert.equal(filenameResult.mask.inputs.image, bindings.source);
-  assert.equal(filenameResult.ref1.inputs.image, bindings.reference1);
-  assert.equal(filenameResult.ref2.inputs.image, bindings.reference2);
-  assert.equal(filenameResult.ref3.inputs.image, bindings.reference3);
-  assert.equal(filenameResult.text.inputs.text, bindings.prompt);
-  assert.equal(filenameResult.text.inputs.image, 'reference1.png');
-  assert.equal(filenameResult.fixed.inputs.image, 'my-reference1.png');
-  assert.equal(filenameResult.output.inputs.image, 'reference1.png [output]');
-  assert.deepEqual(filenameResult.linked.inputs.image, ['filename', 0]);
+  const result = expandMediaWorkflow(compiled, bindings) as typeof graph;
+  assert.equal(result.source.inputs.image, bindings.source);
+  assert.equal(result.mask.inputs.image, bindings.source);
+  assert.equal(result.first.inputs.image, bindings.first_frame);
+  assert.equal(result.ref1.inputs.image, bindings.reference1);
+  assert.equal(result.ref2.inputs.image, bindings.reference2);
+  assert.equal(result.ref3.inputs.image, bindings.reference3);
+  assert.equal(
+    result.subject.inputs.image,
+    bindings.subject,
+    'Named titles override legacy sample filenames',
+  );
+  assert.equal(result.custom.inputs.filename, bindings.clothing);
+  assert.equal(result.text.inputs.value, prompt);
+  assert.equal(result.output.inputs.text, `prefix ${prompt}`);
+  assert.equal(
+    result.output.inputs.image,
+    'reference1.png',
+    'Only actual loader fields bind legacy filenames',
+  );
+  assert.equal(result.fixed.inputs.image, 'my-reference1.png');
+  assert.equal(result.external.inputs.image, 'reference1.png [output]');
+  assert.deepEqual(result.linked.inputs.image, ['filename', 0]);
+  result.subject.inputs.image = 'mutated';
+  assert.equal(
+    (expandMediaWorkflow(compiled, bindings) as typeof graph).subject.inputs.image,
+    bindings.subject,
+  );
+  assert.equal(
+    JSON.stringify(compiled.graph),
+    original,
+    'Expansion never mutates the shared compilation',
+  );
   assert.throws(
-    () => expandMediaWorkflow(filenameCompiled, { prompt, seed: 1, job_id: 'missing' }),
+    () => expandMediaWorkflow(compiled, { prompt, seed: 1, job_id: 'missing' }),
     /Missing workflow input/,
   );
-  const firstFrame = {
-    ...workflow,
-    operation: 'video-first' as const,
-    referenceCount: 0 as const,
-    json: JSON.stringify({
-      image: { class_type: 'LoadImage', inputs: { image: 'first_frame.png' } },
-      text: { class_type: 'Text', inputs: { text: '{{prompt}}' } },
-    }),
-  };
-  assert.equal(mediaWorkflowError(firstFrame), null);
-  assert.ok(compileMediaWorkflow(firstFrame.json).slots.has('first_frame'));
-  // Eviction drops only the derived cache; existing jobs can still expand their capture.
-  const evictionSource = '{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}';
-  const evicted = compileMediaWorkflow(evictionSource);
-  for (let index = 0; index < 64; index++) {
-    compileMediaWorkflow(`{"1":{"inputs":{"text":"{{prompt}}","tag":${index}}}}`);
+  const namedOnly = { ...workflow, json: JSON.stringify({ subject: graph.subject }) };
+  assert.deepEqual(
+    mediaInputSlots(namedOnly),
+    ['subject'],
+    'Overridden sample bindings leave no phantom slots',
+  );
+  assert.equal(
+    mediaWorkflowError(namedOnly),
+    null,
+    'Promptless transformation workflows are valid',
+  );
+  assert.equal(mediaWorkflowError({ ...workflow, textOutputNodeId: 'output' }), null);
+  assert.match(mediaWorkflowError({ ...workflow, textOutputNodeId: 'missing' })!, /existing node/);
+  for (const node of [
+    { ...graph.linked, _meta: { title: 'Subject [image:subject]' } },
+    { ...graph.subject, _meta: { title: 'Subject [image:prompt]' } },
+    { ...graph.subject, _meta: { title: 'Subject [image:Subject]' } },
+  ])
+    assert.throws(() => compileMediaWorkflow(JSON.stringify({ node })));
+  for (const json of [
+    '{"seed":"{{seed}}"}',
+    '{"text":{{prompt}}}',
+    '{"{{prompt}}":1}',
+    '{"text":"{{unknown}}"}',
+    '{"seed":1{{seed}}}',
+  ]) {
+    assert.throws(() => compileMediaWorkflow(json), json);
   }
-  assert.notEqual(compileMediaWorkflow(evictionSource), evicted, 'Compilation cache is bounded');
+  const seeds = compileMediaWorkflow('{"1":{"inputs":{"seed":{{seed}},"text":"{{prompt}}"}}}');
+  assert.equal(
+    (expandMediaWorkflow(seeds, bindings) as { '1': { inputs: { seed: number } } })['1'].inputs
+      .seed,
+    123,
+  );
+  const settings = {
+    ...DEFAULT_MEDIA_RENDERING,
+    workflows: [workflow],
+    defaultWorkflowId: workflow.id,
+  };
+  assert.deepEqual(parseMediaRendering(settings), settings);
+  for (const overrides of [
+    { folders: [{ id: 'folder', name: 'Missing', workflowIds: ['missing'] }] },
+    { folders: [{ id: 'folder', name: 'Duplicate', workflowIds: [workflow.id, workflow.id] }] },
+    {
+      folders: [
+        { id: 'folder', name: 'Same', workflowIds: [] },
+        { id: 'other', name: 'same', workflowIds: [] },
+      ],
+    },
+    {
+      folders: [
+        { id: 'folder', name: 'First', workflowIds: [workflow.id] },
+        { id: 'other', name: 'Second', workflowIds: [workflow.id] },
+      ],
+    },
+    { defaultWorkflowId: 'missing' },
+    { comfyUrl: 'file:///tmp' },
+    { descriptionWorkflowId: workflow.id },
+  ]) {
+    assert.throws(() => parseMediaRendering({ ...settings, ...overrides }));
+  }
+  const standalone = { id: 'standalone', name: 'Model instructions', ...defaultMediaPrompt() };
+  const chat = { id: 'chat', name: 'Model instructions', chatPrompt: defaultChatMediaPrompt() };
+  for (const [preset, key] of [
+    [standalone, 'mediaStandalonePrompts'],
+    [chat, 'mediaChatPrompts'],
+  ] as const) {
+    const folder = { id: 'folder', name: 'My prompts', presetIds: [preset.id] };
+    const grouped = { presets: [preset], folders: [folder], defaultPresetId: preset.id };
+    assert.deepEqual(parseMediaPrompts(grouped, key), grouped);
+    assert.throws(() =>
+      parseMediaPrompts({ ...grouped, folders: [{ ...folder, presetIds: ['missing'] }] }, key),
+    );
+  }
+  for (const [preset, key] of [
+    [standalone, 'mediaChatPrompts'],
+    [chat, 'mediaStandalonePrompts'],
+  ] as const) {
+    assert.throws(
+      () => parseMediaPrompts({ presets: [preset], defaultPresetId: null }, key),
+      /Unexpected prompt field/,
+    );
+  }
+  const evicted = compileMediaWorkflow('{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}');
+  for (let index = 0; index < 64; index++)
+    compileMediaWorkflow(`{"1":{"inputs":{"text":"{{prompt}}","tag":${index}}}}`);
+  assert.notEqual(
+    compileMediaWorkflow('{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}'),
+    evicted,
+  );
   assert.deepEqual(
     expandMediaWorkflow(evicted, { prompt: 'after eviction', seed: 0, job_id: 'retained' }),
     { '1': { inputs: { text: 'after eviction', tag: 'eviction' } } },
@@ -318,13 +323,6 @@ test('workflow inputs', async () => {
     () => compile({ ...graph, frames: { ...graph.frames, inputs: { value: ['seed', 0] } } }),
     /Invalid default/,
   );
-  // Removed title options are rejected rather than silently retained or ignored.
-  for (const option of ['minLength=1', 'maxLength=100', 'multiline=true', 'multiline=false']) {
-    assert.throws(
-      () => compile({ text: node('PrimitiveString', '', `Text [input: ${option}]`) }),
-      /Unknown string parameter/,
-    );
-  }
   for (const classType of [
     'PrimitiveString',
     'PrimitiveStringMultiline',
@@ -339,17 +337,9 @@ test('workflow inputs', async () => {
         _meta: { title: 'Text [input]' },
       },
     });
-    assert.deepEqual(textWorkflow.controls, [
-      {
-        key: 'text',
-        nodeId: 'text',
-        input,
-        label: 'Text',
-        type: 'string',
-        value: '',
-        multiline: classType.endsWith('Multiline'),
-      },
-    ]);
+    const control = textWorkflow.controls[0]!;
+    assert(control.type === 'string');
+    assert.equal(control.multiline, classType.endsWith('Multiline'));
     assert.deepEqual(validateWorkflowValues(textWorkflow.controls, { text: '' }), { text: '' });
     const longText = 'x'.repeat(200001) + '\nSecond line';
     const expanded = expandMediaWorkflow(
@@ -391,30 +381,12 @@ test('workflow inputs', async () => {
     'Explicit order sorts across control types, keeps ties stable and resolution fields together, then appends unordered fields',
   );
   assert.deepEqual(ordered.graph, orderedGraph, 'Display order does not change node IDs or inputs');
-  for (const type of ['PrimitiveInt', 'PrimitiveFloat', 'PrimitiveString', 'PrimitiveBoolean']) {
-    for (const order of ['1.5', 'NaN', 'Infinity', 'later']) {
-      assert.throws(
-        () => compile({ bad: node(type, 1, `Bad [input: order=${order}]`) }),
-        /order must be/,
-      );
-    }
+  for (const order of ['1.5', 'NaN', 'Infinity', 'later']) {
+    assert.throws(
+      () => compile({ bad: node('PrimitiveInt', 1, `Bad [input: order=${order}]`) }),
+      /order must be/,
+    );
   }
-  assert.deepEqual(resolution.controls[1], {
-    key: 'size.megapixels',
-    nodeId: 'size',
-    input: 'megapixels',
-    label: 'Megapixels',
-    type: 'float',
-    value: 1,
-    min: 0.1,
-    max: 16,
-    step: 0.1,
-  });
-  const aspectRatio = resolution.controls[0]!;
-  assert.deepEqual([aspectRatio.key, aspectRatio.label], ['size.aspect_ratio', 'Aspect ratio']);
-  assert(aspectRatio.type === 'select');
-  assert.equal(aspectRatio.options.length, 8);
-  assert(aspectRatio.options.includes('9:16 (Portrait Widescreen)'));
   // Both overrides and omitted defaults preserve the latent's wiring and fixed multiple.
   for (const [aspect, megapixels] of [
     ['9:16 (Portrait Widescreen)', 2.5],

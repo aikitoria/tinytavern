@@ -1,5 +1,6 @@
+import SettingsSection from '../SettingsSection.tsx';
 import SettingLabel from '../../forms/SettingField.tsx';
-import { For, Show, createSignal } from 'solid-js';
+import { For, Show, createSignal, createUniqueId } from 'solid-js';
 import type { Endpoint, GenParams } from '@tinytavern/shared';
 import { api } from '../../../state/api.ts';
 import { endpointEditorSnapshot } from '../../../state/endpointSync.ts';
@@ -11,9 +12,9 @@ import FormField, { createFormFields } from '../../forms/FormFields.tsx';
 import Select from '../../ui/Select.tsx';
 
 export default function EndpointsTab() {
+  const modelId = createUniqueId();
   const [model, setModel] = createSignal('');
   const [keyCleared, setKeyCleared] = createSignal(false);
-  const [editingExisting, setEditingExisting] = createSignal(false);
   const form = createFormFields({
     name: '',
     baseUrl: '',
@@ -44,14 +45,13 @@ export default function EndpointsTab() {
     ...api.endpoints,
     items: () => state.endpoints,
     snapshot: endpointEditorSnapshot,
-    load: (endpoint) => {
-      setEditingExisting(endpoint != null);
-      setKeyCleared(false);
+    load: (endpoint, importing = false) => {
+      if (!importing) setKeyCleared(false);
       setModel(endpoint?.model ?? '');
       form.load({
         name: endpoint?.name ?? '',
         baseUrl: endpoint?.baseUrl ?? '',
-        apiKey: '',
+        apiKey: importing ? keyEl.value : '',
         prefillMode: endpoint?.prefillMode ?? 'none',
         systemPromptPrefix: endpoint?.systemPromptPrefix ?? '',
         systemPromptSuffix: endpoint?.systemPromptSuffix ?? '',
@@ -91,19 +91,8 @@ export default function EndpointsTab() {
         systemPromptSuffix,
         reasoningPrefillPrefix,
         // An empty field preserves the stored key unless explicitly cleared.
-        ...(!editingExisting() || apiKey !== '' || keyCleared() ? { apiKey } : {}),
+        ...(apiKey !== '' || keyCleared() ? { apiKey } : {}),
       };
-    },
-    create: async (data) => {
-      const endpoint = await api.endpoints.create(data);
-      setEditingExisting(true);
-      setKeyCleared(false);
-      return endpoint;
-    },
-    patch: async (id, data) => {
-      const endpoint = await api.endpoints.patch(id, data);
-      setKeyCleared(false);
-      return endpoint;
     },
     deletePrompt: 'Delete this endpoint?',
     initialId: () => state.settings.activeEndpointId,
@@ -135,8 +124,11 @@ export default function EndpointsTab() {
       newLabel="New endpoint"
       activeId={state.settings.activeEndpointId}
     >
-      <section class="settings-section">
-        <h3>Connection</h3>
+      <SettingsSection
+        title="Connection"
+        id="endpoint-connection"
+        fields={['name', 'baseUrl', 'model']}
+      >
         <FormField field={form.fields.name} label="Name" placeholder="Local llama.cpp" />
         <FormField
           field={form.fields.baseUrl}
@@ -154,10 +146,12 @@ export default function EndpointsTab() {
         >
           API key
         </SettingLabel>
-        <p class="hint">Optional. Stored server-side and never returned to the browser.</p>
-        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <input
             ref={keyEl.ref}
+            type="password"
+            autocomplete="new-password"
+            onInput={() => setKeyCleared(false)}
             placeholder={
               keyCleared()
                 ? 'Will be removed on save'
@@ -167,16 +161,17 @@ export default function EndpointsTab() {
             }
           />
         </div>
+        <p class="hint">Optional. Stored server-side and never returned to the browser.</p>
 
-        <SettingLabel changed={model() !== ''} onRevert={() => setModel('')}>
+        <SettingLabel for={modelId} changed={model() !== ''} onRevert={() => setModel('')}>
           Model
         </SettingLabel>
-        <p class="hint">Optional; leave blank to use the endpoint default.</p>
-        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <Show
             when={models().length > 0}
             fallback={
               <input
+                id={modelId}
                 value={model()}
                 onInput={(e) => setModel(e.currentTarget.value)}
                 placeholder="model id (blank uses endpoint default)"
@@ -184,9 +179,11 @@ export default function EndpointsTab() {
             }
           >
             <Select
+              id={modelId}
               value={model()}
               ariaLabel="Endpoint model"
-              searchPlaceholder="Search models…"
+              searchPlaceholder="Search or enter a model ID…"
+              allowCustom
               onChange={setModel}
               options={[
                 { value: '', label: '— endpoint default —' },
@@ -201,10 +198,14 @@ export default function EndpointsTab() {
             <button onClick={() => void fetchModels()}>Fetch models</button>
           </Show>
         </div>
-      </section>
+        <p class="hint">Optional; leave blank to use the endpoint default.</p>
+      </SettingsSection>
 
-      <section class="settings-section">
-        <h3>Global prompt additions</h3>
+      <SettingsSection
+        title="Global prompt additions"
+        id="endpoint-prompts"
+        fields={['systemPromptPrefix', 'systemPromptSuffix', 'reasoningPrefillPrefix']}
+      >
         <p class="hint">
           Apply to every request using this endpoint, including chats, media prompts, and background
           tasks. Text is joined exactly as entered; include any spaces or line breaks you need.
@@ -230,10 +231,13 @@ export default function EndpointsTab() {
           rows={4}
           hint="Added before the prompt template's reasoning prefill, or used on its own when that is empty. Requires prefill support to be enabled."
         />
-      </section>
+      </SettingsSection>
 
-      <section class="settings-section">
-        <h3>Advanced generation</h3>
+      <SettingsSection
+        title="Advanced generation"
+        id="endpoint-generation"
+        fields={['genParams', 'prefillMode']}
+      >
         <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
         <div
           class="grid gap-3 mt-2 field-group grid-cols-[repeat(auto-fit,_minmax(140px,_1fr))]"
@@ -280,7 +284,7 @@ export default function EndpointsTab() {
             { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
           ]}
         />
-      </section>
+      </SettingsSection>
     </EntityEditorPane>
   );
 }

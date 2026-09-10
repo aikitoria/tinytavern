@@ -34,7 +34,7 @@ test('media drafts', async () => {
     await import('../../server/src/media/images.ts');
   function job(body: Parameters<typeof createMediaJob>[0] = {}, source?: number) {
     return createMediaJob(
-      { requestKey: newRequestId(), operation: 'image', ...body },
+      { requestKey: newRequestId(), ...body },
       source === undefined ? undefined : requireMediaJob(source),
     );
   }
@@ -74,7 +74,7 @@ test('media drafts', async () => {
     mediaRendering: {
       ...getSettings().mediaRendering,
       workflows: [workflow],
-      defaults: { 'image:0': workflow.id },
+      defaultWorkflowId: workflow.id,
     },
   });
   conversationFixture({ id: 1, title: 'Draft test' });
@@ -365,6 +365,21 @@ test('media drafts', async () => {
         saved.outputs.find((asset) => asset.id === galleryAssets[1])!.url,
       );
   }
+  const resavedAsset = saved.outputs.find((asset) => asset.id === galleryAssets[1])!;
+  stmt('DELETE FROM gallery_items WHERE image = ?').run(resavedAsset.url);
+  deleteImageFiles([resavedAsset.url]);
+  assert.ok(onDisk(resavedAsset.url), 'The open draft retains a deleted saved variation');
+  saved = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
+    assetId: resavedAsset.id,
+    expectedDraftRevision: mediaDraft(saved.draft!.id).revision,
+  });
+  const resavedInput = job({ inputs: [{ slot: 'source', assetId: resavedAsset.id }] });
+  assert.equal(
+    resavedInput.assets[0]!.id,
+    resavedAsset.id,
+    'A re-saved gallery variation is available as a new reference',
+  );
+  deleteMediaJob(requireMediaJob(resavedInput.id));
   const cancelling = cancelMediaVariation(requireMediaJob(galleryPending.id));
   assert.equal(cancelling.state, 'cancelling');
   cleanupDiscardedMediaDraft(requireMediaJob(galleryPending.id));
@@ -403,8 +418,8 @@ test('media drafts', async () => {
   const editWorkflow = {
     ...workflow,
     id: 'edit',
-    operation: 'image-edit' as const,
-    referenceCount: 1 as const,
+    inputBindings: {},
+    textOutputNodeId: null,
     json: '{"output":{"inputs":{"text":"{{prompt}}","image":"{{reference1}}"}}}',
   };
   putSettings({
@@ -412,7 +427,6 @@ test('media drafts', async () => {
     mediaRendering: { ...getSettings().mediaRendering, workflows: [workflow, editWorkflow] },
   });
   const discarded = job({
-    operation: 'image-edit',
     workflowId: editWorkflow.id,
     prompt: 'Discard this',
     reviewBeforeSave: true,
@@ -424,10 +438,10 @@ test('media drafts', async () => {
   for (let index = 1; index < 10; index++) {
     const requestKey = newRequestId();
     const sourceId = queued.at(-1)!;
-    const next = job({ operation: 'image-edit', requestKey }, sourceId);
+    const next = job({ requestKey }, sourceId);
     assert.equal(next.draft!.id, discarded.draft!.id);
     assert.equal(
-      job({ operation: 'image-edit', requestKey }, sourceId).id,
+      job({ requestKey }, sourceId).id,
       next.id,
       'A repeated queue request creates only one variation',
     );

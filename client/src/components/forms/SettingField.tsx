@@ -99,7 +99,7 @@ export function createDefaultField(defaultValue: () => string | boolean): Defaul
     id: () => {
       revision();
       const target = control();
-      return target instanceof HTMLElement ? target.id : undefined;
+      return target?.id;
     },
     element: control,
   };

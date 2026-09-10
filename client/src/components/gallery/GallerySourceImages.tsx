@@ -1,10 +1,8 @@
 import { For, Show, createResource } from 'solid-js';
-import type { MediaAsset } from '@tinytavern/shared';
+import { mediaInputLabel, type MediaAsset } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import { galleryRevision } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
-
-import { MEDIA_INPUT_LABELS as INPUT_LABELS } from '../../media/jobCards.ts';
 
 export default function GallerySourceImages(props: {
   asset: MediaAsset;
@@ -51,7 +49,7 @@ export default function GallerySourceImages(props: {
                     <span class="h-20 border border-dashed border-line grid place-items-center w-full rounded-sm">
                       Deleted image
                     </span>
-                    <span>{INPUT_LABELS[input.slot]}</span>
+                    <span>{mediaInputLabel(input.slot)}</span>
                   </div>
                 }
               >
@@ -59,16 +57,16 @@ export default function GallerySourceImages(props: {
                   <button
                     type="button"
                     class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left cursor-zoom-in [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm"
-                    aria-label={`View ${INPUT_LABELS[input.slot].toLowerCase()}`}
+                    aria-label={`View ${mediaInputLabel(input.slot).toLowerCase()}`}
                     onClick={() => props.onView(asset().url)}
                   >
                     <img
                       src={asset().thumbnail ?? asset().url}
-                      alt={INPUT_LABELS[input.slot]}
+                      alt={mediaInputLabel(input.slot)}
                       loading="lazy"
                       decoding="async"
                     />
-                    <span>{INPUT_LABELS[input.slot]}</span>
+                    <span>{mediaInputLabel(input.slot)}</span>
                   </button>
                 )}
               </Show>

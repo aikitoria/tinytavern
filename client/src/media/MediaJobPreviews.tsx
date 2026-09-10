@@ -6,7 +6,7 @@ import VideoPreview from './VideoPreview.tsx';
 import { MEDIA_JOB_STATUS, type MediaJobResult } from './jobCards.ts';
 
 const tileClass =
-  'relative grid place-items-center shrink-0 w-26 h-26 phone:w-18 phone:h-18 p-0 overflow-hidden rounded-sm bg-chrome border-clear text-muted [&>img]:object-contain [&>img]:size-full [&>canvas.media-result]:object-contain [&>canvas.media-result]:size-full [&>canvas.media-result]:max-h-full';
+  'relative grid place-items-center shrink-0 w-26 phone:w-18 p-0 overflow-hidden rounded-sm bg-chrome border-clear text-muted [&:not(:has(img,canvas))]:aspect-square [&>img]:block [&>img]:w-full [&>img]:h-auto [&>canvas.media-result]:w-full [&>canvas.media-result]:h-auto [&>canvas.media-result]:max-h-none';
 const captionClass =
   'media-job-preview-label absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 py-0.5 px-1 text-white text-micro';
 
@@ -37,7 +37,7 @@ function PendingPreview(props: {
             when={props.active && image()}
             fallback={
               <FontAwesomeIcon
-                icon={props.job.operation.startsWith('video') ? faVideo : faImage}
+                icon={Boolean(props.job.progress?.videoPreview) ? faVideo : faImage}
                 size={24}
               />
             }
@@ -81,7 +81,7 @@ export default function MediaJobPreviews(props: {
   return (
     <div
       ref={strip}
-      class="flex gap-2 min-w-0 overflow-x-auto overflow-y-hidden [&.media-job-previews-multiple>button]:w-18"
+      class="flex items-start gap-2 min-w-0 overflow-x-auto overflow-y-hidden [&.media-job-previews-multiple>button]:w-18"
       classList={{ 'media-job-previews-multiple': count() > 1 }}
       aria-label="Finished variations and live previews"
     >

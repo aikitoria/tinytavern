@@ -1,3 +1,4 @@
+import SettingsSection from '../SettingsSection.tsx';
 import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
 import { api } from '../../../state/api.ts';
 import { selectSettingsEntity } from '../../../state/settingsSelection.ts';
@@ -36,14 +37,14 @@ export default function PresetsTab() {
       newLabel="New preset"
       activeId={state.settings.defaultPresetId}
     >
-      <section class="settings-section">
-        <h3>Basics</h3>
-        <SettingLabel field={readOnly() ? undefined : nameEl}>Name</SettingLabel>
+      <SettingsSection title="Basics" id="preset-basics" fields={['name']}>
+        <SettingLabel for={nameEl.id()} field={readOnly() ? undefined : nameEl}>
+          Name
+        </SettingLabel>
         <input readOnly={readOnly()} ref={nameEl.ref} placeholder="Creative writer" />
-      </section>
-      <section class="settings-section">
-        <h3>System prompt</h3>
-        <SettingLabel field={readOnly() ? undefined : contentEl}>
+      </SettingsSection>
+      <SettingsSection title="System prompt" id="system-prompt" fields={['content']}>
+        <SettingLabel for={contentEl.id()} field={readOnly() ? undefined : contentEl}>
           System instructions <MacroHelp />
         </SettingLabel>
         <MacroTextarea
@@ -51,7 +52,7 @@ export default function PresetsTab() {
           ref={contentEl.ref}
           placeholder="You are {{char}}, …"
         />
-      </section>
+      </SettingsSection>
     </EntityEditorPane>
   );
 }

@@ -1,5 +1,6 @@
 import type {
   MediaAsset,
+  MediaAvatarContext,
   MediaDraft,
   MediaJob,
   MediaJobInputSnapshot,
@@ -7,7 +8,6 @@ import type {
   MediaVideoPreview,
   MediaWorkflow,
   MediaWorkflowValues,
-  MediaOperation,
   Endpoint,
   StandalonePromptTemplate,
 } from '@tinytavern/shared';
@@ -19,6 +19,7 @@ import type { ChatMessage } from '../generation/prompt.ts';
 import { captureMediaCharacters } from './mediaCharacters.ts';
 
 export interface MediaJobConfiguration {
+  avatarContext?: MediaAvatarContext | null;
   characterIds?: number[];
   sourceCharacterIds?: number[];
   workflowValues?: MediaWorkflowValues;
@@ -46,12 +47,12 @@ export interface MediaJobRow {
   draft_id: number | null;
   recipe_id: number | null;
   revision: number;
-  operation: MediaOperation;
   state: MediaJobState;
   workflow_id: string | null;
   preset_id: string | null;
   instruction: string;
   prompt: string;
+  result_text: string | null;
   inputs_json: string;
   configuration_json: string | null;
   context_json: string | null;
@@ -206,18 +207,20 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     : null;
 
   return publicMediaJob({
+    avatarContext: configuration?.avatarContext ?? null,
     characterIds: configuration?.characterIds ?? captureMediaCharacters(row, configuration ?? {}),
     workflowValues: configuration?.workflowValues ?? {},
     id: row.id,
     draft: row.draft_id === null ? null : mediaDraft(row.draft_id),
     revision: row.revision,
-    operation: row.operation,
     workflowId: row.workflow_id,
     workflowSnapshot: configuration?.workflow ?? null,
     presetId: row.preset_id,
     state: row.state,
     instruction: row.instruction,
     prompt: live?.prompt ?? row.prompt,
+    textResult: row.result_text,
+    temporary: configuration?.temporary === true,
     reasoning: live?.reasoning,
     inputs,
     assets: inputAssets,
@@ -254,12 +257,12 @@ export function publishMediaJob(id: number): void {
 /** Internal column allowlist avoids accidental updates of immutable identities. */
 const PATCH_COLUMNS = [
   'state',
-  'operation',
   'recipe_id',
   'workflow_id',
   'preset_id',
   'instruction',
   'prompt',
+  'result_text',
   'inputs_json',
   'configuration_json',
   'context_json',

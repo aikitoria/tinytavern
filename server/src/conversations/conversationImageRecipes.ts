@@ -3,6 +3,7 @@ import {
   nextCollectionId,
   namedItem,
   mediaInputSlots,
+  normalizeImportedWorkflow,
   compileMediaWorkflow,
   validateWorkflowValues,
   type MediaWorkflowValues,
@@ -15,11 +16,16 @@ import { HttpError } from '../http/router.ts';
 import { parseMediaWorkflow } from '../media/mediaSettings.ts';
 import { requireString } from '../http/validation.ts';
 import { getSettings } from '../settings/settingsStore.ts';
-import type { MediaJobConfiguration } from '../media/mediaJobStore.ts';
-import type { MediaRecipeInput } from '../media/mediaRecipes.ts';
+import {
+  mediaRecipeSeed,
+  saveMediaRecipe,
+  type MediaRecipe,
+  type MediaRecipeInput,
+} from '../media/mediaRecipes.ts';
 
 export interface TransferImageRecipe {
   workflowValues?: MediaWorkflowValues;
+  seed?: number | null;
   id: string;
   prompt: string;
   instruction: string;
@@ -49,11 +55,14 @@ export function exportImageRecipes(
       if (!row) {
         throw new HttpError(409, 'Cannot export a missing image recipe');
       }
-      const configuration = JSON.parse(String(row.configuration_json)) as MediaJobConfiguration;
+      const configuration = JSON.parse(
+        String(row.configuration_json),
+      ) as MediaRecipe['configuration'];
       const workflow = configuration.workflow;
       const inputs = JSON.parse(String(row.inputs_json)) as MediaRecipeInput[];
       recipe = {
         workflowValues: configuration.workflowValues,
+        seed: mediaRecipeSeed({ id: recipeId, configuration }),
         id: `recipe-${recipes.size + 1}`,
         prompt: String(row.prompt),
         instruction: String(row.instruction),
@@ -61,13 +70,13 @@ export function exportImageRecipes(
         workflow: {
           id: workflow.id,
           name: workflow.name,
-          operation: workflow.operation,
-          referenceCount: workflow.referenceCount,
           json: workflow.json,
-          galleryPromptPresetId: null,
+          standalonePromptPresetId: null,
+          inputBindings: {},
+          textOutputNodeId: workflow.textOutputNodeId,
           chatPromptPresetId: null,
         },
-        inputs: mediaInputSlots(workflow.operation, workflow.referenceCount).map((slot) => {
+        inputs: mediaInputSlots(workflow).map((slot) => {
           const input = inputs.find((candidate) => candidate.slot === slot);
           if (!input) {
             throw new HttpError(409, 'Cannot export an incomplete image recipe');
@@ -131,18 +140,15 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
       throw new HttpError(400, 'Image recipe IDs must be nonempty and unique');
     }
     const workflow = parseMediaWorkflow({
-      ...object(source.workflow),
-      galleryPromptPresetId: null,
+      ...normalizeImportedWorkflow(object(source.workflow)),
+      standalonePromptPresetId: null,
+      inputBindings: {},
       chatPromptPresetId: null,
     });
-    if (
-      workflow.operation === 'image-describe' ||
-      workflow.operation.startsWith('video') ||
-      !workflow.json.trim()
-    ) {
+    if (workflow.textOutputNodeId !== null || !workflow.json.trim()) {
       throw new HttpError(400, 'Image recipes require an image workflow');
     }
-    const slots = mediaInputSlots(workflow.operation, workflow.referenceCount);
+    const slots = mediaInputSlots(workflow);
     if (!Array.isArray(source.inputs) || source.inputs.length !== slots.length) {
       throw new HttpError(400, 'Image recipe references do not match the workflow');
     }
@@ -169,6 +175,10 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
     }
+    const seed = source.seed ?? null;
+    if (seed !== null && (typeof seed !== 'number' || !Number.isSafeInteger(seed) || seed < 0)) {
+      throw new HttpError(400, 'Image recipe seed must be a non-negative safe integer or null');
+    }
     recipes.set(id, {
       id,
       prompt: text(source.prompt, 'prompt'),
@@ -176,6 +186,7 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
       workflow,
       inputs,
       workflowValues,
+      seed,
     });
   }
   return recipes;
@@ -268,38 +279,23 @@ export function importRecipeImages(
           ? ''
           : (recipes.get(assets.get(input.assetId)?.recipeId ?? '')?.prompt ?? '')),
     }));
-    const id = Number(
-      stmt(`INSERT INTO media_recipes(prompt, instruction, configuration_json, inputs_json, created_at)
-      VALUES (?, ?, ?, ?, ?)`).run(
-        recipe.prompt,
-        recipe.instruction,
-        JSON.stringify({
-          comfyUrl: rendering.comfyUrl,
-          timeoutSeconds: rendering.jobTimeoutSeconds,
-          workflow: {
-            ...recipe.workflow,
-            id:
-              namedItem(
-                rendering.workflows.filter(
-                  (workflow) =>
-                    workflow.operation === recipe.workflow.operation &&
-                    workflow.referenceCount === recipe.workflow.referenceCount,
-                ),
-                recipe.workflow.name,
-              )?.id ?? nextCollectionId(rendering.workflows),
-          },
-          workflowValues: recipe.workflowValues,
-        }),
-        JSON.stringify(inputs),
-        Date.now(),
-      ).lastInsertRowid,
+    const id = saveMediaRecipe(
+      {
+        comfyUrl: rendering.comfyUrl,
+        timeoutSeconds: rendering.jobTimeoutSeconds,
+        workflow: {
+          ...recipe.workflow,
+          id:
+            namedItem(rendering.workflows, recipe.workflow.name)?.id ??
+            nextCollectionId(rendering.workflows),
+        },
+        workflowValues: recipe.workflowValues,
+      },
+      inputs,
+      recipe.prompt,
+      { instruction: recipe.instruction, seed: recipe.seed },
     );
     recipeIds.set(recipe.id, id);
-    for (const input of inputs) {
-      if (input.assetId === null) continue;
-      stmt(`INSERT INTO media_owners(asset_id, owner_type, owner_id, slot)
-        VALUES (?, 'recipe', ?, ?)`).run(input.assetId, id, input.slot);
-    }
   }
   for (const [id, asset] of assets) {
     if (asset.recipeId !== null) {

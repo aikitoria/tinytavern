@@ -14,15 +14,6 @@ export function restoreMediaInputs(
 ): RestoredMediaInputs | undefined {
   const media = page.media;
   if (!media || media.jobId) return;
-  const slot =
-    media.operation === 'video-first'
-      ? 'first_frame'
-      : media.operation === 'video-references' || media.operation === 'image-edit'
-        ? 'reference1'
-        : media.operation === 'image-describe'
-          ? 'source'
-          : undefined;
-  if (!slot) return;
   for (let index = (page.stack?.length ?? 0) - 1; index >= 0; index--) {
     const ancestor = page.stack![index]!;
     let asset: MediaAsset | undefined;
@@ -43,6 +34,6 @@ export function restoreMediaInputs(
         asset ??= job.outputs.at(-1);
       }
     }
-    if (asset?.kind === 'image') return { inputs: [{ slot, assetId: asset.id }], assets: [asset] };
+    if (asset?.kind === 'image') return { inputs: [], assets: [asset] };
   }
 }

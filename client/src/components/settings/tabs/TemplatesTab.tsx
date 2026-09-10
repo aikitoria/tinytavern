@@ -1,3 +1,4 @@
+import SettingsSection from '../SettingsSection.tsx';
 import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
 import { api } from '../../../state/api.ts';
 import { selectSettingsEntity } from '../../../state/settingsSelection.ts';
@@ -39,11 +40,12 @@ export default function TemplatesTab() {
       newLabel="New template"
       activeId={state.settings.defaultTemplateId}
     >
-      <section class="settings-section">
-        <h3>Basics</h3>
-        <SettingLabel field={readOnly() ? undefined : nameEl}>Name</SettingLabel>
+      <SettingsSection title="Basics" id="template-basics" fields={['name']}>
+        <SettingLabel for={nameEl.id()} field={readOnly() ? undefined : nameEl}>
+          Name
+        </SettingLabel>
         <input readOnly={readOnly()} ref={nameEl.ref} placeholder="Roleplay" />
-      </section>
+      </SettingsSection>
       <TemplateFields readOnly={readOnly()} ref={fields} />
     </EntityEditorPane>
   );

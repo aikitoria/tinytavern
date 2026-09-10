@@ -18,6 +18,8 @@ export function createSettingsSubmission<D, S extends { revision: number }>(opti
   accepted: (draft: D, settings: S) => void;
   discard: () => void;
   onError: (message: string) => void;
+  /** Adopt a newer revision only after the editor merges it without conflicts. */
+  rebase?: () => boolean;
 }) {
   const [saving, setSaving] = createSignal(false);
   let revision = options.revision();
@@ -28,9 +30,13 @@ export function createSettingsSubmission<D, S extends { revision: number }>(opti
     options.onError('');
   };
   createEffect(() => {
-    void options.revision();
+    const latest = options.revision();
     // An invalidation can overtake the save response. Recheck clean drafts when that save ends.
-    if (!saving() && !untrack(options.isDirty)) untrack(discard);
+    if (!saving())
+      untrack(() => {
+        if (!options.isDirty()) discard();
+        else if (latest !== revision && options.rebase?.()) revision = latest;
+      });
   });
   return {
     saving,
@@ -42,6 +48,8 @@ export function createSettingsSubmission<D, S extends { revision: number }>(opti
       setSaving(true);
       options.onError('');
       try {
+        const latest = options.revision();
+        if (latest !== revision && options.rebase?.()) revision = latest;
         const draft = options.snapshot();
         const settings = await options.submit(draft, revision);
         revision = settings.revision;

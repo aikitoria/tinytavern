@@ -1,9 +1,8 @@
 import { dialogStack } from './dialogStack.ts';
-import { MEDIA_OPERATIONS, type MediaOperation } from '@tinytavern/shared';
 import type { ModalKind } from './store.ts';
 
 export interface MediaPageLocation {
-  operation: MediaOperation;
+  workflowId: string | null;
   jobId: number | null;
   assetId?: number;
   contextConversationId: number | null;
@@ -18,7 +17,7 @@ export interface PageLocation {
   character?: string;
   sort?: string;
   settingsTab?: string;
-  settingsEntity?: number | 'new' | 'default';
+  settingsEntity?: number | string;
   settingsDetail?: boolean;
   media?: MediaPageLocation;
   stack?: PageLocation[];
@@ -28,6 +27,22 @@ const positiveId = (value: string | null | undefined) => {
   const id = Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 };
+
+const SETTINGS_TAB_ALIASES: Readonly<Record<string, string>> = {
+  presets: 'system-prompts',
+  templates: 'chat-templates',
+  endpoints: 'model-connections',
+  'media-rendering': 'generation-settings',
+  'chat-prompt-revision': 'generation-settings',
+  'prompt-revision': 'generation-settings',
+  'avatar-prompts': 'generation-settings',
+  'media-chat-prompts': 'chat-media-prompts',
+  'media-standalone-prompts': 'standalone-media-prompts',
+  'media-favorites': 'generation-settings',
+  'toolbar-favorites': 'generation-settings',
+};
+const settingsTabName = (name = 'general') =>
+  Object.hasOwn(SETTINGS_TAB_ALIASES, name) ? SETTINGS_TAB_ALIASES[name]! : name;
 
 function parsePane(hash: string): PageLocation {
   const [path, query] = hash.replace(/^#/, '').split('?');
@@ -50,9 +65,13 @@ function parsePane(hash: string): PageLocation {
     result.sort = params.get('sort') ?? undefined;
   } else if (page === 'settings') {
     result.modal = 'settings';
-    result.settingsTab = detail || 'general';
+    result.settingsTab = settingsTabName(detail || 'general');
     result.settingsEntity =
-      entity === 'new' || entity === 'default' ? entity : (positiveId(entity) ?? undefined);
+      entity === 'new' ||
+      entity === 'default' ||
+      ['workflows', 'chat-media-prompts', 'standalone-media-prompts'].includes(result.settingsTab)
+        ? entity
+        : (positiveId(entity) ?? undefined);
     result.settingsDetail = params.get('detail') === '1';
   } else if (page === 'conversation') {
     result.modal = 'conversation';
@@ -62,37 +81,20 @@ function parsePane(hash: string): PageLocation {
     result.modal = 'media-jobs';
   } else if (page === 'media' && detail === 'job' && positiveId(entity)) {
     result.modal = 'media-tools';
-    // The operation and context are resolved from the saved job, never from its URL.
+    // The workflow and context are resolved from the saved job, never from its URL.
     result.media = {
-      operation: 'image',
+      workflowId: null,
       jobId: positiveId(entity),
       assetId: positiveId(params.get('asset')) ?? undefined,
       contextConversationId: null,
     };
   } else if (page === 'media') {
-    const namedOperation: MediaOperation | undefined =
-      detail === 'create-video'
-        ? params.get('mode') === 'first-frame'
-          ? 'video-first'
-          : params.get('mode') === 'references'
-            ? 'video-references'
-            : 'video'
-        : detail === 'create-image'
-          ? 'image'
-          : detail === 'edit-image'
-            ? 'image-edit'
-            : detail === 'describe-image'
-              ? 'image-describe'
-              : undefined;
-    const operation = MEDIA_OPERATIONS.find((item) => item.id === (namedOperation ?? detail));
-    if (operation) {
-      if (params.get('jobs') === '1') {
-        // Older tool URLs embedded the Jobs list in an otherwise unused editor.
-        result.modal = 'media-jobs';
-      } else {
+    if (detail) {
+      if (params.get('jobs') === '1') result.modal = 'media-jobs';
+      else {
         result.modal = 'media-tools';
         result.media = {
-          operation: operation.id,
+          workflowId: detail === 'generate' ? params.get('workflow') : null,
           jobId: positiveId(entity),
           contextConversationId: positiveId(params.get('context')),
         };
@@ -112,7 +114,7 @@ function formatPane(page: PageLocation): string {
     if (page.character && page.character !== 'all') params.set('character', page.character);
     if (page.sort) params.set('sort', page.sort);
   } else if (page.modal === 'settings') {
-    parts.push('settings', page.settingsTab ?? 'general');
+    parts.push('settings', settingsTabName(page.settingsTab));
     if (page.settingsEntity !== undefined) parts.push(String(page.settingsEntity));
     if (page.settingsDetail) params.set('detail', '1');
   } else if (page.modal === 'media-jobs') {
@@ -122,19 +124,8 @@ function formatPane(page: PageLocation): string {
       parts.push('media', 'job', String(page.media.jobId));
       if (page.media.assetId) params.set('asset', String(page.media.assetId));
     } else {
-      const operation = page.media.operation;
-      parts.push(
-        'media',
-        operation.startsWith('video')
-          ? 'create-video'
-          : operation === 'image-edit'
-            ? 'edit-image'
-            : operation === 'image-describe'
-              ? 'describe-image'
-              : 'create-image',
-      );
-      if (operation === 'video-first') params.set('mode', 'first-frame');
-      if (operation === 'video-references') params.set('mode', 'references');
+      parts.push('media', 'generate');
+      if (page.media.workflowId) params.set('workflow', page.media.workflowId);
     }
     if (!page.media.jobId && page.media.contextConversationId)
       params.set('context', String(page.media.contextConversationId));
@@ -187,16 +178,21 @@ export function parsePageLocation(hash: string): PageLocation {
         pages.unshift({ chatId: first.chatId, viewMode: first.viewMode, modal: null });
     }
   }
+  // Settings has one panel; old nested links select the last requested settings editor.
   // Revisiting Jobs or the same saved job unwinds to the original pane.
   const unique: PageLocation[] = [];
   for (const pane of pages) {
     const jobId = pane.media?.jobId;
     const existing = unique.findIndex((item) =>
-      pane.modal === 'media-jobs'
-        ? item.modal === 'media-jobs'
-        : jobId != null && item.media?.jobId === jobId,
+      pane.modal === 'settings'
+        ? item.modal === 'settings'
+        : pane.modal === 'media-jobs'
+          ? item.modal === 'media-jobs'
+          : jobId != null && item.media?.jobId === jobId,
     );
-    if (existing >= 0) unique.splice(existing + 1);
+    if (existing >= 0 && pane.modal === 'settings')
+      unique.splice(existing, unique.length - existing, pane);
+    else if (existing >= 0) unique.splice(existing + 1);
     else unique.push(pane);
   }
   const top = unique.at(-1)!;
@@ -327,15 +323,14 @@ export function installPageNavigation(apply: (page: PageLocation) => void): void
   history.replaceState({ ...history.state, tinytavernPageIndex: historyIndex }, '');
   historyPages.set(historyIndex, location.hash);
   window.addEventListener('popstate', (event) => {
-    const targetIndex = event.state?.tinytavernPageIndex;
+    let targetIndex = event.state?.tinytavernPageIndex;
     if (typeof targetIndex !== 'number') {
-      // A hash entered outside the app starts a new tracked navigation sequence.
-      restoreBeforeGuard = undefined;
-      approvedHistoryIndex = undefined;
-      historyIndex = 0;
-      historyPages.clear();
-      apply(readPageLocation());
-      return;
+      // Native hash navigation creates an entry without our state. Track it before
+      // restoring the origin so it follows the same Save / Discard / Cancel path.
+      targetIndex = historyIndex + 1;
+      history.replaceState({ ...history.state, tinytavernPageIndex: targetIndex }, '');
+      for (const index of historyPages.keys()) if (index > historyIndex) historyPages.delete(index);
+      historyPages.set(targetIndex, location.hash);
     }
     if (restoreBeforeGuard) {
       if (targetIndex !== historyIndex) {

@@ -404,11 +404,15 @@
   margin-top: var(--space-2);
 }
 
-.settings-section > :is(h3, summary) {
+.settings-section-heading {
+  @apply flex items-center justify-between gap-2;
+}
+
+.settings-section-heading > h3 {
   @apply m-0 text-foreground text-base font-semibold;
 }
 
-.settings-section > h3 + :is(.setting-label, label) {
+.settings-section-heading + :is(.setting-label, label) {
   margin-top: 0;
 }
 

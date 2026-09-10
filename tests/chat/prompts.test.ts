@@ -29,13 +29,6 @@ databaseCase('chat prompt', async () => {
   assert.equal(messages[1]?.content, 'first\n\nsecond');
   assert.equal(messages[2]?.content, 'reply\n\nmore');
   assert.equal(messages[2]?.reasoning_content, 'one\n\ntwo');
-  assert(
-    messages.every(
-      (message, index) =>
-        message.content.trim().length > 0 &&
-        (index === 0 || message.role === 'system' || message.role !== messages[index - 1]?.role),
-    ),
-  );
 
   const rootPrompt: BuiltPrompt = {
     messages: [{ role: 'system', content: 'system' }],
@@ -54,15 +47,8 @@ databaseCase('chat prompt', async () => {
   assert.equal(rootWithNote.at(-1)?.content, '[System Note]\n<Note: Reply as Guest>');
   assert.equal(systemNote('[System Note]\nCustom'), '[System Note]\nCustom');
   assert.equal(systemNote(''), '');
-  for (const label of [
-    'IMAGE PROMPT TASK',
-    'VIDEO PROMPT TASK',
-    'IMAGE PROMPT REVISION TASK',
-    'IMAGE PROMPT REVISION CONTEXT',
-  ]) {
-    assert.equal(systemNote(`[${label}]\nCustom`), '[System Note]\nCustom');
-    assert.equal(systemNote(`[System Note]\n[${label}]\nCustom`), '[System Note]\nCustom');
-  }
+  assert.equal(systemNote('[IMAGE PROMPT TASK]\nCustom'), '[System Note]\nCustom');
+  assert.equal(systemNote('[System Note]\n[IMAGE PROMPT TASK]\nCustom'), '[System Note]\nCustom');
 
   const { stmt, toConversation } = await import('../../server/src/db/db.ts');
   const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');

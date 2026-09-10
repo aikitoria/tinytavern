@@ -1,5 +1,6 @@
+import { entityOptions } from '../../state/entityReferences.ts';
 import MediaCharacterPicker from '../../media/MediaCharacterPicker.tsx';
-import { For, Show, createEffect, createSignal, on, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import {
   faArrowUpRightFromSquare,
   faCopy,
@@ -11,11 +12,7 @@ import {
   faWandMagicSparkles,
 } from '@fortawesome/free-solid-svg-icons';
 import { faTrashCan } from '@fortawesome/free-regular-svg-icons';
-import {
-  mediaWorkflowKey,
-  type GalleryItem,
-  type ImageDescriptionProgress,
-} from '@tinytavern/shared';
+import { type GalleryItem, type ImageDescriptionProgress } from '@tinytavern/shared';
 import { applyGalleryItem, state, toast } from '../../state/store.ts';
 import { api } from '../../state/api.ts';
 import { download, errorMessage } from '../../util.ts';
@@ -31,6 +28,8 @@ import VideoFullscreenButton from '../../media/VideoFullscreenButton.tsx';
 import MediaActions from '../../media/MediaActions.tsx';
 import MediaAssetResultDetails from '../../media/MediaAssetResultDetails.tsx';
 import { openMediaRerun } from '../../media/navigation.ts';
+import type { SettingsSectionActions } from '../../state/settingsSubmission.ts';
+import { createGalleryDetailEditor } from './galleryDetailEditor.ts';
 
 export default function GalleryDetail(props: {
   item: GalleryItem;
@@ -39,6 +38,7 @@ export default function GalleryDetail(props: {
   showDetails: boolean;
   onDelete: (item: GalleryItem) => Promise<void>;
   onOpenSource: (id: number) => void;
+  register: (actions: SettingsSectionActions) => () => void;
 }) {
   let videoPlayer: HTMLVideoElement | undefined;
   const [zoomed, setZoomed] = createSignal(false);
@@ -52,28 +52,42 @@ export default function GalleryDetail(props: {
       : naturalRatio();
   const [deleting, setDeleting] = createSignal(false);
   const itemId = props.item.id;
-  const [prompt, setPrompt] = createSignal(props.item.prompt);
-  const [savedPrompt, setSavedPrompt] = createSignal(props.item.prompt);
-  const itemCharacterIds = () =>
-    props.item.characters.map((character) => character.id).sort((a, b) => a - b);
-  const [characterIds, setCharacterIds] = createSignal(itemCharacterIds());
-  const [savedCharacterIds, setSavedCharacterIds] = createSignal(itemCharacterIds());
-  const dirty = () =>
-    prompt() !== savedPrompt() ||
-    JSON.stringify(characterIds()) !== JSON.stringify(savedCharacterIds());
-  const [savingDetails, setSavingDetails] = createSignal(false);
   const [error, setError] = createSignal('');
   const [generatingPrompt, setGeneratingPrompt] = createSignal(false);
+  const detailsValue = (item: GalleryItem) => ({
+    prompt: item.prompt,
+    characterIds: item.characters.map((character) => character.id).sort((a, b) => a - b),
+  });
+  const editor = createGalleryDetailEditor({
+    value: () => detailsValue(props.item),
+    generating: generatingPrompt,
+    submit: async (value, expected) => {
+      const item = await api.updateGalleryItem(itemId, value, expected);
+      applyGalleryItem(item);
+      return detailsValue(item);
+    },
+    onError: (message) => {
+      setError(message);
+      if (message) toast(message);
+    },
+  });
+  const {
+    prompt,
+    setPrompt,
+    characterIds,
+    setCharacterIds,
+    dirty,
+    saving: savingDetails,
+    save: saveDetails,
+  } = editor;
   const [descriptionProgress, setDescriptionProgress] = createSignal<ImageDescriptionProgress>();
   const [descriptionWorkflowId, setDescriptionWorkflowId] = createSignal<string>();
   const descriptionWorkflows = () =>
     state.settings.mediaRendering.workflows.filter(
-      (workflow) => workflow.operation === 'image-describe' && workflow.json.trim(),
+      (workflow) => workflow.textOutputNodeId !== null && workflow.json.trim(),
     );
   const selectedDescriptionWorkflow = () => {
-    const selected =
-      descriptionWorkflowId() ??
-      state.settings.mediaRendering.defaults[mediaWorkflowKey('image-describe', 0)];
+    const selected = descriptionWorkflowId() ?? state.settings.mediaRendering.descriptionWorkflowId;
     return (
       descriptionWorkflows().find((workflow) => workflow.id === selected)?.id ??
       descriptionWorkflows()[0]?.id
@@ -105,51 +119,22 @@ export default function GalleryDetail(props: {
     }
   };
   onCleanup(() => descriptionAbort?.abort());
-  let pendingSave: Promise<boolean> | undefined;
-  createEffect(
-    on(
-      () => [props.item.prompt, itemCharacterIds()] as const,
-      ([value, association]) => {
-        if (!dirty() && !savingDetails() && !generatingPrompt()) {
-          setPrompt(value);
-          setSavedPrompt(value);
-          setCharacterIds(association);
-          setSavedCharacterIds(association);
-        }
-      },
-    ),
-  );
-  const saveDetails = (): Promise<boolean> => {
-    if (pendingSave) return pendingSave;
-    if (props.readOnly || !dirty()) return Promise.resolve(true);
-    const value = { prompt: prompt(), characterIds: characterIds() };
-    setSavingDetails(true);
-    setError('');
-    pendingSave = api
-      .updateGalleryItem(itemId, value, {
-        prompt: savedPrompt(),
-        characterIds: savedCharacterIds(),
-      })
-      .then((item) => {
-        setSavedPrompt(item.prompt);
-        setSavedCharacterIds(
-          item.characters.map((character) => character.id).sort((a, b) => a - b),
-        );
-        applyGalleryItem(item);
-        return true;
-      })
-      .catch((err: unknown) => {
-        const message = errorMessage(err);
-        setError(message);
-        toast(message);
-        return false;
-      })
-      .finally(() => {
-        pendingSave = undefined;
-        setSavingDetails(false);
-      });
-    return pendingSave;
+  const discardDetails = () => {
+    descriptionAbort?.abort();
+    editor.discard();
   };
+  if (!props.readOnly)
+    onCleanup(
+      props.register({
+        isDirty: dirty,
+        saving: savingDetails,
+        save: () => {
+          descriptionAbort?.abort();
+          return saveDetails();
+        },
+        discard: discardDetails,
+      }),
+    );
   const video = () => (props.item.media?.kind === 'video' ? props.item.media : undefined);
   createEffect(() => {
     void props.item.image;
@@ -375,10 +360,7 @@ export default function GalleryDetail(props: {
                 ariaLabel="Image description workflow"
                 value={selectedDescriptionWorkflow() ?? ''}
                 disabled={savingDetails() || generatingPrompt()}
-                options={descriptionWorkflows().map((workflow) => ({
-                  value: workflow.id,
-                  label: workflow.name,
-                }))}
+                options={entityOptions('workflows', descriptionWorkflows())}
                 onChange={setDescriptionWorkflowId}
               />
             </Show>
@@ -407,7 +389,7 @@ export default function GalleryDetail(props: {
               )}
             </Show>
             <Show when={dirty() || savingDetails() || !video()}>
-              <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
+              <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                 <Show when={dirty() || savingDetails()}>
                   <button
                     class="primary-btn"
@@ -418,13 +400,7 @@ export default function GalleryDetail(props: {
                   </button>
                   <button
                     disabled={savingDetails() || generatingPrompt() || !dirty()}
-                    onClick={() => {
-                      setPrompt(props.item.prompt);
-                      setSavedPrompt(props.item.prompt);
-                      setCharacterIds(itemCharacterIds());
-                      setSavedCharacterIds(itemCharacterIds());
-                      setError('');
-                    }}
+                    onClick={discardDetails}
                   >
                     Discard
                   </button>

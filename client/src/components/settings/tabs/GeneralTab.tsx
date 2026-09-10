@@ -1,3 +1,6 @@
+import SettingsSection from '../SettingsSection.tsx';
+import { SettingsDraftContext } from '../SettingsSection.tsx';
+import { settingsFields } from '@tinytavern/shared';
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
 import { GENERAL_TRANSFER_FIELDS, transferObject } from '@tinytavern/shared';
 import FormField, { type FormFieldProps } from '../../forms/FormFields.tsx';
@@ -100,144 +103,167 @@ export default function GeneralTab() {
   useSettingsGuard(submission);
 
   return (
-    <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
-      <section class="settings-section">
-        <h3>Access</h3>
-        <FormField
-          label="Access password"
-          id="settings-access-password"
-          kind="password"
-          autocomplete="new-password"
-          changed={password() !== '' || (state.settings.hasPassword && !removePassword())}
-          onRevert={() => {
-            setPassword('');
-            setRemovePassword(state.settings.hasPassword);
-          }}
-          placeholder={
-            state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
-          }
-          value={password()}
-          disabled={removePassword()}
-          onChange={(next) => {
-            setPassword(next);
-            setRemovePassword(false);
-          }}
-          hint={
-            removePassword()
-              ? 'The access password will be removed when you save.'
-              : state.settings.hasPassword
-                ? 'A password is set. Leave this blank to keep it unchanged.'
-                : 'Optional. When set, all API, media, and WebSocket access requires a login session.'
-          }
-        />
-      </section>
-      <section class="settings-section">
-        <h3>Messages</h3>
-        <Field
-          name="autoExpandThinking"
-          kind="check"
-          label="Auto-expand thinking while the model reasons (collapses once the reply starts)"
-        />
-        <div class="form-stack field-group" role="group" aria-label="Background swipe generation">
-          <Field
-            name="backgroundSwipeGeneration"
-            kind="check"
-            label="Background Swipe Generation (keep one unread assistant swipe prepared ahead)"
-          />
-          <Field
-            name="parallelBackgroundSwipeGeneration"
-            kind="check"
-            disabled={!value('backgroundSwipeGeneration')}
-            label="Generate the background swipe alongside the primary reply"
-            hint="Allows two responses to generate at once. When off, the background swipe waits for the primary reply to finish."
-          />
-        </div>
-      </section>
-      <section class="settings-section">
-        <h3>Thumbnails</h3>
-        <Field
-          name="galleryThumbnailSize"
-          label="Thumbnail size"
-          id="gallery-thumbnail-size"
-          kind="number"
-          min="64"
-          max="2048"
-          step="1"
-          hint="Maximum width or height in pixels for image and video thumbnails in gallery, chat and media tools. Saving a new size regenerates media thumbnails in the background. Avatar thumbnails are 128 pixels. Originals stay unchanged."
-        />
-      </section>
-      <section class="settings-section">
-        <h3>Chat assistance prompts</h3>
-        <div class="form-stack field-group" role="group" aria-label="Automatic chat titles">
-          <Field
-            name="titlePrompt"
-            kind="macro"
-            rows={5}
-            label={
-              <>
-                Chat title prompt template
-                <MacroHelp />
-              </>
+    <SettingsDraftContext.Provider
+      value={{
+        schema: settingsFields(settingsValues()),
+        read: draft,
+        write: (next) => setDraft(next as ReturnType<typeof draft>),
+        onError: setError,
+      }}
+    >
+      <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
+        <SettingsSection title="Access" id="access" fields={[]}>
+          <FormField
+            label="Access password"
+            id="settings-access-password"
+            kind="password"
+            autocomplete="new-password"
+            changed={password() !== '' || (state.settings.hasPassword && !removePassword())}
+            onRevert={() => {
+              setPassword('');
+              setRemovePassword(state.settings.hasPassword);
+            }}
+            placeholder={
+              state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
             }
-            hint="Appended after the full chat context once the assistant answers your first message, including in character chats with greetings. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
-          />
-        </div>
-        <div class="form-stack field-group" role="group" aria-label="Draft completion">
-          <Field
-            name="draftCompletionPrompt"
-            kind="macro"
-            rows={7}
-            keys={['draft']}
-            label={
-              <>
-                Draft completion prompt template
-                <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
-              </>
+            value={password()}
+            onChange={(next) => {
+              setPassword(next);
+              setRemovePassword(false);
+            }}
+            hint={
+              removePassword()
+                ? 'The access password will be removed when you save.'
+                : state.settings.hasPassword
+                  ? 'A password is set. Leave this blank to keep it unchanged.'
+                  : 'Optional. When set, all API, media, and WebSocket access requires a login session.'
             }
-            hint="Appended to the current chat context for “Continue writing this message”. Include {{draft}} and ask for the full message, starting with an exact copy of the draft. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
           />
-        </div>
-      </section>
-      <Show when={error()}>
-        <p class="notice notice-error" role="alert">
-          {error()}
-        </p>
-      </Show>
-
-      <section class="settings-section">
-        <h3>Chat history</h3>
-        <p class="hint">
-          Permanently delete every conversation and its generated images. Characters and settings
-          are kept.
-        </p>
-        <button
-          class="danger-btn"
-          disabled={deletingChats() || state.conversations.length === 0}
-          onClick={() => void deleteChats()}
+          <Show when={removePassword()}>
+            <button type="button" onClick={() => setRemovePassword(false)}>
+              Undo password removal
+            </button>
+          </Show>
+        </SettingsSection>
+        <SettingsSection
+          title="Messages"
+          id="messages"
+          fields={[
+            'autoExpandThinking',
+            'backgroundSwipeGeneration',
+            'parallelBackgroundSwipeGeneration',
+          ]}
         >
-          {deletingChats() ? 'Deleting…' : 'Delete all chats'}
-        </button>
-      </section>
+          <Field
+            name="autoExpandThinking"
+            kind="check"
+            label="Auto-expand thinking while the model reasons (collapses once the reply starts)"
+          />
+          <div class="form-stack field-group" role="group" aria-label="Background swipe generation">
+            <Field
+              name="backgroundSwipeGeneration"
+              kind="check"
+              label="Background Swipe Generation (keep one unread assistant swipe prepared ahead)"
+            />
+            <Field
+              name="parallelBackgroundSwipeGeneration"
+              kind="check"
+              disabled={!value('backgroundSwipeGeneration')}
+              label="Generate the background swipe alongside the primary reply"
+              hint="Allows two responses to generate at once. When off, the background swipe waits for the primary reply to finish."
+            />
+          </div>
+        </SettingsSection>
+        <SettingsSection title="Thumbnails" id="thumbnails" fields={['galleryThumbnailSize']}>
+          <Field
+            name="galleryThumbnailSize"
+            label="Thumbnail size"
+            id="gallery-thumbnail-size"
+            kind="number"
+            min="64"
+            max="2048"
+            step="1"
+            hint="Maximum width or height in pixels for image and video thumbnails in gallery, chat and media tools. Saving a new size regenerates media thumbnails in the background. Avatar thumbnails are 128 pixels. Originals stay unchanged."
+          />
+        </SettingsSection>
+        <SettingsSection
+          title="Chat assistance prompts"
+          id="chat-assistance"
+          fields={['titlePrompt', 'draftCompletionPrompt']}
+        >
+          <div class="form-stack field-group" role="group" aria-label="Automatic chat titles">
+            <Field
+              name="titlePrompt"
+              kind="macro"
+              rows={5}
+              label={
+                <>
+                  Chat title prompt template
+                  <MacroHelp />
+                </>
+              }
+              hint="Appended after the full chat context once the assistant answers your first message, including in character chats with greetings. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
+            />
+          </div>
+          <div class="form-stack field-group" role="group" aria-label="Draft completion">
+            <Field
+              name="draftCompletionPrompt"
+              kind="macro"
+              rows={7}
+              keys={['draft']}
+              label={
+                <>
+                  Draft completion prompt template
+                  <MacroHelp rows={[['{{draft}}', 'The unfinished message in the composer']]} />
+                </>
+              }
+              hint="Appended to the current chat context for “Continue writing this message”. Include {{draft}} and ask for the full message, starting with an exact copy of the draft. Uses the chat template’s reasoning prefill when prefills are enabled on the endpoint."
+            />
+          </div>
+        </SettingsSection>
+        <Show when={error()}>
+          <p class="notice notice-error" role="alert">
+            {error()}
+          </p>
+        </Show>
 
-      <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
-        <SettingsTransferButtons
-          type="page:general"
-          onError={setError}
-          exportData={() =>
-            Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, value(key)]))
-          }
-          importData={(data) => {
-            const source = transferObject(data);
-            for (const key of GENERAL_TRANSFER_FIELDS) {
-              if (Object.hasOwn(source, key) && typeof source[key] !== typeof DEFAULT_SETTINGS[key])
-                throw new Error(`Invalid ${key}`);
+        <SettingsSection title="Chat history" id="chat-history" fields={[]}>
+          <p class="hint">
+            Permanently delete every conversation and its generated images. Characters and settings
+            are kept.
+          </p>
+          <button
+            class="danger-btn"
+            disabled={deletingChats() || state.conversations.length === 0}
+            onClick={() => void deleteChats()}
+          >
+            {deletingChats() ? 'Deleting…' : 'Delete all chats'}
+          </button>
+        </SettingsSection>
+
+        <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
+          <SettingsTransferButtons
+            type="page:general"
+            onError={setError}
+            exportData={() =>
+              Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, value(key)]))
             }
-            for (const key of GENERAL_TRANSFER_FIELDS) {
-              if (Object.hasOwn(source, key)) change(key, source[key] as Settings[SettingKey]);
-            }
-          }}
-        />
-      </SettingsActions>
-    </div>
+            importData={(data) => {
+              const source = transferObject(data);
+              for (const key of GENERAL_TRANSFER_FIELDS) {
+                if (
+                  Object.hasOwn(source, key) &&
+                  typeof source[key] !== typeof DEFAULT_SETTINGS[key]
+                )
+                  throw new Error(`Invalid ${key}`);
+              }
+              for (const key of GENERAL_TRANSFER_FIELDS) {
+                if (Object.hasOwn(source, key)) change(key, source[key] as Settings[SettingKey]);
+              }
+            }}
+          />
+        </SettingsActions>
+      </div>
+    </SettingsDraftContext.Provider>
   );
 }

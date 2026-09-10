@@ -26,7 +26,7 @@ test('media description', async () => {
   await import('../../server/src/routes/gallery.ts');
 
   assert.deepEqual(getSettings().mediaRendering.workflows, []);
-  assert.deepEqual(getSettings().mediaRendering.defaults, {});
+  assert.equal(getSettings().mediaRendering.descriptionWorkflowId, null);
   assert.throws(() => descriptionWorkflow(), /Add a Describe image workflow/);
 
   assert.equal(mediaWorkflowError(IMAGE_DESCRIPTION_WORKFLOW), null);
@@ -102,7 +102,7 @@ test('media description', async () => {
       ...getSettings().mediaRendering,
       comfyUrl: comfy.url,
       workflows: [IMAGE_DESCRIPTION_WORKFLOW],
-      defaults: { 'image-describe:0': IMAGE_DESCRIPTION_WORKFLOW.id },
+      descriptionWorkflowId: IMAGE_DESCRIPTION_WORKFLOW.id,
     },
   });
   const path = saveImage('.png', makePlaceholderPng());

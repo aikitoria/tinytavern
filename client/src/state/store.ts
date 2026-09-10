@@ -5,6 +5,7 @@ import {
   readPageLocation,
   returnToPageLocation,
   writePageLocation,
+  navigatePageWithGuards,
 } from './pageLocation.ts';
 import { createMemo, createRoot, createSignal, batch } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
@@ -115,7 +116,7 @@ const globalMemo = <T>(fn: () => T) => createRoot(() => createMemo(fn));
 export const activeMediaJobCount = globalMemo(() => {
   let count = 0;
   for (const job of Object.values(state.mediaJobs)) {
-    if (job.operation !== 'image-describe' && mediaJobActive(job.state)) count++;
+    if (!job.temporary && mediaJobActive(job.state)) count++;
   }
   return count;
 });
@@ -812,6 +813,21 @@ export function openDialog(
   page: import('./pageLocation.ts').PageLocation,
   session?: import('../media/navigation.ts').MediaToolSession,
 ): void {
+  if (page.modal === 'settings') {
+    const existing = dialogStack.frames().find((frame) => frame.page.modal === 'settings');
+    if (existing) {
+      const target =
+        page.settingsTab === undefined ? existing.page : { ...page, stack: existing.page.stack };
+      navigatePageWithGuards(target, () =>
+        batch(() => {
+          dialogStack.restore(target);
+          setState('modal', 'settings');
+          writePageLocation(target, true);
+        }),
+      );
+      return;
+    }
+  }
   const from = readPageLocation();
   const next = { ...page, stack: pageStack(from).map(paneLocation) };
   batch(() => {

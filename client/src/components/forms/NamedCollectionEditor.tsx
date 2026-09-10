@@ -1,9 +1,10 @@
-import type { JSX } from 'solid-js';
+import { createMemo, type JSX } from 'solid-js';
 import NamedCollectionToolbar, {
   type NamedCollectionToolbarHandle,
 } from './NamedCollectionToolbar.tsx';
 import SettingsTransferButtons from '../settings/SettingsTransferButtons.tsx';
 import { uniqueCollectionName } from '../../state/collectionNames.ts';
+import { collectionByName } from '../../state/collectionOrder.ts';
 
 /** The caller commits selection and repairs domain references in the same draft update. */
 export function createNamedCollection<T extends { name: string }>(options: {
@@ -19,6 +20,7 @@ export function createNamedCollection<T extends { name: string }>(options: {
 }) {
   let toolbar: NamedCollectionToolbarHandle | undefined;
   const choices = () => (options.filter ? options.items().filter(options.filter) : options.items());
+  const sortedChoices = createMemo(() => collectionByName(choices()));
   const current = () => choices().find((item) => options.identify(item) === options.selected());
   const replace = (item: T) => {
     const previous = current();
@@ -86,7 +88,7 @@ export function createNamedCollection<T extends { name: string }>(options: {
           ...(options.defaultLabel === undefined
             ? []
             : [{ value: '', label: options.defaultLabel }]),
-          ...choices().map((item) => ({ value: options.identify(item), label: item.name })),
+          ...sortedChoices().map((item) => ({ value: options.identify(item), label: item.name })),
         ]}
         buttonLabel={
           current()?.name ?? (choices().length ? props.unselectedLabel : props.emptyLabel)

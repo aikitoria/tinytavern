@@ -15,14 +15,6 @@ export const MEDIA_JOB_STATUS: Record<MediaJob['state'], string> = {
   cancelled: 'Cancelled',
 };
 
-export const MEDIA_INPUT_LABELS: Record<MediaJob['inputs'][number]['slot'], string> = {
-  source: 'Source image',
-  first_frame: 'First frame',
-  reference1: 'Reference 1',
-  reference2: 'Reference 2',
-  reference3: 'Reference 3',
-};
-
 export interface MediaJobGroup {
   id: number;
   job: MediaJob;
@@ -87,7 +79,7 @@ export function mediaJobPreviews(jobs: readonly MediaJob[]) {
 export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
   const groups = new Map<number, MediaJobGroup>();
   for (const job of jobs) {
-    if (job.operation === 'image-describe' || (job.draft && job.state === 'cancelled')) continue;
+    if (job.temporary || (job.draft && job.state === 'cancelled')) continue;
     const id = job.draft ? -job.draft.id : job.id;
     const group = groups.get(id);
     if (!group) {
@@ -111,7 +103,7 @@ export function groupMediaJobs(jobs: MediaJob[]): MediaJobGroup[] {
 
 /** Keep full text for scrolling and preserve the prefix while tokens stream. */
 export function jobPromptExcerpt(
-  job: Pick<MediaJob, 'state' | 'prompt' | 'reasoning' | 'instruction'>,
+  job: Pick<MediaJob, 'state' | 'prompt' | 'reasoning' | 'instruction' | 'textResult'>,
 ) {
   if (job.state === 'preparing') {
     const text = job.prompt || job.reasoning || '';
@@ -120,9 +112,9 @@ export function jobPromptExcerpt(
       text,
     };
   }
-  const text = job.prompt || job.instruction;
+  const text = job.textResult || job.prompt || job.instruction;
   return {
-    label: job.prompt ? 'Prompt' : 'Instruction',
+    label: job.textResult ? 'Result' : job.prompt ? 'Prompt' : 'Instruction',
     text,
   };
 }

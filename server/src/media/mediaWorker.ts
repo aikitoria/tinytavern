@@ -210,6 +210,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
   let videoPreview = previewMetadata
     ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.frames)
     : null;
+  let pendingVideoHeader: ComfyVideoPreview | null = null;
   socket.addEventListener('message', ({ data: raw }) => {
     const binary = typeof raw !== 'string';
     if ((binary ? raw.byteLength : Buffer.byteLength(raw)) > 5 * 1024 * 1024) {
@@ -222,14 +223,24 @@ function openProgress(row: MediaJobRow): Promise<void> {
     if (binary) {
       if (mediaJobRow(row.id)?.state !== 'rendering') return;
       const bytes = Buffer.from(raw as ArrayBuffer);
-      const video = videoPreview?.accept(bytes);
+      // VHS metadata is broadcast globally; only a matching frame on this job's
+      // client socket proves ownership. Do not let another job replace its clip.
+      const firstFrame = pendingVideoHeader?.accept(bytes);
+      if (firstFrame) {
+        videoPreview = pendingVideoHeader;
+        pendingVideoHeader = null;
+        stmt(
+          "UPDATE media_jobs SET configuration_json = json_set(configuration_json, '$.videoPreview', json(?)) WHERE id = ?",
+        ).run(JSON.stringify(videoPreview!.metadata), row.id);
+      }
+      const video = firstFrame ?? videoPreview?.accept(bytes);
       if (video) {
         publishProgress(row.id, { videoPreview: video });
         return;
       }
       // A job already running before header recovery was added can still show arriving JPEGs.
       // VHS puts the sampler ID in every frame but does not repeat its length/rate header.
-      if (!videoPreview && row.operation.startsWith('video') && executingNode) {
+      if (!videoPreview && executingNode) {
         const frame = parseVideoPreviewFrame(bytes);
         if (frame?.nodeId === executingNode.slice(0, 15)) {
           publishProgress(row.id, { preview: frame.image, videoPreview: null });
@@ -273,6 +284,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
         const node = typeof nodeId === 'string' ? nodeId : null;
         if (node !== executingNode) {
           executingNode = node;
+          pendingVideoHeader = null;
           if (videoPreview) {
             stmt(
               "UPDATE media_jobs SET configuration_json = json_remove(configuration_json, '$.videoPreview') WHERE id = ?",
@@ -286,19 +298,12 @@ function openProgress(row: MediaJobRow): Promise<void> {
       ) {
         executingNode = null;
         videoPreview = null;
+        pendingVideoHeader = null;
       }
       if (event.type === 'VHS_latentpreview') {
-        if (!row.operation.startsWith('video') || mediaJobRow(row.id)?.state !== 'rendering')
-          return;
+        if (mediaJobRow(row.id)?.state !== 'rendering') return;
         const incoming = ComfyVideoPreview.fromEvent(event.data, executingNode);
-        if (incoming) {
-          videoPreview = incoming;
-          // This changes no editable job state or revision. Never persist individual frames.
-          stmt(
-            "UPDATE media_jobs SET configuration_json = json_set(configuration_json, '$.videoPreview', json(?)) WHERE id = ?",
-          ).run(JSON.stringify(incoming.metadata), row.id);
-          publishProgress(row.id, { videoPreview: { ...incoming.metadata, frames: {} } });
-        }
+        if (incoming) pendingVideoHeader = incoming;
         return;
       }
       if (
@@ -518,7 +523,7 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
             extra: {
               VHS_MetadataImage: false,
               VHS_KeepIntermediate: false,
-              VHS_latentpreview: row.operation.startsWith('video'),
+              VHS_latentpreview: true,
               VHS_latentpreviewrate: 0,
             },
           },
@@ -590,6 +595,16 @@ async function cancel(row: MediaJobRow, signal: AbortSignal): Promise<void> {
     return;
   }
   const observed = await observe(row, signal);
+  if (row.comfy_prompt_id && !observed.history && !observed.running && !observed.queued) {
+    // Execution can finish between the history and queue reads. Collect its final
+    // files before ending cancellation, even when the progress socket was unavailable.
+    const history = await comfyJson<Record<string, ComfyHistory>>(
+      configuration(row).comfyUrl,
+      `/history/${row.comfy_prompt_id}`,
+      signal,
+    );
+    observed.history = history[row.comfy_prompt_id];
+  }
   recordObservedFiles(row, observed.history);
   if (!observed.history && !observed.running && !observed.queued && !row.comfy_prompt_id) {
     // An interrupted POST may still be validating upstream. Keep reconciling
@@ -612,12 +627,11 @@ async function retrieve(
   signal: AbortSignal,
 ): Promise<void> {
   const config = configuration(row);
-  const kind = row.operation.startsWith('video') ? 'video' : 'image';
   const outputs = history.outputs ?? {};
-  if (row.operation === 'image-describe') {
-    const prompt = comfyTextOutput(outputs);
+  if (config.workflow.textOutputNodeId !== null) {
+    const result = comfyTextOutput(outputs, config.workflow.textOutputNodeId);
     transaction(() => {
-      updateMediaJob(row.id, { prompt });
+      updateMediaJob(row.id, { result_text: result });
       finishMediaJob(row.id, 'succeeded');
     });
     releaseRemoteFiles(row.id);
@@ -638,16 +652,17 @@ async function retrieve(
       `Workflow returned images or videos from multiple output nodes (${mediaNodes.map((node) => node.id).join(', ')}). Keep only one image/video output node in the workflow.`,
     );
   }
-  const files = (mediaNodes[0]?.files ?? []).filter((file) => {
+  const nodeFiles = mediaNodes[0]?.files ?? [];
+  // Video nodes may return a temporary thumbnail alongside their final assets.
+  const finalFiles = nodeFiles.some((file) => file.type === 'output')
+    ? nodeFiles.filter((file) => file.type === 'output')
+    : nodeFiles;
+  const files = finalFiles.filter((file) => {
     const extension = extname(file.filename).toLowerCase();
-    return kind === 'video'
-      ? extension === '.webm'
-      : ['.png', '.jpg', '.jpeg', '.webp'].includes(extension);
+    return ['.png', '.jpg', '.jpeg', '.webp', '.webm'].includes(extension);
   });
   if (files.length === 0) {
-    throw new InvalidMediaOutput(
-      `Comfy produced no final ${kind === 'video' ? 'AV1 WebM video' : 'image'}`,
-    );
+    throw new InvalidMediaOutput('Comfy produced no final supported image or AV1 WebM video');
   }
   for (const file of files) {
     const remote = ownRemoteFile(row.id, config.comfyUrl, file, 'output');
@@ -658,6 +673,7 @@ async function retrieve(
     const response = await fetch(`${config.comfyUrl}/view?${comfyFileParams(file)}`, {
       signal: requestSignal(signal, 180_000),
     });
+    const kind = extname(file.filename).toLowerCase() === '.webm' ? 'video' : 'image';
     const media = await downloadMedia(response, kind, signal);
     const current = requireMediaJob(row.id);
     if (current.state !== 'downloading') {

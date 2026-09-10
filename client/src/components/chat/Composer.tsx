@@ -8,7 +8,7 @@ import {
   stopDraftCompletion,
 } from '../../state/draftCompletion.ts';
 import type { ComposerCommand } from '../../composerCommands.ts';
-import { imageGenerationCommands, imageGenerationTools } from '../../images/imageGeneration.tsx';
+import { mediaGenerationCommands, mediaFavoriteTools } from '../../images/imageGeneration.tsx';
 import {
   activePath,
   applyMediaJob,
@@ -23,7 +23,7 @@ import {
 } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
-import { CHAT_MEDIA_TOOL_LINKS, openMediaTool } from '../../media/navigation.ts';
+import { mediaToolLinks, openMediaTool } from '../../media/navigation.ts';
 import MobileSidebarButton from '../layout/MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
@@ -67,7 +67,7 @@ const BUILTIN_COMMANDS: ComposerCommand[] = [
   },
 ];
 
-const COMMANDS: ComposerCommand[] = [...BUILTIN_COMMANDS, ...imageGenerationCommands];
+const COMMANDS: ComposerCommand[] = [...BUILTIN_COMMANDS, ...mediaGenerationCommands];
 
 // First-match dispatch silently shadows duplicate command names.
 {
@@ -332,7 +332,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
             keyboardNavigation
             autoFocus
           >
-            <For each={CHAT_MEDIA_TOOL_LINKS}>
+            <For each={mediaToolLinks()}>
               {(tool) => (
                 <button
                   type="button"
@@ -340,14 +340,14 @@ export default function Composer(props: { text: string; onText: (text: string) =
                   disabled={state.selectedId === null}
                   onClick={() => {
                     setToolsOpen(false);
-                    openMediaTool(tool.operation, { conversationId: state.selectedId });
+                    openMediaTool(tool.workflowId, { conversationId: state.selectedId });
                   }}
                 >
                   {tool.label}
                 </button>
               )}
             </For>
-            <For each={imageGenerationTools()}>
+            <For each={mediaFavoriteTools()}>
               {(tool) => (
                 <button
                   type="button"

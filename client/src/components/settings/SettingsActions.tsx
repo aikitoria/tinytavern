@@ -12,6 +12,7 @@ export default function SettingsActions(props: {
   discard?: () => void;
   saving?: boolean;
   saved?: boolean;
+  saveLabel?: string;
   inline?: boolean;
 }) {
   const target = useContext(SettingsActionsContext);
@@ -19,15 +20,15 @@ export default function SettingsActions(props: {
     <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
       <Show when={props.save}>
         <button class="primary-btn" disabled={props.saving} onClick={() => void props.save?.()}>
-          {props.saving ? 'Saving…' : 'Save'}
+          {props.saving ? 'Saving…' : (props.saveLabel ?? 'Save')}
         </button>
       </Show>
-      {props.children}
       <Show when={props.discard}>
         <button disabled={props.saving} onClick={() => props.discard?.()}>
           Discard
         </button>
       </Show>
+      {props.children}
       <Show when={props.saved}>
         <span class="text-success text-sm">
           <FontAwesomeIcon icon={faCheck} size={12} /> Saved

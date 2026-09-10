@@ -1,13 +1,21 @@
+export * from './settingsSections.ts';
 export { readSseData } from './sse.ts';
 export * from './media.ts';
-export * from './imagePrompts.ts';
+export { DEFAULT_MEDIA_CHAT_PRESETS } from './imagePrompts.ts';
+import { DEFAULT_MEDIA_CHAT_PRESETS } from './imagePrompts.ts';
 export * from './settingsTransfer.ts';
 export * from './template.ts';
 export * from './entityFields.ts';
 export * from './promptMessages.ts';
 import type { Character } from './entityFields.ts';
 import { DEFAULT_MEDIA_RENDERING, DEFAULT_MEDIA_PROMPTS } from './media.ts';
-import type { MediaAsset, MediaRenderingSettings, MediaPromptSettings, MediaJob } from './media.ts';
+import type {
+  MediaAsset,
+  MediaRenderingSettings,
+  MediaPromptSettings,
+  MediaJob,
+  MediaFavorite,
+} from './media.ts';
 
 /** 'tool' messages are tool output shown in the chat but excluded from prompt history. */
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
@@ -152,9 +160,9 @@ export interface Settings {
   hasPassword: boolean;
   imageGeneration: ImageGenerationSettings;
   mediaRendering: MediaRenderingSettings;
-  galleryImagePrompts: MediaPromptSettings;
-  galleryVideoPrompts: MediaPromptSettings;
-  chatVideoPrompts: MediaPromptSettings;
+  mediaFavorites: MediaFavorite[];
+  mediaStandalonePrompts: MediaPromptSettings;
+  mediaChatPrompts: MediaPromptSettings;
 }
 
 /** {{system}} resolves the preset/custom prompt; empty slots omit their {{#if}} blocks. */
@@ -210,6 +218,8 @@ Do not wrap it in quotation marks or additional code fences.
 {{draft}}
 </unfinished_user_input>`;
 
+export const DEFAULT_AVATAR_PROMPT =
+  'Write an image-generation prompt for a portrait avatar. Head and shoulders, facing forward. Reply with only the prompt.';
 export const DEFAULT_AVATAR_CONTEXT =
   'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
 
@@ -271,19 +281,19 @@ export const DEFAULT_SETTINGS: Settings = {
     promptRevisionOriginal: DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
   },
   mediaRendering: DEFAULT_MEDIA_RENDERING,
-  galleryImagePrompts: {
-    defaults: {},
+  mediaFavorites: [],
+  mediaStandalonePrompts: {
+    folders: [],
+    defaultPresetId: null,
     presets: [
       {
         id: 'image-prompt-revision',
         name: 'Revise image prompt',
-        operation: 'image',
         ...DEFAULT_IMAGE_PROMPT_REVISION,
       },
     ],
   },
-  galleryVideoPrompts: DEFAULT_MEDIA_PROMPTS,
-  chatVideoPrompts: DEFAULT_MEDIA_PROMPTS,
+  mediaChatPrompts: { folders: [], presets: DEFAULT_MEDIA_CHAT_PRESETS, defaultPresetId: null },
 };
 
 export interface TreeSnapshot {

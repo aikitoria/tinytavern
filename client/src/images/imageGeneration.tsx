@@ -1,6 +1,8 @@
+import SettingsSection from '../components/settings/SettingsSection.tsx';
 import SettingsTransferButtons from '../components/settings/SettingsTransferButtons.tsx';
 import {
   nextCollectionId,
+  newRequestId,
   importImagePromptSet,
   transferObject,
   transferString,
@@ -9,8 +11,8 @@ import {
   DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
   DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
   DEFAULT_AVATAR_CONTEXT,
+  DEFAULT_AVATAR_PROMPT,
 } from '@tinytavern/shared';
-import SettingsActions from '../components/settings/SettingsActions.tsx';
 import type { MediaImageConfig, ImageGenerationSettings } from '@tinytavern/shared';
 import SettingLabel from '../components/forms/SettingField.tsx';
 import {
@@ -22,11 +24,9 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import { For, Show, createSignal, onMount, type JSX } from 'solid-js';
+import { For, Show, createSignal, type JSX } from 'solid-js';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
-  DEFAULT_IMAGE_CHAT_PROMPTS,
-  type ImageChatPromptKind,
   imageRevisionTemplateError,
   type Message,
 } from '@tinytavern/shared';
@@ -36,14 +36,13 @@ import {
   activePath,
   applyGalleryItem,
   applyMediaJob,
-  applySettings,
   mediaJobsByMessage,
   navigateTree,
   openModal,
   state,
   toast,
 } from '../state/store.ts';
-import { createSavedFlash, errorMessage } from '../util.ts';
+import { errorMessage } from '../util.ts';
 import ImageViewer from '../components/ui/ImageViewer.tsx';
 import MediaPlayer from '../media/MediaPlayer.tsx';
 import MediaActions from '../media/MediaActions.tsx';
@@ -52,54 +51,13 @@ import MacroHelp from '../components/forms/MacroHelp.tsx';
 import Markdown from '../components/ui/Markdown.tsx';
 import { createNamedCollection } from '../components/forms/NamedCollectionEditor.tsx';
 import FormField, { createFormFields } from '../components/forms/FormFields.tsx';
-import { createSettingsSubmission } from '../state/settingsSubmission.ts';
-import { useSettingsGuard } from '../components/settings/SettingsGuard.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 
 type ImagePromptPresetSet = NonNullable<ImageGenerationSettings['promptPresets']>[string];
 type ImagePromptPreset = ImagePromptPresetSet['presets'][number];
 
-type ImagePromptKind = ImageChatPromptKind | 'avatar';
-
-const IMAGE_PROMPT_SECTIONS = [
-  {
-    key: 'character',
-    title: 'Character images',
-    hint: 'Prompt templates used by /imagechar and Create image from chat, with and without an instruction.',
-  },
-  {
-    key: 'face',
-    title: 'Face images',
-    hint: 'Prompt templates used by /imageface and the Face presets in Create image from chat, with and without an instruction.',
-  },
-  {
-    key: 'generic',
-    title: 'Generic images',
-    hint: 'Prompt template used by /image and the Generic image presets in Create image from chat.',
-  },
-  {
-    key: 'references',
-    title: 'Images from references',
-    hint: 'Prompt template for Image from references in a chat. Uses the full chat history and the saved prompts for the selected reference images.',
-  },
-  {
-    key: 'avatar',
-    title: 'Avatars',
-    hint: 'System instructions and a user message template for Generate avatar. The user message supplies the character or persona details.',
-  },
-] as const;
-
-type ImageGenSettings = ImageGenerationSettings & {
-  promptPresets: Record<ImagePromptKind, ImagePromptPresetSet>;
-};
-
-const DEFAULT_PROMPTS: Record<ImagePromptKind, string> = {
-  ...DEFAULT_IMAGE_CHAT_PROMPTS,
-  avatar:
-    'Write an image-generation prompt for a portrait avatar. Head and shoulders, facing forward. Reply with only the prompt.',
-};
-
+type ImagePromptKind = 'avatar';
 const AVATAR_MACROS: [string, string][] = [
   ['{{name}}', 'Character or persona name'],
   ['{{char}}', 'Character name (characters only)'],
@@ -110,80 +68,7 @@ const AVATAR_MACROS: [string, string][] = [
   ['{{firstMessage}}', 'Character first message (characters only)'],
 ];
 
-const PROMPT_EDITORS: {
-  kind: ImagePromptKind;
-  section: (typeof IMAGE_PROMPT_SECTIONS)[number]['key'];
-  label: string;
-  command?: string;
-}[] = [
-  {
-    kind: 'describe',
-    section: 'character',
-    label: 'Without an instruction',
-  },
-  {
-    kind: 'characterInstruction',
-    section: 'character',
-    label: 'With an instruction',
-    command: '/imagechar',
-  },
-  {
-    kind: 'face',
-    section: 'face',
-    label: 'Without an instruction',
-  },
-  {
-    kind: 'faceInstruction',
-    section: 'face',
-    label: 'With an instruction',
-    command: '/imageface',
-  },
-  {
-    kind: 'instruction',
-    section: 'generic',
-    label: 'Saved presets',
-    command: '/image',
-  },
-  {
-    kind: 'references',
-    section: 'references',
-    label: 'Saved presets',
-  },
-  {
-    kind: 'avatar',
-    section: 'avatar',
-    label: 'Saved presets',
-  },
-];
 const AVATAR_EXTRA_KEYS = ['name', 'description', 'personality', 'scenario', 'firstMessage'];
-const REFERENCE_EXTRA_KEYS = [
-  'instruction',
-  'prompt',
-  'reference1_prompt',
-  'reference2_prompt',
-  'reference3_prompt',
-];
-const REFERENCE_MACROS: [string, string][] = [
-  ['{{instruction}}', 'Your generation instruction'],
-  ['{{prompt}}', 'The original prompt when revising'],
-  ['{{char}} / {{user}}', 'Character and persona names'],
-  ...[1, 2, 3].map((index): [string, string] => [
-    `{{reference${index}_prompt}}`,
-    `Saved prompt for reference image ${index}; editable in gallery details, empty if none.`,
-  ]),
-  [
-    '{{#if reference1_prompt}}…{{/if}}',
-    'Include this block only when the macro has a nonempty value. Works with any available macro.',
-  ],
-];
-
-function promptRecord<T>(
-  read: (editor: (typeof PROMPT_EDITORS)[number]) => T,
-): Record<ImagePromptKind, T> {
-  const values = {} as Record<ImagePromptKind, T>;
-  for (const editor of PROMPT_EDITORS) values[editor.kind] = read(editor);
-  return values;
-}
 
 function normalizePromptPresets(
   cfg: { promptPresets?: Record<string, ImagePromptPresetSet> },
@@ -211,45 +96,13 @@ function normalizePromptPresets(
   return { presets: [], active: '' };
 }
 
-function settings(): ImageGenSettings {
-  const stored = state.settings.imageGeneration;
-  return {
-    promptRevisionTemplate: stored.promptRevisionTemplate,
-    promptRevisionContext: stored.promptRevisionContext,
-    promptRevisionOriginal: stored.promptRevisionOriginal,
-    promptPresets: promptRecord(({ kind }) => normalizePromptPresets(stored, kind)),
-  };
-}
-
-function selectedPrompt(
-  cfg: ImageGenSettings,
-  kind: ImagePromptKind,
-  /** undefined = active setting; null = built-in Default; string = named preset. */
-  presetName?: string | null,
-): string {
-  const selection = cfg.promptPresets[kind];
-  const name = presetName === undefined ? selection.active : presetName;
-  return selection.presets.find((preset) => preset.name === name)?.prompt ?? DEFAULT_PROMPTS[kind];
-}
-
-/** {{char}}/{{user}} expand server-side using the conversation context. */
-function composePrompt(
-  kind: Exclude<ImagePromptKind, 'avatar'>,
-  instruction = '',
-  presetName?: string | null,
-): string {
-  const template = selectedPrompt(settings(), kind, presetName);
-  // A callback preserves literal $-sequences in the instruction.
-  return template.replaceAll(/\{\{instruction\}\}/gi, () => instruction);
-}
-
 export function activeImageRenderConfig(): MediaImageConfig | undefined {
   const cfg = state.settings.mediaRendering;
-  const active = cfg.workflows.find((workflow) => workflow.id === cfg.defaults['image:0']);
+  const active = cfg.workflows.find((workflow) => workflow.id === cfg.defaultWorkflowId);
   return active?.json.trim() ? { workflow: active, comfyUrl: cfg.comfyUrl } : undefined;
 }
 
-/** Fall back to the /image workflow when no avatar workflow resolves. */
+/** An unset avatar workflow inherits the generator default. */
 export function avatarRenderConfig(): MediaImageConfig | undefined {
   const cfg = state.settings.mediaRendering;
   const avatar = cfg.workflows.find((workflow) => workflow.id === cfg.avatarWorkflowId);
@@ -259,68 +112,23 @@ export function avatarRenderConfig(): MediaImageConfig | undefined {
 }
 
 export function avatarGenerationAvailable(): boolean {
-  return avatarRenderConfig() != null;
+  return avatarRenderConfig()?.workflow.textOutputNodeId === null;
 }
 
-/** Both templates expand server-side using authoritative entity fields. */
-export function avatarPromptTemplates(): { prompt: string; context: string } {
-  const selection = settings().promptPresets.avatar;
-  if (selection.active === '') {
-    return { prompt: DEFAULT_PROMPTS.avatar, context: DEFAULT_AVATAR_CONTEXT };
-  }
-  const preset = selection.presets.find((candidate) => candidate.name === selection.active);
-  if (!preset || !preset.context?.trim()) {
-    throw new Error(
-      'Select an avatar preset with a user message template in Avatar prompts settings.',
-    );
-  }
-  return { prompt: preset.prompt, context: preset.context };
-}
-
-/** Stream a tool prompt, then render it if a workflow is selected. */
-async function generate(
-  kind: Exclude<ImagePromptKind, 'avatar'>,
-  instruction = '',
-  presetName?: string | null,
-): Promise<boolean> {
-  if (state.selectedId == null) {
-    toast('No conversation selected.', 'warning');
-    return false;
-  }
-  return navigateTree(() =>
-    api.toolGenerate(state.selectedId!, state.tree, {
-      prompt: composePrompt(kind, instruction, presetName),
-      label: 'Image prompt',
-      image: activeImageRenderConfig(),
-    }),
-  );
-}
-
-/** Preset actions override the selection for one generation only. */
-function promptTools(kind: 'describe' | 'face', subject: 'Character' | 'Face') {
-  const presets = settings().promptPresets[kind].presets;
-  const baseLabel = `Generate ${subject} Image`;
-  if (presets.length === 0) {
-    return [
-      {
-        label: baseLabel,
-        icon: () => <FontAwesomeIcon icon={faImage} size={16} />,
-        run: () => void generate(kind),
-      },
-    ];
-  }
-  return [
-    { name: 'Default', presetName: null },
-    ...presets.map((preset) => ({ name: preset.name, presetName: preset.name })),
-  ].map(({ name, presetName }) => ({
-    label: `${baseLabel} — ${name}`,
+export function mediaFavoriteTools() {
+  return state.settings.mediaFavorites.map((favorite) => ({
+    label: favorite.name,
     icon: () => <FontAwesomeIcon icon={faImage} size={16} />,
-    run: () => void generate(kind, '', presetName),
+    run: () => {
+      const conversationId = state.selectedId;
+      if (conversationId === null) return;
+      const requestKey = newRequestId();
+      void navigateTree(async () => {
+        const job = await api.runMediaFavorite(favorite.id, conversationId, state.tree, requestKey);
+        applyMediaJob(job);
+      });
+    },
   }));
-}
-
-export function imageGenerationTools() {
-  return [...promptTools('describe', 'Character'), ...promptTools('face', 'Face')];
 }
 
 /** The same available built-in name is used when adding an item or reverting its name. */
@@ -454,234 +262,130 @@ function PromptPresetEditor(props: {
   );
 }
 
-export function ImageGenerationSettingsPage(props: { mode: 'chat' | 'avatar' }) {
-  const sections = IMAGE_PROMPT_SECTIONS.filter((section) =>
-    props.mode === 'avatar' ? section.key === 'avatar' : section.key !== 'avatar',
-  );
-  const promptEditors = PROMPT_EDITORS.filter((editor) =>
-    props.mode === 'avatar' ? editor.kind === 'avatar' : editor.kind !== 'avatar',
-  );
-  let baseSettings = settings();
-  const editors = {} as Record<ImagePromptKind, PromptPresetEditorHandle>;
-  let errorEl: HTMLParagraphElement | undefined;
-  const [saved, flashSaved] = createSavedFlash();
-  const [error, setError] = createSignal('');
+export interface ImageGenerationSettingsHandle {
+  value: ImageGenerationSettings;
+  validate: () => void;
+}
+
+/** Embedded fields use their containing page's revision guard and Save/Discard actions. */
+export function ImageGenerationSettingsFields(props: {
+  ref: (handle: ImageGenerationSettingsHandle) => void;
+  onError: (message: string) => void;
+}) {
+  let baseSettings = state.settings.imageGeneration;
+  let avatar!: PromptPresetEditorHandle;
   const revision = createFormFields({
     promptRevisionContext: DEFAULT_CHAT_IMAGE_REVISION_CONTEXT,
     promptRevisionOriginal: DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL,
     promptRevisionTemplate: DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
   });
-  let baseline = '';
-
-  const showError = (message: string) => {
-    setError(message);
-    if (message) queueMicrotask(() => errorEl?.scrollIntoView({ block: 'nearest' }));
+  const handle: ImageGenerationSettingsHandle = {
+    get value() {
+      return {
+        ...baseSettings,
+        ...revision.value(),
+        promptPresets: { ...baseSettings.promptPresets, avatar: avatar.value },
+      };
+    },
+    set value(next) {
+      baseSettings = next;
+      revision.load(next);
+      avatar.value = normalizePromptPresets(next, 'avatar');
+    },
+    validate() {
+      const invalid = imageRevisionTemplateError(revision.value().promptRevisionTemplate);
+      if (invalid) throw new Error(invalid);
+      importImagePromptSet(avatar.value, { presets: [], active: '' }, true);
+    },
   };
-
-  const draft = () => ({
-    imageGeneration: {
-      ...baseSettings,
-      ...(props.mode === 'chat' ? revision.value() : {}),
-      promptPresets: {
-        ...baseSettings.promptPresets,
-        ...Object.fromEntries(promptEditors.map(({ kind }) => [kind, editors[kind].value])),
-      },
-    },
-  });
-
-  const load = () => {
-    baseSettings = settings();
-    if (props.mode === 'chat') revision.load(baseSettings);
-    for (const { kind } of promptEditors) editors[kind].value = baseSettings.promptPresets[kind];
-    baseline = JSON.stringify(draft());
-  };
-  const submission = createSettingsSubmission({
-    revision: () => state.settings.revision,
-    isDirty: () => JSON.stringify(draft()) !== baseline,
-    snapshot: () => {
-      const values = draft();
-      const invalidRevision = imageRevisionTemplateError(
-        values.imageGeneration.promptRevisionTemplate,
-      );
-      if (invalidRevision) throw new Error(invalidRevision);
-      for (const { kind } of promptEditors) {
-        importImagePromptSet(
-          values.imageGeneration.promptPresets[kind],
-          { presets: [], active: '' },
-          kind === 'avatar',
-        );
-      }
-      return values;
-    },
-    submit: (values, revision) => api.putSettings(values, revision),
-    accepted: (values, next) => {
-      applySettings(next);
-      baseline = JSON.stringify(values);
-      flashSaved();
-    },
-    discard: load,
-    onError: showError,
-  });
-  const { save, discard, saving } = submission;
-  onMount(discard);
-  useSettingsGuard(submission);
-
+  props.ref(handle);
   return (
     <>
-      <Show when={error()}>
-        <p ref={errorEl} class="notice notice-error image-settings-notice" role="alert">
-          {error()}
-        </p>
-      </Show>
-
-      <For each={sections}>
-        {(section) => (
-          <section
-            id={`image-settings-panel-${section.key}`}
-            class="settings-section image-settings-panel"
-            aria-labelledby={`image-settings-title-${section.key}`}
-          >
-            <h3 id={`image-settings-title-${section.key}`}>{section.title}</h3>
-            <p class="hint">{section.hint}</p>
-            <For each={PROMPT_EDITORS.filter((editor) => editor.section === section.key)}>
-              {(editor) => (
-                <PromptPresetEditor
-                  ref={(handle) => (editors[editor.kind] = handle)}
-                  transferKey={editor.kind}
-                  onError={showError}
-                  defaultPrompt={DEFAULT_PROMPTS[editor.kind]}
-                  extraKeys={
-                    editor.kind === 'avatar'
-                      ? AVATAR_EXTRA_KEYS
-                      : editor.kind === 'references'
-                        ? REFERENCE_EXTRA_KEYS
-                        : editor.command
-                          ? ['instruction']
-                          : undefined
-                  }
-                  defaultContext={editor.kind === 'avatar' ? DEFAULT_AVATAR_CONTEXT : undefined}
-                  contextExtraKeys={AVATAR_EXTRA_KEYS}
-                  promptLabel={
-                    editor.kind === 'avatar' ? (
-                      <>
-                        System instructions <MacroHelp rows={AVATAR_MACROS} />
-                      </>
-                    ) : undefined
-                  }
-                  contextLabel={
-                    <>
-                      User message template <MacroHelp rows={AVATAR_MACROS} />
-                    </>
-                  }
-                  label={
-                    <>
-                      {editor.label}{' '}
-                      <Show when={editor.kind !== 'avatar'}>
-                        <MacroHelp
-                          rows={editor.kind === 'references' ? REFERENCE_MACROS : undefined}
-                          extra={
-                            editor.command
-                              ? [['{{instruction}}', `The ${editor.command} command argument`]]
-                              : undefined
-                          }
-                        />
-                      </Show>
-                    </>
-                  }
-                />
-              )}
-            </For>
-          </section>
-        )}
-      </For>
-
-      <Show when={props.mode === 'chat'}>
-        <section
-          id="image-settings-panel-revision"
-          class="settings-section image-settings-panel"
-          aria-labelledby="image-settings-title-revision"
-        >
-          <h3 id="image-settings-title-revision">Chat image revision</h3>
-          <p class="hint">
-            Used when you regenerate an image prompt inside a chat. The existing conversation and
-            its system prompt remain as context; the original image prompt is supplied as the
-            preceding assistant message. This setting applies to every chat.
-          </p>
-          <div class="form-stack field-group" role="group" aria-label="Image revision messages">
-            <For
-              each={
-                [
-                  [
-                    'promptRevisionContext',
-                    'Context message template',
-                    3,
-                    'Inserted before the original prompt when the chat does not end with a user turn. Leave empty to omit it.',
-                  ],
-                  [
-                    'promptRevisionOriginal',
-                    'Original prompt message template',
-                    4,
-                    'Sent as the assistant turn being revised. Include {{prompt}}.',
-                  ],
-                  [
-                    'promptRevisionTemplate',
-                    'Prompt template',
-                    10,
-                    'Instructions for revising the original image prompt.',
-                  ],
-                ] as const
-              }
-            >
-              {([key, label, rows, hint]) => (
-                <FormField
-                  kind="macro"
-                  field={revision.fields[key]}
-                  label={label}
-                  rows={rows}
-                  keys={['instruction', 'prompt']}
-                  hint={hint}
-                  id={key === 'promptRevisionTemplate' ? 'image-revision-template' : undefined}
-                  help={
-                    key === 'promptRevisionTemplate'
-                      ? [
-                          ['{{instruction}}', 'The requested change'],
-                          ['{{prompt}}', 'The original image prompt'],
-                        ]
-                      : undefined
-                  }
-                />
-              )}
-            </For>
-          </div>
-        </section>
-      </Show>
-
-      <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
-        <SettingsTransferButtons
-          type={`page:${props.mode === 'chat' ? 'chatImagePrompts' : 'avatarPrompts'}`}
-          onError={showError}
-          exportData={() => ({
-            presets: Object.fromEntries(
-              promptEditors.map(({ kind }) => [kind, editors[kind].value]),
-            ),
-            ...(props.mode === 'chat' ? revision.value() : {}),
-          })}
-          importData={(data) => {
-            const source = transferObject(data);
-            const presets = transferObject(source.presets);
-            const incoming = promptEditors
-              .filter(({ kind }) => Object.hasOwn(presets, kind))
-              .map(({ kind }) => ({
-                kind,
-                value: importImagePromptSet(presets[kind], editors[kind].value, kind === 'avatar'),
-              }));
-            if (props.mode === 'chat')
-              for (const key of Object.keys(revision.fields)) transferString(source[key], key);
-            for (const item of incoming) editors[item.kind].value = item.value;
-            if (props.mode === 'chat') revision.load(source as ReturnType<typeof revision.value>);
-          }}
+      <SettingsSection
+        title="Avatar prompts"
+        id="avatar-prompts"
+        class="image-settings-panel"
+        fields={['imageGeneration.promptPresets.avatar']}
+      >
+        <p class="hint">Prepare a portrait prompt from character or persona details.</p>
+        <PromptPresetEditor
+          ref={(value) => (avatar = value)}
+          transferKey="avatar"
+          onError={props.onError}
+          defaultPrompt={DEFAULT_AVATAR_PROMPT}
+          extraKeys={AVATAR_EXTRA_KEYS}
+          defaultContext={DEFAULT_AVATAR_CONTEXT}
+          contextExtraKeys={AVATAR_EXTRA_KEYS}
+          promptLabel={
+            <>
+              System instructions <MacroHelp rows={AVATAR_MACROS} />
+            </>
+          }
+          contextLabel={
+            <>
+              User message template <MacroHelp rows={AVATAR_MACROS} />
+            </>
+          }
+          label="Saved presets"
         />
-      </SettingsActions>
+      </SettingsSection>
+      <SettingsSection
+        title="Prompt revision"
+        id="prompt-revision"
+        class="image-settings-panel"
+        fields={Object.keys(revision.fields).map((key) => `imageGeneration.${key}`)}
+      >
+        <p class="hint">
+          Used when revising a media prompt inside a chat. The conversation remains as context, with
+          the original prompt supplied as the preceding assistant message.
+        </p>
+        <div class="form-stack field-group" role="group" aria-label="Prompt revision messages">
+          <For
+            each={
+              [
+                [
+                  'promptRevisionContext',
+                  'Context message template',
+                  3,
+                  'Inserted before the original prompt when the chat does not end with a user turn. Leave empty to omit it.',
+                ],
+                [
+                  'promptRevisionOriginal',
+                  'Original prompt message template',
+                  4,
+                  'Sent as the assistant turn being revised. Include {{prompt}}.',
+                ],
+                [
+                  'promptRevisionTemplate',
+                  'Prompt template',
+                  10,
+                  'Instructions for revising the original image prompt.',
+                ],
+              ] as const
+            }
+          >
+            {([key, label, rows, hint]) => (
+              <FormField
+                kind="macro"
+                field={revision.fields[key]}
+                label={label}
+                rows={rows}
+                keys={['instruction', 'prompt']}
+                hint={hint}
+                id={key === 'promptRevisionTemplate' ? 'image-revision-template' : undefined}
+                help={
+                  key === 'promptRevisionTemplate'
+                    ? [
+                        ['{{instruction}}', 'The requested change'],
+                        ['{{prompt}}', 'The original image prompt'],
+                      ]
+                    : undefined
+                }
+              />
+            )}
+          </For>
+        </div>
+      </SettingsSection>
     </>
   );
 }
@@ -850,7 +554,7 @@ export const imageMessage = {
               title="Open media job"
               aria-label="Open media job"
               onClick={() =>
-                openMediaTool(job().operation, {
+                openMediaTool(job().workflowId, {
                   jobId: job().id,
                   conversationId: job().contextConversationId,
                 })
@@ -1011,34 +715,15 @@ export const imageMessage = {
   },
 };
 
-export const imageGenerationCommands: ComposerCommand[] = [
+export const mediaGenerationCommands: ComposerCommand[] = [
   {
-    name: 'image',
-    params: '<instruction>',
-    description:
-      'Generate an image from the generic instruction prompt; {{instruction}} expands to the command argument',
+    name: 'media',
+    params: '[prompt]',
+    description: 'Open the media generator with an optional final prompt',
     allowDuringGeneration: true,
-    // Returning navigateTree's result keeps the composer text on failure.
-    run: (args) => generate('instruction', args.trim()),
-  },
-  {
-    name: 'imagechar',
-    params: '[instruction]',
-    description: 'Generate a character image, optionally using the character-instruction prompt',
-    allowDuringGeneration: true,
-    run: (args) => {
-      const instruction = args.trim();
-      return generate(instruction ? 'characterInstruction' : 'describe', instruction);
-    },
-  },
-  {
-    name: 'imageface',
-    params: '[instruction]',
-    description: 'Generate a face image, optionally using the face-instruction prompt',
-    allowDuringGeneration: true,
-    run: (args) => {
-      const instruction = args.trim();
-      return generate(instruction ? 'faceInstruction' : 'face', instruction);
+    run: async (args) => {
+      openMediaTool(null, { conversationId: state.selectedId ?? undefined, prompt: args.trim() });
+      return true;
     },
   },
 ];

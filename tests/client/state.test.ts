@@ -81,8 +81,6 @@ test('pending prompt trace preserves history and replaces only its editable tail
 test('client sync', async () => {
   const { prepareEndpointPatch } = await import('../../client/src/state/endpointSync.ts');
 
-  const { changedFields, mergeRemoteDraft } = await import('../../client/src/state/editorSync.ts');
-
   const { SuccessfulFetchSequence } = await import('../../client/src/state/sync.ts');
 
   const sequence = new SuccessfulFetchSequence<string>();
@@ -94,27 +92,11 @@ test('client sync', async () => {
   assert.equal(sequence.accept('settings', fourth), true);
   assert.equal(sequence.accept('settings', third), false);
 
-  assert.deepEqual(
-    changedFields(
-      { name: 'A', content: 'old', nested: { enabled: false } },
-      { name: 'B', content: 'old', nested: { enabled: false } },
-    ),
-    { name: 'B' },
-  );
-
   assert.deepEqual(prepareEndpointPatch({ genParams: {} }), {
     genParams: {},
     replaceGenParams: true,
   });
   assert.deepEqual(prepareEndpointPatch({ name: 'renamed' }), { name: 'renamed' });
-
-  const merged = mergeRemoteDraft(
-    { title: 'old', personaId: 1, endpointId: 1 },
-    { title: 'old', personaId: 2, endpointId: 1 },
-    { title: 'remote', personaId: 3, endpointId: 1 },
-  );
-  assert.deepEqual(merged.draft, { title: 'remote', personaId: 2, endpointId: 1 });
-  assert.deepEqual(merged.conflicts, ['personaId']);
 });
 
 test('settings submission', async () => {

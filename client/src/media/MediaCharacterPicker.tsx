@@ -4,6 +4,8 @@ import { state } from '../state/store.ts';
 import Avatar from '../components/ui/Avatar.tsx';
 import DropdownSurface from '../components/ui/DropdownSurface.tsx';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
+import ReferenceEditButton from '../components/ui/ReferenceEditButton.tsx';
+import { editReferencedEntity } from '../state/entityReferences.ts';
 
 export default function MediaCharacterPicker(props: {
   value: number[];
@@ -67,22 +69,35 @@ export default function MediaCharacterPicker(props: {
         </button>
         <For each={state.characters}>
           {(character) => (
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-label={character.name}
-              aria-checked={props.value.includes(character.id)}
-              onClick={() => toggle(character.id)}
-              disabled={props.disabled}
+            <div
+              class="flex items-center gap-1 [&>button:first-child]:flex-1 [&>button:first-child]:min-w-0"
+              role="presentation"
             >
-              <Avatar src={character.avatarThumbnail} name={character.name} />
-              <span>{character.name}</span>
-              <span class="menu-check">
-                <Show when={props.value.includes(character.id)}>
-                  <FontAwesomeIcon icon={faCheck} size={12} />
-                </Show>
-              </span>
-            </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-label={character.name}
+                aria-checked={props.value.includes(character.id)}
+                onClick={() => toggle(character.id)}
+                disabled={props.disabled}
+              >
+                <Avatar src={character.avatarThumbnail} name={character.name} />
+                <span>{character.name}</span>
+                <span class="menu-check">
+                  <Show when={props.value.includes(character.id)}>
+                    <FontAwesomeIcon icon={faCheck} size={12} />
+                  </Show>
+                </span>
+              </button>
+              <ReferenceEditButton
+                label={character.name}
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  editReferencedEntity('characters', character.id);
+                }}
+              />
+            </div>
           )}
         </For>
       </DropdownSurface>

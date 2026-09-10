@@ -56,6 +56,14 @@ function candidate(row: MediaJobRow, value: unknown) {
   return { source, asset };
 }
 
+function textCandidate(row: MediaJobRow) {
+  if (row.state !== 'succeeded' || !row.result_text?.trim())
+    throw new HttpError(409, 'This text variation is no longer available');
+  if (row.destination !== 'chat')
+    throw new HttpError(400, 'Text results can be added to a chat; the gallery requires media');
+  return { source: row, asset: null };
+}
+
 export function selectMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
   const { asset } = candidate(row, body.assetId);
@@ -82,8 +90,11 @@ export function cancelMediaVariation(row: MediaJobRow) {
 /** Save one result without closing the draft or releasing its other variations. */
 export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
-  const { source, asset } = candidate(row, body.assetId);
-  if (draft.savedAssetIds.includes(asset.id)) return mediaJobDto(source);
+  const { source, asset } =
+    body.assetId === null ? textCandidate(row) : candidate(row, body.assetId);
+  // The message FK is the saved-text identity and is cleared when that message is deleted.
+  if (asset ? draft.savedAssetIds.includes(asset.id) : source.message_id !== null)
+    return mediaJobDto(source);
   const conversation =
     source.context_conversation_id === null
       ? null
@@ -105,22 +116,23 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       const message = appendMessage(
         chat.id,
         'tool',
-        source.prompt,
+        asset ? source.prompt : source.result_text!,
         chat.activeLeafId,
         'done',
         null,
-        'Media prompt',
+        asset ? 'Media prompt' : 'Media result',
       );
-      stmt('UPDATE messages SET images_json = ?, render_recipe_id = ? WHERE id = ?').run(
-        JSON.stringify([asset.url]),
-        asset.recipeId,
-        message.id,
-      );
+      if (asset)
+        stmt('UPDATE messages SET images_json = ?, render_recipe_id = ? WHERE id = ?').run(
+          JSON.stringify([asset.url]),
+          asset.recipeId,
+          message.id,
+        );
       updateMediaJob(source.id, { message_id: message.id });
       markMessageDirty(chat.id, message.id);
       touchMediaConversation(chat.id);
       broadcastTree(chat.id);
-    } else {
+    } else if (asset) {
       insertGalleryAsset(asset, {
         conversationId: source.context_conversation_id,
         prompt: source.prompt,
@@ -128,7 +140,7 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       invalidate('gallery');
     }
     stmt(`UPDATE media_drafts SET selected_asset_id = ?, revision = revision + 1
-      WHERE id = ?`).run(asset.id, draft.id);
+      WHERE id = ?`).run(asset?.id ?? draft.selectedAssetId, draft.id);
   });
   publishMediaJob(source.id);
   if (row.id !== source.id) publishMediaJob(row.id);

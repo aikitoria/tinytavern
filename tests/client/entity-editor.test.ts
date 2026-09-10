@@ -89,3 +89,60 @@ test('model discovery preserves endpoint drafts without hiding configuration con
     dispose();
   }
 });
+
+test('entity saves reject duplicate submissions and preserve edits made during the request', async () => {
+  const modulePath = '../../client/src/util.ts';
+  const { createEntityEditor } = await import(modulePath);
+  let dispose!: () => void;
+  let draft = { name: '' };
+  let writes = 0;
+  let finish!: () => void;
+  const editor = createRoot((cleanup) => {
+    dispose = cleanup;
+    const [items, setItems] = createSignal([{ id: 'workflow', name: 'Original' }]);
+    return createEntityEditor({
+      items,
+      initialId: () => 'workflow',
+      load: (item: { id: string; name: string } | undefined) => {
+        draft = { name: item?.name ?? '' };
+      },
+      data: () => draft,
+      create: async (data: typeof draft) => ({ id: 'created', ...data }),
+      patch: async (id: string, data: Partial<typeof draft>) => {
+        writes++;
+        const item = { ...items()[0]!, ...data, id };
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        setItems([item]);
+        return item;
+      },
+      remove: async () => {},
+      duplicate: async () => items()[0]!,
+      deletePrompt: 'Delete workflow?',
+    });
+  });
+  try {
+    draft.name = 'Submitted';
+    const first = editor.save();
+    assert.equal(editor.saving(), true);
+    assert.equal(await editor.save(), false);
+    assert.equal(writes, 1);
+    editor.discard();
+    assert.equal(draft.name, 'Submitted', 'Discard cannot race an in-flight save');
+    draft.name = 'Edited during save';
+    finish();
+    assert.equal(await first, false, 'Later edits must keep navigation guarded');
+    assert.equal(editor.saving(), false);
+    assert.equal(editor.selected()?.name, 'Submitted');
+    assert.equal(draft.name, 'Edited during save');
+    const second = editor.save();
+    finish();
+    assert.equal(await second, true);
+    assert.equal(editor.selected()?.name, 'Edited during save');
+    editor.discard();
+    assert.equal(draft.name, 'Edited during save');
+  } finally {
+    dispose();
+  }
+});

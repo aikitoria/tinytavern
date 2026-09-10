@@ -1,5 +1,9 @@
-import { useDialogPage } from '../../state/dialogContext.ts';
-import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
+import { useDialogNavigationGuard, useDialogPage } from '../../state/dialogContext.ts';
+import {
+  navigatePageWithGuards,
+  readPageLocation,
+  writePageLocation,
+} from '../../state/pageLocation.ts';
 import {
   faArrowLeft,
   faBarsProgress,
@@ -39,7 +43,7 @@ import { confirmAction } from '../../state/confirm.ts';
 import { filterGallery, indexGallery } from '../../galleryModel.ts';
 import { errorMessage } from '../../util.ts';
 import {
-  MEDIA_TOOL_LINKS,
+  mediaToolLinks,
   openMediaJobs,
   openMediaTool,
   restorePage,
@@ -51,6 +55,9 @@ import GalleryDetail from './GalleryDetail.tsx';
 import GalleryGrid from './GalleryGrid.tsx';
 import Modal from '../ui/Modal.tsx';
 import Select from '../ui/Select.tsx';
+import ReferenceEditButton from '../ui/ReferenceEditButton.tsx';
+import { editReferencedEntity } from '../../state/entityReferences.ts';
+import { createSettingsNavigation, SettingsNavigationPrompt } from '../settings/SettingsGuard.tsx';
 
 function readPreference(key: string): string | null {
   try {
@@ -91,31 +98,45 @@ function CharacterPicker(props: {
   };
   return (
     <>
-      <button
-        ref={button}
-        type="button"
-        class="select-btn [&_.avatar]:shrink-0 [&_.avatar]:text-tiny [&_.avatar]:w-5 [&_.avatar]:h-5 tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-35"
-        aria-label="Filter gallery by character"
-        aria-haspopup="menu"
-        aria-expanded={open()}
-        disabled={props.disabled}
-        onClick={() => setOpen(!open())}
-      >
-        <Show when={selected()} fallback={<FontAwesomeIcon icon={faImages} size={15} />}>
-          {(current) => (
-            <Avatar
-              src={
-                state.characters.find((character) => character.id === current().id)?.avatarThumbnail
-              }
-              name={current().name}
+      <div class="select-control tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-35">
+        <button
+          ref={button}
+          type="button"
+          class="select-btn [&_.avatar]:shrink-0 [&_.avatar]:text-tiny [&_.avatar]:w-5 [&_.avatar]:h-5"
+          aria-label="Filter gallery by character"
+          aria-haspopup="menu"
+          aria-expanded={open()}
+          disabled={props.disabled}
+          onClick={() => setOpen(!open())}
+        >
+          <Show when={selected()} fallback={<FontAwesomeIcon icon={faImages} size={15} />}>
+            {(current) => (
+              <Avatar
+                src={
+                  state.characters.find((character) => character.id === current().id)
+                    ?.avatarThumbnail
+                }
+                name={current().name}
+              />
+            )}
+          </Show>
+          <span class="select-label flex-1 min-w-0 text-left truncate">
+            {selected()?.name ?? 'All characters'}
+          </span>
+          <FontAwesomeIcon icon={faChevronDown} size={10} />
+        </button>
+        <Show when={state.characters.find((character) => character.id === selected()?.id)}>
+          {(character) => (
+            <ReferenceEditButton
+              label={character().name}
+              onClick={() => {
+                setOpen(false);
+                editReferencedEntity('characters', character().id);
+              }}
             />
           )}
         </Show>
-        <span class="flex-1 min-w-0 text-left truncate">
-          {selected()?.name ?? 'All characters'}
-        </span>
-        <FontAwesomeIcon icon={faChevronDown} size={10} />
-      </button>
+      </div>
       <DropdownSurface
         open={open()}
         anchor={() => button}
@@ -170,6 +191,8 @@ export interface GalleryPickerOptions {
 }
 
 export default function GalleryModal(props: { picker?: GalleryPickerOptions; active?: boolean }) {
+  const navigation = createSettingsNavigation();
+  if (!props.picker) useDialogNavigationGuard(navigation.navigate);
   const galleryItems = () =>
     props.picker ? state.gallery.filter((item) => item.media?.kind === 'image') : state.gallery;
   const [pickedIds, setPickedIds] = createSignal<number[]>(
@@ -195,7 +218,8 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       toast(`Choose up to ${props.picker?.maximum} images.`);
     }
   };
-  const leave = () => (props.picker ? props.picker.onCancel() : openModal(null));
+  const leave = () =>
+    navigation.navigate(() => (props.picker ? props.picker.onCancel() : openModal(null)));
   const initialPage = props.picker ? null : useDialogPage()();
   const initialSize = Number(readPreference('size'));
   const [imageSize, setImageSize] = createSignal(
@@ -319,7 +343,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       setCharacterKey('all');
   });
 
-  const openDetail = (item: GalleryItem) => {
+  const showDetail = (item: GalleryItem) => {
     const moveFocus =
       detailId() == null || document.activeElement?.closest('.gallery-detail-content');
     setToolsOpen(false);
@@ -333,10 +357,12 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     if (moveFocus)
       focusFrame = requestAnimationFrame(() => backButton?.focus({ preventScroll: true }));
   };
-  const closeDetail = () => {
+  const hideDetail = () => {
     setDetailId(null);
     if (!filtered().length) queueMicrotask(() => searchInput?.focus({ preventScroll: true }));
   };
+  const openDetail = (item: GalleryItem) => navigation.navigate(() => showDetail(item));
+  const closeDetail = () => navigation.navigate(hideDetail);
   const navigateDetail = (direction: number) => {
     const position = detailIndex();
     const next = position < 0 ? undefined : filtered()[position + direction];
@@ -348,9 +374,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     if (byId().has(id)) lastDetailIndex = filteredIndex().get(id) ?? lastDetailIndex;
     else
       untrack(() => {
+        navigation.cancel();
         const next = filtered()[Math.min(lastDetailIndex, filtered().length - 1)];
-        if (next) openDetail(next);
-        else closeDetail();
+        if (next) showDetail(next);
+        else hideDetail();
       });
   });
 
@@ -458,379 +485,386 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
   };
 
   return (
-    <Modal
-      active={props.active}
-      title={props.picker ? 'Choose reference images' : 'Gallery'}
-      hideCloseButton
-      fullscreen
-      class={`gallery-modal mobile:[&_.modal-head]:gap-2 small:[&_.modal-title]:display-none ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
-      onClose={() => {
-        if (bulkDeleting()) return;
-        if (detailId() != null) closeDetail();
-        else if (selectionMode()) leaveSelection();
-        else leave();
-      }}
-      headerExtra={
-        <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear small:gap-1">
-          <Show when={props.picker}>
+    <>
+      <Modal
+        active={props.active}
+        title={props.picker ? 'Choose reference images' : 'Gallery'}
+        hideCloseButton
+        fullscreen
+        class={`gallery-modal mobile:[&_.modal-head]:gap-2 small:[&_.modal-title]:display-none ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
+        onClose={() => {
+          if (bulkDeleting()) return;
+          if (detailId() != null) closeDetail();
+          else if (selectionMode()) leaveSelection();
+          else leave();
+        }}
+        headerStart={
+          <Show when={props.picker || !selectionMode() || detailItem()}>
             <button
-              class="page-back"
+              ref={backButton}
+              type="button"
+              class="page-back icon-btn flex-none border-transparent bg-clear gallery-back"
+              aria-label="Back"
+              title="Back"
               onClick={() => (detailId() === null ? leave() : closeDetail())}
             >
-              <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
+              <FontAwesomeIcon icon={faArrowLeft} size={13} />
             </button>
-            <span class="whitespace-nowrap text-dim text-caption tabular-nums">
-              {pickedItems().length} / {props.picker!.maximum} selected
-            </span>
-            <Show when={detailItem()}>
-              {(item) => (
-                <button onClick={() => togglePicked(item().id)}>
-                  {pickedIds().includes(item().id) ? 'Remove selection' : 'Select image'}
-                </button>
-              )}
-            </Show>
-            <button onClick={() => fileInput.click()} disabled={uploadProgress() !== null}>
-              Upload
-            </button>
-            <button
-              class="primary-btn"
-              disabled={pickedItems().length === 0}
-              onClick={() => props.picker!.onConfirm(pickedItems())}
-            >
-              Use selected
-            </button>
-            <button onClick={leave}>Cancel</button>
           </Show>
-          <Show when={!props.picker}>
-            <Show
-              when={detailItem()}
-              fallback={
-                <Show
-                  when={selectionMode()}
-                  fallback={
-                    <>
-                      <button type="button" class="page-back gallery-back" onClick={leave}>
-                        <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
-                      </button>
-                      <span class="whitespace-nowrap text-dim text-caption tabular-nums">
-                        {filtered().length} {filtered().length === 1 ? 'image' : 'images'}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={uploadProgress() != null}
-                        onClick={() => fileInput.click()}
-                      >
-                        <FontAwesomeIcon icon={faUpload} size={14} /> Upload
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!filtered().length}
-                        onClick={() => setSelectionMode(true)}
-                      >
-                        <FontAwesomeIcon icon={faListCheck} size={14} /> Select
-                      </button>
-                    </>
-                  }
-                >
-                  <span
-                    class="whitespace-nowrap text-dim text-caption tabular-nums"
-                    aria-live="polite"
-                  >
-                    {selectedItems().length} selected
-                  </span>
-                  <button
-                    type="button"
-                    disabled={bulkDeleting() || !filtered().length}
-                    onClick={() =>
-                      setSelectedIds(
-                        allSelected()
-                          ? new Set<number>()
-                          : new Set(filtered().map((item) => item.id)),
-                      )
+        }
+        headerExtra={
+          <div class="flex items-center justify-end flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control small:gap-1">
+            <Show when={props.picker}>
+              <span class="whitespace-nowrap text-dim text-caption tabular-nums">
+                {pickedItems().length} / {props.picker!.maximum} selected
+              </span>
+              <Show when={detailItem()}>
+                {(item) => (
+                  <button onClick={() => togglePicked(item().id)}>
+                    {pickedIds().includes(item().id) ? 'Remove selection' : 'Select image'}
+                  </button>
+                )}
+              </Show>
+              <button onClick={() => fileInput.click()} disabled={uploadProgress() !== null}>
+                Upload
+              </button>
+              <button
+                class="primary-btn"
+                disabled={pickedItems().length === 0}
+                onClick={() => props.picker!.onConfirm(pickedItems())}
+              >
+                Use selected
+              </button>
+              <button onClick={leave}>Cancel</button>
+            </Show>
+            <Show when={!props.picker}>
+              <Show
+                when={detailItem()}
+                fallback={
+                  <Show
+                    when={selectionMode()}
+                    fallback={
+                      <>
+                        <span class="whitespace-nowrap text-dim text-caption tabular-nums">
+                          {filtered().length} {filtered().length === 1 ? 'image' : 'images'}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={uploadProgress() != null}
+                          onClick={() => fileInput.click()}
+                        >
+                          <FontAwesomeIcon icon={faUpload} size={14} /> Upload
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!filtered().length}
+                          onClick={() => setSelectionMode(true)}
+                        >
+                          <FontAwesomeIcon icon={faListCheck} size={14} /> Select
+                        </button>
+                      </>
                     }
                   >
-                    {allSelected() ? 'Clear selection' : 'Select all'}
+                    <span
+                      class="whitespace-nowrap text-dim text-caption tabular-nums"
+                      aria-live="polite"
+                    >
+                      {selectedItems().length} selected
+                    </span>
+                    <button
+                      type="button"
+                      disabled={bulkDeleting() || !filtered().length}
+                      onClick={() =>
+                        setSelectedIds(
+                          allSelected()
+                            ? new Set<number>()
+                            : new Set(filtered().map((item) => item.id)),
+                        )
+                      }
+                    >
+                      {allSelected() ? 'Clear selection' : 'Select all'}
+                    </button>
+                    <button
+                      type="button"
+                      class="danger"
+                      disabled={bulkDeleting() || !selectedItems().length}
+                      onClick={() => void deleteSelected()}
+                    >
+                      <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete
+                    </button>
+                    <button type="button" disabled={bulkDeleting()} onClick={leaveSelection}>
+                      Done
+                    </button>
+                  </Show>
+                }
+              >
+                <span class="whitespace-nowrap text-dim text-caption tabular-nums">
+                  {detailIndex() >= 0
+                    ? `${detailIndex() + 1} / ${filtered().length}`
+                    : 'Saved image'}
+                </span>
+                <div class="flex gap-1">
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Previous gallery image"
+                    title="Previous image"
+                    disabled={detailIndex() <= 0}
+                    onClick={() => navigateDetail(-1)}
+                  >
+                    <FontAwesomeIcon icon={faChevronLeft} size={14} />
                   </button>
                   <button
                     type="button"
-                    class="danger"
-                    disabled={bulkDeleting() || !selectedItems().length}
-                    onClick={() => void deleteSelected()}
+                    class="icon-btn"
+                    aria-label="Next gallery image"
+                    title="Next image"
+                    disabled={detailIndex() < 0 || detailIndex() >= filtered().length - 1}
+                    onClick={() => navigateDetail(1)}
                   >
-                    <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete
+                    <FontAwesomeIcon icon={faChevronRight} size={14} />
                   </button>
-                  <button type="button" disabled={bulkDeleting()} onClick={leaveSelection}>
-                    Done
-                  </button>
-                </Show>
-              }
-            >
-              <button
-                ref={backButton}
-                type="button"
-                class="page-back gallery-back"
-                onClick={closeDetail}
-              >
-                <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
-              </button>
-              <span class="whitespace-nowrap text-dim text-caption tabular-nums">
-                {detailIndex() >= 0 ? `${detailIndex() + 1} / ${filtered().length}` : 'Saved image'}
-              </span>
-              <div class="flex gap-1">
+                </div>
                 <button
                   type="button"
-                  class="icon-btn"
-                  aria-label="Previous gallery image"
-                  title="Previous image"
-                  disabled={detailIndex() <= 0}
-                  onClick={() => navigateDetail(-1)}
+                  class="gallery-details-toggle"
+                  aria-label={showDetails() ? 'Hide image details' : 'Show image details'}
+                  aria-expanded={showDetails()}
+                  aria-controls="gallery-detail-panel"
+                  onClick={() => {
+                    const next = !showDetails();
+                    setShowDetails(next);
+                    savePreference('details', next ? '1' : '0');
+                  }}
                 >
-                  <FontAwesomeIcon icon={faChevronLeft} size={14} />
+                  <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
                 </button>
+              </Show>
+              <Show when={!selectionMode() && !detailItem()}>
                 <button
+                  ref={toolsButton}
                   type="button"
-                  class="icon-btn"
-                  aria-label="Next gallery image"
-                  title="Next image"
-                  disabled={detailIndex() < 0 || detailIndex() >= filtered().length - 1}
-                  onClick={() => navigateDetail(1)}
+                  aria-label="Media tools"
+                  aria-haspopup="menu"
+                  aria-expanded={toolsOpen()}
+                  onClick={() => setToolsOpen(!toolsOpen())}
                 >
-                  <FontAwesomeIcon icon={faChevronRight} size={14} />
+                  <FontAwesomeIcon icon={faWrench} size={14} /> Tools
+                  <FontAwesomeIcon icon={faChevronDown} size={10} />
                 </button>
-              </div>
-              <button
-                type="button"
-                class="gallery-details-toggle"
-                aria-label={showDetails() ? 'Hide image details' : 'Show image details'}
-                aria-expanded={showDetails()}
-                aria-controls="gallery-detail-panel"
-                onClick={() => {
-                  const next = !showDetails();
-                  setShowDetails(next);
-                  savePreference('details', next ? '1' : '0');
-                }}
-              >
-                <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
-              </button>
+                <DropdownSurface
+                  open={toolsOpen()}
+                  anchor={() => toolsButton}
+                  onClose={() => setToolsOpen(false)}
+                  role="menu"
+                  ariaLabel="Media tools"
+                  fitContentWidth
+                  minWidth={160}
+                  keyboardNavigation
+                  autoFocus
+                >
+                  <For each={mediaToolLinks()}>
+                    {(tool) => (
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setToolsOpen(false);
+                          openMediaTool(tool.workflowId);
+                        }}
+                      >
+                        {tool.label}
+                      </button>
+                    )}
+                  </For>
+                </DropdownSurface>
+              </Show>
+              <Show when={!selectionMode()}>
+                <button type="button" aria-label="Media jobs" onClick={openMediaJobs}>
+                  <FontAwesomeIcon icon={faBarsProgress} size={14} />
+                  Jobs{activeMediaJobCount() ? ` (${activeMediaJobCount()})` : ''}
+                </button>
+              </Show>
             </Show>
-            <Show when={!selectionMode() && !detailItem()}>
-              <button
-                ref={toolsButton}
-                type="button"
-                aria-label="Media tools"
-                aria-haspopup="menu"
-                aria-expanded={toolsOpen()}
-                onClick={() => setToolsOpen(!toolsOpen())}
-              >
-                <FontAwesomeIcon icon={faWrench} size={14} /> Tools
-                <FontAwesomeIcon icon={faChevronDown} size={10} />
-              </button>
-              <DropdownSurface
-                open={toolsOpen()}
-                anchor={() => toolsButton}
-                onClose={() => setToolsOpen(false)}
-                role="menu"
-                ariaLabel="Media tools"
-                fitContentWidth
-                minWidth={160}
-                keyboardNavigation
-                autoFocus
-              >
-                <For each={MEDIA_TOOL_LINKS}>
-                  {(tool) => (
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setToolsOpen(false);
-                        openMediaTool(tool.operation);
-                      }}
-                    >
-                      {tool.label}
-                    </button>
-                  )}
-                </For>
-              </DropdownSurface>
-            </Show>
-            <Show when={!selectionMode()}>
-              <button type="button" aria-label="Media jobs" onClick={openMediaJobs}>
-                <FontAwesomeIcon icon={faBarsProgress} size={14} />
-                Jobs{activeMediaJobCount() ? ` (${activeMediaJobCount()})` : ''}
-              </button>
-            </Show>
-          </Show>
-        </div>
-      }
-    >
-      <div
-        class="flex flex-col relative flex-1 min-h-0 mobile:block mobile:overflow-visible"
-        onDragEnter={(event) => {
-          if (!event.dataTransfer?.types.includes('Files')) return;
-          event.preventDefault();
-          dragDepth++;
-          setDragging(true);
-        }}
-        onDragOver={(event) => {
-          if (!event.dataTransfer?.types.includes('Files')) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = uploadProgress() || bulkDeleting() ? 'none' : 'copy';
-        }}
-        onDragLeave={() => {
-          if (--dragDepth <= 0) {
+          </div>
+        }
+      >
+        <div
+          class="flex flex-col relative flex-1 min-h-0 mobile:block mobile:overflow-visible"
+          onDragEnter={(event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return;
+            event.preventDefault();
+            dragDepth++;
+            setDragging(true);
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = uploadProgress() || bulkDeleting() ? 'none' : 'copy';
+          }}
+          onDragLeave={() => {
+            if (--dragDepth <= 0) {
+              dragDepth = 0;
+              setDragging(false);
+            }
+          }}
+          onDrop={(event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return;
+            event.preventDefault();
             dragDepth = 0;
             setDragging(false);
-          }
-        }}
-        onDrop={(event) => {
-          if (!event.dataTransfer?.types.includes('Files')) return;
-          event.preventDefault();
-          dragDepth = 0;
-          setDragging(false);
-          void upload([...event.dataTransfer.files]);
-        }}
-      >
-        <input
-          ref={fileInput}
-          type="file"
-          hidden
-          multiple
-          accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
-          onChange={(event) => {
-            const files = [...(event.currentTarget.files ?? [])];
-            event.currentTarget.value = '';
-            void upload(files);
+            void upload([...event.dataTransfer.files]);
           }}
-        />
-        <Show when={dragging()}>
-          <div class="flex flex-col items-center justify-center gap-3 absolute inset-3 z-5 pointer-events-none bg-panel border-2 border-dashed border-accent text-foreground [&_span]:text-dim [&_span]:text-sm rounded-[var(--radius-md)]">
-            <FontAwesomeIcon icon={faUpload} size={26} />
-            <strong>
-              {uploadProgress()
-                ? 'Upload in progress'
-                : bulkDeleting()
-                  ? 'Deletion in progress'
-                  : 'Drop images to upload'}
-            </strong>
-            <span>PNG, JPEG, WebP · Up to 64 MB each</span>
-          </div>
-        </Show>
-        <Show when={uploadProgress()}>
-          {(progress) => (
-            <div class="flex items-center gap-2 py-2 px-4 text-dim text-xs" role="status">
-              <FontAwesomeIcon
-                icon={faSpinner}
-                size={12}
-                class="spinner inline-block flex-none origin-center size-2.5"
-              />
-              Uploading {progress().done} / {progress().total}
-            </div>
-          )}
-        </Show>
-        <div
-          class="grid items-center gap-2 flex-none min-h-bar py-1 px-4 bg-chrome border-b border-b-solid border-b-subtle mobile:flex mobile:flex-wrap grid-cols-[minmax(160px,_1fr)_minmax(150px,_230px)_132px_170px] tablet:grid-cols-[minmax(0,_1fr)_minmax(0,_1fr)_132px]"
-          classList={{ hidden: detailItem() != null }}
         >
-          <div class="gallery-search flex items-center gap-2 min-w-0 pl-3 bg-canvas border border-solid border-control-line rounded-sm text-control [&:focus-within]:border-accent [&:focus-within]:-outline-offset-1 [&_input]:shadow-clear [&_input]:outline-clear [&_input]:text-sm [&_input]:leading-5 [&_input]:w-full [&_input]:min-w-0 [&_input]:border-clear [&_input]:bg-clear [&_input]:p-1.5 [&_input]:pr-3 [&_input]:pl-0 [&_input:focus]:outline-clear tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-45">
-            <FontAwesomeIcon icon={faMagnifyingGlass} size={14} />
-            <input
-              ref={searchInput}
-              data-modal-initial-focus
-              type="search"
-              aria-label="Search gallery prompts"
-              placeholder="Search prompts…"
-              value={query()}
-              disabled={bulkDeleting()}
-              onInput={(event) => updateQuery(event.currentTarget.value)}
-            />
-          </div>
-          <CharacterPicker
-            options={characterOptions()}
-            value={characterKey()}
-            total={galleryItems().length}
-            disabled={bulkDeleting()}
-            onChange={setCharacterKey}
-          />
-          <Select
-            class="tablet:col-start-3 tablet:row-start-1 mobile:grow-0 mobile:shrink-0 mobile:basis-33"
-            ariaLabel="Sort gallery"
-            value={sort()}
-            disabled={bulkDeleting()}
-            options={[
-              { value: 'newest', label: 'Newest first' },
-              { value: 'oldest', label: 'Oldest first' },
-            ]}
-            onChange={(value) => {
-              setSort(value);
-              savePreference('sort', value);
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            multiple
+            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            onChange={(event) => {
+              const files = [...(event.currentTarget.files ?? [])];
+              event.currentTarget.value = '';
+              void upload(files);
             }}
           />
-          <label class="flex items-center gap-2 text-dim text-xs whitespace-nowrap mobile:min-w-0 mobile:max-w-60 mobile:grow mobile:shrink mobile:basis-42.5 [&_input]:shadow-clear [&_input]:w-full [&_input]:min-w-0 [&_input]:h-6 [&_input]:p-0 [&_input]:border-clear [&_input]:bg-clear">
-            Image size
-            <input
-              type="range"
-              min={140}
-              max={320}
-              step={20}
-              value={imageSize()}
-              aria-label="Gallery image size"
-              onInput={(event) => {
-                const value = Number(event.currentTarget.value);
-                setImageSize(value);
-                savePreference('size', String(value));
-              }}
-            />
-          </label>
-        </div>
-        <GalleryGrid
-          items={filtered()}
-          targetHeight={imageSize()}
-          resetKey={JSON.stringify([search(), characterKey(), sort()])}
-          hidden={detailItem() != null || filtered().length === 0}
-          active={props.active}
-          selecting={props.picker !== undefined || selectionMode()}
-          selectedIds={props.picker ? new Set(pickedIds()) : selectedIds()}
-          onOpen={openDetail}
-          onToggle={props.picker ? togglePicked : toggleSelection}
-          onInspect={props.picker ? openDetail : undefined}
-          selectionOrder={props.picker ? pickedIds() : undefined}
-        />
-        <Show when={!detailItem() && filtered().length === 0}>
-          <div class="flex items-center justify-center flex-col gap-2 flex-1 p-4 text-dim text-center text-sm [&>svg]:mb-2 [&>svg]:text-muted [&_strong]:text-foreground [&_strong]:text-lg">
-            <FontAwesomeIcon icon={faImages} size={34} />
-            <strong>{state.gallery.length ? 'No matching images' : 'No saved images yet'}</strong>
-            <span>
-              {state.gallery.length
-                ? 'Try another prompt search or character.'
-                : 'Upload images, drop them here, or save an image from chat.'}
-            </span>
-            <Show when={state.gallery.length > 0}>
-              <button type="button" onClick={clearFilters}>
-                Clear filters
-              </button>
-            </Show>
-          </div>
-        </Show>
-        <Show when={detailItem() && detailId()} keyed>
-          {(id) => (
-            <div
-              id="gallery-detail-content"
-              class="gallery-detail-content flex flex-1 min-h-0 mobile:block"
-            >
-              <GalleryDetail
-                readOnly={props.picker !== undefined}
-                active={props.active}
-                item={byId().get(id)!}
-                showDetails={showDetails()}
-                onDelete={deleteItem}
-                onOpenSource={(conversationId) => {
-                  const page = { chatId: conversationId, modal: null };
-                  writePageLocation(page, true);
-                  restorePage(page);
-                }}
+          <Show when={dragging()}>
+            <div class="flex flex-col items-center justify-center gap-3 absolute inset-3 z-5 pointer-events-none bg-panel border-2 border-dashed border-accent text-foreground [&_span]:text-dim [&_span]:text-sm rounded-[var(--radius-md)]">
+              <FontAwesomeIcon icon={faUpload} size={26} />
+              <strong>
+                {uploadProgress()
+                  ? 'Upload in progress'
+                  : bulkDeleting()
+                    ? 'Deletion in progress'
+                    : 'Drop images to upload'}
+              </strong>
+              <span>PNG, JPEG, WebP · Up to 64 MB each</span>
+            </div>
+          </Show>
+          <Show when={uploadProgress()}>
+            {(progress) => (
+              <div class="flex items-center gap-2 py-2 px-4 text-dim text-xs" role="status">
+                <FontAwesomeIcon
+                  icon={faSpinner}
+                  size={12}
+                  class="spinner inline-block flex-none origin-center size-2.5"
+                />
+                Uploading {progress().done} / {progress().total}
+              </div>
+            )}
+          </Show>
+          <div
+            class="grid items-center gap-2 flex-none min-h-bar py-1 px-4 bg-chrome border-b border-b-solid border-b-subtle mobile:flex mobile:flex-wrap grid-cols-[minmax(160px,_1fr)_minmax(150px,_230px)_132px_170px] tablet:grid-cols-[minmax(0,_1fr)_minmax(0,_1fr)_132px]"
+            classList={{ hidden: detailItem() != null }}
+          >
+            <div class="gallery-search flex items-center gap-2 min-w-0 pl-3 bg-canvas border border-solid border-control-line rounded-sm text-control [&:focus-within]:border-accent [&:focus-within]:-outline-offset-1 [&_input]:shadow-clear [&_input]:outline-clear [&_input]:text-sm [&_input]:leading-5 [&_input]:w-full [&_input]:min-w-0 [&_input]:border-clear [&_input]:bg-clear [&_input]:p-1.5 [&_input]:pr-3 [&_input]:pl-0 [&_input:focus]:outline-clear tablet:col-start-1 tablet:col-end-3 mobile:grow mobile:shrink mobile:basis-45">
+              <FontAwesomeIcon icon={faMagnifyingGlass} size={14} />
+              <input
+                ref={searchInput}
+                data-modal-initial-focus
+                type="search"
+                aria-label="Search gallery prompts"
+                placeholder="Search prompts…"
+                value={query()}
+                disabled={bulkDeleting()}
+                onInput={(event) => updateQuery(event.currentTarget.value)}
               />
             </div>
-          )}
-        </Show>
-      </div>
-    </Modal>
+            <CharacterPicker
+              options={characterOptions()}
+              value={characterKey()}
+              total={galleryItems().length}
+              disabled={bulkDeleting()}
+              onChange={setCharacterKey}
+            />
+            <Select
+              class="tablet:col-start-3 tablet:row-start-1 mobile:grow-0 mobile:shrink-0 mobile:basis-33"
+              ariaLabel="Sort gallery"
+              value={sort()}
+              disabled={bulkDeleting()}
+              options={[
+                { value: 'newest', label: 'Newest first' },
+                { value: 'oldest', label: 'Oldest first' },
+              ]}
+              onChange={(value) => {
+                setSort(value);
+                savePreference('sort', value);
+              }}
+            />
+            <label class="flex items-center gap-2 text-dim text-xs whitespace-nowrap mobile:min-w-0 mobile:max-w-60 mobile:grow mobile:shrink mobile:basis-42.5 [&_input]:shadow-clear [&_input]:w-full [&_input]:min-w-0 [&_input]:h-6 [&_input]:p-0 [&_input]:border-clear [&_input]:bg-clear">
+              Image size
+              <input
+                type="range"
+                min={140}
+                max={320}
+                step={20}
+                value={imageSize()}
+                aria-label="Gallery image size"
+                onInput={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  setImageSize(value);
+                  savePreference('size', String(value));
+                }}
+              />
+            </label>
+          </div>
+          <GalleryGrid
+            items={filtered()}
+            targetHeight={imageSize()}
+            resetKey={JSON.stringify([search(), characterKey(), sort()])}
+            hidden={detailItem() != null || filtered().length === 0}
+            active={props.active}
+            selecting={props.picker !== undefined || selectionMode()}
+            selectedIds={props.picker ? new Set(pickedIds()) : selectedIds()}
+            onOpen={openDetail}
+            onToggle={props.picker ? togglePicked : toggleSelection}
+            onInspect={props.picker ? openDetail : undefined}
+            selectionOrder={props.picker ? pickedIds() : undefined}
+          />
+          <Show when={!detailItem() && filtered().length === 0}>
+            <div class="flex items-center justify-center flex-col gap-2 flex-1 p-4 text-dim text-center text-sm [&>svg]:mb-2 [&>svg]:text-muted [&_strong]:text-foreground [&_strong]:text-lg">
+              <FontAwesomeIcon icon={faImages} size={34} />
+              <strong>{state.gallery.length ? 'No matching images' : 'No saved images yet'}</strong>
+              <span>
+                {state.gallery.length
+                  ? 'Try another prompt search or character.'
+                  : 'Upload images, drop them here, or save an image from chat.'}
+              </span>
+              <Show when={state.gallery.length > 0}>
+                <button type="button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              </Show>
+            </div>
+          </Show>
+          <Show when={detailItem() && detailId()} keyed>
+            {(id) => (
+              <div
+                id="gallery-detail-content"
+                class="gallery-detail-content flex flex-1 min-h-0 mobile:block"
+              >
+                <GalleryDetail
+                  readOnly={props.picker !== undefined}
+                  active={props.active}
+                  item={byId().get(id)!}
+                  showDetails={showDetails()}
+                  register={navigation.register}
+                  onDelete={deleteItem}
+                  onOpenSource={(conversationId) => {
+                    const page = { chatId: conversationId, modal: null };
+                    navigatePageWithGuards(page, () => {
+                      writePageLocation(page, true);
+                      restorePage(page);
+                    });
+                  }}
+                />
+              </div>
+            )}
+          </Show>
+        </div>
+      </Modal>
+      <SettingsNavigationPrompt navigation={navigation}>
+        You have unsaved gallery details. Save them before leaving this image?
+      </SettingsNavigationPrompt>
+    </>
   );
 }

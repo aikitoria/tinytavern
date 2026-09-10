@@ -7,7 +7,7 @@ export function parseImageGenerationSettings(
   value: unknown,
 ): Partial<ImageGenerationSettings> | undefined {
   if (value === undefined) return undefined;
-  const settings = requireObject(value, 'imageGeneration');
+  const settings = { ...requireObject(value, 'imageGeneration') };
   for (const key of Object.keys(settings)) {
     if (
       ![
@@ -22,11 +22,15 @@ export function parseImageGenerationSettings(
   }
   if (settings.promptPresets !== undefined) {
     try {
+      const promptPresets: NonNullable<ImageGenerationSettings['promptPresets']> = {};
       for (const [kind, set] of Object.entries(
         requireObject(settings.promptPresets, 'promptPresets'),
       )) {
-        importImagePromptSet(set, { presets: [], active: '' }, kind === 'avatar');
+        if (kind !== 'avatar')
+          throw new Error('Media prompt presets are configured in the media prompt library');
+        promptPresets[kind] = importImagePromptSet(set, { presets: [], active: '' }, true);
       }
+      settings.promptPresets = promptPresets;
     } catch (err) {
       throw new HttpError(400, err instanceof Error ? err.message : String(err));
     }

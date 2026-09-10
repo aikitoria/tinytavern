@@ -1,13 +1,18 @@
-import { mediaJobActive, newRequestId, type MediaAsset } from '@tinytavern/shared';
+import {
+  compileMediaWorkflow,
+  mediaJobActive,
+  newRequestId,
+  type MediaAsset,
+} from '@tinytavern/shared';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup, onMount, on } from 'solid-js';
 import { api, ApiError } from '../state/api.ts';
 import { applyMediaJob, state, toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import Modal from '../components/ui/Modal.tsx';
 import PromptGenerationStatus from '../media/PromptGenerationStatus.tsx';
-import { avatarPromptTemplates, avatarRenderConfig } from './imageGeneration.tsx';
+import { avatarRenderConfig } from './imageGeneration.tsx';
 import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 
@@ -18,33 +23,52 @@ export default function AvatarGenerateModal(props: {
   onClose: () => void;
 }) {
   const [text, setText] = createSignal('');
-  const [reasoning, setReasoning] = createSignal('');
-  const [streaming, setStreaming] = createSignal(true);
   const [submitting, setSubmitting] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   const [jobId, setJobId] = createSignal<number>();
   const [result, setResult] = createSignal<MediaAsset>();
   const [error, setError] = createSignal('');
-  const promptAbort = new AbortController();
   const job = () => state.mediaJobs[jobId()!];
+  const image = avatarRenderConfig();
+  const streaming = () => job()?.state === 'preparing';
+  const reasoning = () => job()?.reasoning ?? '';
+  const hasPrompt = () => {
+    const workflow = job()?.workflowSnapshot ?? image?.workflow;
+    return workflow ? compileMediaWorkflow(workflow.json).slots.has('prompt') : false;
+  };
   const rendering = () => submitting() || (job() !== undefined && mediaJobActive(job()!.state));
   const progress = () => job()?.progress;
   const previewUrl = () => (rendering() ? progress()?.preview : undefined);
   const imageUrl = () => result()?.url;
   let requestKey = newRequestId();
   let disposed = false;
+  let discardOnClose = false;
+
+  createEffect(
+    on(
+      () => job()?.prompt,
+      (prompt) => {
+        if (prompt !== undefined) setText(prompt);
+      },
+    ),
+  );
 
   createEffect(() => {
     const current = job();
-    if (current?.state === 'succeeded') setResult(current.outputs[0]);
+    if (current?.state === 'succeeded') {
+      const image = current.outputs.find((asset) => asset.kind === 'image');
+      setResult(image);
+      if (!image) setError('The workflow produced no image to use as an avatar.');
+    }
     if (current?.error) setError(current.error);
   });
 
-  const discard = async (id: number) => {
+  const discard = async (id: number, onlyUnstarted = false) => {
     for (let attempt = 0; ; attempt++) {
       try {
         const current = await api.mediaJob(id);
-        await api.discardMediaDraft(current, current.draft!.revision);
+        if (onlyUnstarted && current.startedAt !== null) return;
+        await api.discardMediaDraft(current, current.draft!.revision, onlyUnstarted);
         return;
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) return;
@@ -53,10 +77,9 @@ export default function AvatarGenerateModal(props: {
     }
   };
 
-  const render = async () => {
-    const image = avatarRenderConfig();
+  const render = async (prepare = false) => {
     const prompt = text().trim();
-    if (!image || !prompt) {
+    if (!image || (!prepare && hasPrompt() && !prompt)) {
       setError(
         !image ? 'Select a workflow in Settings → Media rendering first.' : 'Write a prompt first.',
       );
@@ -66,10 +89,11 @@ export default function AvatarGenerateModal(props: {
     setError('');
     try {
       const values = {
-        operation: 'image' as const,
         workflowId: image.workflow.id,
+        avatarContext: { kind: props.kind, id: props.id },
         prompt,
         inputs: [],
+        fillInputs: { avatar: { kind: props.kind, id: props.id } },
         reviewBeforeSave: true,
       };
       const current = job();
@@ -82,56 +106,29 @@ export default function AvatarGenerateModal(props: {
       applyMediaJob(saved);
       setJobId(saved.id);
       if (disposed) return;
-      applyMediaJob(await api.mediaJobAction(saved, 'render'));
+      const currentJob = state.mediaJobs[saved.id];
+      if (!currentJob) throw new Error('The avatar job is no longer available');
+      applyMediaJob(
+        await api.mediaJobAction(currentJob, prepare && hasPrompt() ? 'prepare' : 'render', {
+          autoRender: true,
+        }),
+      );
     } catch (err) {
       if (!disposed) setError(errorMessage(err));
     } finally {
       setSubmitting(false);
-      if (disposed && jobId()) void discard(jobId()!).catch((err) => toast(errorMessage(err)));
+      if (disposed && jobId())
+        void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
     }
   };
 
-  onMount(() => {
-    void (async () => {
-      let completed = false;
-      try {
-        const templates = avatarPromptTemplates();
-        await api.streamAvatarPrompt(
-          props.kind,
-          props.id,
-          templates.prompt,
-          templates.context,
-          (d) => {
-            if (disposed || promptAbort.signal.aborted) return;
-            setReasoning('');
-            setText((t) => t + d);
-          },
-          promptAbort.signal,
-          (delta) => {
-            if (!disposed && !promptAbort.signal.aborted && !text()) {
-              setReasoning((value) => value + delta);
-            }
-          },
-        );
-        completed = true;
-      } catch (err) {
-        if (!promptAbort.signal.aborted && !disposed) setError(errorMessage(err));
-      } finally {
-        if (!disposed) {
-          setStreaming(false);
-          setReasoning('');
-        }
-      }
-      // Failed streams may contain partial prompts that should not be rendered.
-      if (completed && !promptAbort.signal.aborted && !disposed) await render();
-    })();
-  });
+  onMount(() => void render(true));
 
   onCleanup(() => {
     disposed = true;
-    promptAbort.abort();
-    // A pending request performs cleanup after its response establishes the job identity.
-    if (!submitting() && jobId()) void discard(jobId()!).catch((err) => toast(errorMessage(err)));
+    // Started drafts continue in the shared jobs list; Cancel explicitly discards them.
+    if (!submitting() && jobId())
+      void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
   });
 
   const save = async () => {
@@ -144,6 +141,7 @@ export default function AvatarGenerateModal(props: {
         props.id,
         asset.id,
       );
+      discardOnClose = true;
       props.onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -156,15 +154,17 @@ export default function AvatarGenerateModal(props: {
   return (
     <Modal title="Generate avatar" onClose={props.onClose}>
       <div class="avatar-gen form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
-        <label>Portrait prompt</label>
-        <PromptGenerationStatus active={streaming()} content={text()} reasoning={reasoning()} />
-        <textarea
-          rows={5}
-          value={text()}
-          readOnly={streaming()}
-          placeholder="The model is writing the portrait prompt…"
-          onInput={(e) => setText(e.currentTarget.value)}
-        />
+        <Show when={hasPrompt()}>
+          <label>Portrait prompt</label>
+          <PromptGenerationStatus active={streaming()} content={text()} reasoning={reasoning()} />
+          <textarea
+            rows={5}
+            value={text()}
+            readOnly={busy()}
+            placeholder="The model is writing the portrait prompt…"
+            onInput={(e) => setText(e.currentTarget.value)}
+          />
+        </Show>
         <div class="min-h-40 flex items-center gap-2 justify-center [&_img]:max-w-64 [&_img]:max-h-64 [&_img]:border [&_img]:border-solid [&_img]:border-line [&_img]:rounded-md">
           <Show
             when={previewUrl() ?? imageUrl()}
@@ -216,7 +216,14 @@ export default function AvatarGenerateModal(props: {
           <button disabled={busy()} onClick={() => void render()}>
             {imageUrl() ? 'Regenerate' : 'Render'}
           </button>
-          <button onClick={props.onClose}>Cancel</button>
+          <button
+            onClick={() => {
+              discardOnClose = true;
+              props.onClose();
+            }}
+          >
+            Cancel
+          </button>
         </div>
         <Show when={error()}>
           <p class="notice notice-error" role="alert">

@@ -27,14 +27,6 @@
   background: #0009;
 }
 
-.media-job-card-active .media-job-status {
-  @apply text-secondary;
-}
-
-.media-job-card-failed .media-job-status {
-  @apply text-danger;
-}
-
 .media-job-excerpt {
   @apply block overflow-y-auto;
   scrollbar-gutter: stable;

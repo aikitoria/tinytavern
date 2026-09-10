@@ -12,7 +12,7 @@ import {
   type MediaJobRow,
 } from './mediaJobStore.ts';
 import { tickMediaWorker } from './mediaWorker.ts';
-import { getMediaRecipe, messageRecipeId } from './mediaRecipes.ts';
+import { messageRecipeId } from './mediaRecipes.ts';
 import { HttpError } from '../http/router.ts';
 
 /** A chat swipe reuses the full recipe, including image-edit inputs and output selection. */
@@ -22,9 +22,6 @@ export function startMessageImageRender(
 ): MediaJobRow {
   if (!recipeId) {
     throw new HttpError(400, 'The message has no rendering recipe');
-  }
-  if (getMediaRecipe(recipeId).configuration.workflow.operation.startsWith('video')) {
-    throw new HttpError(400, 'Use the video tool to rerun a video');
   }
   const result = transaction(() => {
     const draft = createMediaJobFromRecipe(recipeId, {

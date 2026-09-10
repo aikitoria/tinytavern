@@ -48,6 +48,22 @@
   @apply flex items-center justify-between gap-2 w-full min-w-0 min-h-control h-control bg-panel border-control-line text-foreground text-left;
 }
 
+.select-control {
+  @apply relative flex items-center min-w-0 min-h-control h-control bg-panel border border-solid border-control-line rounded-sm;
+}
+
+.select-control > .select-btn {
+  @apply flex-1 self-stretch min-w-0 min-h-0 h-auto border-0 bg-clear py-0;
+}
+
+.select-control > .icon-btn {
+  @apply absolute right-7 top-1/2 -translate-y-1/2;
+}
+
+.select-control:has(> .icon-btn) .select-label {
+  @apply pr-7;
+}
+
 .select-btn:hover:where(:not(:disabled)) {
   background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg-hover));
 }

@@ -1,22 +1,22 @@
+import { fillAutomaticMediaInputs } from './mediaInputs.ts';
+import { avatarPrompt, parseAvatarContext } from './mediaAvatarPrompt.ts';
 import { captureMediaCharacters, mediaCharacterIds } from './mediaCharacters.ts';
 import type { MediaRecipeInput } from './mediaRecipes.ts';
 import {
-  MEDIA_OPERATIONS,
   systemNote,
+  MEDIA_INPUT_NAME,
+  MAX_MEDIA_INPUTS,
   defaultMediaPrompt,
-  chatImagePromptPresets,
-  defaultChatImagePrompt,
   defaultChatMediaPrompt,
   mediaPromptSettingsKey,
   mediaInputSlots,
+  MEDIA_INPUT_PROMPT_KEYS,
   mediaJobActive,
   mediaWorkflowError,
-  mediaWorkflowKey,
   compileMediaWorkflow,
   validateWorkflowValues,
   type MediaJobInput,
   type MediaJobInputSnapshot,
-  type MediaOperation,
   type MediaWorkflow,
   type StandalonePromptTemplate,
 } from '@tinytavern/shared';
@@ -52,11 +52,11 @@ import {
   type MediaPromptContext,
 } from './mediaJobStore.ts';
 import { releaseRemoteFiles } from './mediaRemote.ts';
+import { finishMediaJob } from './mediaJobResults.ts';
 import { getMediaRecipe, saveMediaRecipe } from './mediaRecipes.ts';
 
 type JobBody = Record<string, unknown>;
 const EDITABLE_STATES = new Set(['draft', 'ready', 'failed', 'cancelled']);
-const INPUT_SLOTS = new Set<string>(MEDIA_OPERATIONS.flatMap((operation) => operation.slots));
 
 function conversationForJob(row: MediaJobRow) {
   if (row.context_conversation_id === null) {
@@ -71,19 +71,11 @@ function conversationForJob(row: MediaJobRow) {
   return toConversation(conversation);
 }
 
-function parseOperation(value: unknown): MediaOperation {
-  const operation = MEDIA_OPERATIONS.find((item) => item.id === value);
-  if (!operation) {
-    throw new HttpError(400, 'Choose a media operation');
-  }
-  return operation.id;
-}
-
 function parseInputs(
   value: unknown,
   previous: readonly MediaRecipeInput[] = [],
 ): MediaJobInputSnapshot[] {
-  if (!Array.isArray(value) || value.length > 3) {
+  if (!Array.isArray(value) || value.length > MAX_MEDIA_INPUTS) {
     throw new HttpError(400, 'Invalid media inputs');
   }
   const slots = new Set<string>();
@@ -94,7 +86,9 @@ function parseInputs(
     const input = raw as Record<string, unknown>;
     const slot = input.slot;
     const knownSlot =
-      typeof slot === 'string' && (INPUT_SLOTS.has(slot) || /^reference[123]$/.test(slot));
+      typeof slot === 'string' &&
+      MEDIA_INPUT_NAME.test(slot) &&
+      !['prompt', 'seed', 'job_id'].includes(slot);
     if (!knownSlot || slots.has(slot as string)) {
       throw new HttpError(400, 'Each media input needs a distinct named slot');
     }
@@ -124,22 +118,15 @@ function parseInputs(
 }
 
 function resolveJobConfiguration(
-  operation: MediaOperation,
   workflowId: string | null,
-  inputs: MediaJobInput[],
   configurationJson: string | null,
 ): { configuration: MediaJobConfiguration; captured: boolean } | null {
   const settings = getSettings().mediaRendering;
-  const referenceCount = inputs.filter((input) => input.slot.startsWith('reference')).length;
-  const selectedId = workflowId ?? settings.defaults[mediaWorkflowKey(operation, referenceCount)];
+  const selectedId = workflowId ?? settings.defaultWorkflowId;
   const snapshot: MediaJobConfiguration | null = configurationJson
     ? JSON.parse(configurationJson)
     : null;
-  if (
-    snapshot &&
-    snapshot.workflow.id === selectedId &&
-    snapshot.workflow.operation === operation
-  ) {
+  if (snapshot && snapshot.workflow.id === selectedId) {
     return { configuration: snapshot, captured: true };
   }
   const workflow = settings.workflows.find((item) => item.id === selectedId);
@@ -155,11 +142,8 @@ function resolveJobConfiguration(
     : null;
 }
 
-function validateJobWorkflow(operation: MediaOperation, configuration: MediaJobConfiguration) {
+function validateJobWorkflow(configuration: MediaJobConfiguration) {
   const workflow = configuration.workflow;
-  if (workflow.operation !== operation) {
-    throw new HttpError(400, 'Choose a saved workflow matching the operation and reference count');
-  }
   const invalid = mediaWorkflowError(workflow);
   if (invalid) {
     throw new HttpError(400, invalid);
@@ -184,23 +168,34 @@ function validateText(value: string, label: string): string {
 }
 
 function draftConfiguration(
-  operation: MediaOperation,
   workflowId: string | null,
-  inputs: MediaJobInput[],
   configurationJson: string | null,
   values: unknown,
+  avatarContext: unknown,
 ): string | null {
-  if (values === undefined && configurationJson === null) return null;
-  const resolved = resolveJobConfiguration(operation, workflowId, inputs, configurationJson);
-  if (values === undefined) return resolved?.captured ? configurationJson : null;
+  if (values === undefined && avatarContext === undefined && configurationJson === null)
+    return null;
+  const resolved = resolveJobConfiguration(workflowId, configurationJson);
+  if (values === undefined && avatarContext === undefined)
+    return resolved?.captured ? configurationJson : null;
   try {
     if (!resolved) {
-      validateWorkflowValues([], values);
+      if (avatarContext != null) throw new HttpError(400, 'Choose an avatar workflow');
+      if (values !== undefined) validateWorkflowValues([], values);
       return null;
     }
-    const compiled = validateJobWorkflow(operation, resolved.configuration);
-    const workflowValues = validateWorkflowValues(compiled.controls, values);
-    return JSON.stringify({ ...resolved.configuration, workflowValues });
+    const compiled = validateJobWorkflow(resolved.configuration);
+    const workflowValues = validateWorkflowValues(
+      compiled.controls,
+      values === undefined ? (resolved.configuration.workflowValues ?? {}) : values,
+    );
+    const avatar =
+      avatarContext === undefined
+        ? resolved.configuration.avatarContext
+        : parseAvatarContext(avatarContext);
+    if (avatar && resolved.configuration.workflow.textOutputNodeId !== null)
+      throw new HttpError(400, 'Avatar workflows must produce images');
+    return JSON.stringify({ ...resolved.configuration, workflowValues, avatarContext: avatar });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }
@@ -212,10 +207,18 @@ export function createMediaJob(
   source?: MediaJobRow,
   configurationJson: string | null = source?.configuration_json ?? null,
   inputSnapshots?: readonly MediaRecipeInput[],
+  notify = true,
 ) {
   if (source && configurationJson) {
-    const { comfyUrl, workflow, timeoutSeconds, workflowValues, characterIds, sourceCharacterIds } =
-      JSON.parse(configurationJson) as MediaJobConfiguration;
+    const {
+      comfyUrl,
+      workflow,
+      timeoutSeconds,
+      workflowValues,
+      characterIds,
+      sourceCharacterIds,
+      avatarContext,
+    } = JSON.parse(configurationJson) as MediaJobConfiguration;
     configurationJson = JSON.stringify({
       comfyUrl,
       workflow,
@@ -223,6 +226,7 @@ export function createMediaJob(
       workflowValues,
       characterIds,
       sourceCharacterIds,
+      avatarContext,
     });
   }
   const requestKey = optionalString(body, 'requestKey');
@@ -234,11 +238,13 @@ export function createMediaJob(
     return mediaJobDto(requireMediaJob(Number(previous.id)));
   }
 
-  const operation = parseOperation(body.operation ?? source?.operation);
   const previousInputs: MediaRecipeInput[] = source ? JSON.parse(source.inputs_json) : [];
   const inputs = parseInputs(body.inputs ?? previousInputs, inputSnapshots ?? previousInputs);
+  const requestedConversation = optionalNullableId(body, 'contextConversationId');
   const conversationId =
-    optionalNullableId(body, 'contextConversationId') ?? source?.context_conversation_id ?? null;
+    requestedConversation === undefined
+      ? (source?.context_conversation_id ?? null)
+      : requestedConversation;
   if (
     conversationId !== null &&
     !stmt('SELECT id FROM conversations WHERE id = ?').get(conversationId)
@@ -252,25 +258,21 @@ export function createMediaJob(
   if (destination === 'chat' && conversationId === null) {
     throw new HttpError(400, 'Chat results require a conversation');
   }
-  if (
-    operation === 'image-describe' &&
-    (destination !== 'gallery' || body.reviewBeforeSave === true || conversationId !== null)
-  ) {
-    throw new HttpError(400, 'Image descriptions belong to the gallery prompt editor');
-  }
-  const workflowId = optionalNullableString(body, 'workflowId') ?? source?.workflow_id ?? null;
-  const presetId = optionalNullableString(body, 'presetId') ?? source?.preset_id ?? null;
+  const requestedWorkflow = optionalNullableString(body, 'workflowId');
+  const workflowId =
+    requestedWorkflow === undefined ? (source?.workflow_id ?? null) : requestedWorkflow;
+  const requestedPreset = optionalNullableString(body, 'presetId');
+  const presetId = requestedPreset === undefined ? (source?.preset_id ?? null) : requestedPreset;
   const instruction = validateText(
     optionalString(body, 'instruction') ?? source?.instruction ?? '',
     'Instruction',
   );
   const prompt = validateText(optionalString(body, 'prompt') ?? source?.prompt ?? '', 'Prompt');
   configurationJson = draftConfiguration(
-    operation,
     workflowId,
-    inputs,
     configurationJson,
     body.workflowValues,
+    body.avatarContext,
   );
   const sourceDraft = source?.draft_id ? mediaDraft(source.draft_id) : null;
   const review = body.reviewBeforeSave === true || sourceDraft?.state === 'open';
@@ -278,54 +280,114 @@ export function createMediaJob(
   let id = 0;
   const now = Date.now();
 
-  transaction(() => {
-    if (review) {
-      draftId ??= Number(stmt('INSERT INTO media_drafts DEFAULT VALUES').run().lastInsertRowid);
-      stmt('UPDATE media_drafts SET revision = revision + 1 WHERE id = ?').run(draftId);
-    }
-    id = Number(
-      stmt(`
+  const copiedPaths: string[] = [];
+  try {
+    transaction(() => {
+      if (review) {
+        draftId ??= Number(stmt('INSERT INTO media_drafts DEFAULT VALUES').run().lastInsertRowid);
+        stmt('UPDATE media_drafts SET revision = revision + 1 WHERE id = ?').run(draftId);
+      }
+      id = Number(
+        stmt(`
       INSERT INTO media_jobs (
-        operation, workflow_id, preset_id, instruction, prompt,
+        workflow_id, preset_id, instruction, prompt,
         context_conversation_id, destination, source_job_id, request_key, created_at, updated_at,
         configuration_json, draft_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-        operation,
-        workflowId,
-        presetId,
-        instruction,
-        prompt,
-        conversationId,
-        destination,
-        source?.id ?? null,
-        requestKey,
-        now,
-        now,
-        configurationJson,
-        draftId,
-      ).lastInsertRowid,
-    );
-    pinMediaInputs(id, inputs);
-  });
-  publishMediaJob(id);
+          workflowId,
+          presetId,
+          instruction,
+          prompt,
+          conversationId,
+          destination,
+          source?.id ?? null,
+          requestKey,
+          now,
+          now,
+          configurationJson,
+          draftId,
+        ).lastInsertRowid,
+      );
+      const resolved =
+        body.fillInputs === undefined
+          ? null
+          : resolveJobConfiguration(workflowId, configurationJson);
+      const filled = resolved
+        ? fillAutomaticMediaInputs(
+            resolved.configuration.workflow,
+            inputs,
+            body.fillInputs,
+            conversationId,
+            copiedPaths,
+            parseInputs,
+          )
+        : inputs;
+      pinMediaInputs(id, filled);
+    });
+  } catch (err) {
+    deleteImageFiles(copiedPaths);
+    throw err;
+  }
+  if (notify) publishMediaJob(id);
   return mediaJobDto(requireMediaJob(id));
+}
+
+/** Favorites only choose a preset and workflow; preparation and execution are shared. */
+export function runMediaFavorite(favoriteId: string, body: JobBody) {
+  const settings = getSettings();
+  const favorite = settings.mediaFavorites.find((item) => item.id === favoriteId);
+  if (!favorite) throw new HttpError(404, 'Media favorite not found');
+  const preset = settings.mediaChatPrompts.presets.find((item) => item.id === favorite.presetId);
+  const workflow = settings.mediaRendering.workflows.find(
+    (item) => item.id === favorite.workflowId,
+  );
+  if (!preset || !('chatPrompt' in preset) || !workflow || workflow.textOutputNodeId !== null)
+    throw new HttpError(400, 'The favorite prompt or workflow is unavailable');
+  const invalid = mediaWorkflowError(workflow);
+  if (invalid) throw new HttpError(400, invalid);
+  const compiled = compileMediaWorkflow(workflow.json);
+  if (compiled.imageInputs.length || !compiled.slots.has('prompt'))
+    throw new HttpError(
+      400,
+      'Favorites require a prompt and no image inputs; use the full generator',
+    );
+  const conversationId = optionalNullableId(body, 'contextConversationId');
+  if (conversationId == null) throw new HttpError(400, 'Choose a conversation');
+  return transaction(() => {
+    const draft = createMediaJob(
+      {
+        requestKey: body.requestKey,
+        workflowId: workflow.id,
+        presetId: preset.id,
+        instruction: body.instruction,
+        contextConversationId: conversationId,
+        destination: 'chat',
+      },
+      undefined,
+      null,
+      undefined,
+      false,
+    );
+    const row = requireMediaJob(draft.id);
+    // A lost response may be retried after the worker has already advanced this request.
+    if (row.started_at !== null) return mediaJobDto(row);
+    return startMediaJob(row, { ...body, autoRender: true }, true);
+  });
 }
 
 export function editMediaJob(row: MediaJobRow, body: JobBody) {
   requireEditable(row);
   const inputs =
     body.inputs === undefined ? null : parseInputs(body.inputs, JSON.parse(row.inputs_json));
-  const operation = body.operation === undefined ? row.operation : parseOperation(body.operation);
   const requestedWorkflow = optionalNullableString(body, 'workflowId');
   const workflowId = requestedWorkflow === undefined ? row.workflow_id : requestedWorkflow;
-  const sameWorkflow = operation === row.operation && workflowId === row.workflow_id;
+  const sameWorkflow = workflowId === row.workflow_id;
   const configurationJson = draftConfiguration(
-    operation,
     workflowId,
-    inputs ?? JSON.parse(row.inputs_json),
     sameWorkflow ? row.configuration_json : null,
     body.workflowValues,
+    body.avatarContext,
   );
   const previousPaths = stmt(`
     SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
@@ -334,29 +396,46 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
     .all(row.id)
     .map((asset) => String(asset.path));
 
-  transaction(() => {
-    updateMediaJob(row.id, {
-      operation,
-      workflow_id: workflowId,
-      preset_id:
-        optionalNullableString(body, 'presetId') === undefined
-          ? row.preset_id
-          : (body.presetId as string | null),
-      instruction: validateText(
-        optionalString(body, 'instruction') ?? row.instruction,
-        'Instruction',
-      ),
-      prompt: validateText(optionalString(body, 'prompt') ?? row.prompt, 'Prompt'),
-      state: 'draft',
-      error: null,
-      configuration_json: configurationJson,
-      context_json: null,
-      endpoint_json: null,
+  const copiedPaths: string[] = [];
+  try {
+    transaction(() => {
+      updateMediaJob(row.id, {
+        workflow_id: workflowId,
+        preset_id:
+          optionalNullableString(body, 'presetId') === undefined
+            ? row.preset_id
+            : (body.presetId as string | null),
+        instruction: validateText(
+          optionalString(body, 'instruction') ?? row.instruction,
+          'Instruction',
+        ),
+        prompt: validateText(optionalString(body, 'prompt') ?? row.prompt, 'Prompt'),
+        state: 'draft',
+        error: null,
+        configuration_json: configurationJson,
+        context_json: null,
+        endpoint_json: null,
+      });
+      const resolved =
+        body.fillInputs === undefined
+          ? null
+          : resolveJobConfiguration(workflowId, configurationJson);
+      const filled = resolved
+        ? fillAutomaticMediaInputs(
+            resolved.configuration.workflow,
+            inputs ?? JSON.parse(row.inputs_json),
+            body.fillInputs,
+            row.context_conversation_id,
+            copiedPaths,
+            parseInputs,
+          )
+        : inputs;
+      if (filled) pinMediaInputs(row.id, filled);
     });
-    if (inputs) {
-      pinMediaInputs(row.id, inputs);
-    }
-  });
+  } catch (err) {
+    deleteImageFiles(copiedPaths);
+    throw err;
+  }
   deleteImageFiles(previousPaths);
   publishMediaJob(row.id);
   return mediaJobDto(requireMediaJob(row.id));
@@ -388,7 +467,6 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
   if (characterIds !== undefined) configuration.characterIds = characterIds;
   return createMediaJob(
     {
-      operation: configuration.workflow.operation,
       workflowId: configuration.workflow.id,
       prompt: recipe.prompt,
       instruction: recipe.instruction,
@@ -404,45 +482,24 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
 }
 
 /** Snapshot the exact text request without persisting endpoint credentials. */
-function prepareContext(row: MediaJobRow, workflow: MediaWorkflow) {
+function prepareContext(row: MediaJobRow, configuration: MediaJobConfiguration) {
+  const { workflow, avatarContext } = configuration;
   const settings = getSettings();
-  const conversation = conversationForJob(row);
-  const chatImage =
-    (row.operation === 'image' || row.operation === 'image-edit') && conversation !== null;
-  let presetId: string | null;
-  let template = defaultMediaPrompt(row.operation);
-  let chatPrompt = defaultChatMediaPrompt(row.operation);
-  if (chatImage) {
-    const preset =
-      row.preset_id === null
-        ? defaultChatImagePrompt(settings.imageGeneration, row.instruction, row.operation)
-        : chatImagePromptPresets(
-            settings.imageGeneration,
-            Boolean(row.instruction.trim()),
-            row.operation,
-          ).find((item) => item.id === row.preset_id);
-    if (!preset) {
-      throw new HttpError(400, 'Choose a chat image prompt preset');
-    }
-    presetId = preset.id;
-    chatPrompt = preset.prompt;
-  } else {
-    const prompts = settings[mediaPromptSettingsKey(row.operation, conversation !== null)];
-    presetId =
-      row.preset_id ??
-      (conversation ? workflow.chatPromptPresetId : workflow.galleryPromptPresetId) ??
-      prompts.defaults[row.operation] ??
-      null;
-    if (presetId) {
-      const preset = prompts.presets.find(
-        (item) => item.id === presetId && item.operation === row.operation,
-      );
-      if (!preset) {
-        throw new HttpError(400, 'The selected prompt preset is unavailable');
-      }
-      if ('chatPrompt' in preset) chatPrompt = preset.chatPrompt;
-      else template = preset;
-    }
+  const conversation = avatarContext ? null : conversationForJob(row);
+  const avatar = avatarContext ? avatarPrompt(avatarContext) : null;
+  const prompts = settings[mediaPromptSettingsKey(conversation !== null)];
+  const presetId = avatar
+    ? null
+    : (row.preset_id ??
+      (conversation ? workflow.chatPromptPresetId : workflow.standalonePromptPresetId) ??
+      prompts.defaultPresetId);
+  let template = avatar?.template ?? defaultMediaPrompt();
+  let chatPrompt = defaultChatMediaPrompt();
+  if (presetId) {
+    const preset = prompts.presets.find((item) => item.id === presetId);
+    if (!preset) throw new HttpError(400, 'The selected prompt preset is unavailable');
+    if ('chatPrompt' in preset) chatPrompt = preset.chatPrompt;
+    else template = preset;
   }
 
   if (conversation && hasActiveNonToolGeneration(conversation.id)) {
@@ -456,23 +513,27 @@ function prepareContext(row: MediaJobRow, workflow: MediaWorkflow) {
     : null;
   const values: Record<string, string> = {
     instruction: row.instruction,
+    no_instruction: row.instruction.trim() ? '' : '1',
     prompt: row.prompt,
+    workflow: workflow.name,
     char: context?.charName ?? 'Assistant',
     user: context?.userName ?? 'User',
-    first_frame_prompt: '',
-    reference1_prompt: '',
-    reference2_prompt: '',
-    reference3_prompt: '',
+    ...avatar?.values,
   };
   const inputs = JSON.parse(row.inputs_json) as MediaJobInputSnapshot[];
-  for (const input of inputs) values[`${input.slot}_prompt`] = input.prompt;
+  const promptsBySlot = new Map(inputs.map((input) => [input.slot, input.prompt]));
+  const slots = mediaInputSlots(workflow);
+  for (let index = 0; index < MEDIA_INPUT_PROMPT_KEYS.length; index++) {
+    // Include absent inputs as empty values so the same preset works with any workflow.
+    values[MEDIA_INPUT_PROMPT_KEYS[index]!] = promptsBySlot.get(slots[index] ?? '') ?? '';
+  }
   const expand = (text: string) => expandTemplate(text, values);
   let messages: ChatMessage[];
   let capturedTemplate: StandalonePromptTemplate;
   if (context) {
     // Match the original image tool: retain the structured chat prefix, including
     // assistant reasoning, and append only the media task for prefix-cache reuse.
-    const steering = expand(systemNote(chatPrompt));
+    const steering = systemNote(expand(chatPrompt));
     messages = context.messages;
     appendChatMessage(messages, { role: 'user', content: steering });
     capturedTemplate = {
@@ -488,6 +549,8 @@ function prepareContext(row: MediaJobRow, workflow: MediaWorkflow) {
       reasoningPrefill: expand(template.reasoningPrefill),
       messagePrefill: expand(template.messagePrefill),
     };
+    if (avatar && !capturedTemplate.userMessage.trim())
+      throw new HttpError(400, 'The prompt template must produce a nonempty user message');
     messages = [];
     if (capturedTemplate.systemPrompt.trim()) {
       messages.push({ role: 'system', content: capturedTemplate.systemPrompt });
@@ -541,29 +604,24 @@ function attachToolMessage(row: MediaJobRow, body: JobBody, preparing: boolean):
 export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean) {
   requireEditable(row);
   const inputs = parseInputs(JSON.parse(row.inputs_json));
-  const resolved = resolveJobConfiguration(
-    row.operation,
-    row.workflow_id,
-    inputs,
-    row.configuration_json,
-  );
+  const resolved = resolveJobConfiguration(row.workflow_id, row.configuration_json);
   if (!resolved) {
-    throw new HttpError(400, 'Choose a saved workflow matching the operation and reference count');
+    throw new HttpError(400, 'Choose a saved workflow');
   }
   const { configuration } = resolved;
   const { workflow } = configuration;
-  const compiled = validateJobWorkflow(row.operation, configuration);
-  const requiredSlots = mediaInputSlots(row.operation, workflow.referenceCount);
+  const compiled = validateJobWorkflow(configuration);
+  const requiredSlots = mediaInputSlots(workflow);
   if (
     requiredSlots.length !== inputs.length ||
     !requiredSlots.every((slot) => inputs.some((input) => input.slot === slot))
   ) {
     throw new HttpError(400, `Select the required images: ${requiredSlots.join(', ')}`);
   }
-  if (row.operation === 'image-describe' && prepare) {
-    throw new HttpError(400, 'Image descriptions use the instruction inside the Comfy workflow');
+  if (prepare && !compiled.slots.has('prompt')) {
+    throw new HttpError(400, 'This workflow has no prompt input; run it directly');
   }
-  if (!prepare && row.operation !== 'image-describe' && !row.prompt.trim()) {
+  if (!prepare && compiled.slots.has('prompt') && !row.prompt.trim()) {
     throw new HttpError(400, 'Enter a final prompt before rendering');
   }
   try {
@@ -572,8 +630,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }
   configuration.characterIds = captureMediaCharacters(row, configuration);
-  if (row.operation === 'image-describe') configuration.temporary = true;
-  const context = prepare ? prepareContext(row, workflow) : {};
+  const context = prepare ? prepareContext(row, configuration) : {};
   const now = Date.now();
   const previousInputs =
     row.message_id === null
@@ -603,6 +660,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
       state: prepare ? 'preparing' : 'submitting',
       prompt: prepare ? '' : row.prompt,
       error: null,
+      result_text: null,
       auto_render: body.autoRender === true ? 1 : 0,
       started_at: now,
       deadline:
@@ -635,7 +693,7 @@ export function syncMediaJobMessage(row: MediaJobRow): void {
   if (row.state !== 'preparing') {
     stmt('UPDATE media_recipes SET prompt = ? WHERE id = ? AND prompt <> ?').run(
       row.prompt,
-      row.id,
+      row.recipe_id,
       row.prompt,
     );
   }
@@ -653,7 +711,7 @@ export function syncMediaJobMessage(row: MediaJobRow): void {
   stmt(`
     UPDATE messages SET content = ?, status = ?, image_pending = ?, gen_meta_json = ? WHERE id = ?
   `).run(
-    renderOnly ? String(message.content) : row.prompt,
+    renderOnly ? String(message.content) : (row.result_text ?? row.prompt),
     renderOnly ? String(message.status) : status,
     mediaJobActive(row.state) ? 1 : 0,
     JSON.stringify(meta),
@@ -668,18 +726,16 @@ export function cancelMediaJob(row: MediaJobRow) {
   if (!mediaJobActive(row.state)) {
     return mediaJobDto(row);
   }
+  if (row.state === 'preparing') {
+    finishMediaJob(row.id, 'cancelled', row.error);
+    if (row.message_id !== null) mediaPromptBuffers.delete(row.message_id);
+    return mediaJobDto(requireMediaJob(row.id));
+  }
   const prompt = mediaLive.get(row.id)?.prompt ?? row.prompt;
-  const state = row.state === 'preparing' ? 'cancelled' : 'cancelling';
   transaction(() => {
-    const next = updateMediaJob(row.id, { state, prompt, auto_render: 0 });
+    const next = updateMediaJob(row.id, { state: 'cancelling', prompt, auto_render: 0 });
     syncMediaJobMessage(next);
   });
-  if (state === 'cancelled') {
-    mediaLive.delete(row.id);
-    if (row.message_id !== null) {
-      mediaPromptBuffers.delete(row.message_id);
-    }
-  }
   publishMediaJob(row.id);
   return mediaJobDto(requireMediaJob(row.id));
 }

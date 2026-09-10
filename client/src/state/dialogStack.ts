@@ -1,4 +1,4 @@
-import type { MediaJob } from '@tinytavern/shared';
+import { newRequestId, type MediaJob } from '@tinytavern/shared';
 import { createSignal } from 'solid-js';
 import type { RestoredMediaInputs } from '../media/restoreInputs.ts';
 import type { MediaToolSession } from '../media/navigation.ts';
@@ -12,7 +12,7 @@ export interface DialogFrame {
 }
 
 let nextFrameId = 0;
-export function nextDialogId(): string {
+function nextDialogId(): string {
   return String(++nextFrameId);
 }
 
@@ -30,7 +30,7 @@ function createFrame(
       session ??
       (media
         ? {
-            id,
+            requestKey: newRequestId(),
             ...media,
             destination: media.contextConversationId === null ? 'gallery' : 'chat',
             prompt: '',

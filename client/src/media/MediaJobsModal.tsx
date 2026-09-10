@@ -57,12 +57,15 @@ export default function MediaJobsModal() {
       hideCloseButton
       class="media-tools-modal"
       onClose={back}
-      headerExtra={
-        <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear">
-          <button class="page-back" onClick={back}>
-            <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
-          </button>
-        </div>
+      headerStart={
+        <button
+          class="page-back icon-btn flex-none border-transparent bg-clear"
+          aria-label="Back"
+          title="Back"
+          onClick={back}
+        >
+          <FontAwesomeIcon icon={faArrowLeft} size={13} />
+        </button>
       }
     >
       <div class="media-workspace flex flex-col flex-1 min-h-0 overflow-hidden mobile:overflow-visible [&>.notice]:m-4">
@@ -78,7 +81,7 @@ export default function MediaJobsModal() {
           more={more()}
           loading={loading()}
           onOpen={(job) =>
-            openMediaTool(job.operation, {
+            openMediaTool(job.workflowId, {
               jobId: job.id,
               conversationId: job.contextConversationId,
             })

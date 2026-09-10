@@ -65,7 +65,7 @@ export function stmt(sql: string): PreparedStatement {
 
 // Existing databases must already meet the minimum supported schema version.
 // Never renumber this baseline or silently open an older/newer schema.
-const BASELINE_VERSION = 68;
+const BASELINE_VERSION = 73;
 let version = Number(stmt('PRAGMA user_version').get()!.user_version);
 if (version !== 0 && (version < BASELINE_VERSION || version > SCHEMA_VERSION)) {
   throw new Error(
@@ -118,15 +118,8 @@ function migrate(target: number, apply: () => void): void {
   });
   version = target;
 }
-migrate(69, () => {
-  db.exec(`ALTER TABLE endpoints ADD COLUMN system_prompt_prefix TEXT NOT NULL DEFAULT '';
-    ALTER TABLE endpoints ADD COLUMN system_prompt_suffix TEXT NOT NULL DEFAULT '';
-    ALTER TABLE endpoints ADD COLUMN reasoning_prefill_prefix TEXT NOT NULL DEFAULT '';`);
-  // Existing media requests keep their captured behavior, independent of later endpoint edits.
-  stmt(`UPDATE media_jobs SET endpoint_json = json_insert(endpoint_json,
-    '$.systemPromptPrefix', '', '$.systemPromptSuffix', '', '$.reasoningPrefillPrefix', '')
-    WHERE endpoint_json IS NOT NULL`).run();
-});
+// Future migrations attach here: migrate(74, () => { ... });
+
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 deleteMessageSubtrees(

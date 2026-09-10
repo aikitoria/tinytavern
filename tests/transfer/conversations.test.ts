@@ -319,6 +319,7 @@ databaseCase('media transfer', async () => {
     await import('../../server/src/media/mediaJobs.ts');
   const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { getMediaAssetResultDetails } = await import('../../server/src/media/mediaRecipes.ts');
 
   const { mediaCharacterIds, setMediaCharacters } =
     await import('../../server/src/media/mediaCharacters.ts');
@@ -336,9 +337,9 @@ databaseCase('media transfer', async () => {
   const workflow: MediaWorkflow = {
     id: 'saved-edit',
     name: 'Edit with references',
-    operation: 'image-edit',
-    referenceCount: 3,
-    galleryPromptPresetId: 'private-preset',
+    inputBindings: {},
+    textOutputNodeId: null,
+    standalonePromptPresetId: 'private-preset',
     chatPromptPresetId: 'private-preset',
     json: JSON.stringify({
       strength: {
@@ -375,6 +376,7 @@ databaseCase('media transfer', async () => {
         timeoutSeconds: 1234,
         workflow,
         workflowValues: workflow.id === 'saved-edit' ? { strength: 0.8 } : {},
+        seed: workflow.id === 'saved-edit' ? 4294967295 : 0,
         temporary: true,
         executionSecret: 'must-not-export',
       }),
@@ -398,8 +400,8 @@ databaseCase('media transfer', async () => {
       ...workflow,
       id: 'original-image',
       name: 'Create image',
-      operation: 'image',
-      referenceCount: 0,
+      inputBindings: {},
+      textOutputNodeId: null,
       json: '{"save":{"class_type":"SaveImage","inputs":{"text":"{{prompt}}"}}}',
     },
     [],
@@ -426,6 +428,11 @@ databaseCase('media transfer', async () => {
     'Repeated source/reference slots embed each raster only once',
   );
   assert.equal(portable.recipes!.length, 2, 'Export follows recipes on referenced images');
+  assert.deepEqual(
+    portable.recipes!.map((recipe) => recipe.seed),
+    [4294967295, 0],
+    'Export includes the original seed of results and their transitive sources',
+  );
   assert.deepEqual(
     portable.recipes![0]!.inputs.map((input) => input.slot),
     ['reference1', 'reference2', 'reference3'],
@@ -474,10 +481,16 @@ databaseCase('media transfer', async () => {
   const configuration = JSON.parse(String(importedRecipe.configuration_json));
   assert.equal(configuration.comfyUrl, getSettings().mediaRendering.comfyUrl);
   assert.equal(configuration.workflow.json, workflow.json);
-  assert.equal(configuration.workflow.galleryPromptPresetId, null);
+  assert.equal(configuration.workflow.standalonePromptPresetId, null);
   assert.equal(configuration.workflow.chatPromptPresetId, null);
   assert.deepEqual(configuration.workflowValues, { strength: 0.8 });
+  assert.equal(getMediaAssetResultDetails(asset.id).seed, 4294967295);
   const importedInputs = JSON.parse(String(importedRecipe.inputs_json)) as MediaJobInput[];
+  assert.equal(
+    getMediaAssetResultDetails(importedInputs[0]!.assetId).seed,
+    0,
+    'A zero seed remains available in imported result details',
+  );
   assert.notEqual(importedInputs[0]!.assetId, importedInputs[1]!.assetId);
   assert.equal(importedInputs[1]!.assetId, importedInputs[2]!.assetId);
   for (const input of importedInputs) {
@@ -485,7 +498,7 @@ databaseCase('media transfer', async () => {
     assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(String(row.path)))), png);
   }
   const rerun = createMediaJobFromAsset(asset.id, { requestKey: newRequestId() });
-  assert.equal(rerun.operation, 'image-edit');
+  assert.equal(rerun.workflowSnapshot!.json, workflow.json);
   assert.equal(
     rerun.instruction,
     '  Change the background.\nKeep the pose.  ',
@@ -521,6 +534,11 @@ databaseCase('media transfer', async () => {
     (value: typeof portable) => {
       value.recipes![0]!.inputs.reverse();
     },
+    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map(
+      (seed) => (value: typeof portable) => {
+        Object.assign(value.recipes![0]!, { seed });
+      },
+    ),
   ];
   for (const mutate of invalidCases) {
     const invalid = structuredClone(portable);
@@ -589,6 +607,7 @@ databaseCase('media transfer', async () => {
   assert.equal(stmt('SELECT count(*) AS n FROM media_recipes').get()!.n, 0);
   const missingReferences = structuredClone(portable);
   const editedRecipe = missingReferences.recipes![0]!;
+  delete editedRecipe.seed;
   for (const input of editedRecipe.inputs) input.assetId = null;
   missingReferences.recipes = [editedRecipe];
   missingReferences.assets = missingReferences.assets.filter(
@@ -602,11 +621,19 @@ databaseCase('media transfer', async () => {
     'Import/export preserves every deleted input slot without an image file',
   );
   const missingPaths = collectConversationImages(missingCopy.id);
+  assert.equal(
+    getMediaAssetResultDetails(mediaAssetForPath(missingPaths[0]!)!.id).seed,
+    null,
+    'Older version 1 exports without a seed remain importable',
+  );
   const missingRerun = createMediaJobFromAsset(mediaAssetForPath(missingPaths[0]!)!.id, {
     requestKey: newRequestId(),
   });
   assert.deepEqual(missingRerun.inputs, []);
-  assert.equal(missingRerun.workflowSnapshot!.referenceCount, 3);
+  assert.equal(
+    (await import('@tinytavern/shared')).mediaInputSlots(missingRerun.workflowSnapshot!).length,
+    3,
+  );
   deleteMediaJob(requireMediaJob(missingRerun.id));
   stmt('DELETE FROM conversations WHERE id = ?').run(missingCopy.id);
   deleteImageFiles(missingPaths);

@@ -1,4 +1,5 @@
 import { mockComfy } from '../support/comfy.ts';
+import { insertFixture } from '../support/fixtures.ts';
 import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
@@ -38,18 +39,18 @@ test('media jobs', async () => {
   const imageWorkflow: MediaWorkflow = {
     id: 'image',
     name: 'Image',
-    operation: 'image',
-    referenceCount: 0,
+    inputBindings: {},
+    textOutputNodeId: null,
     json: '{"1":{"class_type":"Text","inputs":{"text":"{{prompt}}","seed":{{seed}}}},"9":{"class_type":"SaveImage","inputs":{"filename_prefix":"{{job_id}}"}}}',
-    galleryPromptPresetId: null,
+    standalonePromptPresetId: null,
     chatPromptPresetId: null,
   };
   const editWorkflow: MediaWorkflow = {
     ...imageWorkflow,
     id: 'edit',
     name: 'Edit',
-    operation: 'image-edit',
-    referenceCount: 3,
+    inputBindings: {},
+    textOutputNodeId: null,
     json: JSON.stringify({
       '1': { class_type: 'Text', inputs: { text: '{{prompt}}', seed: 123 } },
       reference3: { class_type: 'LoadImage', inputs: { image: 'reference3.png' } },
@@ -60,10 +61,16 @@ test('media jobs', async () => {
   };
   putSettings({
     ...getSettings(),
+    activeEndpointId: insertFixture('endpoints', {
+      name: 'Preparation cancellation',
+      base_url: 'http://endpoint.invalid/v1',
+      created_at: 1,
+    }),
     mediaRendering: {
+      ...getSettings().mediaRendering,
       comfyUrl: base,
       workflows: [imageWorkflow, editWorkflow],
-      defaults: { 'image:0': imageWorkflow.id },
+      defaultWorkflowId: imageWorkflow.id,
       avatarWorkflowId: null,
       jobTimeoutSeconds: 60,
     },
@@ -75,6 +82,7 @@ test('media jobs', async () => {
   let downloadAborted = false;
   let extraOutput: 'image' | 'video' | null = null;
   let downloadCount = 0;
+  let completeAfterHistory: string | null = null;
   const comfy = mockComfy({
     submit(_body, job) {
       job.state = holdQueue ? 'queued' : 'done';
@@ -112,7 +120,13 @@ test('media jobs', async () => {
   globalThis.fetch = (async (input, init) => {
     const request = new Request(String(input), init);
     assert.equal(new URL(request.url).origin, base, 'Tests never contact a live Comfy endpoint');
-    return comfy.fetch(request);
+    const completionId = completeAfterHistory;
+    const response = await comfy.fetch(request);
+    if (completionId && new URL(request.url).pathname === `/history/${completionId}`) {
+      submitted.get(completionId)!.state = 'done';
+      completeAfterHistory = null;
+    }
+    return response;
   }) as typeof fetch;
 
   async function waitFor(id: number, state: MediaJob['state'], removed = false): Promise<MediaJob> {
@@ -139,13 +153,41 @@ test('media jobs', async () => {
   function draft(requestKey: string, extra: Record<string, unknown> = {}) {
     return createMediaJob({
       requestKey: testRequestKey(requestKey),
-      operation: 'image',
+
       prompt: 'A landscape',
       ...extra,
     });
   }
 
   try {
+    const cancelledInputPath = saveImage('.png', raster);
+    const cancelledInputId = mediaAssetForPath(cancelledInputPath)!.id;
+    const cancelledGalleryId = insertFixture('gallery_items', {
+      character_name: 'Test',
+      prompt: 'Reference deleted during preparation',
+      image: cancelledInputPath,
+      created_at: 1,
+      updated_at: 1,
+    });
+    const preparation = draft('cancel-preparation-reference', {
+      workflowId: editWorkflow.id,
+      inputs: ['reference1', 'reference2', 'reference3'].map((slot) => ({
+        slot,
+        assetId: cancelledInputId,
+      })),
+    });
+    startMediaJob(requireMediaJob(preparation.id), { autoRender: true }, true);
+    stmt('DELETE FROM gallery_items WHERE id = ?').run(cancelledGalleryId);
+    deleteImageFiles([cancelledInputPath]);
+    assert(existsSync(join(IMAGES_DIR, basename(cancelledInputPath))));
+    cancelMediaJob(requireMediaJob(preparation.id));
+    await Promise.resolve();
+    assert.equal(requireMediaJob(preparation.id).auto_render, 0);
+    assert.equal(
+      existsSync(join(IMAGES_DIR, basename(cancelledInputPath))),
+      false,
+      'Cancelling preparation releases a reference deleted while the job was active',
+    );
     initMediaWorker();
     const first = draft('idempotent');
     assert.equal(draft('idempotent').id, first.id);
@@ -214,7 +256,7 @@ test('media jobs', async () => {
     const editInstruction = '  Preserve the face.\nChange the lighting to sunset.  ';
     const edit = draft('references', {
       instruction: editInstruction,
-      operation: 'image-edit',
+
       workflowId: editWorkflow.id,
       inputs: [
         { slot: 'reference2', assetId: sourceId },
@@ -368,6 +410,24 @@ test('media jobs', async () => {
     assert.equal(mediaJobRow(pending.id), undefined);
     assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(pending.draft!.id), null);
     assert.deepEqual(cancellations, [pendingId], 'Cancellation targets only the recorded job');
+
+    const completing = draft('cancel-between-history-and-queue');
+    startMediaJob(requireMediaJob(completing.id), {}, false);
+    await waitFor(completing.id, 'queued');
+    const completingId = requireMediaJob(completing.id).comfy_prompt_id!;
+    completeAfterHistory = completingId;
+    cancelMediaJob(requireMediaJob(completing.id));
+    await waitFor(completing.id, 'cancelled');
+    const completionFiles = stmt(
+      'SELECT filename, state FROM media_remote_files WHERE job_id = ? ORDER BY filename',
+    ).all(completing.id);
+    assert.deepEqual(
+      completionFiles.map((file) => file.filename),
+      ['first.png', 'second.png', 'trace.json'],
+      'Cancellation records outputs completed between its history and queue snapshots',
+    );
+    assert(completionFiles.every((file) => file.state !== 'owned'));
+    assert(!cancellations.includes(completingId), 'Already completed work needs only file cleanup');
 
     putSettings({
       ...getSettings(),

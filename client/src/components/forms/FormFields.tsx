@@ -62,6 +62,7 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
   else if (props.options)
     control = (
       <Select
+        id={props.id}
         ref={ref}
         options={props.options}
         value={props.value as string | undefined}
@@ -133,7 +134,7 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
     <>
       <SettingLabel
         field={props.readOnly ? undefined : field}
-        for={props.id}
+        for={props.id ?? field.id()}
         check={check}
         changed={props.readOnly ? false : props.changed}
         onRevert={props.onRevert}

@@ -1,3 +1,4 @@
+import { entityOptions, editReferencedEntity } from '../../state/entityReferences.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import { faBarsProgress, faGear, faPen } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
@@ -183,16 +184,18 @@ export default function Header() {
                   options={[
                     {
                       value: '',
+                      edit:
+                        state.settings.activeEndpointId != null
+                          ? () =>
+                              editReferencedEntity('endpoints', state.settings.activeEndpointId!)
+                          : undefined,
                       label: `Global default · ${
                         state.endpoints.find(
                           (endpoint) => endpoint.id === state.settings.activeEndpointId,
                         )?.name ?? 'none selected'
                       }`,
                     },
-                    ...state.endpoints.map((endpoint) => ({
-                      value: String(endpoint.id),
-                      label: endpoint.name,
-                    })),
+                    ...entityOptions('endpoints', state.endpoints),
                   ]}
                 />
                 <Select
@@ -218,10 +221,7 @@ export default function Header() {
                   onChange={(value) => void updateContext('personaId', value)}
                   options={[
                     { value: '', label: 'No persona' },
-                    ...state.personas.map((persona) => ({
-                      value: String(persona.id),
-                      label: persona.name,
-                    })),
+                    ...entityOptions('personas', state.personas),
                   ]}
                 />
               </div>

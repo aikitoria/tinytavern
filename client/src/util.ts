@@ -4,29 +4,33 @@ import { createEffect, createSignal, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/settings/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
 import { confirmAction } from './state/confirm.ts';
+import { createAsyncScope } from './state/asyncScope.ts';
 
-export type EditorId = number | 'new' | 'default';
+export type EditorId<Id extends number | string = number> = Id | 'new' | 'default';
 export type NoticeKind = 'error' | 'warning' | 'info' | 'success';
 
-interface EntityEditorOptions<T extends { id: number }, D extends Record<string, unknown>> {
+interface EntityEditorOptions<
+  T extends { id: number | string },
+  D extends Record<string, unknown>,
+> {
   items: () => readonly T[];
   /** Settings relevant to remote-conflict detection, excluding cached metadata. */
   snapshot?: (item: T) => unknown;
-  load: (item: T | undefined) => void;
+  load: (item: T | undefined, importing?: boolean) => void;
   data: () => D;
   create: (data: D) => Promise<T>;
-  patch: (id: number, data: Partial<D>) => Promise<T>;
-  remove: (id: number) => Promise<void>;
+  patch: (id: T['id'], data: Partial<D>) => Promise<T>;
+  remove: (id: T['id']) => Promise<void>;
   /** Server-side copy of the saved row (secrets and files included). */
-  duplicate: (id: number) => Promise<T>;
+  duplicate: (id: T['id']) => Promise<T>;
   deletePrompt: string;
   /** Select this saved item on mount when it exists. */
-  initialId?: () => number | null;
+  initialId?: () => T['id'] | null;
   /** Editor shown when no saved item is selected or the selected item is deleted. */
   emptySelection?: 'new' | 'default';
   /** Selecting a saved row also selects it for use. `null` represents the
    * editor's virtual built-in/none row; new drafts activate after creation. */
-  activate?: (id: number | null) => Promise<void>;
+  activate?: (id: T['id'] | null) => Promise<void>;
 }
 
 export function errorMessage(err: unknown): string {
@@ -38,15 +42,19 @@ export function numberOrNull(value: string): number | null {
 }
 
 /** Shared state/actions for the settings master-detail CRUD editors. */
-export function createEntityEditor<T extends { id: number }, D extends Record<string, unknown>>(
-  options: EntityEditorOptions<T, D>,
-) {
+export function createEntityEditor<
+  T extends { id: number | string },
+  D extends Record<string, unknown>,
+>(options: EntityEditorOptions<T, D>) {
+  type Id = EditorId<T['id']>;
   const initialPage = useDialogPage()();
   const paneActive = useDialogActive();
   const [locationReady, setLocationReady] = createSignal(false);
   const emptySelection = options.emptySelection ?? (options.activate ? 'default' : 'new');
-  const [selectedId, setSelectedId] = createSignal<EditorId>('new');
+  const [selectedId, setSelectedId] = createSignal<Id>('new');
   const [saved, flashSaved] = createSavedFlash();
+  const [saving, setSaving] = createSignal(false);
+  const [removingId, setRemovingId] = createSignal<Id | null>(null);
   const [status, setStatusValue] = createSignal('');
   const [statusKind, setStatusKind] = createSignal<NoticeKind>('error');
   const setStatus = (message: string, kind: NoticeKind = 'error') => {
@@ -59,6 +67,9 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   let loadedItem = '';
   let remoteConflict = false;
   let activationSequence = 0;
+  let draftIdentity = 0;
+  const identity = () => [selectedId(), draftIdentity];
+  const capture = createAsyncScope(() => [identity(), options.data()]);
   const snapshot = (item: T | undefined) =>
     JSON.stringify(item == null ? null : options.snapshot ? options.snapshot(item) : item);
 
@@ -66,6 +77,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     baseline = structuredClone(options.data());
   };
   const load = (item: T | undefined) => {
+    draftIdentity++;
     options.load(item);
     captureBaseline();
     loadedItem = snapshot(item);
@@ -74,7 +86,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
 
   const selected = () => options.items().find((item) => item.id === selectedId());
   const isDirty = () => baseline != null && !sameValue(options.data(), baseline);
-  const activate = (id: EditorId) => {
+  const activate = (id: Id) => {
     if (!options.activate || id === 'new') return;
     const sequence = ++activationSequence;
     void options.activate(id === 'default' ? null : id).catch((err) => {
@@ -83,14 +95,14 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       }
     });
   };
-  const applySelection = (id: EditorId, shouldActivate = true) => {
+  const applySelection = (id: Id, shouldActivate = true) => {
     rawNav.openDetail();
-    setSelectedId(id);
+    setSelectedId(() => id);
     setStatus('');
     load(options.items().find((item) => item.id === id));
     if (shouldActivate) activate(id);
   };
-  const select = (id: EditorId) => {
+  const select = (id: Id) => {
     if (id === selectedId()) {
       rawNav.openDetail();
       setStatus('');
@@ -100,26 +112,23 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     requestNavigation(() => applySelection(id));
   };
   const closeDetail = () => requestNavigation(rawNav.closeDetail);
-  /** Load an item before its invalidate refetch reaches items(). */
+  /** Imports and copies resolve unsaved edits before replacing the current draft. */
   const adopt = (item: T) => {
-    rawNav.openDetail();
-    setSelectedId(item.id);
-    load(item);
-    activate(item.id);
+    requestNavigation(() => {
+      rawNav.openDetail();
+      setSelectedId(item.id);
+      load(item);
+      activate(item.id);
+    });
   };
   // Wait for refs, then load without opening mobile detail. DOM defaults can
   // differ from load(undefined), especially for Select values.
   onMount(() => {
     if (selectedId() !== 'new') return;
-    const initialId =
-      typeof initialPage.settingsEntity === 'number'
-        ? initialPage.settingsEntity
-        : initialPage.settingsEntity === undefined
-          ? options.initialId?.()
-          : undefined;
+    const initialId = initialPage.settingsEntity ?? options.initialId?.();
     const item =
       initialId != null
-        ? options.items().find((candidate) => candidate.id === initialId)
+        ? options.items().find((candidate) => String(candidate.id) === String(initialId))
         : undefined;
     if (item) setSelectedId(item.id);
     else
@@ -148,6 +157,12 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     if (id === 'new') return;
     const item = selected();
     const serialized = snapshot(item);
+    // A settings update/socket invalidation can announce our own deletion before
+    // its HTTP promise resolves. Let that operation complete its guarded selection.
+    if (!item && removingId() === id) return;
+    // The response reconciles updates observed during the request. Ending a save must
+    // not reload an older cached DTO before its invalidation refetch arrives.
+    if (untrack(saving)) return;
     untrack(() => {
       if (serialized === loadedItem) return;
       if (!item) {
@@ -175,6 +190,8 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
   });
 
   const save = async () => {
+    if (saving()) return false;
+    setSaving(true);
     try {
       const id = selectedId();
       if (id === 'default') return true;
@@ -185,7 +202,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
         );
         return false;
       }
-      const data = options.data();
+      const data = structuredClone(options.data());
       const selectedAtStart = snapshot(selected());
       const item =
         id === 'new'
@@ -193,42 +210,58 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
           : await options.patch(id, changedFields(baseline ?? data, data));
       const latest = id === 'new' ? undefined : selected();
       const response = snapshot(item);
-      if (latest && snapshot(latest) !== selectedAtStart && snapshot(latest) !== response) {
-        load(latest);
-        setStatus('A newer version arrived while saving; it has been loaded.', 'info');
+      if (id !== 'new' && snapshot(latest) !== selectedAtStart && snapshot(latest) !== response) {
+        remoteConflict = true;
+        setStatus('This item changed elsewhere while saving. Discard to load it.', 'warning');
         return false;
       }
+      const editedDuringSave = !sameValue(options.data(), data);
       setSelectedId(item.id);
       setStatus('');
-      // Server-normalized values and secrets must become the new clean baseline.
-      load(item);
+      if (editedDuringSave) {
+        // Keep later edits in the form, and only acknowledge the submitted snapshot.
+        baseline = data;
+        loadedItem = response;
+        remoteConflict = false;
+      } else {
+        // Server-normalized values and secrets must become the new clean baseline.
+        load(item);
+      }
       if (id === 'new') activate(item.id);
       flashSaved();
-      return true;
+      return !isDirty();
     } catch (err) {
       setStatus(errorMessage(err));
       return false;
+    } finally {
+      setSaving(false);
     }
   };
   // Duplication copies saved state, so resolve unsaved edits through the navigation guard.
   const duplicate = () => {
     const id = selectedId();
-    if (typeof id !== 'number') return;
+    if (id === 'new' || id === 'default') return;
     requestNavigation(() => {
+      const current = capture();
       void (async () => {
         try {
-          adopt(await options.duplicate(id));
+          const item = await options.duplicate(id);
+          if (!current()) return;
+          adopt(item);
           flashSaved();
         } catch (err) {
-          setStatus(errorMessage(err));
+          if (current()) setStatus(errorMessage(err));
         }
       })();
     });
   };
   const remove = async () => {
+    if (removingId() !== null) return;
     const id = selectedId();
+    const current = capture();
     if (
-      typeof id !== 'number' ||
+      id === 'new' ||
+      id === 'default' ||
       !(await confirmAction({
         title: options.deletePrompt,
         message: 'This cannot be undone.',
@@ -237,18 +270,24 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
       }))
     )
       return;
+    if (!current()) return;
+    setRemovingId(() => id);
     try {
       await options.remove(id);
+      if (!current()) return;
       applySelection(emptySelection, false);
       rawNav.closeDetail();
     } catch (err) {
-      setStatus(errorMessage(err));
+      if (current()) setStatus(errorMessage(err));
+    } finally {
+      setRemovingId(null);
     }
   };
   const discard = () => {
+    if (saving()) return;
     const id = selectedId();
     const item = options.items().find((candidate) => candidate.id === id);
-    if (typeof id === 'number' && !item) {
+    if (id !== 'new' && id !== 'default' && !item) {
       applySelection(emptySelection, false);
       rawNav.closeDetail();
       setStatus('This item was deleted on another device.', 'warning');
@@ -260,12 +299,16 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
 
   useSettingsGuard({
     isDirty,
+    saving,
     save,
     discard,
   });
 
   return {
     selectedId,
+    identity,
+    capture,
+    saving,
     saved,
     status,
     statusKind,
@@ -282,7 +325,7 @@ export function createEntityEditor<T extends { id: number }, D extends Record<st
     draftData: () => ({ ...selected(), ...options.data() }),
     importData: (data: Record<string, unknown>, asNew = false) => {
       if (asNew || selectedId() === 'default') applySelection('new', false);
-      options.load({ ...selected(), ...options.data(), ...data } as unknown as T);
+      options.load({ ...selected(), ...options.data(), ...data } as unknown as T, true);
       rawNav.openDetail();
       setStatus('Imported into this draft. Save to apply.', 'info');
     },

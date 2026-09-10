@@ -9,6 +9,7 @@ import {
 } from '../media/mediaJobStore.ts';
 import {
   createMediaJob,
+  runMediaFavorite,
   createMediaJobFromAsset,
   deleteMediaJob,
   editMediaJob,
@@ -61,6 +62,12 @@ route.get('/api/media/jobs/active', activeMediaJobs);
 route.get('/api/media/jobs/:id', ({ params }) =>
   mediaJobDto(requireMediaJob(positiveId(params.id, 'job ID'))),
 );
+
+route.post('/api/media/favorites/:id/run', ({ params, body }) => {
+  const result = runMediaFavorite(params.id!, objectBody(body));
+  queueMicrotask(tickMediaWorker);
+  return result;
+});
 
 route.post('/api/media/jobs', ({ body }) => createMediaJob(objectBody(body)));
 

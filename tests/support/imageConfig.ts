@@ -6,10 +6,10 @@ export function imageConfig(json: string, comfyUrl: string): MediaImageConfig {
     workflow: {
       id: 'test-image-workflow',
       name: 'Test image workflow',
-      operation: 'image',
-      referenceCount: 0,
+      inputBindings: {},
+      textOutputNodeId: null,
       json,
-      galleryPromptPresetId: null,
+      standalonePromptPresetId: null,
       chatPromptPresetId: null,
     },
   };

@@ -79,7 +79,7 @@ export function finishMediaJob(
   }
   transaction(() => {
     const prompt = mediaLive.get(jobId)?.prompt ?? current.prompt;
-    const job = updateMediaJob(jobId, { state, error, prompt });
+    const job = updateMediaJob(jobId, { state, error, prompt, auto_render: 0 });
     syncMediaJobMessage(job);
   });
   releaseDeletedMediaInputs(jobId);

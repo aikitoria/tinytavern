@@ -1,4 +1,5 @@
-import { For, Show } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
+import SettingsSection from '../settings/SettingsSection.tsx';
 import type { CustomTemplate } from '@tinytavern/shared';
 import {
   DEFAULT_PROMPT_TEMPLATE,
@@ -18,7 +19,7 @@ export default function TemplateFields(props: {
   inline?: boolean;
   readOnly?: boolean;
 }) {
-  let prefills: HTMLDetailsElement | undefined;
+  const [prefills, setPrefills] = createSignal({ key: 0, hasContent: false });
   const form = createFormFields({
     content: props.inline ? '' : DEFAULT_PROMPT_TEMPLATE,
     userPrologue: '',
@@ -35,7 +36,10 @@ export default function TemplateFields(props: {
     },
     set value(value) {
       form.load(value);
-      if (prefills) prefills.open = !!(value?.reasoningPrefill || value?.messagePrefill);
+      setPrefills((previous) => ({
+        key: previous.key + 1,
+        hasContent: Boolean(value?.reasoningPrefill || value?.messagePrefill),
+      }));
     },
   };
   if (typeof props.ref === 'function') props.ref(handle);
@@ -129,24 +133,14 @@ export default function TemplateFields(props: {
   return (
     <For each={sections}>
       {([title, fields, hint]) => (
-        <Show
-          when={title === 'Prefills'}
-          fallback={
-            <section class={props.inline ? 'form-stack' : 'settings-section'}>
-              <Show when={!props.inline}>
-                <h3>{title}</h3>
-              </Show>
-              <Fields fields={fields} hint={hint} />
-            </section>
-          }
+        <SettingsSection
+          title={title === 'Prefills' ? 'Advanced prefills' : title}
+          disclosure={title === 'Prefills' ? prefills() : undefined}
+          id={`template-${title.toLowerCase().replaceAll(' ', '-')}`}
+          fields={fields.map((field) => `${props.inline ? 'customTemplate.' : ''}${field.key}`)}
         >
-          <details ref={prefills} class="settings-section block">
-            <summary class="cursor-pointer">Advanced prefills</summary>
-            <div class="form-stack">
-              <Fields fields={fields} hint={hint} />
-            </div>
-          </details>
-        </Show>
+          <Fields fields={fields} hint={hint} />
+        </SettingsSection>
       )}
     </For>
   );

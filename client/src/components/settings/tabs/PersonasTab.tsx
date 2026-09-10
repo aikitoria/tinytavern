@@ -1,3 +1,4 @@
+import SettingsSection from '../SettingsSection.tsx';
 import type { Persona } from '@tinytavern/shared';
 import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
 import { Show, createSignal } from 'solid-js';
@@ -12,6 +13,7 @@ import AvatarRow from '../../forms/AvatarRow.tsx';
 import EntityEditorPane from '../EntityEditorPane.tsx';
 import MacroHelp from '../../forms/MacroHelp.tsx';
 import MacroTextarea from '../../forms/MacroTextarea.tsx';
+import { avatarEditorSnapshot } from '../../../state/editorSync.ts';
 
 export default function PersonasTab() {
   const [avatarData, setAvatarData] = createSignal<string | null | undefined>();
@@ -22,6 +24,7 @@ export default function PersonasTab() {
   const editor = createEntityEditor({
     ...api.personas,
     items: () => state.personas,
+    snapshot: avatarEditorSnapshot,
     load: (persona: (Persona & { avatarData?: string | null }) | undefined) => {
       setAvatarData(persona?.avatarData);
       nameEl.value = persona?.name ?? '';
@@ -63,8 +66,7 @@ export default function PersonasTab() {
         description: 'New conversations will start without a persona selected.',
       }}
     >
-      <section class="settings-section">
-        <h3>Basics</h3>
+      <SettingsSection title="Basics" id="persona-basics" fields={['name', 'avatarData']}>
         <Show when={avatarData() !== undefined}>
           <div class="flex items-center gap-3 [&_.avatar]:size-14">
             <Avatar src={avatarData()} name={nameEl.value || '?'} />
@@ -96,9 +98,12 @@ export default function PersonasTab() {
         </Show>
         <SettingLabel field={nameEl}>Name (used as {'{{user}}'})</SettingLabel>
         <input ref={nameEl.ref} placeholder="Your name" />
-      </section>
-      <section class="settings-section">
-        <h3>Persona description</h3>
+      </SettingsSection>
+      <SettingsSection
+        title="Persona description"
+        id="persona-description"
+        fields={['description']}
+      >
         <SettingLabel field={descriptionEl}>
           Description (injected into the prompt) <MacroHelp />
         </SettingLabel>
@@ -106,7 +111,7 @@ export default function PersonasTab() {
           ref={descriptionEl.ref}
           placeholder="A few sentences about {{user}} (optional)"
         />
-      </section>
+      </SettingsSection>
     </EntityEditorPane>
   );
 }

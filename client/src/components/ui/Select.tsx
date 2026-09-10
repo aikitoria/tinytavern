@@ -10,14 +10,17 @@ import {
   type JSX,
 } from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
+import ReferenceEditButton from './ReferenceEditButton.tsx';
 
 export interface SelectOption {
   value: string;
   label: string;
+  edit?: () => void;
 }
 
 /** Imperative handle mimicking HTMLSelectElement's value contract for ref-based forms. */
 export interface SelectHandle {
+  readonly id: string;
   value: string;
   /** Apply an explicit edit, including the controlled-value callback. */
   change: (value: string) => void;
@@ -32,6 +35,7 @@ export default function Select(props: {
   onChange?: (value: string) => void;
   ref?: SelectHandle | ((handle: SelectHandle) => void);
   class?: string;
+  id?: string;
   ariaLabel?: string;
   buttonLabel?: JSX.Element;
   disabled?: boolean;
@@ -39,6 +43,8 @@ export default function Select(props: {
   menuClass?: string;
   showCheck?: boolean;
   searchPlaceholder?: string;
+  /** Let a searched value be selected even when it is absent from the supplied options. */
+  allowCustom?: boolean;
 }) {
   const id = createUniqueId();
   const listboxId = `select-listbox-${id}`;
@@ -46,15 +52,20 @@ export default function Select(props: {
   const [open, setOpen] = createSignal(false);
   const [highlighted, setHighlighted] = createSignal(0);
   const [query, setQuery] = createSignal('');
+  const choices = createMemo(() => props.options);
   const options = createMemo(() => {
-    const needle = query().trim().toLowerCase();
-    return needle
-      ? props.options.filter(
+    const value = query().trim();
+    const needle = value.toLowerCase();
+    const matches = needle
+      ? choices().filter(
           (option) =>
             option.label.toLowerCase().includes(needle) ||
             option.value.toLowerCase().includes(needle),
         )
-      : props.options;
+      : choices();
+    return props.allowCustom && value && !choices().some((option) => option.value === value)
+      ? [...matches, { value, label: `Use “${value}”` }]
+      : matches;
   });
   let button!: HTMLButtonElement;
   let menu: HTMLDivElement | undefined;
@@ -67,6 +78,9 @@ export default function Select(props: {
   });
 
   const handle: SelectHandle = {
+    get id() {
+      return props.id ?? `select-control-${id}`;
+    },
     get value() {
       return current();
     },
@@ -84,8 +98,8 @@ export default function Select(props: {
   };
   if (typeof props.ref === 'function') props.ref(handle);
 
-  const label = () =>
-    props.buttonLabel ?? props.options.find((o) => o.value === current())?.label ?? current();
+  const label = () => props.buttonLabel ?? selectedOption()?.label ?? current();
+  const selectedOption = createMemo(() => choices().find((option) => option.value === current()));
 
   const openMenu = () => {
     if (props.disabled) return;
@@ -93,7 +107,7 @@ export default function Select(props: {
     setHighlighted(
       Math.max(
         0,
-        props.options.findIndex((o) => o.value === current()),
+        choices().findIndex((o) => o.value === current()),
       ),
     );
     setOpen(true);
@@ -144,25 +158,37 @@ export default function Select(props: {
 
   return (
     <>
-      <button
-        type="button"
-        class={`select-btn ${props.class ?? ''}`}
-        ref={button}
-        role={props.searchPlaceholder ? undefined : 'combobox'}
-        aria-label={props.ariaLabel}
-        aria-haspopup={props.searchPlaceholder ? 'dialog' : 'listbox'}
-        aria-expanded={open()}
-        aria-controls={props.searchPlaceholder ? `select-popup-${id}` : listboxId}
-        aria-activedescendant={props.searchPlaceholder ? undefined : activeDescendant()}
-        disabled={props.disabled}
-        onClick={() => (open() ? setOpen(false) : openMenu())}
-        onKeyDown={onKeyDown}
-      >
-        <span class="select-label truncate">{label()}</span>
-        <span class="select-caret text-dim text-tiny shrink-0">
-          <FontAwesomeIcon icon={faChevronDown} size={10} />
-        </span>
-      </button>
+      <div class={`select-control ${props.class ?? ''}`}>
+        <button
+          type="button"
+          id={handle.id}
+          class="select-btn"
+          ref={button}
+          role={props.searchPlaceholder ? undefined : 'combobox'}
+          aria-label={props.ariaLabel}
+          aria-haspopup={props.searchPlaceholder ? 'dialog' : 'listbox'}
+          aria-expanded={open()}
+          aria-controls={props.searchPlaceholder ? `select-popup-${id}` : listboxId}
+          aria-activedescendant={props.searchPlaceholder ? undefined : activeDescendant()}
+          disabled={props.disabled}
+          onClick={() => (open() ? setOpen(false) : openMenu())}
+          onKeyDown={onKeyDown}
+        >
+          <span class="select-label truncate">{label()}</span>
+          <span class="select-caret text-dim text-tiny shrink-0">
+            <FontAwesomeIcon icon={faChevronDown} size={10} />
+          </span>
+        </button>
+        <Show when={selectedOption()?.edit}>
+          <ReferenceEditButton
+            label={selectedOption()!.label}
+            onClick={() => {
+              setOpen(false);
+              selectedOption()?.edit?.();
+            }}
+          />
+        </Show>
+      </div>
       <DropdownSurface
         open={open()}
         anchor={() => button}

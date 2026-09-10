@@ -45,7 +45,7 @@ export default function NamedCollectionToolbar(props: {
   if (typeof props.ref === 'function') props.ref({ closeRename });
   return (
     <>
-      <div class="key-row flex items-center gap-2 flex-wrap [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-45 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0 small-touch:[&_.select-btn]:basis-[100%]">
+      <div class="key-row flex items-center gap-2 flex-wrap [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-45 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0 small-touch:[&_.select-control]:basis-[100%]">
         <Select
           ariaLabel={props.ariaLabel}
           value={props.selected}
@@ -100,7 +100,7 @@ export default function NamedCollectionToolbar(props: {
         >
           {props.nameLabel}
         </SettingLabel>
-        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-btn]:flex-1 [&_.select-btn]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
+        <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
           <input
             id={inputId}
             ref={input}

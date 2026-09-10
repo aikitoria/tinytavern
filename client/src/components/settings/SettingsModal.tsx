@@ -4,7 +4,7 @@ import {
   useDialogPage,
 } from '../../state/dialogContext.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
-import { For, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
@@ -25,34 +25,40 @@ import PresetsTab from './tabs/PresetsTab.tsx';
 import TemplatesTab from './tabs/TemplatesTab.tsx';
 import CharactersTab from './tabs/CharactersTab.tsx';
 import PersonasTab from './tabs/PersonasTab.tsx';
-import { ChatImagePromptsTab, AvatarPromptsTab } from './tabs/ImageGenerationTab.tsx';
 import MediaRenderingTab from './tabs/MediaRenderingTab.tsx';
-import {
-  GalleryImagePromptsTab,
-  ChatVideoPromptsTab,
-  GalleryVideoPromptsTab,
-} from './tabs/MediaPromptsTab.tsx';
+import WorkflowsTab from './tabs/WorkflowsTab.tsx';
+import { ChatMediaPromptsTab, StandaloneMediaPromptsTab } from './tabs/MediaPromptsTab.tsx';
 
-const TABS: { key: string; label: string; component: Component }[] = [
-  { key: 'general', label: 'General', component: GeneralTab },
-  { key: 'endpoints', label: 'Endpoints', component: EndpointsTab },
-  { key: 'presets', label: 'System prompts', component: PresetsTab },
-  { key: 'templates', label: 'Prompt templates', component: TemplatesTab },
-  { key: 'characters', label: 'Characters', component: CharactersTab },
-  { key: 'personas', label: 'Personas', component: PersonasTab },
-  { key: 'media-rendering', label: 'Media rendering', component: MediaRenderingTab },
-  { key: 'avatar-prompts', label: 'Avatar prompts', component: AvatarPromptsTab },
-  { key: 'chat-image-prompts', label: 'Chat image prompts', component: ChatImagePromptsTab },
-  { key: 'chat-video-prompts', label: 'Chat video prompts', component: ChatVideoPromptsTab },
+const TABS: { key: string; label: string; group: string; component: Component }[] = [
+  { key: 'characters', label: 'Characters', group: 'Chat', component: CharactersTab },
+  { key: 'personas', label: 'Personas', group: 'Chat', component: PersonasTab },
+  { key: 'system-prompts', label: 'System prompts', group: 'Chat', component: PresetsTab },
+  { key: 'chat-templates', label: 'Chat templates', group: 'Chat', component: TemplatesTab },
+  { key: 'workflows', label: 'Workflows', group: 'Media', component: WorkflowsTab },
   {
-    key: 'gallery-image-prompts',
-    label: 'Gallery image prompts',
-    component: GalleryImagePromptsTab,
+    key: 'chat-media-prompts',
+    label: 'Chat media prompts',
+    group: 'Media',
+    component: ChatMediaPromptsTab,
   },
   {
-    key: 'gallery-video-prompts',
-    label: 'Gallery video prompts',
-    component: GalleryVideoPromptsTab,
+    key: 'standalone-media-prompts',
+    label: 'Standalone media prompts',
+    group: 'Media',
+    component: StandaloneMediaPromptsTab,
+  },
+  {
+    key: 'generation-settings',
+    label: 'Generation settings',
+    group: 'Media',
+    component: MediaRenderingTab,
+  },
+  { key: 'general', label: 'General', group: 'Application', component: GeneralTab },
+  {
+    key: 'model-connections',
+    label: 'Model connections',
+    group: 'Application',
+    component: EndpointsTab,
   },
 ];
 
@@ -87,7 +93,8 @@ export default function SettingsModal() {
   const navigation = createSettingsNavigation();
   useDialogNavigationGuard(navigation.navigate);
   const paneActive = useDialogActive();
-  const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS[0]!;
+  const activeTab = () =>
+    TABS.find((item) => item.key === tab()) ?? TABS.find((item) => item.key === 'general')!;
   let sectionPicker!: SelectHandle;
   let contentEl!: HTMLDivElement;
   const leaveSettings = () => navigation.navigate(() => openModal(null));
@@ -157,16 +164,20 @@ export default function SettingsModal() {
         fullscreen
         hideCloseButton
         onClose={leaveSettings}
+        headerStart={
+          <button
+            type="button"
+            class="page-back icon-btn flex-none border-transparent bg-clear"
+            aria-label="Back"
+            title="Back"
+            data-modal-initial-focus
+            onClick={leaveSettings}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} size={13} />
+          </button>
+        }
         headerExtra={
-          <div class="flex items-center flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control [&_.page-back]:mr-auto [&_.page-back]:border-transparent [&_.page-back]:bg-clear">
-            <button
-              type="button"
-              class="page-back"
-              data-modal-initial-focus
-              onClick={leaveSettings}
-            >
-              <FontAwesomeIcon icon={faArrowLeft} size={13} /> Back
-            </button>
+          <div class="flex items-center justify-end flex-1 min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control">
             <div class="display-none w-50 min-w-0 compact:block">
               <Select
                 ref={sectionPicker}
@@ -192,19 +203,30 @@ export default function SettingsModal() {
               <div role="tablist" aria-label="Settings sections" aria-orientation="vertical">
                 <For each={TABS}>
                   {(t, index) => (
-                    <button
-                      class="settings-nav-item min-h-control border-transparent w-full text-dim bg-clear text-left [&.active]:text-foreground"
-                      classList={{ active: tab() === t.key }}
-                      id={`settings-tab-${t.key}`}
-                      role="tab"
-                      aria-selected={tab() === t.key}
-                      aria-controls="settings-tab-panel"
-                      tabIndex={tab() === t.key ? 0 : -1}
-                      onKeyDown={(event) => onTabKeyDown(event, index())}
-                      onClick={() => chooseTab(t.key)}
-                    >
-                      {t.label}
-                    </button>
+                    <>
+                      <Show when={index() === 0 || TABS[index() - 1]!.group !== t.group}>
+                        <div
+                          role="presentation"
+                          class="px-[9px] pt-1 pb-0 text-label leading-5 text-foreground font-bold"
+                          classList={{ 'mt-3': index() > 0 }}
+                        >
+                          {t.group}
+                        </div>
+                      </Show>
+                      <button
+                        class="settings-nav-item min-h-control border-transparent w-full text-dim bg-clear text-left [&.active]:text-foreground"
+                        classList={{ active: tab() === t.key }}
+                        id={`settings-tab-${t.key}`}
+                        role="tab"
+                        aria-selected={tab() === t.key}
+                        aria-controls="settings-tab-panel"
+                        tabIndex={tab() === t.key ? 0 : -1}
+                        onKeyDown={(event) => onTabKeyDown(event, index())}
+                        onClick={() => chooseTab(t.key)}
+                      >
+                        {t.label}
+                      </button>
+                    </>
                   )}
                 </For>
               </div>
@@ -212,7 +234,7 @@ export default function SettingsModal() {
             <div class="settings-editor flex flex-col min-w-0 min-h-0 flex-1">
               <div
                 ref={contentEl}
-                class="min-w-0 min-h-0 flex-1 overflow-y-auto [&:has(>.master-detail)]:flex [&:has(>.master-detail)]:overflow-hidden [&>.form]:w-full [&>.form]:min-h-full [&>.form]:p-4 [&_.form]:min-w-0 [&_.form>*]:shrink-0 [&_.form>*]:w-full [&_.form>*]:max-w-240 [&_.form>*]:mx-auto [&_.settings-section]:p-4 [&_.settings-section]:bg-chrome [&_.settings-section]:rounded-md [&_details.settings-section]:block [&_details.settings-section>summary]:cursor-pointer [&_details.settings-section[open]>summary]:mb-2 [&_.field-group]:bg-panel [&_.field-group]:border-subtle [&_.field-group>:is(label,_.setting-label):first-child]:mt-0 mobile:[&_.settings-section]:p-3"
+                class="min-w-0 min-h-0 flex-1 overflow-y-auto [&:has(>.master-detail)]:flex [&:has(>.master-detail)]:overflow-hidden [&>.form]:w-full [&>.form]:min-h-full [&>.form]:p-4 [&_.form]:min-w-0 [&_.form>*]:shrink-0 [&_.form>*]:w-full [&_.form>*]:max-w-240 [&_.form>*]:mx-auto [&_.settings-section]:p-4 [&_.settings-section]:bg-chrome [&_.settings-section]:rounded-md [&_.field-group]:bg-panel [&_.field-group]:border-subtle [&_.field-group>:is(label,_.setting-label):first-child]:mt-0 mobile:[&_.settings-section]:p-3"
                 id="settings-tab-panel"
                 role="tabpanel"
                 aria-label={activeTab().label}
