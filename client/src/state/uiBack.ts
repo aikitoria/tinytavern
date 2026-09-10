@@ -6,7 +6,7 @@ export function registerUiBack(element: HTMLElement, action: () => void): void {
   backActions.set(element, action);
 }
 
-function currentBackAction(): (() => void) | undefined {
+export function currentBackAction(): (() => void) | undefined {
   const surfaces = document.querySelectorAll<HTMLElement>('[data-ui-back]');
   // Portals follow their underlying pages in document order. A nested Back
   // button (such as the mobile entity editor) also takes priority over its parent.

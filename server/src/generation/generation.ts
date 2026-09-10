@@ -21,6 +21,7 @@ import {
 } from './completionConfig.ts';
 import type { CompletionOptions } from './completionConfig.ts';
 import { completionDataReader, startCompletionIdleWatchdog } from './completionStream.ts';
+import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
 
 interface ActiveGen {
   mid: number;
@@ -133,8 +134,10 @@ export function stopBackgroundGenerations(conversationId?: number): number | nul
 
 /** Overlays in-flight stream buffers onto persisted rows so snapshots are current. */
 export function mergeLiveBuffers(messages: Message[]): Message[] {
-  if (active.size === 0) return messages;
+  if (active.size === 0 && mediaPromptBuffers.size === 0) return messages;
   return messages.map((m) => {
+    const prompt = mediaPromptBuffers.get(m.id);
+    if (prompt) return { ...m, content: prompt.prompt, reasoning: prompt.reasoning || null };
     const gen = active.get(m.id);
     if (!gen) return m;
     return {
@@ -550,10 +553,18 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
     return out;
   };
 
-  const processData = completionDataReader((d, r) => {
+  let refusal = '';
+  let receivedVisibleContent = false;
+  let receivedReasoning = false;
+  const processData = completionDataReader((d, r, rejected) => {
     const dOut = d ? passContent(d) : '';
+    if (!receivedVisibleContent && dOut.trim()) receivedVisibleContent = true;
+    refusal += rejected;
     if (dOut) gen.content += dOut;
-    if (r) gen.reasoning += r;
+    if (r) {
+      receivedReasoning = true;
+      gen.reasoning += r;
+    }
     if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
     broadcastConv(gen.conversationId, {
       t: 'delta',
@@ -592,8 +603,18 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   }
   // A reply shorter than the name prefix may still be held back — flush it.
   if (holdback?.trim() && active.get(gen.mid) === gen) {
+    receivedVisibleContent = true;
     gen.content += holdback;
     broadcastConv(gen.conversationId, { t: 'delta', mid: gen.mid, d: holdback });
+  }
+  if (!receivedVisibleContent) {
+    if (refusal.trim()) throw new Error(`The model refused: ${refusal.trim().slice(0, 300)}`);
+    if (receivedReasoning) {
+      throw new Error(
+        'The model returned only reasoning and no message content (reasoning models may need a larger token budget)',
+      );
+    }
+    throw new Error('The model returned an empty reply');
   }
   finalize(gen, 'done');
 }

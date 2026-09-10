@@ -134,6 +134,7 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
       broadcastTree(chat.id);
     } else if (asset) {
       insertGalleryAsset(asset, {
+        folderId: source.gallery_folder_id,
         conversationId: source.context_conversation_id,
         prompt: source.prompt,
       });

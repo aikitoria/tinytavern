@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
-import { ENTITY_FOLDERS, transferDocument } from '@tinytavern/shared';
+import { ENTITY_FOLDERS, transferDocument, type GalleryItem } from '@tinytavern/shared';
 import { testApi } from '../support/http.ts';
 import { conversationFixture } from '../support/fixtures.ts';
 
@@ -11,9 +11,10 @@ test('entity folders preserve contents and transfer by name with atomic imports'
   await import('../../server/src/routes/personas.ts');
   await import('../../server/src/routes/endpoints.ts');
   await import('../../server/src/routes/characters.ts');
+  await import('../../server/src/routes/gallery.ts');
   const { stmt } = await import('../../server/src/db/db.ts');
   const conversation = conversationFixture();
-  const { server, request } = await testApi();
+  const { server, request, base } = await testApi();
   try {
     for (const type of ['characters', 'presets', 'templates', 'personas', 'endpoints'] as const) {
       const folderPath = `/api/${ENTITY_FOLDERS[type].path}`;
@@ -41,6 +42,99 @@ test('entity folders preserve contents and transfer by name with atomic imports'
       const items = await request('GET', `/api/${type}`);
       assert.equal(items.find((row: { id: number }) => row.id === copy.id).folderId, null);
     }
+
+    const galleryFolder = await request('POST', '/api/gallery-folders', { name: 'Scenes' });
+    const destination = await request('POST', '/api/gallery-folders', { name: 'Keep' });
+    const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+    const upload = async (folder = '') => {
+      const response = await fetch(`${base}/api/gallery/upload${folder}`, {
+        method: 'POST',
+        body: makePlaceholderPng(),
+      });
+      assert.equal(response.status, 200);
+      return response.json() as Promise<GalleryItem>;
+    };
+    const images = [await upload(`?folderId=${galleryFolder.id}`), await upload()];
+    assert.deepEqual(
+      images.map((item) => item.folderId),
+      [galleryFolder.id, null],
+    );
+    const owners = stmt("SELECT * FROM media_owners WHERE owner_type = 'gallery'").all();
+    const move = (
+      folderId: number | null,
+      expected: Pick<GalleryItem, 'id' | 'folderId'>[] = images,
+    ) => ({
+      folderId,
+      items: expected.map((item) => ({ id: item.id, expectedFolderId: item.folderId })),
+    });
+    await request('POST', '/api/gallery/move', move(999999), 400);
+    await request('POST', '/api/gallery/move', move(destination.id));
+    const moved = await request('GET', '/api/gallery');
+    assert(moved.every((item: { folderId: number }) => item.folderId === destination.id));
+    await request(
+      'POST',
+      '/api/gallery/move',
+      move(null, [moved[0], { ...moved[1], folderId: null }]),
+      409,
+    );
+    assert.deepEqual(
+      await request('GET', '/api/gallery'),
+      moved,
+      'A stale bulk move changes nothing',
+    );
+    await request(
+      'POST',
+      '/api/gallery/move',
+      move(null, [moved[0], { id: 999999, folderId: null }]),
+      404,
+    );
+    const detail = moved[0];
+    const details = {
+      prompt: 'Filed and edited together',
+      characterIds: [],
+      folderId: null,
+      expectedPrompt: detail.prompt,
+      expectedCharacterIds: detail.characters.map((character: { id: number }) => character.id),
+      expectedFolderId: detail.folderId,
+    };
+    const edited = await request('PATCH', `/api/gallery/${detail.id}`, details);
+    assert.equal(edited.folderId, null);
+    assert.equal(edited.prompt, details.prompt);
+    await request(
+      'PATCH',
+      `/api/gallery/${detail.id}`,
+      {
+        ...details,
+        prompt: 'Must not overwrite',
+        expectedPrompt: edited.prompt,
+      },
+      409,
+    );
+    await request(
+      'PATCH',
+      `/api/gallery/${detail.id}`,
+      {
+        ...details,
+        folderId: 999999,
+        expectedFolderId: null,
+        expectedPrompt: edited.prompt,
+      },
+      400,
+    );
+    assert.equal(
+      (await request('GET', '/api/gallery')).find((item: GalleryItem) => item.id === detail.id)
+        .prompt,
+      edited.prompt,
+    );
+    await request('PATCH', `/api/gallery-folders/${destination.id}`, { name: 'Selected' });
+    await request('DELETE', `/api/gallery-folders/${destination.id}`, undefined, 204);
+    const rooted = await request('GET', '/api/gallery');
+    assert(rooted.every((item: { folderId: number | null }) => item.folderId === null));
+    assert.deepEqual(
+      stmt("SELECT * FROM media_owners WHERE owner_type = 'gallery'").all(),
+      owners,
+      'Moving items and deleting folders preserve media ownership',
+    );
 
     const folder = await request('POST', '/api/preset-folders', { name: 'Portable' });
     await request('POST', '/api/preset-folders', { name: 'Empty' });

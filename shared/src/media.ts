@@ -195,6 +195,7 @@ export interface MediaJobDraft {
   prompt?: string;
   inputs?: MediaJobInput[];
   contextConversationId?: number | null;
+  galleryFolderId?: number | null;
   destination?: 'gallery' | 'chat';
 }
 
@@ -277,6 +278,7 @@ export interface MediaJob {
   assets: MediaAsset[];
   outputs: MediaAsset[];
   contextConversationId: number | null;
+  galleryFolderId: number | null;
   messageId: number | null;
   destination: 'gallery' | 'chat';
   sourceJobId: number | null;

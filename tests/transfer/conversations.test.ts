@@ -5,6 +5,47 @@ import { imageConfig } from '../support/imageConfig.ts';
 import { basename, join } from 'node:path';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
+databaseCase('conversation copies retain live media prompts', async () => {
+  const { stmt } = await import('../../server/src/db/db.ts');
+  const { mediaPromptBuffers } = await import('../../server/src/media/mediaJobStore.ts');
+  const { getActivePath, setActiveLeaf } = await import('../../server/src/conversations/tree.ts');
+  await import('../../server/src/routes/conversations.ts');
+  const { testApi } = await import('../support/http.ts');
+  const { server, request } = await testApi();
+  const conversationId = conversationFixture();
+  const messageId = messageFixture(conversationId, {
+    role: 'tool',
+    content: '',
+    status: 'streaming',
+    image_pending: 1,
+  });
+  setActiveLeaf(conversationId, messageId);
+  mediaPromptBuffers.set(messageId, {
+    prompt: 'Visible partial prompt',
+    reasoning: 'Live reasoning',
+  });
+  try {
+    const tree = await request('GET', `/api/conversations/${conversationId}/tree`);
+    for (const path of [
+      `/api/conversations/${conversationId}/duplicate`,
+      `/api/messages/${messageId}/branch-conversation`,
+    ]) {
+      const copy = await request('POST', path);
+      const message = getActivePath(copy.id)[0]!;
+      assert.equal(message.content, tree.messages[0].content);
+      assert.equal(message.reasoning, tree.messages[0].reasoning);
+      assert.equal(message.content, 'Visible partial prompt');
+      assert.equal(message.reasoning, 'Live reasoning');
+      assert.equal(message.status, 'stopped');
+      assert.equal(message.imagePending, false);
+    }
+    assert.equal(stmt('SELECT content FROM messages WHERE id = ?').get(messageId)!.content, '');
+  } finally {
+    mediaPromptBuffers.delete(messageId);
+    server.stop(true);
+  }
+});
+
 databaseCase('conversation transfer', async () => {
   const { IMAGES_DIR, stmt } = await import('../../server/src/db/db.ts');
   const { deleteImageFiles, saveImage } = await import('../../server/src/media/images.ts');

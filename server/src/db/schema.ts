@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 77;
+export const SCHEMA_VERSION = 79;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -155,8 +155,15 @@ CREATE TABLE auth_sessions (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE gallery_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE gallery_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL,
   character_name TEXT NOT NULL,
   source_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
   source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
@@ -220,6 +227,7 @@ CREATE TABLE media_jobs (
   context_conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
   message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
   destination TEXT NOT NULL DEFAULT 'gallery',
+  gallery_folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL,
   source_job_id INTEGER,
   recipe_id INTEGER REFERENCES media_recipes(id) ON DELETE SET NULL,
   seed INTEGER,
@@ -291,6 +299,8 @@ CREATE INDEX idx_personas_folder ON personas(folder_id) WHERE folder_id IS NOT N
 CREATE INDEX idx_endpoints_folder ON endpoints(folder_id) WHERE folder_id IS NOT NULL;
 CREATE INDEX idx_characters_folder ON characters(folder_id) WHERE folder_id IS NOT NULL;
 CREATE INDEX idx_gallery_image ON gallery_items(image);
+CREATE INDEX idx_gallery_folder ON gallery_items(folder_id) WHERE folder_id IS NOT NULL;
+CREATE INDEX idx_media_jobs_gallery_folder ON media_jobs(gallery_folder_id) WHERE gallery_folder_id IS NOT NULL;
 CREATE INDEX idx_gallery_updated ON gallery_items(updated_at DESC, id DESC);
 CREATE INDEX idx_gallery_source_message ON gallery_items(source_message_id) WHERE source_message_id IS NOT NULL;
 CREATE INDEX idx_gallery_source_conversation ON gallery_items(source_conversation_id) WHERE source_conversation_id IS NOT NULL;

@@ -2,7 +2,8 @@ import type { ENTITY_FOLDERS, FolderEntity } from '@tinytavern/shared';
 import { stmt } from '../../db/db.ts';
 import { HttpError } from '../../http/router.ts';
 
-export type EntityTable = FolderEntity | (typeof ENTITY_FOLDERS)[FolderEntity]['table'];
+export type EntityTable =
+  Exclude<FolderEntity, 'gallery'> | (typeof ENTITY_FOLDERS)[FolderEntity]['table'];
 
 export function rows(table: EntityTable): Record<string, unknown>[] {
   return stmt(`SELECT * FROM ${table} ORDER BY name COLLATE NOCASE, id`).all() as Record<

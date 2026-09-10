@@ -25,8 +25,10 @@ export interface MediaToolSession {
   requestKey: string;
   workflowId: string | null;
   jobId: number | null;
+  previewJobId?: number;
   assetId?: number;
   contextConversationId: number | null;
+  galleryFolderId?: number | null;
   destination: 'gallery' | 'chat';
   prompt: string;
   inputs: MediaJobInput[];
@@ -46,6 +48,7 @@ export function openMediaTool(
   workflowId: string | null = null,
   options: {
     conversationId?: number | null;
+    galleryFolderId?: number | null;
     prompt?: string;
     input?: { asset: MediaAsset; slot?: MediaJobInput['slot'] };
     jobId?: number;
@@ -60,6 +63,7 @@ export function openMediaTool(
     workflowId,
     jobId: options.jobId ?? null,
     contextConversationId: conversationId,
+    galleryFolderId: conversationId === null ? (options.galleryFolderId ?? null) : null,
     destination: conversationId === null ? 'gallery' : 'chat',
     prompt: options.prompt ?? '',
     inputs: input?.slot ? [{ slot: input.slot, assetId: input.asset.id }] : [],

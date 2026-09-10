@@ -299,8 +299,14 @@ export const api = {
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
   gallery: () => request<GalleryItem[]>('GET', '/api/gallery'),
-  uploadGalleryImage: (file: File, characterId: number | null, characterName?: string) => {
+  uploadGalleryImage: (
+    file: File,
+    characterId: number | null,
+    characterName?: string,
+    folderId?: number | null,
+  ) => {
     const query = new URLSearchParams();
+    if (folderId != null) query.set('folderId', String(folderId));
     if (characterId != null) query.set('characterId', String(characterId));
     else if (characterName) query.set('characterName', characterName);
     return request<GalleryItem>('POST', `/api/gallery/upload?${query}`, undefined, {
@@ -346,17 +352,23 @@ export const api = {
   },
   updateGalleryItem: (
     id: number,
-    value: { prompt: string; characterIds: number[] },
-    expected: { prompt: string; characterIds: number[] },
+    value: { prompt: string; characterIds: number[]; folderId: number | null },
+    expected: { prompt: string; characterIds: number[]; folderId: number | null },
   ) =>
     request<GalleryItem>('PATCH', `/api/gallery/${id}`, {
       ...value,
       expectedPrompt: expected.prompt,
       expectedCharacterIds: expected.characterIds,
+      expectedFolderId: expected.folderId,
     }),
   deleteGalleryItem: (id: number) => request<void>('DELETE', `/api/gallery/${id}`),
   deleteGalleryItems: (ids: number[]) =>
     request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
+  moveGalleryItems: (items: Pick<GalleryItem, 'id' | 'folderId'>[], folderId: number | null) =>
+    request<{ moved: number }>('POST', '/api/gallery/move', {
+      items: items.map((item) => ({ id: item.id, expectedFolderId: item.folderId })),
+      folderId,
+    }),
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   deleteAllCharacters: () => request<{ deleted: number }>('DELETE', '/api/characters'),
   resetSettings: (expectedRevision: number): Promise<Settings> =>

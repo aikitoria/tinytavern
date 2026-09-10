@@ -10,7 +10,24 @@ export function avatarEditorSnapshot<T extends { avatar: unknown; avatarThumbnai
 }
 
 export function sameValue(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((value, index) => sameValue(value, b[index]))
+    );
+  }
+  const left = a as RecordDraft;
+  const right = b as RecordDraft;
+  // Drafts are JSON records: object field order is irrelevant and undefined fields are omitted.
+  const keys = Object.keys(left).filter((key) => left[key] !== undefined);
+  return (
+    keys.length === Object.keys(right).filter((key) => right[key] !== undefined).length &&
+    keys.every((key) => Object.hasOwn(right, key) && sameValue(left[key], right[key]))
+  );
 }
 
 /** Top-level field patch. Nested values remain atomic editor fields. */

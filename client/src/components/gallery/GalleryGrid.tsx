@@ -225,7 +225,9 @@ export default function GalleryGrid(props: {
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
-    const mobile = window.matchMedia('(max-width: 767px)');
+    const mobile = window.matchMedia(
+      '(max-width: 767px), (pointer: coarse) and (max-width: 1024px)',
+    );
     const measure = () => {
       if (props.hidden || props.active === false) return;
       cancelAnimationFrame(frame);

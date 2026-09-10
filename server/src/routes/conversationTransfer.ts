@@ -19,7 +19,6 @@ import { HttpError, route } from '../http/router.ts';
 import { getPathToMessage } from '../conversations/tree.ts';
 import { positiveId, requireObject as object, requireString } from '../http/validation.ts';
 import { parseImageConfig } from '../media/mediaSettings.ts';
-import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
 import {
   exportImageRecipes,
   importRecipeImages,
@@ -242,7 +241,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
         id: row.id,
         parentId: row.parent_id,
         role: row.role,
-        content: mediaPromptBuffers.get(row.id)?.prompt ?? current?.content ?? row.content,
+        content: current?.content ?? row.content,
         reasoning: current?.reasoning ?? row.reasoning,
         name: row.name,
         status: row.status,

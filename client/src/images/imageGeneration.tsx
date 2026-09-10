@@ -36,7 +36,6 @@ import type { ComposerCommand } from '../composerCommands.ts';
 import { api } from '../state/api.ts';
 import {
   activePath,
-  applyGalleryItem,
   applyMediaJob,
   mediaJobsByMessage,
   navigateTree,
@@ -524,7 +523,6 @@ export const imageMessage = {
       setSavingToGallery(true);
       try {
         const result = await api.saveGalleryImage(message().id, activeImage());
-        applyGalleryItem(result.item);
         if (result.created) toast('Saved image to gallery.', 'success');
         else openModal('gallery');
       } catch (err) {

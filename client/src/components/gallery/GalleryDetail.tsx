@@ -1,4 +1,5 @@
 import { entityOptions } from '../../state/entityReferences.ts';
+import { collectionByName } from '../../state/collectionOrder.ts';
 import MediaCharacterPicker from '../../media/MediaCharacterPicker.tsx';
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import {
@@ -13,7 +14,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { faTrashCan } from '@fortawesome/free-regular-svg-icons';
 import { type GalleryItem, type ImageDescriptionProgress } from '@tinytavern/shared';
-import { applyGalleryItem, state, toast } from '../../state/store.ts';
+import { state, toast } from '../../state/store.ts';
 import { api } from '../../state/api.ts';
 import { download, errorMessage } from '../../util.ts';
 import { prepareTextareaResize } from '../../textareaResize.ts';
@@ -57,13 +58,13 @@ export default function GalleryDetail(props: {
   const detailsValue = (item: GalleryItem) => ({
     prompt: item.prompt,
     characterIds: item.characters.map((character) => character.id).sort((a, b) => a - b),
+    folderId: item.folderId,
   });
   const editor = createGalleryDetailEditor({
     value: () => detailsValue(props.item),
     generating: generatingPrompt,
     submit: async (value, expected) => {
       const item = await api.updateGalleryItem(itemId, value, expected);
-      applyGalleryItem(item);
       return detailsValue(item);
     },
     onError: (message) => {
@@ -76,6 +77,8 @@ export default function GalleryDetail(props: {
     setPrompt,
     characterIds,
     setCharacterIds,
+    folderId,
+    setFolderId,
     dirty,
     saving: savingDetails,
     save: saveDetails,
@@ -218,7 +221,11 @@ export default function GalleryDetail(props: {
           </button>
           <Show when={!props.readOnly && props.item.media}>
             {(asset) => (
-              <MediaActions asset={asset()} disabled={savingDetails() || generatingPrompt()} />
+              <MediaActions
+                asset={asset()}
+                galleryFolderId={props.item.folderId}
+                disabled={savingDetails() || generatingPrompt()}
+              />
             )}
           </Show>
           <Show when={!props.readOnly && props.item.media?.recipeId}>
@@ -290,6 +297,23 @@ export default function GalleryDetail(props: {
           </time>
         </div>
         <Show when={!props.readOnly}>
+          <div class="form-stack">
+            <label for="gallery-detail-folder">Folder</label>
+            <Select
+              id="gallery-detail-folder"
+              ariaLabel="Image folder"
+              value={String(folderId() ?? 'root')}
+              disabled={savingDetails() || generatingPrompt()}
+              options={[
+                { value: 'root', label: 'Unfiled' },
+                ...collectionByName(state.galleryFolders).map((folder) => ({
+                  value: String(folder.id),
+                  label: folder.name,
+                })),
+              ]}
+              onChange={(value) => setFolderId(value === 'root' ? null : Number(value))}
+            />
+          </div>
           <div class="form-stack">
             <label>Characters</label>
             <MediaCharacterPicker

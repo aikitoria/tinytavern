@@ -9,55 +9,19 @@ import { confirmDelete } from '../../state/confirm.ts';
 import { errorMessage } from '../../util.ts';
 import { collectionByName } from '../../state/collectionOrder.ts';
 
-/** The same searchable folder browser serves settings entities with numeric or string IDs. */
-export function createFolderBrowser<
-  T extends { id: number | string; name: string },
-  F extends { id: number | string; name: string },
->(props: {
-  items: () => readonly T[];
+export function createFolderActions<F extends { id: number | string; name: string }>(props: {
   folders: () => readonly F[];
-  folderId: (item: T) => F['id'] | null;
-  selectedId: () => number | string;
-  activeId?: () => T['id'] | null;
-  select: (id: T['id']) => void;
-  label: (item: T) => JSX.Element;
   noun: string;
   create: (name: string) => Promise<unknown>;
   rename: (id: F['id'], name: string) => Promise<unknown>;
   remove: (id: F['id']) => Promise<unknown>;
   onError: (message: string) => void;
 }) {
-  const [query, setQuery] = createSignal('');
-  const [collapsed, setCollapsed] = createSignal<ReadonlySet<F['id']>>(new Set());
   const [dialog, setDialog] = createSignal<{ id: F['id'] | null } | null>(null);
   const [name, setName] = createSignal('');
   const [error, setError] = createSignal('');
   const [saving, setSaving] = createSignal(false);
   const field = createDefaultField(() => '');
-  const empty: T[] = [];
-  const sortedItems = createMemo(() => collectionByName(props.items()));
-  const sortedFolders = createMemo(() => collectionByName(props.folders()));
-  const groups = createMemo(() => {
-    const search = query().trim().toLocaleLowerCase();
-    const folders = new Set(props.folders().map((folder) => folder.id));
-    const root: T[] = [];
-    const byFolder = new Map<F['id'], T[]>();
-    let count = 0;
-    for (const item of sortedItems()) {
-      if (search && !item.name.toLocaleLowerCase().includes(search)) continue;
-      count++;
-      const folder = props.folderId(item);
-      if (folder === null || !folders.has(folder)) root.push(item);
-      else {
-        let group = byFolder.get(folder);
-        if (!group) byFolder.set(folder, (group = []));
-        group.push(item);
-      }
-    }
-    return { root, byFolder, count, search: Boolean(search) };
-  });
-  const members = (id: F['id']) => groups().byFolder.get(id) ?? empty;
-  const expanded = (id: F['id']) => groups().search || !collapsed().has(id);
   const edit = (id: F['id'] | null, current = '') => {
     setName(current);
     setError('');
@@ -98,87 +62,10 @@ export function createFolderBrowser<
       props.onError(errorMessage(err));
     }
   };
-  const Entry = (entry: { item: T }) => (
-    <button
-      class="character-tree-entry"
-      classList={{
-        active: props.selectedId() === entry.item.id,
-      }}
-      onClick={() => props.select(entry.item.id)}
-    >
-      <span class="min-w-0 truncate flex flex-1 items-center gap-2">{props.label(entry.item)}</span>
-      <Show when={props.activeId?.() === entry.item.id}>
-        <EntityActiveBadge />
-      </Show>
+  const NewButton = (button: { disabled?: boolean }) => (
+    <button disabled={button.disabled} title="Create folder" onClick={() => edit(null)}>
+      Folder
     </button>
-  );
-  const NewButton = () => <button onClick={() => edit(null)}>Folder</button>;
-  const Search = () => <EntityListSearch noun={props.noun} value={query()} onChange={setQuery} />;
-  const List = () => (
-    <>
-      <For each={sortedFolders()}>
-        {(folder) => (
-          <Show when={!groups().search || members(folder.id).length > 0}>
-            <section class="character-folder">
-              <div class="character-folder-row">
-                <button
-                  class="character-folder-toggle"
-                  aria-expanded={expanded(folder.id)}
-                  title={expanded(folder.id) ? 'Collapse folder' : 'Expand folder'}
-                  onClick={() => {
-                    if (groups().search) return;
-                    setCollapsed((current) => {
-                      const next = new Set(current);
-                      if (next.has(folder.id)) next.delete(folder.id);
-                      else next.add(folder.id);
-                      return next;
-                    });
-                  }}
-                >
-                  <span class="w-2.5 text-center text-muted grow-0 shrink-0 basis-2.5">
-                    <FontAwesomeIcon
-                      icon={expanded(folder.id) ? faChevronDown : faChevronRight}
-                      size={expanded(folder.id) ? 10 : 12}
-                    />
-                  </span>
-                  <span class="text-ellipsis overflow-hidden">{folder.name}</span>
-                </button>
-                <button
-                  class="character-folder-action"
-                  title="Rename folder"
-                  aria-label={`Rename ${folder.name}`}
-                  onClick={() => edit(folder.id, folder.name)}
-                >
-                  <FontAwesomeIcon icon={faPen} size={14} />
-                </button>
-                <button
-                  class="character-folder-action"
-                  title="Delete folder"
-                  aria-label={`Delete ${folder.name}`}
-                  onClick={(event) => void remove(folder, event)}
-                >
-                  <FontAwesomeIcon icon={faXmark} size={14} />
-                </button>
-              </div>
-              <Show when={expanded(folder.id)}>
-                <div class="ml-3.5 pl-3 border-l border-l-solid border-l-subtle flex flex-col gap-0.5 min-w-0">
-                  <For each={members(folder.id)}>{(item) => <Entry item={item} />}</For>
-                  <Show when={!groups().search && members(folder.id).length === 0}>
-                    <span class="px-2 min-h-control flex items-center text-muted text-xs">
-                      Empty folder
-                    </span>
-                  </Show>
-                </div>
-              </Show>
-            </section>
-          </Show>
-        )}
-      </For>
-      <For each={groups().root}>{(item) => <Entry item={item} />}</For>
-      <Show when={groups().search && groups().count === 0}>
-        <p class="hint py-1 px-2">No matches.</p>
-      </Show>
-    </>
   );
   const Dialog = () => (
     <Show when={dialog()}>
@@ -225,14 +112,143 @@ export function createFolderBrowser<
   );
   return {
     NewButton,
-    Search,
-    List,
     Dialog,
+    edit,
+    remove,
     options: () =>
-      sortedFolders().map((folder) => ({
+      collectionByName(props.folders()).map((folder) => ({
         value: String(folder.id),
         label: folder.name,
         edit: () => edit(folder.id, folder.name),
       })),
   };
+}
+
+/** The same searchable folder browser serves settings entities with numeric or string IDs. */
+export function createFolderBrowser<
+  T extends { id: number | string; name: string },
+  F extends { id: number | string; name: string },
+>(props: {
+  items: () => readonly T[];
+  folders: () => readonly F[];
+  folderId: (item: T) => F['id'] | null;
+  selectedId: () => number | string;
+  activeId?: () => T['id'] | null;
+  select: (id: T['id']) => void;
+  label: (item: T) => JSX.Element;
+  noun: string;
+  create: (name: string) => Promise<unknown>;
+  rename: (id: F['id'], name: string) => Promise<unknown>;
+  remove: (id: F['id']) => Promise<unknown>;
+  onError: (message: string) => void;
+}) {
+  const actions = createFolderActions(props);
+  const [query, setQuery] = createSignal('');
+  const [collapsed, setCollapsed] = createSignal<ReadonlySet<F['id']>>(new Set());
+  const empty: T[] = [];
+  const sortedItems = createMemo(() => collectionByName(props.items()));
+  const sortedFolders = createMemo(() => collectionByName(props.folders()));
+  const groups = createMemo(() => {
+    const search = query().trim().toLocaleLowerCase();
+    const folders = new Set(props.folders().map((folder) => folder.id));
+    const root: T[] = [];
+    const byFolder = new Map<F['id'], T[]>();
+    let count = 0;
+    for (const item of sortedItems()) {
+      if (search && !item.name.toLocaleLowerCase().includes(search)) continue;
+      count++;
+      const folder = props.folderId(item);
+      if (folder === null || !folders.has(folder)) root.push(item);
+      else {
+        let group = byFolder.get(folder);
+        if (!group) byFolder.set(folder, (group = []));
+        group.push(item);
+      }
+    }
+    return { root, byFolder, count, search: Boolean(search) };
+  });
+  const members = (id: F['id']) => groups().byFolder.get(id) ?? empty;
+  const expanded = (id: F['id']) => groups().search || !collapsed().has(id);
+  const Entry = (entry: { item: T }) => (
+    <button
+      class="character-tree-entry"
+      classList={{
+        active: props.selectedId() === entry.item.id,
+      }}
+      onClick={() => props.select(entry.item.id)}
+    >
+      <span class="min-w-0 truncate flex flex-1 items-center gap-2">{props.label(entry.item)}</span>
+      <Show when={props.activeId?.() === entry.item.id}>
+        <EntityActiveBadge />
+      </Show>
+    </button>
+  );
+  const Search = () => <EntityListSearch noun={props.noun} value={query()} onChange={setQuery} />;
+  const List = () => (
+    <>
+      <For each={sortedFolders()}>
+        {(folder) => (
+          <Show when={!groups().search || members(folder.id).length > 0}>
+            <section class="character-folder">
+              <div class="character-folder-row">
+                <button
+                  class="character-folder-toggle"
+                  aria-expanded={expanded(folder.id)}
+                  title={expanded(folder.id) ? 'Collapse folder' : 'Expand folder'}
+                  onClick={() => {
+                    if (groups().search) return;
+                    setCollapsed((current) => {
+                      const next = new Set(current);
+                      if (next.has(folder.id)) next.delete(folder.id);
+                      else next.add(folder.id);
+                      return next;
+                    });
+                  }}
+                >
+                  <span class="w-2.5 text-center text-muted grow-0 shrink-0 basis-2.5">
+                    <FontAwesomeIcon
+                      icon={expanded(folder.id) ? faChevronDown : faChevronRight}
+                      size={expanded(folder.id) ? 10 : 12}
+                    />
+                  </span>
+                  <span class="text-ellipsis overflow-hidden">{folder.name}</span>
+                </button>
+                <button
+                  class="character-folder-action"
+                  title="Rename folder"
+                  aria-label={`Rename ${folder.name}`}
+                  onClick={() => actions.edit(folder.id, folder.name)}
+                >
+                  <FontAwesomeIcon icon={faPen} size={14} />
+                </button>
+                <button
+                  class="character-folder-action"
+                  title="Delete folder"
+                  aria-label={`Delete ${folder.name}`}
+                  onClick={(event) => void actions.remove(folder, event)}
+                >
+                  <FontAwesomeIcon icon={faXmark} size={14} />
+                </button>
+              </div>
+              <Show when={expanded(folder.id)}>
+                <div class="ml-3.5 pl-3 border-l border-l-solid border-l-subtle flex flex-col gap-0.5 min-w-0">
+                  <For each={members(folder.id)}>{(item) => <Entry item={item} />}</For>
+                  <Show when={!groups().search && members(folder.id).length === 0}>
+                    <span class="px-2 min-h-control flex items-center text-muted text-xs">
+                      Empty folder
+                    </span>
+                  </Show>
+                </div>
+              </Show>
+            </section>
+          </Show>
+        )}
+      </For>
+      <For each={groups().root}>{(item) => <Entry item={item} />}</For>
+      <Show when={groups().search && groups().count === 0}>
+        <p class="hint py-1 px-2">No matches.</p>
+      </Show>
+    </>
+  );
+  return { ...actions, Search, List };
 }

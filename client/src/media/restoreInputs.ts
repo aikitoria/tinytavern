@@ -20,7 +20,7 @@ export function restoreMediaInputs(
     if (ancestor.modal === 'gallery' && ancestor.galleryId) {
       asset = gallery.find((item) => item.id === ancestor.galleryId)?.media;
     } else if (ancestor.media?.jobId) {
-      const job = jobs[ancestor.media.jobId];
+      const job = jobs[ancestor.media.previewJobId ?? ancestor.media.jobId];
       if (job) {
         const selected = ancestor.media.assetId ?? job.outputs[0]?.id ?? job.draft?.selectedAssetId;
         asset = job.outputs.find((output) => output.id === selected);

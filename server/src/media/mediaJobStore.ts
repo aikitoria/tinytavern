@@ -60,6 +60,7 @@ export interface MediaJobRow {
   context_conversation_id: number | null;
   message_id: number | null;
   destination: 'gallery' | 'chat';
+  gallery_folder_id: number | null;
   source_job_id: number | null;
   seed: number | null;
   comfy_prompt_id: string | null;
@@ -228,6 +229,7 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     contextConversationId: row.context_conversation_id,
     messageId: row.message_id,
     destination: row.destination,
+    galleryFolderId: row.gallery_folder_id,
     sourceJobId: row.source_job_id,
     seed: row.seed,
     comfyPromptId: row.comfy_prompt_id,

@@ -16,7 +16,8 @@ import { invalidate, observeInvalidation } from '../realtime/events.ts';
 import { copyImage, deleteImageFiles, rasterImageFormat, saveImage } from '../media/images.ts';
 import { imageDimensions } from '../media/imageDimensions.ts';
 import { HttpError, route } from '../http/router.ts';
-import { objectBody, optionalString, positiveId } from '../http/validation.ts';
+import { objectBody, optionalNullableId, optionalString, positiveId } from '../http/validation.ts';
+import { requireReference } from './shared/entityUtils.ts';
 import { describeImage, descriptionWorkflow } from '../media/mediaDescription.ts';
 import { streamResponse } from '../http/streamResponse.ts';
 
@@ -34,6 +35,7 @@ const GALLERY_SELECT = `SELECT g.*,
 
 type GalleryRow = Record<string, unknown> & {
   image: string;
+  folder_id: number | null;
 };
 
 function galleryRow(id: number): GalleryRow | undefined {
@@ -72,6 +74,8 @@ route.post(
     const size = format && imageDimensions(raw);
     if (!format || !size) throw new HttpError(400, 'Upload a valid PNG, JPEG, or WebP image');
     const query = new URL(req.url!, 'http://localhost').searchParams;
+    const folderId = query.has('folderId') ? positiveId(query.get('folderId')!, 'folderId') : null;
+    requireReference('gallery_folders', folderId, 'folderId');
     const characterId = query.has('characterId') ? positiveId(query.get('characterId')!) : null;
     let characterName = query.get('characterName')?.trim() || 'Uploads';
     if (characterId != null) {
@@ -84,7 +88,7 @@ route.post(
     try {
       const asset = mediaAssetForPath(saved)!;
       if (characterId !== null) setMediaCharacters(asset.id, [characterId]);
-      const item = galleryItem(insertGalleryAsset(asset, { characterName, prompt: '' }));
+      const item = galleryItem(insertGalleryAsset(asset, { characterName, prompt: '', folderId }));
       invalidate('gallery');
       return item;
     } catch (err) {
@@ -181,6 +185,40 @@ route.post('/api/gallery/bulk-delete', ({ body }) => {
 });
 
 const describing = new Set<number>();
+route.post('/api/gallery/move', ({ body }) => {
+  const data = objectBody(body);
+  const folderId = optionalNullableId(data, 'folderId');
+  if (folderId === undefined) throw new HttpError(400, 'folderId is required');
+  requireReference('gallery_folders', folderId, 'folderId');
+  if (!Array.isArray(data.items) || !data.items.length || data.items.length > 10_000)
+    throw new HttpError(400, 'Select between 1 and 10000 gallery items');
+  const expected = new Map<number, number | null>();
+  for (const value of data.items) {
+    const item = objectBody(value);
+    const id = optionalNullableId(item, 'id');
+    const folder = optionalNullableId(item, 'expectedFolderId');
+    if (!id || folder === undefined || expected.has(id))
+      throw new HttpError(400, 'Each item needs a unique id and expectedFolderId');
+    expected.set(id, folder);
+  }
+  const ids = JSON.stringify([...expected.keys()]);
+  transaction(() => {
+    const rows = stmt(
+      'SELECT id, folder_id FROM gallery_items WHERE id IN (SELECT value FROM json_each(?))',
+    ).all(ids);
+    if (rows.length !== expected.size)
+      throw new HttpError(404, 'One or more gallery items no longer exist');
+    if (rows.some((row) => row.folder_id !== expected.get(Number(row.id))))
+      throw new HttpError(409, 'An item moved elsewhere. Refresh the gallery and try again.');
+    stmt('UPDATE gallery_items SET folder_id = ? WHERE id IN (SELECT value FROM json_each(?))').run(
+      folderId,
+      ids,
+    );
+  });
+  invalidate('gallery');
+  return { moved: expected.size };
+});
+
 route.post('/api/gallery/:id/describe', ({ params, body, req }) => {
   const id = positiveId(params.id);
   const item = galleryItem(id);
@@ -209,8 +247,18 @@ route.patch('/api/gallery/:id', ({ params, body }) => {
   const data = objectBody(body);
   const hasPrompt = Object.hasOwn(data, 'prompt');
   const hasCharacters = Object.hasOwn(data, 'characterIds');
-  if (!hasPrompt && !hasCharacters)
-    throw new HttpError(400, 'Provide a prompt or characters to update');
+  const hasFolder = Object.hasOwn(data, 'folderId');
+  if (!hasPrompt && !hasCharacters && !hasFolder)
+    throw new HttpError(400, 'Provide a prompt, characters or folder to update');
+  const folderId = hasFolder ? optionalNullableId(data, 'folderId') : row.folder_id;
+  if (folderId === undefined) throw new HttpError(400, 'folderId is required');
+  if (hasFolder) {
+    const expectedFolderId = optionalNullableId(data, 'expectedFolderId');
+    if (expectedFolderId === undefined) throw new HttpError(400, 'expectedFolderId is required');
+    if (row.folder_id !== expectedFolderId)
+      throw new HttpError(409, 'The folder changed elsewhere. Reopen the media to load it.');
+    requireReference('gallery_folders', folderId, 'folderId');
+  }
   const prompt = hasPrompt ? data.prompt : row.prompt;
   if (typeof prompt !== 'string' || prompt.length > 200_000) {
     throw new HttpError(400, 'Prompt must be text of at most 200000 characters');
@@ -243,16 +291,17 @@ route.patch('/api/gallery/:id', ({ params, body }) => {
     }
   }
   const charactersChanged = JSON.stringify(characterIds) !== JSON.stringify(previousIds);
-  if (prompt !== row.prompt || charactersChanged) {
+  if (prompt !== row.prompt || charactersChanged || folderId !== row.folder_id) {
     transaction(() => {
       if (charactersChanged) setMediaCharacters(asset.id, characterIds);
       const characterName = charactersChanged
         ? mediaCharacterNames(asset.id) || (asset.recipeId ? 'Media tools' : 'Uploads')
         : String(row.character_name);
-      stmt(`UPDATE gallery_items SET prompt = ?, character_name = ?,
+      stmt(`UPDATE gallery_items SET prompt = ?, character_name = ?, folder_id = ?,
         updated_at = MAX(updated_at + 1, ?) WHERE id = ?`).run(
         prompt,
         characterName,
+        folderId,
         Date.now(),
         id,
       );

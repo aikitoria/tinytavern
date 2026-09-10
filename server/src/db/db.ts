@@ -196,6 +196,29 @@ migrate(77, () => {
   }
 });
 
+migrate(78, () => {
+  db.exec(`CREATE TABLE gallery_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at INTEGER NOT NULL
+  )`);
+  db.exec(
+    'ALTER TABLE gallery_items ADD COLUMN folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL',
+  );
+  db.exec(
+    'CREATE INDEX idx_gallery_folder ON gallery_items(folder_id) WHERE folder_id IS NOT NULL',
+  );
+});
+
+migrate(79, () => {
+  db.exec(
+    'ALTER TABLE media_jobs ADD COLUMN gallery_folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL',
+  );
+  db.exec(
+    'CREATE INDEX idx_media_jobs_gallery_folder ON media_jobs(gallery_folder_id) WHERE gallery_folder_id IS NOT NULL',
+  );
+});
+
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 deleteMessageSubtrees(
@@ -350,6 +373,7 @@ export function toGalleryItem(r: Row): GalleryItem {
   const characters = JSON.parse(String(r.characters_json)) as GalleryItem['characters'];
   return {
     id: r.id as number,
+    folderId: (r.folder_id as number | null) ?? null,
     characters,
     characterName:
       characters.map((character) => character.name).join(', ') || String(r.character_name),

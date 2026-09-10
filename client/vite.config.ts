@@ -3,11 +3,47 @@ import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
+import { pwaManifest } from './src/pwa.ts';
 
 export default defineConfig({
   plugins: [
     tailwindcss(),
     solid(),
+    {
+      name: 'pwa-manifest',
+      configureServer(server) {
+        const manifest = JSON.stringify(pwaManifest(true));
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.split('?')[0] !== '/manifest.webmanifest') return next();
+          res.setHeader('Content-Type', 'application/manifest+json');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.end(manifest);
+        });
+      },
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'manifest.webmanifest',
+          source: JSON.stringify(pwaManifest(false)),
+        });
+      },
+      transformIndexHtml(html, context) {
+        const manifest = pwaManifest(Boolean(context.server));
+        return {
+          html: html
+            .replace('<title>TinyTavern</title>', `<title>${manifest.name}</title>`)
+            .replace('href="/icon.svg?v=tt2"', `href="${manifest.icons[0]!.src}"`)
+            .replace('href="/icon-192.png?v=tt2"', `href="${manifest.icons[1]!.src}"`),
+          tags: [
+            {
+              tag: 'meta',
+              attrs: { name: 'apple-mobile-web-app-title', content: manifest.name },
+              injectTo: 'head',
+            },
+          ],
+        };
+      },
+    },
     {
       name: 'precompress-static-assets',
       apply: 'build',

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
+import type { GalleryDetails } from '../../client/src/components/gallery/galleryDetailEditor.ts';
 
 test('gallery detail drafts survive cancelled navigation and failed saves', async () => {
   const { createRoot } = await import('solid-js');
   const { createSettingsNavigation } = await import('../../client/src/state/settingsSubmission.ts');
   const { createGalleryDetailEditor } =
     await import('../../client/src/components/gallery/galleryDetailEditor.ts');
-  let saved = { prompt: 'Original prompt', characterIds: [1] };
+  let saved = { prompt: 'Original prompt', characterIds: [1], folderId: 7 as number | null };
   let fail = false;
   let error = '';
   let destination = '';
@@ -38,6 +39,7 @@ test('gallery detail drafts survive cancelled navigation and failed saves', asyn
   try {
     editor.setPrompt('Edited prompt');
     editor.setCharacterIds([2]);
+    editor.setFolderId(9);
     const leave = () => {
       destination = 'next image';
     };
@@ -47,6 +49,7 @@ test('gallery detail drafts survive cancelled navigation and failed saves', asyn
     navigation.cancel();
     assert.equal(editor.prompt(), 'Edited prompt');
     assert.deepEqual(editor.characterIds(), [2]);
+    assert.equal(editor.folderId(), 9);
     fail = true;
     navigation.navigate(leave);
     await navigation.save();
@@ -57,11 +60,11 @@ test('gallery detail drafts survive cancelled navigation and failed saves', asyn
     navigation.navigate(leave);
     await navigation.save();
     assert.equal(destination, 'next image');
-    assert.deepEqual(saved, { prompt: 'Edited prompt', characterIds: [2] });
+    assert.deepEqual(saved, { prompt: 'Edited prompt', characterIds: [2], folderId: 9 });
     assert.equal(editor.dirty(), false);
 
     editor.setPrompt('Discard this');
-    saved = { prompt: 'Updated elsewhere', characterIds: [3] };
+    saved = { prompt: 'Updated elsewhere', characterIds: [3], folderId: null };
     navigation.navigate(() => {
       destination = 'gallery grid';
     });
@@ -69,9 +72,81 @@ test('gallery detail drafts survive cancelled navigation and failed saves', asyn
     assert.equal(destination, 'gallery grid');
     assert.equal(editor.prompt(), saved.prompt);
     assert.deepEqual(editor.characterIds(), saved.characterIds);
+    assert.equal(editor.folderId(), null);
+    assert.equal(editor.dirty(), false);
+    editor.setFolderId(7);
+    assert(editor.dirty(), 'A folder-only edit participates in Save/Discard');
+    editor.discard();
+    assert.equal(editor.folderId(), null);
+  } finally {
+    dispose();
+  }
+});
+
+test('gallery detail keeps the newer snapshot when a save response arrives late', async () => {
+  const { createRoot, createSignal } = await import('solid-js');
+  const { createGalleryDetailEditor } =
+    await import('../../client/src/components/gallery/galleryDetailEditor.ts');
+  const original = { prompt: 'Original', characterIds: [], folderId: 1 };
+  let finish!: (value: GalleryDetails) => void;
+  let dispose!: () => void;
+  const { editor, setRemote } = createRoot((cleanup) => {
+    dispose = cleanup;
+    const [remote, setRemote] = createSignal<GalleryDetails>(original);
+    const editor = createGalleryDetailEditor({
+      value: remote,
+      generating: () => false,
+      submit: () =>
+        new Promise<GalleryDetails>((resolve) => {
+          finish = resolve;
+        }),
+      onError: (error) => {
+        if (error) assert.fail(error);
+      },
+    });
+    return { editor, setRemote };
+  });
+  try {
+    editor.setPrompt('Saved');
+    const saving = editor.save();
+    setRemote({ prompt: 'Updated elsewhere', characterIds: [3], folderId: 2 });
+    finish({ ...original, prompt: 'Saved' });
+    assert.equal(await saving, true);
+    assert.equal(editor.prompt(), 'Updated elsewhere');
+    assert.equal(editor.folderId(), 2);
+    assert.deepEqual(editor.characterIds(), [3]);
     assert.equal(editor.dirty(), false);
   } finally {
     dispose();
+  }
+});
+
+test('folder browsing recovers missing folders and retains neighbors after a move', async () => {
+  const { adjacentGalleryIndex, resolveGalleryFolder } =
+    await import('../../client/src/galleryModel.ts');
+  assert.equal(
+    resolveGalleryFolder('7', [], false),
+    '7',
+    'Loading must not discard a restored folder',
+  );
+  assert.equal(resolveGalleryFolder('7', [{ id: 7 }], true), '7');
+  assert.equal(
+    resolveGalleryFolder('7', [], true),
+    'root',
+    'An already deleted folder restores to Unfiled',
+  );
+  assert.equal(resolveGalleryFolder('all', [], true), 'all');
+  assert.equal(resolveGalleryFolder('root', [], true), 'root');
+  for (const [position, previous, count, left, right] of [
+    [1, 1, 3, 0, 2],
+    [-1, 1, 2, 0, 1],
+    [-1, 0, 2, -1, 0],
+    [-1, 2, 2, 1, -1],
+    [-1, 5, 2, 1, -1],
+    [-1, 0, 0, -1, -1],
+  ] as const) {
+    assert.equal(adjacentGalleryIndex(position, previous, -1, count), left);
+    assert.equal(adjacentGalleryIndex(position, previous, 1, count), right);
   }
 });
 
@@ -122,6 +197,7 @@ test('gallery layout', async () => {
     await import('../../client/src/galleryModel.ts');
 
   const items: GalleryItem[] = Array.from({ length: 5000 }, (_, index) => ({
+    folderId: index % 3 === 0 ? 1 : null,
     id: index + 1,
     characters: index % 2 ? [{ id: 7, name: 'Ashina' }] : [],
     characterName: index % 2 ? 'Ashina' : 'Uploads',
@@ -193,6 +269,12 @@ test('gallery layout', async () => {
     ),
   );
   assert(filtered[0]!.id < filtered[1]!.id);
+  assert.deepEqual(
+    filterGallery(index, 'NIGHT blue', 'id:7', true, 1),
+    filtered.filter((item) => item.folderId === 1),
+  );
+  assert.equal(filterGallery(index, '', 'all', false, null).length, 3333);
+  assert.equal(filterGallery(index, '', 'all', false, 999).length, 0);
   assert.equal(filterGallery(index, 'absent', 'all', false).length, 0);
   assert.equal(filterGallery(index, '', 'name:Uploads', false).length, 2500);
 
@@ -245,6 +327,7 @@ test('media job cards', async () => {
       assets: [],
       outputs: [],
       contextConversationId: null,
+      galleryFolderId: null,
       messageId: null,
       destination: 'gallery',
       sourceJobId: null,

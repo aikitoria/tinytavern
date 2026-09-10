@@ -74,12 +74,13 @@ function conversationForJob(row: MediaJobRow) {
 function parseInputs(
   value: unknown,
   previous: readonly MediaRecipeInput[] = [],
+  allowMissingInherited = false,
 ): MediaJobInputSnapshot[] {
   if (!Array.isArray(value) || value.length > MAX_MEDIA_INPUTS) {
     throw new HttpError(400, 'Invalid media inputs');
   }
   const slots = new Set<string>();
-  return value.map((raw) => {
+  return value.flatMap((raw) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new HttpError(400, 'Invalid media input');
     }
@@ -95,6 +96,7 @@ function parseInputs(
     if (!Number.isSafeInteger(input.assetId) || (input.assetId as number) <= 0) {
       throw new HttpError(400, 'Invalid reference asset ID');
     }
+    slots.add(slot as string);
     const asset = stmt(`
       SELECT a.id, COALESCE(g.prompt, r.prompt, '') AS prompt FROM media_assets a
       LEFT JOIN media_owners gallery_owner ON gallery_owner.asset_id = a.id AND gallery_owner.owner_type = 'gallery'
@@ -104,16 +106,18 @@ function parseInputs(
         AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)
     `).get(input.assetId as number);
     if (!asset) {
+      if (allowMissingInherited) return [];
       throw new HttpError(409, 'A selected reference image is no longer available');
     }
-    slots.add(slot as string);
-    return {
-      slot: slot as MediaJobInput['slot'],
-      assetId: input.assetId as number,
-      prompt:
-        previous.find((saved) => saved.slot === slot && saved.assetId === input.assetId)?.prompt ??
-        String(asset.prompt ?? ''),
-    };
+    return [
+      {
+        slot: slot as MediaJobInput['slot'],
+        assetId: input.assetId as number,
+        prompt:
+          previous.find((saved) => saved.slot === slot && saved.assetId === input.assetId)
+            ?.prompt ?? String(asset.prompt ?? ''),
+      },
+    ];
   });
 }
 
@@ -239,7 +243,13 @@ export function createMediaJob(
   }
 
   const previousInputs: MediaRecipeInput[] = source ? JSON.parse(source.inputs_json) : [];
-  const inputs = parseInputs(body.inputs ?? previousInputs, inputSnapshots ?? previousInputs);
+  // Inherited references can disappear after submission. Leave their workflow slots empty
+  // so the new draft can be edited; explicit selections still undergo strict validation.
+  const inputs = parseInputs(
+    body.inputs ?? previousInputs,
+    inputSnapshots ?? previousInputs,
+    source !== undefined && body.inputs === undefined,
+  );
   const requestedConversation = optionalNullableId(body, 'contextConversationId');
   const conversationId =
     requestedConversation === undefined
@@ -258,6 +268,19 @@ export function createMediaJob(
   if (destination === 'chat' && conversationId === null) {
     throw new HttpError(400, 'Chat results require a conversation');
   }
+  const requestedFolder = optionalNullableId(body, 'galleryFolderId');
+  // Variations retain the server's destination, including a deleted folder's SET NULL.
+  const galleryFolderId =
+    destination === 'gallery'
+      ? source && destination === source.destination
+        ? source.gallery_folder_id
+        : (requestedFolder ?? null)
+      : null;
+  if (
+    galleryFolderId !== null &&
+    !stmt('SELECT id FROM gallery_folders WHERE id = ?').get(galleryFolderId)
+  )
+    throw new HttpError(400, 'The destination folder no longer exists');
   const requestedWorkflow = optionalNullableString(body, 'workflowId');
   const workflowId =
     requestedWorkflow === undefined ? (source?.workflow_id ?? null) : requestedWorkflow;
@@ -292,8 +315,8 @@ export function createMediaJob(
       INSERT INTO media_jobs (
         workflow_id, preset_id, instruction, prompt,
         context_conversation_id, destination, source_job_id, request_key, created_at, updated_at,
-        configuration_json, draft_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        configuration_json, draft_id, gallery_folder_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
           workflowId,
           presetId,
@@ -307,6 +330,7 @@ export function createMediaJob(
           now,
           configurationJson,
           draftId,
+          galleryFolderId,
         ).lastInsertRowid,
       );
       const resolved =
@@ -444,7 +468,7 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
 /** Saved recipes outlive job history and keep their own local reference owners. */
 export function createMediaJobFromAsset(assetId: number, body: JobBody) {
   const recipe = stmt(`
-    SELECT r.*, COALESCE(g.prompt, r.prompt) AS saved_prompt FROM media_assets a
+    SELECT r.*, COALESCE(g.prompt, r.prompt) AS saved_prompt, g.folder_id AS gallery_folder_id FROM media_assets a
     JOIN media_recipes r ON r.id = a.recipe_id
     LEFT JOIN media_owners gallery_owner ON gallery_owner.asset_id = a.id AND gallery_owner.owner_type = 'gallery'
     LEFT JOIN gallery_items g ON g.id = CAST(gallery_owner.owner_id AS INTEGER)
@@ -455,7 +479,7 @@ export function createMediaJobFromAsset(assetId: number, body: JobBody) {
   }
   return createMediaJobFromRecipe(
     Number(recipe.id),
-    { prompt: recipe.saved_prompt, ...body },
+    { prompt: recipe.saved_prompt, galleryFolderId: recipe.gallery_folder_id ?? null, ...body },
     mediaCharacterIds(assetId),
   );
 }

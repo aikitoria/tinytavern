@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">TinyTavern Dev — blue interlocking TT monogram</title>
+  <defs>
+    <linearGradient id="charcoal" x2="1" y2="1">
+      <stop stop-color="#303035"/>
+      <stop offset="1" stop-color="#111113"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#c2e8ff"/>
+      <stop offset="0.45" stop-color="#55aaff"/>
+      <stop offset="1" stop-color="#2463c4"/>
+    </linearGradient>
+    <linearGradient id="light-blue" x1="0" y1="0" x2="0.7" y2="1">
+      <stop stop-color="#d0edff"/>
+      <stop offset="0.55" stop-color="#71b9ff"/>
+      <stop offset="1" stop-color="#3981db"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#charcoal)"/>
+  <path d="M97 112h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H155v-15c24-2 32-7 32-26V140h-24c-34 0-44 8-52 37H93Z" fill="url(#blue)"/>
+  <path d="M193 184h218l4 65h-14c-8-29-18-37-52-37h-24v163c0 19 8 24 32 26v15H251v-15c24-2 32-7 32-26V212h-24c-34 0-44 8-52 37h-14Z" fill="url(#light-blue)" stroke="#1b1b1e" stroke-width="10" stroke-linejoin="round" paint-order="stroke"/>
+  <path d="M108 120h195M204 192h195" fill="none" stroke="#dff3ff" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>
+</svg>

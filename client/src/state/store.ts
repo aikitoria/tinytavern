@@ -65,6 +65,7 @@ interface AppState {
   personas: Persona[];
   endpoints: Endpoint[];
   gallery: GalleryItem[];
+  galleryFolders: EntityFolder[];
   /** Client-local live cards for gallery renders; final items are server-owned. */
   mediaJobs: Record<number, MediaJob>;
   settings: Settings;
@@ -95,6 +96,7 @@ export const [state, setState] = createStore<AppState>({
   personas: [],
   endpoints: [],
   gallery: [],
+  galleryFolders: [],
   mediaJobs: {},
   settings: { ...DEFAULT_SETTINGS },
   connected: false,
@@ -256,6 +258,7 @@ function applyThumbnails(assets: MediaAsset[] = []): void {
 }
 
 export const [galleryRevision, setGalleryRevision] = createSignal(0);
+export const [galleryFoldersLoaded, setGalleryFoldersLoaded] = createSignal(false);
 
 const loaders: Record<InvalidateEntity, () => Promise<void>> = {
   conversations: loader('conversations', api.conversations, (conversations) => {
@@ -274,6 +277,8 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
     }
   }),
   gallery: loader('gallery', api.gallery, (items) => {
+    // Ordered snapshots are the sole gallery authority. Write responses may arrive
+    // after a later move or deletion and must never be merged back into this list.
     for (const item of items) if (item.media) applyThumbnails([item.media]);
     setState('gallery', reconcile(items, { key: 'id' }));
     setGalleryRevision((revision) => revision + 1);
@@ -296,6 +301,12 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
   characterFolders: loader('characterFolders', api.entityFolders.characters.list, (data) =>
     setState('characterFolders', reconcile(data, { key: 'id' })),
   ),
+  galleryFolders: loader('galleryFolders', api.entityFolders.gallery.list, (data) => {
+    batch(() => {
+      setState('galleryFolders', reconcile(data, { key: 'id' }));
+      setGalleryFoldersLoaded(true);
+    });
+  }),
   presets: loader('presets', api.presets.list, (data) =>
     setState('presets', reconcile(data, { key: 'id' })),
   ),
@@ -760,13 +771,6 @@ export function applySettings(next: Settings): boolean {
   if (!isCurrentSettingsRevision(state.settings.revision, next.revision)) return false;
   setState('settings', next);
   return true;
-}
-
-/** The invalidation GET may arrive before or after this write response. */
-export function applyGalleryItem(item: GalleryItem): void {
-  setState('gallery', (items) =>
-    upsertById(items, item).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id),
-  );
 }
 
 export async function deleteConversation(id: number): Promise<void> {

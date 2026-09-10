@@ -147,6 +147,7 @@ export function completeMediaJob(jobId: number): void {
     } else if (!config.temporary) {
       for (const asset of assets) {
         insertGalleryAsset(asset, {
+          folderId: job.gallery_folder_id,
           conversationId: job.context_conversation_id,
           prompt: job.prompt,
           characterName: config.galleryOutput?.characterName,

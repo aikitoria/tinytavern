@@ -72,6 +72,7 @@ export interface Message {
 /** Gallery-owned image copy; source links are metadata, so source deletion preserves it. */
 export interface GalleryItem {
   id: number;
+  folderId: number | null;
   characters: { id: number; name: string }[];
   /** Snapshotted when saved so grouping survives character deletion. */
   characterName: string;

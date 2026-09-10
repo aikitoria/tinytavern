@@ -332,13 +332,23 @@ test('media drafts', async () => {
   assert.equal(acceptedRerun.prompt, 'First prompt');
   deleteMediaJob(requireMediaJob(acceptedRerun.id));
 
+  const galleryFolderId = Number(
+    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Generated', 1)").run()
+      .lastInsertRowid,
+  );
   const galleryDraft = job({
+    galleryFolderId,
     prompt: 'Gallery choice',
     reviewBeforeSave: true,
   });
   start(galleryDraft.id);
   const galleryAssets = result(galleryDraft.id, 2);
   const galleryPending = job({ prompt: 'Next gallery variation' }, galleryDraft.id);
+  assert.equal(
+    galleryPending.galleryFolderId,
+    galleryFolderId,
+    'Variations inherit the saved destination',
+  );
   start(galleryPending.id);
   const runningGallery = requireMediaJob(galleryPending.id);
   let saved = mediaJobDto(requireMediaJob(galleryDraft.id));
@@ -366,6 +376,24 @@ test('media drafts', async () => {
       );
   }
   const resavedAsset = saved.outputs.find((asset) => asset.id === galleryAssets[1])!;
+  assert(
+    stmt('SELECT folder_id FROM gallery_items')
+      .all()
+      .every((item) => item.folder_id === galleryFolderId),
+  );
+  const folderRerun = createMediaJobFromAsset(resavedAsset.id, { requestKey: newRequestId() });
+  assert.equal(
+    folderRerun.galleryFolderId,
+    galleryFolderId,
+    'Rerunning a saved image retains its folder',
+  );
+  deleteMediaJob(requireMediaJob(folderRerun.id));
+  stmt('DELETE FROM gallery_folders WHERE id = ?').run(galleryFolderId);
+  assert.equal(
+    requireMediaJob(galleryPending.id).gallery_folder_id,
+    null,
+    'Deleting a folder safely rehomes pending jobs',
+  );
   stmt('DELETE FROM gallery_items WHERE image = ?').run(resavedAsset.url);
   deleteImageFiles([resavedAsset.url]);
   assert.ok(onDisk(resavedAsset.url), 'The open draft retains a deleted saved variation');
@@ -373,6 +401,10 @@ test('media drafts', async () => {
     assetId: resavedAsset.id,
     expectedDraftRevision: mediaDraft(saved.draft!.id).revision,
   });
+  assert.equal(
+    stmt('SELECT folder_id FROM gallery_items WHERE image = ?').get(resavedAsset.url)!.folder_id,
+    null,
+  );
   const resavedInput = job({ inputs: [{ slot: 'source', assetId: resavedAsset.id }] });
   assert.equal(
     resavedInput.assets[0]!.id,
@@ -384,7 +416,12 @@ test('media drafts', async () => {
   assert.equal(cancelling.state, 'cancelling');
   cleanupDiscardedMediaDraft(requireMediaJob(galleryPending.id));
   assert.equal(requireMediaJob(galleryPending.id).state, 'cancelling');
-  const queuedAfterCancel = job({ prompt: 'Generate again' }, galleryPending.id);
+  const queuedAfterCancel = job({ prompt: 'Generate again', galleryFolderId }, galleryPending.id);
+  assert.equal(
+    queuedAfterCancel.galleryFolderId,
+    null,
+    'A stale client cannot restore a deleted destination on a variation',
+  );
   assert.equal(
     JSON.parse(requireMediaJob(queuedAfterCancel.id).configuration_json!).discardOnCancel,
     undefined,
@@ -411,6 +448,21 @@ test('media drafts', async () => {
   assert.throws(() => requireMediaJob(saved.id), { status: 404 });
   for (const asset of saved.outputs)
     assert.ok(onDisk(asset.url), 'Every saved gallery output survives finishing');
+
+  const automaticFolder = Number(
+    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Automatic', 1)").run()
+      .lastInsertRowid,
+  );
+  assert.throws(() => job({ galleryFolderId: 999999 }), { status: 400 });
+  const automatic = job({ prompt: 'Direct result', galleryFolderId: automaticFolder });
+  start(automatic.id);
+  const automaticAssets = result(automatic.id);
+  assert.equal(
+    stmt(
+      `SELECT g.folder_id FROM gallery_items g JOIN media_assets a ON a.path = g.image WHERE a.id = ?`,
+    ).get(automaticAssets[0]!)!.folder_id,
+    automaticFolder,
+  );
 
   const inputPath = saveImage('.png', makePlaceholderPng());
   const input = mediaAssetForPath(inputPath)!;

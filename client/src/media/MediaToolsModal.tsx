@@ -2,7 +2,7 @@ import { entityOptions, editReferencedEntity } from '../state/entityReferences.t
 import { newRequestId } from '@tinytavern/shared';
 import { canFillMediaInputs } from './automaticInputs.ts';
 import { orderedMediaInputs, reconcileMediaInputSelection } from './inputSelection.ts';
-import { mergeRemoteDraft } from '../state/editorSync.ts';
+import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import MediaResultDetails from './MediaResultDetails.tsx';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 import { createStreamScroll } from '../streamScroll.ts';
@@ -56,6 +56,7 @@ import MediaJobStatus from './MediaJobStatus.tsx';
 import { api, ApiError } from '../state/api.ts';
 import {
   applyMediaJob,
+  galleryFoldersLoaded,
   handleServerEvent,
   mediaJobWasDeleted,
   state,
@@ -101,6 +102,7 @@ function draftFromJob(job: MediaJob): ToolDraft {
     prompt: job.prompt,
     inputs: job.inputs.map(({ slot, assetId }) => ({ slot, assetId })),
     contextConversationId: job.contextConversationId,
+    galleryFolderId: job.galleryFolderId ?? null,
     destination: job.destination,
   };
 }
@@ -112,6 +114,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const createRequestKey = session.requestKey ?? newRequestId();
   const [jobId, setJobId] = createSignal(session.jobId);
   const [draftId, setDraftId] = createSignal<number | null>(null);
+  const [variationsLoaded, setVariationsLoaded] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const paneActive = useDialogActive();
@@ -129,22 +132,26 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     prompt: session.prompt ?? '',
     inputs: session.inputs,
     contextConversationId: session.contextConversationId,
+    galleryFolderId: session.galleryFolderId ?? null,
     destination: session.destination,
   });
   let baseline = JSON.parse(JSON.stringify(draft)) as ToolDraft;
-  let baselineJson = JSON.stringify(baseline);
   let variationRequestKey = newRequestId();
   createEffect(() => {
     if (!paneActive()) return;
     const selected = selectedVariation();
+    const pendingPreview = !variationsLoaded() ? viewedVariation() : null;
     rememberMediaPage({
       workflowId: draft.workflowId ?? null,
-      jobId: selected?.job.id ?? jobId(),
-      assetId:
-        selected?.job.outputs.length === 1
+      jobId: jobId(),
+      previewJobId: pendingPreview?.jobId ?? selected?.job.id,
+      assetId: pendingPreview
+        ? pendingPreview.assetId
+        : selected?.job.outputs.length === 1
           ? undefined
-          : (selected?.asset?.id ?? (loadingJob() ? session.assetId : undefined)),
+          : selected?.asset?.id,
       contextConversationId: draft.contextConversationId ?? null,
+      galleryFolderId: draft.galleryFolderId ?? null,
     });
   });
   const contextConversation = createMemo(() =>
@@ -202,7 +209,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const [viewedVariation, setViewedVariation] = createSignal<{
     jobId: number;
     assetId?: number;
-  } | null>(session.jobId === null ? null : { jobId: session.jobId, assetId: session.assetId });
+  } | null>(
+    session.jobId === null
+      ? null
+      : { jobId: session.previewJobId ?? session.jobId, assetId: session.assetId },
+  );
   const selectedIndex = () =>
     mediaVariationIndex(candidates(), viewedVariation(), review()?.selectedAssetId);
   const selectedVariation = () => candidates()[selectedIndex()];
@@ -389,7 +400,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     );
   });
   onCleanup(promptScroll.dispose);
-  const dirty = () => JSON.stringify(draft) !== baselineJson;
+  const dirty = () => !sameValue(draft, baseline);
   const inputForSlot = (slot: MediaJobInput['slot']) =>
     draft.inputs.find((input) => input.slot === slot);
 
@@ -406,7 +417,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         : next;
       // A submitted variation owns its snapshot; edits here describe the next one.
       baseline = next;
-      baselineJson = JSON.stringify(next);
       setDraft(values);
       setDraft('workflowValues', reconcile(values.workflowValues));
       for (const asset of incoming.assets) {
@@ -420,7 +430,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     const remaining = variations().at(-1);
     // Cancellation can delete the editor's anchor. Keep its working values while repointing it.
     if (remaining) baseline = draftFromJob(remaining);
-    baselineJson = remaining ? JSON.stringify(baseline) : '';
     batch(() => {
       if (!remaining) {
         setDraftId(null);
@@ -461,9 +470,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       return;
     }
     const incoming = await api.mediaVariations(jobId()!, draftId());
-    for (const item of incoming) {
-      applyMediaJob(item);
-    }
+    batch(() => {
+      for (const item of incoming) applyMediaJob(item);
+      setVariationsLoaded(true);
+    });
   };
   const refreshOpenJob = () => {
     const id = jobId();
@@ -521,6 +531,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       return current;
     }
     const values = JSON.parse(JSON.stringify(draft)) as ToolDraft;
+    if (
+      galleryFoldersLoaded() &&
+      values.galleryFolderId != null &&
+      !state.galleryFolders.some((folder) => folder.id === values.galleryFolderId)
+    )
+      values.galleryFolderId = null;
     values.workflowId = selectedWorkflow() || null;
     values.presetId = selectedPromptId() || null;
     const saved = fork
@@ -949,6 +965,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         <MediaActions
                           asset={candidate().asset}
                           conversationId={candidate().job.contextConversationId}
+                          galleryFolderId={draft.galleryFolderId}
                         />
                         <Show when={candidate().asset.kind === 'video'}>
                           <VideoFullscreenButton

@@ -4,8 +4,10 @@ import type { ModalKind } from './store.ts';
 export interface MediaPageLocation {
   workflowId: string | null;
   jobId: number | null;
+  previewJobId?: number;
   assetId?: number;
   contextConversationId: number | null;
+  galleryFolderId?: number | null;
 }
 
 export interface PageLocation {
@@ -13,6 +15,7 @@ export interface PageLocation {
   modal: ModalKind;
   viewMode?: 'map' | 'trace';
   galleryId?: number;
+  galleryFolder?: number | 'root';
   query?: string;
   character?: string;
   sort?: string;
@@ -60,6 +63,9 @@ function parsePane(hash: string): PageLocation {
   if (page === 'gallery') {
     result.modal = 'gallery';
     result.galleryId = positiveId(detail) ?? undefined;
+    if (params.has('folder'))
+      result.galleryFolder =
+        params.get('folder') === 'root' ? 'root' : (positiveId(params.get('folder')) ?? undefined);
     result.query = params.get('q') ?? undefined;
     result.character = params.get('character') ?? undefined;
     result.sort = params.get('sort') ?? undefined;
@@ -85,6 +91,7 @@ function parsePane(hash: string): PageLocation {
     result.media = {
       workflowId: null,
       jobId: positiveId(entity),
+      previewJobId: positiveId(params.get('preview')) ?? undefined,
       assetId: positiveId(params.get('asset')) ?? undefined,
       contextConversationId: null,
     };
@@ -97,6 +104,7 @@ function parsePane(hash: string): PageLocation {
           workflowId: detail === 'generate' ? params.get('workflow') : null,
           jobId: positiveId(entity),
           contextConversationId: positiveId(params.get('context')),
+          galleryFolderId: positiveId(params.get('folder')),
         };
       }
     }
@@ -110,6 +118,7 @@ function formatPane(page: PageLocation): string {
   if (page.modal === 'gallery') {
     parts.push('gallery');
     if (page.galleryId) parts.push(String(page.galleryId));
+    if (page.galleryFolder !== undefined) params.set('folder', String(page.galleryFolder));
     if (page.query) params.set('q', page.query);
     if (page.character && page.character !== 'all') params.set('character', page.character);
     if (page.sort) params.set('sort', page.sort);
@@ -122,6 +131,8 @@ function formatPane(page: PageLocation): string {
   } else if (page.modal === 'media-tools' && page.media) {
     if (page.media.jobId) {
       parts.push('media', 'job', String(page.media.jobId));
+      if (page.media.previewJobId && page.media.previewJobId !== page.media.jobId)
+        params.set('preview', String(page.media.previewJobId));
       if (page.media.assetId) params.set('asset', String(page.media.assetId));
     } else {
       parts.push('media', 'generate');
@@ -129,6 +140,8 @@ function formatPane(page: PageLocation): string {
     }
     if (!page.media.jobId && page.media.contextConversationId)
       params.set('context', String(page.media.contextConversationId));
+    if (!page.media.jobId && page.media.galleryFolderId)
+      params.set('folder', String(page.media.galleryFolderId));
   } else if (page.modal === 'conversation') {
     parts.push('conversation');
   } else if (page.viewMode) {
@@ -222,6 +235,7 @@ let historyIndex = 0;
 const historyPages = new Map<number, string>();
 let restoreBeforeGuard: (() => void) | undefined;
 let approvedHistoryIndex: number | undefined;
+let uiBackHistory = false;
 const navigationGuards: {
   guard: (action: () => void) => void;
   applies?: (target: PageLocation) => boolean;
@@ -273,7 +287,11 @@ export function writePageLocation(page: PageLocation, push = false): void {
     if (push) {
       for (const index of historyPages.keys()) if (index > historyIndex) historyPages.delete(index);
       historyIndex++;
-      history.pushState({ tinytavernPageIndex: historyIndex }, '', hash);
+      history.pushState(
+        { tinytavernPageIndex: historyIndex, ...(uiBackHistory && { tinytavernUiBack: true }) },
+        '',
+        hash,
+      );
     } else history.replaceState({ ...history.state, tinytavernPageIndex: historyIndex }, '', hash);
   }
   currentHash = hash;
@@ -318,17 +336,43 @@ export function applyPageLocation(page: PageLocation, apply: () => void): void {
   }
 }
 
-export function installPageNavigation(apply: (page: PageLocation) => void): void {
+export function installPageNavigation(
+  apply: (page: PageLocation) => void,
+  backAction?: () => (() => void) | undefined,
+): void {
+  uiBackHistory = Boolean(backAction);
+  if (backAction && !history.state?.tinytavernUiBack) {
+    // Keep one same-document entry behind the initial page so system Back can
+    // close local UI even in a freshly launched PWA or a reloaded deep link.
+    history.replaceState(
+      { ...history.state, tinytavernPageIndex: -1, tinytavernBackBoundary: true },
+      '',
+    );
+    const { tinytavernBackBoundary: _boundary, ...state } = history.state;
+    history.pushState(
+      { ...state, tinytavernPageIndex: 0, tinytavernUiBack: true },
+      '',
+      location.hash,
+    );
+  }
   historyIndex = history.state?.tinytavernPageIndex ?? 0;
   history.replaceState({ ...history.state, tinytavernPageIndex: historyIndex }, '');
   historyPages.set(historyIndex, location.hash);
+  let leavingThroughBoundary = false;
   window.addEventListener('popstate', (event) => {
     let targetIndex = event.state?.tinytavernPageIndex;
     if (typeof targetIndex !== 'number') {
       // Native hash navigation creates an entry without our state. Track it before
       // restoring the origin so it follows the same Save / Discard / Cancel path.
       targetIndex = historyIndex + 1;
-      history.replaceState({ ...history.state, tinytavernPageIndex: targetIndex }, '');
+      history.replaceState(
+        {
+          ...history.state,
+          tinytavernPageIndex: targetIndex,
+          ...(uiBackHistory && { tinytavernUiBack: true }),
+        },
+        '',
+      );
       for (const index of historyPages.keys()) if (index > historyIndex) historyPages.delete(index);
       historyPages.set(targetIndex, location.hash);
     }
@@ -344,6 +388,31 @@ export function installPageNavigation(apply: (page: PageLocation) => void): void
     }
     const approved = approvedHistoryIndex === targetIndex;
     approvedHistoryIndex = undefined;
+    if (event.state?.tinytavernBackBoundary && leavingThroughBoundary) {
+      leavingThroughBoundary = false;
+      history.go(1);
+      return;
+    }
+    leavingThroughBoundary = false;
+    if (!approved && targetIndex < historyIndex) {
+      const action = backAction?.();
+      if (action) {
+        // popstate cannot be cancelled. Restore the untouched entry before
+        // invoking the UI handler so menus and cancelled guards retain the URL,
+        // mounted editor and Forward history. UI Back traversals are preapproved.
+        restoreBeforeGuard = () => {
+          if (backAction?.() === action) action();
+        };
+        history.go(historyIndex - targetIndex);
+        return;
+      }
+    }
+    if (event.state?.tinytavernBackBoundary) {
+      // Nothing can close: let Back leave the app without an extra button press.
+      leavingThroughBoundary = true;
+      history.go(-1);
+      return;
+    }
     const guards = navigationGuards
       .filter((entry) => !entry.applies || entry.applies(readPageLocation()))
       .reverse();

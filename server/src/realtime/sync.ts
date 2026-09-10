@@ -11,17 +11,9 @@ import {
 import { mergeLiveBuffers } from '../generation/generation.ts';
 import { broadcastConv, sendTo } from './events.ts';
 import { getConversationRevision } from '../conversations/conversationRevision.ts';
-import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
 
 function publicLiveMessages(messages: Message[]): Message[] {
-  return mergeLiveBuffers(messages).map((message) => {
-    const prompt = mediaPromptBuffers.get(message.id);
-    const current =
-      prompt === undefined
-        ? message
-        : { ...message, content: prompt.prompt, reasoning: prompt.reasoning || null };
-    return publicMessage(current);
-  });
+  return mergeLiveBuffers(messages).map(publicMessage);
 }
 
 export function treeSnapshot(conversationId: number): TreeSnapshot {

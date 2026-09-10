@@ -324,6 +324,31 @@ databaseCase('generation stream', async () => {
       'Reasoning prefills cannot resume visible content',
     );
 
+    stmt(
+      'UPDATE endpoints SET allow_message_prefill = 1, reasoning_prefill_prefix = ? WHERE id = ?',
+    ).run('', endpointId);
+    for (const [delta, error] of [
+      [{ refusal: 'Cannot answer this request' }, /The model refused: Cannot answer this request/],
+      [{ content: '   ' }, /empty reply/],
+      [{ reasoning_content: 'Still thinking' }, /only reasoning and no message content/],
+    ] as const) {
+      const id = message();
+      // Template seeds must not disguise an upstream response with no visible answer.
+      startGeneration(conversation, id, undefined, {
+        prompt: { ...prompt, namePrefill: null, messagePrefill: 'Seed: ' },
+      });
+      await flush();
+      const request = requests.at(-1)!;
+      request.stream.write(upstreamFrame(delta));
+      request.stream.close();
+      await flush();
+      assert.equal(getMessage(id)!.status, 'error');
+      assert.match(getMessage(id)!.genMeta?.error ?? '', error);
+      assert.equal(getMessage(id)!.content, 'Seed:');
+      if ('reasoning_content' in delta)
+        assert.equal(getMessage(id)!.reasoning, delta.reasoning_content);
+    }
+
     // A request that stalls before returning response headers has the same deadline.
     let waitingSignal!: AbortSignal;
     mockFetch(

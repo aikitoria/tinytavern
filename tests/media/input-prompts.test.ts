@@ -23,7 +23,8 @@ test('media input prompts', async () => {
     cancelMediaJob,
     deleteMediaJob,
   } = await import('../../server/src/media/mediaJobs.ts');
-  const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { requireMediaJob, updateMediaJob } =
+    await import('../../server/src/media/mediaJobStore.ts');
   const { saveMediaRecipe, getMediaRecipe } =
     await import('../../server/src/media/mediaRecipes.ts');
   const { expandTemplate } = await import('../../server/src/generation/prompt.ts');
@@ -282,8 +283,37 @@ test('media input prompts', async () => {
     unsupportedNames,
     'Input-name macros have no aliases; unknown tokens retain the normal template behavior',
   );
+  const failedRender = job('image-edit', [
+    { slot: 'input1', assetId: first.id },
+    { slot: 'input2', assetId: upload.id },
+    { slot: 'input3', assetId: blank.id },
+  ]);
+  updateMediaJob(failedRender.id, { state: 'failed', submission_id: crypto.randomUUID() });
   stmt('DELETE FROM gallery_items WHERE id = ?').run(first.galleryId);
   deleteImageFiles([first.path]);
+  const retry = createMediaJob(
+    { requestKey: newRequestId(), reviewBeforeSave: true },
+    requireMediaJob(failedRender.id),
+  );
+  assert.deepEqual(
+    retry.inputs.map((input) => input.slot),
+    ['input2', 'input3'],
+  );
+  assert.throws(() => startMediaJob(requireMediaJob(retry.id), {}, false), /input1/);
+  assert.throws(
+    () =>
+      createMediaJob(
+        { requestKey: newRequestId(), inputs: failedRender.inputs },
+        requireMediaJob(failedRender.id),
+      ),
+    { status: 409 },
+    'Explicit unavailable references must still be rejected',
+  );
+  editMediaJob(requireMediaJob(retry.id), {
+    prompt: 'Retry with a replacement',
+    inputs: [{ slot: 'input1', assetId: replacement.id }, ...retry.inputs],
+  });
+  assert.equal(startMediaJob(requireMediaJob(retry.id), {}, false).state, 'submitting');
   const saved = getMediaRecipe(recipeId);
   assert.equal(saved.inputs[0]!.assetId, null);
   assert.equal(

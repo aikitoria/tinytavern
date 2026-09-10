@@ -76,6 +76,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     jsxDEV: (_type: unknown, props: Record<string, unknown>) => {
       const key =
         props.ariaLabel ??
+        props['aria-label'] ??
         props.id ??
         props.title ??
         (typeof props.children === 'string' ? props.children : undefined);
@@ -93,7 +94,9 @@ test('media drafts retain edits across settings, generation and ordered job snap
   const contextPath = '../../client/src/state/dialogContext.ts';
   const { DialogContext } = await import(contextPath);
   const locationPath = '../../client/src/state/pageLocation.ts';
-  const { parsePageLocation, formatPageLocation } = await import(locationPath);
+  const { parsePageLocation, formatPageLocation, navigatePageWithGuards } = await import(
+    locationPath
+  );
   const mediaPath = '../../client/src/media/navigation.ts';
   const { openMediaTool } = await import(mediaPath);
   const componentPath = '../../client/src/media/MediaToolsModal.tsx';
@@ -144,6 +147,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assets: [source],
     outputs: [],
     contextConversationId: null,
+    galleryFolderId: null,
     messageId: null,
     destination: 'gallery',
     sourceJobId: null,
@@ -222,7 +226,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     const gallery = parsePageLocation('#+/gallery/12');
     dialogStack.restore(gallery);
     location.hash = formatPageLocation(gallery);
-    openMediaTool('a', { input: { asset: source } });
+    openMediaTool('a', { input: { asset: source }, galleryFolderId: 7 });
     const frame = dialogStack.top()!;
     assert.notEqual(
       frame.media!.requestKey,
@@ -253,6 +257,11 @@ test('media drafts retain edits across settings, generation and ordered job snap
     const current = await started;
     assert.equal(submitted!.workflowId, 'b');
     assert.equal(submitted!.instruction, 'Animate the selected image');
+    assert.equal(
+      submitted!.galleryFolderId,
+      7,
+      'The gallery destination survives workflow changes and child panes',
+    );
     assert.deepEqual(submitted!.inputs, [{ slot: 'source', assetId: source.id }]);
     assert.equal(keys[0], frame.media!.requestKey);
     assert.equal(
@@ -321,6 +330,24 @@ test('media drafts retain edits across settings, generation and ordered job snap
       finishAction(job);
       return { ...job, revision: job.revision + 1, state: 'queued', submitted: true };
     };
+    for (let visit = 0; visit < 2; visit++) {
+      dispose = mount();
+      const closed = parsePageLocation('#');
+      await new Promise<void>((resolve) =>
+        navigatePageWithGuards(closed, () => {
+          dialogStack.restore(closed);
+          resolve();
+        }),
+      );
+      assert.equal(
+        variationKeys.length,
+        0,
+        'Closing an unchanged running job cannot create a variation',
+      );
+      dispose();
+      dialogStack.restore(parsePageLocation('#+/media/job/300'));
+      location.hash = '#+/media/job/300';
+    }
     dispose = mount();
     assert.equal(controls.get('Saved media workflow')!.disabled, false);
     assert.equal(controls.get('Media prompt preset')!.disabled, false);
@@ -365,7 +392,66 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.notEqual(variationKeys[0], variationKeys[1]);
     await Promise.resolve();
     await Promise.resolve();
+    applyMediaJob({
+      ...state.mediaJobs[301]!,
+      revision: state.mediaJobs[301]!.revision + 1,
+      state: 'succeeded',
+      outputs: [
+        { ...source, id: 801 },
+        { ...source, id: 802 },
+      ],
+    });
+    applyMediaJob({
+      ...state.mediaJobs[302]!,
+      revision: state.mediaJobs[302]!.revision + 1,
+      state: 'succeeded',
+      outputs: [{ ...source, id: 803 }],
+    });
+    controls.get('Previous variation')!.onClick!();
+    const restoredPreview = parsePageLocation(location.hash);
+    assert.equal(restoredPreview.media!.jobId, 302, 'Preview navigation retains the editor anchor');
+    assert.equal(restoredPreview.media!.previewJobId, 301);
+    assert.equal(restoredPreview.media!.assetId, 802);
     dispose();
+    const restoredJobs = JSON.parse(JSON.stringify(state.mediaJobs)) as Record<number, MediaJob>;
+    for (const id of Object.keys(state.mediaJobs)) setState('mediaJobs', Number(id), undefined!);
+    let finishAnchor!: (job: MediaJob) => void;
+    let finishVariations!: (jobs: MediaJob[]) => void;
+    api.mediaJob = () =>
+      new Promise<MediaJob>((resolve) => {
+        finishAnchor = resolve;
+      });
+    api.mediaVariations = () =>
+      new Promise<MediaJob[]>((resolve) => {
+        finishVariations = resolve;
+      });
+    dialogStack.restore(parsePageLocation('#'));
+    dialogStack.restore(restoredPreview);
+    location.hash = formatPageLocation(restoredPreview);
+    dispose = mount();
+    finishAnchor(restoredJobs[302]!);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      parsePageLocation(location.hash).media!.previewJobId,
+      301,
+      'Loading the editor before its siblings cannot replace the saved preview',
+    );
+    assert.equal(parsePageLocation(location.hash).media!.assetId, 802);
+    finishVariations([restoredJobs[300]!, restoredJobs[301]!, restoredJobs[302]!]);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(parsePageLocation(location.hash).media!.previewJobId, 301);
+    const restoredQueue = nextAction();
+    controls.get('Render the final prompt shown above')!.onClick!();
+    await restoredQueue;
+    assert.equal(submitted!.prompt, 'Third prompt');
+    assert.deepEqual(submitted!.workflowValues, { duration: 12 });
+    await Promise.resolve();
+    await Promise.resolve();
+    dispose();
+    api.mediaJob = async (id: number) => state.mediaJobs[id];
+    api.mediaVariations = async () => [];
 
     const preparingJob = makeJob(400, { state: 'preparing', prompt: 'Partial prompt' });
     applyMediaJob(preparingJob);

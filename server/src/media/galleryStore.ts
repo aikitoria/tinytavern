@@ -7,6 +7,7 @@ export function insertGalleryAsset(
   asset: MediaAsset,
   source: {
     prompt: string;
+    folderId?: number | null;
     characterName?: string;
     conversationId?: number | null;
     messageId?: number | null;
@@ -27,8 +28,8 @@ export function insertGalleryAsset(
   return Number(
     stmt(`INSERT INTO gallery_items (
       character_name, source_conversation_id, source_message_id, source_image,
-      prompt, image, image_width, image_height, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      prompt, image, image_width, image_height, created_at, updated_at, folder_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       characterName,
       source.conversationId ?? null,
       source.messageId ?? null,
@@ -39,6 +40,7 @@ export function insertGalleryAsset(
       asset.height,
       now,
       now,
+      source.folderId ?? null,
     ).lastInsertRowid,
   );
 }

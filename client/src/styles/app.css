@@ -306,6 +306,15 @@
   border-color: color-mix(in srgb, var(--accent) 76%, var(--accent-hot));
 }
 
+.composer-input {
+  overflow-x: hidden;
+}
+
+.composer-input:placeholder-shown {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .message-selection-bar {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }

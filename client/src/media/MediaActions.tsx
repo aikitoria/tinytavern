@@ -8,6 +8,7 @@ import { mediaToolLinks, openMediaTool } from './navigation.ts';
 export default function MediaActions(props: {
   asset: MediaAsset;
   conversationId?: number | null;
+  galleryFolderId?: number | null;
   compact?: boolean;
   disabled?: boolean;
 }) {
@@ -18,6 +19,7 @@ export default function MediaActions(props: {
     setOpen(false);
     openMediaTool(workflowId, {
       conversationId: props.conversationId,
+      galleryFolderId: props.galleryFolderId,
       input: { asset: props.asset },
     });
   };

@@ -127,9 +127,13 @@ export default function Composer(props: { text: string; onText: (text: string) =
   const resize = () => {
     if (!area) return;
     area.style.height = 'auto';
-    area.style.height = `${Math.min(area.scrollHeight, 200)}px`;
+    area.style.overflowY = 'hidden';
+    // A wrapped placeholder must not expand an empty, single-row composer.
+    if (!area.value) return;
+    const height = area.scrollHeight;
+    area.style.height = `${Math.min(height, 200)}px`;
     // Suppress single-line scrollbars caused by sub-pixel rounding.
-    area.style.overflowY = area.scrollHeight > 200 ? 'auto' : 'hidden';
+    area.style.overflowY = height > 200 ? 'auto' : 'hidden';
   };
 
   const send = async () => {

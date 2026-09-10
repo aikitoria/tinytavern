@@ -1,5 +1,32 @@
 import type { GalleryItem } from '@tinytavern/shared';
 
+export function resolveGalleryFolder(
+  key: string,
+  folders: readonly { id: number }[],
+  loaded: boolean,
+): string {
+  return loaded &&
+    key !== 'all' &&
+    key !== 'root' &&
+    !folders.some((folder) => String(folder.id) === key)
+    ? 'root'
+    : key;
+}
+
+/** A moved item retains its old position between its remaining neighbors. */
+export function adjacentGalleryIndex(
+  position: number,
+  previousPosition: number,
+  direction: number,
+  count: number,
+): number {
+  const next =
+    position < 0
+      ? Math.min(previousPosition, count) + (direction < 0 ? -1 : 0)
+      : position + direction;
+  return next >= 0 && next < count ? next : -1;
+}
+
 export const galleryCharacterKeys = (item: Pick<GalleryItem, 'characters' | 'characterName'>) =>
   item.characters.length
     ? item.characters.map((character) => `id:${character.id}`)
@@ -20,11 +47,13 @@ export function filterGallery(
   query: string,
   characterKey: string,
   oldestFirst: boolean,
+  folderId?: number | null,
 ): GalleryItem[] {
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const result = index
     .filter(
       (entry) =>
+        (folderId === undefined || entry.item.folderId === folderId) &&
         (characterKey === 'all' || entry.characterKeys.includes(characterKey)) &&
         terms.every((term) => entry.search.includes(term)),
     )

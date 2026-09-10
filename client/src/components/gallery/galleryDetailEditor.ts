@@ -3,6 +3,7 @@ import { createEffect, createSignal, on } from 'solid-js';
 export interface GalleryDetails {
   prompt: string;
   characterIds: number[];
+  folderId: number | null;
 }
 
 /** The mounted gallery detail owns its draft until Save or Discard permits navigation. */
@@ -15,20 +16,25 @@ export function createGalleryDetailEditor(options: {
   const initial = options.value();
   const [prompt, setPrompt] = createSignal(initial.prompt);
   const [characterIds, setCharacterIds] = createSignal(initial.characterIds);
+  const [folderId, setFolderId] = createSignal(initial.folderId);
   const [saved, setSaved] = createSignal(initial);
   const [saving, setSaving] = createSignal(false);
+  let remoteChangedDuringSave = false;
   const dirty = () =>
     prompt() !== saved().prompt ||
+    folderId() !== saved().folderId ||
     JSON.stringify(characterIds()) !== JSON.stringify(saved().characterIds);
   const discard = () => {
     const value = options.value();
     setPrompt(value.prompt);
     setCharacterIds(value.characterIds);
+    setFolderId(value.folderId);
     setSaved(value);
     options.onError('');
   };
   createEffect(
     on(options.value, () => {
+      if (saving()) remoteChangedDuringSave = true;
       if (!dirty() && !saving() && !options.generating()) discard();
     }),
   );
@@ -36,7 +42,8 @@ export function createGalleryDetailEditor(options: {
   const save = (): Promise<boolean> => {
     if (pendingSave) return pendingSave;
     if (!dirty()) return Promise.resolve(true);
-    const value = { prompt: prompt(), characterIds: characterIds() };
+    const value = { prompt: prompt(), characterIds: characterIds(), folderId: folderId() };
+    remoteChangedDuringSave = false;
     setSaving(true);
     options.onError('');
     pendingSave = options
@@ -52,8 +59,20 @@ export function createGalleryDetailEditor(options: {
       .finally(() => {
         pendingSave = undefined;
         setSaving(false);
+        if (remoteChangedDuringSave && !dirty() && !options.generating()) discard();
       });
     return pendingSave;
   };
-  return { prompt, setPrompt, characterIds, setCharacterIds, dirty, saving, save, discard };
+  return {
+    prompt,
+    setPrompt,
+    characterIds,
+    setCharacterIds,
+    folderId,
+    setFolderId,
+    dirty,
+    saving,
+    save,
+    discard,
+  };
 }

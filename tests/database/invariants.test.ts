@@ -162,6 +162,7 @@ test('foreign-key actions and ordered lists stay indexed', async () => {
     'presets',
     'templates',
     'character_folders',
+    'gallery_folders',
   ]) {
     assert.doesNotMatch(
       plan(`DELETE FROM ${table} WHERE id=1`),
@@ -360,6 +361,14 @@ test('schema baseline initializes once and rejects unsupported versions', async 
     existing.exec(
       "INSERT INTO endpoints (name, base_url, created_at, prefill_mode) VALUES ('Existing', 'http://test.invalid', 1, 'vllm')",
     );
+    existing.exec('DROP INDEX idx_gallery_folder');
+    existing.exec('DROP INDEX idx_media_jobs_gallery_folder');
+    existing.exec('ALTER TABLE media_jobs DROP COLUMN gallery_folder_id');
+    existing.exec('ALTER TABLE gallery_items DROP COLUMN folder_id');
+    existing.exec('DROP TABLE gallery_folders');
+    existing.exec(
+      "INSERT INTO gallery_items (id, character_name, prompt, created_at, updated_at) VALUES (99, 'Existing', 'Keep this prompt', 1, 1)",
+    );
     existing.exec('PRAGMA user_version = 73');
   }
   const migrated = start();
@@ -367,6 +376,10 @@ test('schema baseline initializes once and rejects unsupported versions', async 
   {
     using existing = new Database(path);
     const read = (sql: string) => existing.query<Record<string, string | number>, []>(sql).get()!;
+    assert.deepEqual(read('SELECT prompt, folder_id FROM gallery_items WHERE id = 99'), {
+      prompt: 'Keep this prompt',
+      folder_id: null,
+    });
     settings = String(read("SELECT value FROM settings WHERE key='app'").value);
     const upgraded = JSON.parse(settings);
     assert.equal(upgraded.revision, 44);
@@ -401,6 +414,7 @@ test('schema baseline initializes once and rejects unsupported versions', async 
       { name: 'input3', label: 'Missing' },
     ]);
     const job = read('SELECT * FROM media_jobs WHERE id=1');
+    assert.equal(job.gallery_folder_id, null, 'Existing jobs keep their unfiled destination');
     const recipe = read('SELECT * FROM media_recipes WHERE id=1');
     const expectedInputs = inputs.map((input, i) => ({ ...input, slot: `input${i + 1}` }));
     for (const row of [job, recipe, read('SELECT * FROM media_jobs WHERE id=2')])

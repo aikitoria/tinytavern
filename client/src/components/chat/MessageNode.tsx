@@ -56,6 +56,7 @@ export default function MessageNode(props: {
   const [editing, setEditing] = createSignal(false);
   const [showReasoning, setShowReasoning] = createSignal(false);
   let editArea: HTMLTextAreaElement | undefined;
+  let editBaseline: Parameters<typeof api.editMessage>[1] | undefined;
   let moreButton: HTMLButtonElement | undefined;
 
   const isUser = () => props.message.role === 'user';
@@ -217,6 +218,10 @@ export default function MessageNode(props: {
     queueMicrotask(() => {
       if (!editArea) return;
       editArea.value = props.message.content;
+      editBaseline = {
+        activeLeafId: state.tree.activeLeafId,
+        mutationRevision: state.tree.mutationRevision,
+      };
       editArea.style.height = `${editArea.scrollHeight}px`;
       editArea.focus({ preventScroll: true });
     });
@@ -231,8 +236,10 @@ export default function MessageNode(props: {
   });
 
   const saveEdit = async (edit: typeof api.editMessage) => {
+    const expected = editBaseline;
+    if (!expected) return;
     const saved = await navigateTree(() =>
-      edit(props.message.id, state.tree, { content: editArea!.value }),
+      edit(props.message.id, expected, { content: editArea!.value }),
     );
     if (saved) setEditing(false);
   };
