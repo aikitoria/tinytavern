@@ -4,7 +4,7 @@ import { stmt, toEndpoint } from '../db/db.ts';
 import { invalidate } from '../realtime/events.ts';
 import { route, HttpError } from '../http/router.ts';
 import { objectBody, optionalNumber, optionalString, positiveId } from '../http/validation.ts';
-import { defineEntityRoutes, entityFields } from './shared/entityRoutes.ts';
+import { defineEntityRoutes, entityFields, referenceValue } from './shared/entityRoutes.ts';
 import { rowById } from './shared/entityUtils.ts';
 
 const PREFILL_MODES = new Set<Endpoint['prefillMode']>(['disabled', 'none', 'vllm', 'deepseek']);
@@ -102,6 +102,7 @@ defineEntityRoutes<Endpoint>({
   toDto: toEndpoint,
   toPublic: publicEndpoint,
   fields: entityFields(ENTITY_FIELDS.endpoints, {
+    folderId: referenceValue('folderId', 'endpoint_folders'),
     baseUrl: (b, cur) => baseUrl(optionalString(b, 'baseUrl'), cur?.baseUrl),
     apiKey: endpointApiKey,
     genParams: (b, cur) =>

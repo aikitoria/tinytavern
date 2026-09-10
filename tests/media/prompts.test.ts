@@ -210,7 +210,7 @@ test('media prompts', async () => {
     const expected = buildToolPrompt(
       toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId)!),
       getActivePath(conversationId),
-      '[System Note]\nChat video formatting\nTask: Use literal {{context}} in the title',
+      '<system_instruction>\nChat video formatting\nTask: Use literal {{context}} in the title\n</system_instruction>',
     );
     const job = createMediaJob({
       requestKey: testRequestKey('snapshot'),
@@ -393,7 +393,7 @@ test('media prompts', async () => {
       name: 'Edit',
       inputBindings: {},
       textOutputNodeId: null,
-      json: '{"1":{"inputs":{"prompt":"{{prompt}}","image":"{{reference1}}"}}}',
+      json: '{"1":{"inputs":{"prompt":"{{prompt}}","image":"{{input1}}"}}}',
       standalonePromptPresetId: 'gallery-edit',
       chatPromptPresetId: 'reference-style',
     };
@@ -490,9 +490,9 @@ test('media prompts', async () => {
     assert.equal(
       JSON.parse(chatDefault.context_json!)
         .messages.at(-1)
-        .content.match(/\[System Note\]/g)?.length,
+        .content.match(/<system_instruction>/g)?.length,
       1,
-      'Conditional chat presets retain one system-note marker',
+      'Conditional chat presets retain one instruction wrapper',
     );
     const blankInstruction = await prepareImage(
       'chat-image-blank',
@@ -548,7 +548,7 @@ test('media prompts', async () => {
     editMediaJob(requireMediaJob(edit.id), {
       workflowId: 'edit',
       presetId: null,
-      inputs: [{ assetId: sourceId, slot: 'reference1' }],
+      inputs: [{ assetId: sourceId, slot: 'input1' }],
     });
     startMediaJob(requireMediaJob(edit.id), {}, true);
     const editReady = await waitFor(edit.id, 'ready');
@@ -571,7 +571,7 @@ test('media prompts', async () => {
       workflowId: 'edit',
       reviewBeforeSave: true,
       instruction: 'Change the lighting',
-      inputs: [{ assetId: sourceId, slot: 'reference1' }],
+      inputs: [{ assetId: sourceId, slot: 'input1' }],
     });
     startMediaJob(requireMediaJob(standaloneEdit.id), {}, true);
     const standaloneEditReady = await waitFor(standaloneEdit.id, 'ready');

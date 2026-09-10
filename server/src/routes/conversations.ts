@@ -4,6 +4,7 @@ import { copyConversation, insertCopiedMessage } from '../conversations/conversa
 import type { MessageRow } from '../conversations/conversationCopies.ts';
 import {
   characterChatName,
+  messagePrefillEnabled,
   type Conversation,
   type Message,
   type PromptTrace,
@@ -472,7 +473,7 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
     ? stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId)
     : undefined;
   const endpoint = endpointRow ? toEndpoint(endpointRow) : null;
-  const prefillDisabled = endpoint?.prefillMode === 'disabled';
+  const prefillDisabled = endpoint ? !messagePrefillEnabled(endpoint) : false;
   return {
     messages: endpoint ? withEndpointSystemPrompt(endpoint, built.messages) : built.messages,
     reasoningPrefill: endpoint
@@ -480,8 +481,10 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
       : built.reasoningPrefill,
     messagePrefill: prefillDisabled ? null : built.messagePrefill,
     namePrefill: prefillDisabled ? null : built.namePrefill,
-    disabledPrefillSpeakerNote: built.disabledPrefillSpeakerNote,
+    speakerHandoff: built.speakerHandoff,
     prefillMode: endpoint?.prefillMode ?? 'none',
+    allowReasoningPrefill: endpoint?.allowReasoningPrefill ?? true,
+    allowMessagePrefill: endpoint?.allowMessagePrefill ?? true,
     userMessagePrefix: built.namePrefill ? `${built.userName.trim()}: ` : '',
   } satisfies PromptTrace;
 });

@@ -15,6 +15,7 @@ import ReferenceEditButton from './ReferenceEditButton.tsx';
 export interface SelectOption {
   value: string;
   label: string;
+  group?: string;
   edit?: () => void;
 }
 
@@ -53,14 +54,15 @@ export default function Select(props: {
   const [highlighted, setHighlighted] = createSignal(0);
   const [query, setQuery] = createSignal('');
   const choices = createMemo(() => props.options);
-  const options = createMemo(() => {
+  const options = createMemo<SelectOption[]>(() => {
     const value = query().trim();
     const needle = value.toLowerCase();
     const matches = needle
       ? choices().filter(
           (option) =>
             option.label.toLowerCase().includes(needle) ||
-            option.value.toLowerCase().includes(needle),
+            option.value.toLowerCase().includes(needle) ||
+            option.group?.toLowerCase().includes(needle),
         )
       : choices();
     return props.allowCustom && value && !choices().some((option) => option.value === value)
@@ -148,7 +150,9 @@ export default function Select(props: {
             ? options().length - 1
             : (highlighted() + dir + options().length) % options().length;
       setHighlighted(next);
-      menu?.children[next]?.scrollIntoView({ block: 'nearest' });
+      menu
+        ?.querySelector<HTMLElement>(`[id="select-option-${id}-${next}"]`)
+        ?.scrollIntoView({ block: 'nearest' });
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       const option = options()[highlighted()];
@@ -229,30 +233,38 @@ export default function Select(props: {
         <div ref={menu} id={listboxId} role="listbox" aria-label={props.ariaLabel}>
           <For each={options()}>
             {(option, i) => (
-              <button
-                type="button"
-                class="select-option"
-                id={`select-option-${id}-${i()}`}
-                role="option"
-                tabIndex={-1}
-                aria-selected={option.value === current()}
-                classList={{
-                  highlighted: i() === highlighted(),
-                  selected: option.value === current(),
-                  active: props.showCheck && option.value === current(),
-                }}
-                onPointerEnter={() => setHighlighted(i())}
-                onClick={() => pick(option.value)}
-              >
-                <span>{option.label}</span>
-                <Show when={props.showCheck}>
-                  <span class="menu-check" aria-hidden="true">
-                    {option.value === current() ? (
-                      <FontAwesomeIcon icon={faCheck} size={12} />
-                    ) : null}
-                  </span>
+              <>
+                <Show when={option.group && option.group !== options()[i() - 1]?.group}>
+                  <div class="px-2 pt-2 pb-1 text-dim text-xs font-semibold" role="presentation">
+                    {option.group}
+                  </div>
                 </Show>
-              </button>
+                <button
+                  type="button"
+                  class="select-option"
+                  id={`select-option-${id}-${i()}`}
+                  role="option"
+                  aria-label={option.group ? `${option.group}: ${option.label}` : undefined}
+                  tabIndex={-1}
+                  aria-selected={option.value === current()}
+                  classList={{
+                    highlighted: i() === highlighted(),
+                    selected: option.value === current(),
+                    active: props.showCheck && option.value === current(),
+                  }}
+                  onPointerEnter={() => setHighlighted(i())}
+                  onClick={() => pick(option.value)}
+                >
+                  <span classList={{ 'pl-3': !!option.group }}>{option.label}</span>
+                  <Show when={props.showCheck}>
+                    <span class="menu-check" aria-hidden="true">
+                      {option.value === current() ? (
+                        <FontAwesomeIcon icon={faCheck} size={12} />
+                      ) : null}
+                    </span>
+                  </Show>
+                </button>
+              </>
             )}
           </For>
         </div>

@@ -2,7 +2,7 @@ import { faArrowDown, faArrowUp, faXmark } from '@fortawesome/free-solid-svg-ico
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { Show, createSignal } from 'solid-js';
 import { api } from '../../state/api.ts';
-import { confirmAction } from '../../state/confirm.ts';
+import { confirmDelete } from '../../state/confirm.ts';
 import { clearMessageSelection, selectedMessageRange } from '../../state/messageSelection.ts';
 import { navigateTree, state } from '../../state/store.ts';
 import Modal from '../ui/Modal.tsx';
@@ -62,18 +62,21 @@ export default function MessageSelectionBar() {
     }
   };
 
-  const deleteRange = async () => {
+  const deleteRange = async (event: MouseEvent) => {
     const selected = range();
     if (!selected) return;
     const count = selected.messages.length;
     if (
-      !(await confirmAction({
-        title: `Delete ${count === 1 ? 'message' : `${count} messages`}?`,
-        message:
-          'This removes the selected range and every swipe alternative in those message blocks. The conversation after the range will be kept.',
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: `Delete ${count === 1 ? 'message' : `${count} messages`}?`,
+          message:
+            'This removes the selected range and every swipe alternative in those message blocks. The conversation after the range will be kept.',
+          confirmLabel: 'Delete',
+          danger: true,
+        },
+        event,
+      ))
     ) {
       return;
     }
@@ -124,7 +127,7 @@ export default function MessageSelectionBar() {
           type="button"
           class="danger-btn"
           disabled={state.treeNavigationPending}
-          onClick={() => void deleteRange()}
+          onClick={(event) => void deleteRange(event)}
         >
           Delete
         </button>

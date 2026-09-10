@@ -4,6 +4,7 @@ import {
   namedItem,
   mediaInputSlots,
   normalizeImportedWorkflow,
+  normalizeMediaWorkflowInputs,
   compileMediaWorkflow,
   validateWorkflowValues,
   type MediaWorkflowValues,
@@ -139,16 +140,21 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
     if (!id || id.length > 200 || recipes.has(id)) {
       throw new HttpError(400, 'Image recipe IDs must be nonempty and unique');
     }
-    const workflow = parseMediaWorkflow({
-      ...normalizeImportedWorkflow(object(source.workflow)),
-      standalonePromptPresetId: null,
-      inputBindings: {},
-      chatPromptPresetId: null,
-    });
+    const originalWorkflow = parseMediaWorkflow(
+      {
+        ...normalizeImportedWorkflow(object(source.workflow)),
+        standalonePromptPresetId: null,
+        inputBindings: {},
+        chatPromptPresetId: null,
+      },
+      undefined,
+      false,
+    );
+    const { workflow, slots: renamedSlots } = normalizeMediaWorkflowInputs(originalWorkflow);
     if (workflow.textOutputNodeId !== null || !workflow.json.trim()) {
       throw new HttpError(400, 'Image recipes require an image workflow');
     }
-    const slots = mediaInputSlots(workflow);
+    const slots = [...renamedSlots.keys()];
     if (!Array.isArray(source.inputs) || source.inputs.length !== slots.length) {
       throw new HttpError(400, 'Image recipe references do not match the workflow');
     }
@@ -159,7 +165,7 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
         throw new HttpError(400, 'Image recipe references must follow workflow slot order');
       }
       return {
-        slot,
+        slot: renamedSlots.get(slot)!,
         assetId: input.assetId === null ? null : text(input.assetId, 'reference asset ID', 200),
         prompt: input.prompt === undefined ? undefined : text(input.prompt, 'reference prompt'),
       };

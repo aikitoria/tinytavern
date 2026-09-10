@@ -1,10 +1,11 @@
 import EntityActiveBadge from './EntityActiveBadge.tsx';
+import EntityListSearch from './EntityListSearch.tsx';
 import { For, Show, createMemo, createSignal, type JSX } from 'solid-js';
 import { faChevronDown, faChevronRight, faPen, faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import Modal from '../ui/Modal.tsx';
 import SettingLabel, { createDefaultField } from '../forms/SettingField.tsx';
-import { confirmAction } from '../../state/confirm.ts';
+import { confirmDelete } from '../../state/confirm.ts';
 import { errorMessage } from '../../util.ts';
 import { collectionByName } from '../../state/collectionOrder.ts';
 
@@ -78,14 +79,17 @@ export function createFolderBrowser<
       setSaving(false);
     }
   };
-  const remove = async (folder: F) => {
+  const remove = async (folder: F, event: MouseEvent) => {
     if (
-      !(await confirmAction({
-        title: 'Delete folder?',
-        message: `Delete “${folder.name}”? Its ${props.noun} will move to the root.`,
-        confirmLabel: 'Delete folder',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: 'Delete folder?',
+          message: `Delete “${folder.name}”? Its ${props.noun} will move to the root.`,
+          confirmLabel: 'Delete folder',
+          danger: true,
+        },
+        event,
+      ))
     )
       return;
     try {
@@ -94,12 +98,11 @@ export function createFolderBrowser<
       props.onError(errorMessage(err));
     }
   };
-  const Entry = (entry: { item: T; child?: boolean }) => (
+  const Entry = (entry: { item: T }) => (
     <button
       class="character-tree-entry"
       classList={{
         active: props.selectedId() === entry.item.id,
-        'character-tree-child': entry.child,
       }}
       onClick={() => props.select(entry.item.id)}
     >
@@ -110,17 +113,9 @@ export function createFolderBrowser<
     </button>
   );
   const NewButton = () => <button onClick={() => edit(null)}>Folder</button>;
+  const Search = () => <EntityListSearch noun={props.noun} value={query()} onChange={setQuery} />;
   const List = () => (
     <>
-      <div class="mb-2 [&_.search-input]:min-h-control">
-        <input
-          class="search-input w-full min-w-0"
-          aria-label={`Search ${props.noun}`}
-          placeholder={`Search ${props.noun}…`}
-          value={query()}
-          onInput={(event) => setQuery(event.currentTarget.value)}
-        />
-      </div>
       <For each={sortedFolders()}>
         {(folder) => (
           <Show when={!groups().search || members(folder.id).length > 0}>
@@ -160,16 +155,20 @@ export function createFolderBrowser<
                   class="character-folder-action"
                   title="Delete folder"
                   aria-label={`Delete ${folder.name}`}
-                  onClick={() => void remove(folder)}
+                  onClick={(event) => void remove(folder, event)}
                 >
                   <FontAwesomeIcon icon={faXmark} size={14} />
                 </button>
               </div>
               <Show when={expanded(folder.id)}>
-                <For each={members(folder.id)}>{(item) => <Entry item={item} child />}</For>
-                <Show when={!groups().search && members(folder.id).length === 0}>
-                  <span class="character-folder-empty">Empty folder</span>
-                </Show>
+                <div class="ml-3.5 pl-3 border-l border-l-solid border-l-subtle flex flex-col gap-0.5 min-w-0">
+                  <For each={members(folder.id)}>{(item) => <Entry item={item} />}</For>
+                  <Show when={!groups().search && members(folder.id).length === 0}>
+                    <span class="px-2 min-h-control flex items-center text-muted text-xs">
+                      Empty folder
+                    </span>
+                  </Show>
+                </div>
               </Show>
             </section>
           </Show>
@@ -226,6 +225,7 @@ export function createFolderBrowser<
   );
   return {
     NewButton,
+    Search,
     List,
     Dialog,
     options: () =>

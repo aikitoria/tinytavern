@@ -3,7 +3,7 @@ import { readPageLocation, writePageLocation } from './state/pageLocation.ts';
 import { createEffect, createSignal, onMount, untrack } from 'solid-js';
 import { useSettingsGuard, useSettingsNavigation } from './components/settings/SettingsGuard.tsx';
 import { changedFields, sameValue } from './state/editorSync.ts';
-import { confirmAction } from './state/confirm.ts';
+import { confirmDelete } from './state/confirm.ts';
 import { createAsyncScope } from './state/asyncScope.ts';
 
 export type EditorId<Id extends number | string = number> = Id | 'new' | 'default';
@@ -255,19 +255,22 @@ export function createEntityEditor<
       })();
     });
   };
-  const remove = async () => {
+  const remove = async (event?: { shiftKey: boolean }) => {
     if (removingId() !== null) return;
     const id = selectedId();
     const current = capture();
     if (
       id === 'new' ||
       id === 'default' ||
-      !(await confirmAction({
-        title: options.deletePrompt,
-        message: 'This cannot be undone.',
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: options.deletePrompt,
+          message: 'This cannot be undone.',
+          confirmLabel: 'Delete',
+          danger: true,
+        },
+        event,
+      ))
     )
       return;
     if (!current()) return;

@@ -34,7 +34,7 @@ import './routes/presets.ts';
 import './routes/templates.ts';
 import './routes/personas.ts';
 import './routes/characters.ts';
-import './routes/characterFolders.ts';
+import './routes/entityFolders.ts';
 import './routes/endpoints.ts';
 import './routes/settings.ts';
 import './routes/conversationTransfer.ts';

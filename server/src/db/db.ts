@@ -5,9 +5,10 @@ type PreparedStatement = Statement<SqlRow, SQLQueryBindings[]>;
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
+import { migrateMediaInputs } from './mediaInputMigration.ts';
 import type {
   Character,
-  CharacterFolder,
+  EntityFolder,
   Conversation,
   CustomTemplate,
   Endpoint,
@@ -19,6 +20,8 @@ import type {
   Template,
 } from '@tinytavern/shared';
 import {
+  ENTITY_FOLDERS,
+  defaultChatMediaPrompt,
   DEFAULT_PROMPT_TEMPLATE,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_STEER_TEMPLATE,
@@ -118,7 +121,80 @@ function migrate(target: number, apply: () => void): void {
   });
   version = target;
 }
-// Future migrations attach here: migrate(74, () => { ... });
+migrate(74, migrateMediaInputs);
+migrate(75, () => {
+  for (const entity of ['presets', 'templates', 'personas', 'endpoints'] as const) {
+    const { table } = ENTITY_FOLDERS[entity];
+    db.exec(`CREATE TABLE ${table} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      created_at INTEGER NOT NULL
+    )`);
+    db.exec(
+      `ALTER TABLE ${entity} ADD COLUMN folder_id INTEGER REFERENCES ${table}(id) ON DELETE SET NULL`,
+    );
+    db.exec(
+      `CREATE INDEX idx_${entity}_folder ON ${entity}(folder_id) WHERE folder_id IS NOT NULL`,
+    );
+  }
+});
+
+migrate(76, () => {
+  db.exec('ALTER TABLE endpoints ADD COLUMN allow_reasoning_prefill INTEGER NOT NULL DEFAULT 1');
+  db.exec('ALTER TABLE endpoints ADD COLUMN allow_message_prefill INTEGER NOT NULL DEFAULT 1');
+});
+
+migrate(77, () => {
+  const prompts = [
+    DEFAULT_SETTINGS.titlePrompt,
+    DEFAULT_SETTINGS.draftCompletionPrompt,
+    DEFAULT_SETTINGS.imageGeneration.promptRevisionContext,
+    DEFAULT_SETTINGS.imageGeneration.promptRevisionTemplate,
+    ...DEFAULT_SETTINGS.mediaChatPrompts.presets.flatMap((preset) =>
+      'chatPrompt' in preset ? [preset.chatPrompt] : [],
+    ),
+    DEFAULT_STEER_TEMPLATE,
+    DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
+    defaultChatMediaPrompt(),
+  ];
+  const replacements = new Map(
+    prompts.map((prompt) => [
+      prompt
+        .replaceAll('<system_instruction>', '[System Note]')
+        .replaceAll('\n</system_instruction>', ''),
+      prompt,
+    ]),
+  );
+  // Update only exact old defaults, including copies; preserve custom text and captured jobs.
+  const upgradeJson = (source: string) => {
+    let changed = false;
+    const upgraded = JSON.stringify(JSON.parse(source), (_key, value) => {
+      const replacement = typeof value === 'string' ? replacements.get(value) : undefined;
+      if (replacement === undefined) return value;
+      changed = true;
+      return replacement;
+    });
+    return changed ? upgraded : source;
+  };
+  const source = String(stmt("SELECT value FROM settings WHERE key = 'app'").get()!.value);
+  const upgraded = upgradeJson(source);
+  if (upgraded !== source) {
+    const settings = JSON.parse(upgraded);
+    settings.revision++;
+    stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(settings));
+  }
+  for (const column of ['steer_template', 'speaker_handoff_template'])
+    for (const [before, after] of replacements)
+      stmt(`UPDATE templates SET ${column} = ? WHERE ${column} = ?`).run(after, before);
+  for (const row of stmt(
+    'SELECT id, custom_template FROM characters WHERE custom_template IS NOT NULL',
+  ).all()) {
+    const source = String(row.custom_template);
+    const upgraded = upgradeJson(source);
+    if (upgraded !== source)
+      stmt('UPDATE characters SET custom_template = ? WHERE id = ?').run(upgraded, row.id!);
+  }
+});
 
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
@@ -326,7 +402,7 @@ export function toCharacter(r: Row): Character {
   };
 }
 
-export function toCharacterFolder(r: Row): CharacterFolder {
+export function toEntityFolder(r: Row): EntityFolder {
   return {
     id: r.id as number,
     name: r.name as string,
@@ -337,6 +413,7 @@ export function toCharacterFolder(r: Row): CharacterFolder {
 export function toPreset(r: Row): Preset {
   return {
     id: r.id as number,
+    folderId: (r.folder_id as number | null) ?? null,
     readOnly: r.builtin === 1,
     name: r.name as string,
     content: r.content as string,
@@ -347,6 +424,7 @@ export function toPreset(r: Row): Preset {
 export function toTemplate(r: Row): Template {
   return {
     id: r.id as number,
+    folderId: (r.folder_id as number | null) ?? null,
     readOnly: r.builtin === 1,
     name: r.name as string,
     content: r.content as string,
@@ -364,6 +442,7 @@ export function toTemplate(r: Row): Template {
 export function toPersona(r: Row): Persona {
   return {
     id: r.id as number,
+    folderId: (r.folder_id as number | null) ?? null,
     name: r.name as string,
     avatar: r.avatar as string | null,
     description: r.description as string,
@@ -375,6 +454,7 @@ export function toEndpoint(r: Row): Endpoint {
   const apiKey = r.api_key as string;
   return {
     id: r.id as number,
+    folderId: (r.folder_id as number | null) ?? null,
     name: r.name as string,
     baseUrl: r.base_url as string,
     apiKey,
@@ -385,6 +465,8 @@ export function toEndpoint(r: Row): Endpoint {
     systemPromptPrefix: r.system_prompt_prefix as string,
     systemPromptSuffix: r.system_prompt_suffix as string,
     reasoningPrefillPrefix: r.reasoning_prefill_prefix as string,
+    allowReasoningPrefill: r.allow_reasoning_prefill === 1,
+    allowMessagePrefill: r.allow_message_prefill === 1,
     prefillMode: r.prefill_mode as Endpoint['prefillMode'],
     createdAt: r.created_at as number,
   };

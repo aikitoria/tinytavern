@@ -1,5 +1,8 @@
 import {
   ENTITY_FIELDS,
+  entityTransferData,
+  type TransferEntity,
+  ENTITY_FOLDERS,
   DEFAULT_CUSTOM_TEMPLATE,
   settingsFields,
   settingsNullable,
@@ -34,7 +37,10 @@ export function entitySettingsSchema(type: keyof typeof ENTITY_FIELDS): Settings
           }
         : {};
   return {
-    ...settingsFields(defaults, overrides),
+    ...settingsFields(defaults, {
+      ...overrides,
+      folderId: settingsReference(() => state[ENTITY_FOLDERS[type].state]),
+    }),
     ...(type === 'personas' ? { avatarData: settingsNullable(settingsText) } : {}),
     ...(type === 'characters'
       ? Object.fromEntries(
@@ -42,4 +48,20 @@ export function entitySettingsSchema(type: keyof typeof ENTITY_FIELDS): Settings
         )
       : {}),
   };
+}
+
+/** Portable entity transfers resolve folder references by name, like section transfers. */
+export function exportEntityDraft(type: TransferEntity, data: Record<string, unknown>) {
+  return entityTransferData(type, {
+    ...data,
+    ...(data.folderId === undefined
+      ? {}
+      : { folderId: entitySettingsSchema(type).folderId!.encode(data.folderId) }),
+  });
+}
+export function importEntityDraft(type: TransferEntity, data: unknown) {
+  const imported = entityTransferData(type, data);
+  if (Object.hasOwn(imported, 'folderId'))
+    imported.folderId = entitySettingsSchema(type).folderId!.decode(imported.folderId, null);
+  return imported;
 }

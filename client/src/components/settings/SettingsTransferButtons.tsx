@@ -1,4 +1,4 @@
-import { createSignal, useContext } from 'solid-js';
+import { Show, createSignal, useContext } from 'solid-js';
 import { faUpload, faDownload } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { transferData, transferDocument } from '@tinytavern/shared';
@@ -14,6 +14,7 @@ export default function SettingsTransferButtons(props: {
   onError: (error: string) => void;
   importLabel?: string;
   exportLabel?: string;
+  compact?: boolean;
   disabledExport?: boolean;
   disabledImport?: boolean;
 }) {
@@ -68,23 +69,27 @@ export default function SettingsTransferButtons(props: {
       />
       <button
         type="button"
-        class="icon-btn"
+        class={props.compact ? 'icon-btn' : undefined}
         title={props.importLabel ?? 'Import'}
         aria-label={props.importLabel ?? 'Import'}
         disabled={busy() || props.disabledImport}
         onClick={() => input.click()}
       >
-        <FontAwesomeIcon icon={faDownload} size={16} />
+        <Show when={props.compact} fallback={props.importLabel ?? 'Import'}>
+          <FontAwesomeIcon icon={faDownload} size={16} />
+        </Show>
       </button>
       <button
         type="button"
-        class="icon-btn"
+        class={props.compact ? 'icon-btn' : undefined}
         title={props.exportLabel ?? 'Export'}
         aria-label={props.exportLabel ?? 'Export'}
         disabled={busy() || props.disabledExport}
         onClick={() => void run(exportFile)}
       >
-        <FontAwesomeIcon icon={faUpload} size={16} />
+        <Show when={props.compact} fallback={props.exportLabel ?? 'Export'}>
+          <FontAwesomeIcon icon={faUpload} size={16} />
+        </Show>
       </button>
     </>
   );

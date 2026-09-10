@@ -3,6 +3,7 @@ import { mock, test } from 'bun:test';
 import { createRoot, createSignal } from 'solid-js';
 import { createSettingsNavigation } from '../../client/src/state/settingsSubmission.ts';
 import { avatarEditorSnapshot } from '../../client/src/state/editorSync.ts';
+import { pendingConfirmation, settleConfirmation } from '../../client/src/state/confirm.ts';
 
 Object.defineProperties(globalThis, {
   matchMedia: { configurable: true, value: () => ({ matches: false, addEventListener() {} }) },
@@ -15,7 +16,6 @@ mock.module('../../client/src/components/settings/SettingsGuard.tsx', () => ({
     navigation.register(actions),
   useSettingsNavigation: () => navigation.navigate,
 }));
-mock.module('../../client/src/state/confirm.ts', () => ({ confirmAction: async () => true }));
 const modulePath = '../../client/src/util.ts';
 const { createEntityEditor } = await import(modulePath);
 
@@ -89,6 +89,9 @@ test('imports guard dirty drafts and late entity operations cannot replace a new
     editor.discard();
     editor.select('a');
     const deleting = editor.remove();
+    assert.equal(pendingConfirmation()?.confirmLabel, 'Delete');
+    assert.equal(typeof finishDelete, 'undefined', 'Ordinary deletes wait for confirmation');
+    settleConfirmation(true);
     await Promise.resolve();
     editor.select('b');
     draft.name = 'Still unsaved B';
@@ -99,8 +102,9 @@ test('imports guard dirty drafts and late entity operations cannot replace a new
     assert.equal(draft.name, 'Still unsaved B');
 
     editor.discard();
-    const localDelete = editor.remove();
+    const localDelete = editor.remove({ shiftKey: true });
     await Promise.resolve();
+    assert.equal(pendingConfirmation(), null, 'Shift-click skips individual delete confirmation');
     setItems(items().filter((item) => item.id !== 'b'));
     assert.equal(editor.selectedId(), 'b', 'Our pending deletion owns the selection transition');
     assert.equal(editor.status(), '', 'Our own settings update is not a remote deletion');

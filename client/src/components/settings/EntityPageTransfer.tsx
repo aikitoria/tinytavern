@@ -5,6 +5,7 @@ import { errorMessage } from '../../util.ts';
 import { useSettingsNavigation } from './SettingsGuard.tsx';
 import SettingsTransferButtons from './SettingsTransferButtons.tsx';
 import Modal from '../ui/Modal.tsx';
+import { DEFAULT_TEXTAREA_ROWS } from '../forms/MacroTextarea.tsx';
 
 export default function EntityPageTransfer(props: {
   type: TransferEntity;
@@ -64,7 +65,7 @@ export default function EntityPageTransfer(props: {
             <label>Import contents</label>
             <textarea
               class="mono"
-              rows={16}
+              rows={DEFAULT_TEXTAREA_ROWS}
               value={pending()!.data}
               disabled={saving()}
               onInput={(event) =>

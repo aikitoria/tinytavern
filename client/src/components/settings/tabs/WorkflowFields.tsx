@@ -46,7 +46,6 @@ export default function WorkflowFields(props: {
         onChange={(json) => {
           if (current()?.json !== json) patch({ json });
         }}
-        rows={12}
         mono
         keys={[
           'prompt',
@@ -124,7 +123,9 @@ export default function WorkflowFields(props: {
               <For each={compiled().workflow?.imageInputs ?? []}>
                 {(input) => (
                   <tr>
-                    <th scope="row">{input.label}</th>
+                    <th scope="row">
+                      {input.name} · {input.label}
+                    </th>
                     <For each={['standalone', 'chat', 'avatar'] as const}>
                       {(context) => (
                         <td>
@@ -164,45 +165,61 @@ export default function WorkflowFields(props: {
 
 export function WorkflowSetupHelp() {
   return (
-    <SettingsSection title="Workflow setup help" id="workflow-help" fields={[]}>
-      <p>
-        Export an API-format workflow with node titles included. TinyTavern preserves the graph and
-        binds only the inputs you expose.
+    <SettingsSection
+      title="Workflow setup"
+      id="workflow-help"
+      class="workflow-setup-help"
+      fields={[]}
+    >
+      <p class="m-0 text-sm text-dim">
+        Export your ComfyUI workflow in API format, including node titles.
       </p>
-      <ul>
-        <li>
-          Prompt: use a primitive Text node containing <code>{'{{prompt}}'}</code>, or title a text
-          constant <code>Prompt [prompt]</code>.
-        </li>
-        <li>
-          Images: title a Load Image node <code>Subject [image:subject]</code>. Names use lowercase
-          letters, digits and underscores. Reuse a name to feed the same image to multiple loaders.
-        </li>
-        <li>
-          Custom nodes: specify the literal filename/text field, for example{' '}
-          <code>Subject [image:subject, field=filename]</code> or{' '}
-          <code>Prompt [prompt, field=text]</code>. Connected fields cannot be overwritten.
-        </li>
-        <li>
-          Media prompt presets use <code>{'{{input1_prompt}}'}</code>,{' '}
-          <code>{'{{input2_prompt}}'}</code>, and so on for the saved prompts of input images, in
-          editor order. Input names and labels do not change these macros.
-        </li>
-        <li>
-          Controls: use constant-node titles such as{' '}
-          <code>Steps [input: min=1, max=100, step=1]</code>, <code>Style [input]</code>,{' '}
-          <code>Negative prompt [input]</code>, or <code>Resolution [input]</code>. Add{' '}
-          <code>order=0</code> to control ordering. Existing limits and defaults are retained.
-        </li>
-        <li>
-          Seeds: keep seed inputs numeric. Seeds are randomized per render; exposed seed controls
-          retain their chosen values.
-        </li>
-        <li>
-          Outputs: use one final media output node, including batches. Images and AV1 WebM videos
-          share the same execution path. For text, select the output node above.
-        </li>
-      </ul>
+      <dl>
+        <div>
+          <dt>Prompt</dt>
+          <dd>
+            Put <code>{'{{prompt}}'}</code> in a primitive Text node, or name a text node{' '}
+            <code>Prompt [prompt]</code>.
+          </dd>
+        </div>
+        <div>
+          <dt>Images</dt>
+          <dd>
+            Name a Load Image node <code>Subject [image:input1]</code>. Use <code>input1</code>{' '}
+            through <code>input64</code>; “Subject” is just a label. Reuse a number to share an
+            image between loaders.
+          </dd>
+        </div>
+        <div>
+          <dt>Controls</dt>
+          <dd>
+            Name a constant node <code>Style [input]</code> to make it editable. For numeric limits,
+            use <code>Steps [input: min=1, max=100, step=1]</code>. Add <code>order=0</code> inside
+            the brackets to set display order.
+          </dd>
+        </div>
+        <div>
+          <dt>Seeds</dt>
+          <dd>
+            Keep seeds numeric. They are randomized for each render unless exposed as a control.
+          </dd>
+        </div>
+        <div>
+          <dt>Outputs</dt>
+          <dd>
+            Use one media output node. It can return multiple files from a single run. For
+            descriptions, choose the <strong>Text output node</strong> below.
+          </dd>
+        </div>
+        <div>
+          <dt>Custom nodes</dt>
+          <dd>
+            Specify other filename or text fields in the title:{' '}
+            <code>Subject [image:input1, field=filename]</code> or{' '}
+            <code>Prompt [prompt, field=text]</code>. Only unconnected text fields can be bound.
+          </dd>
+        </div>
+      </dl>
     </SettingsSection>
   );
 }

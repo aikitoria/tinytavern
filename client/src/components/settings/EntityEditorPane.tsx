@@ -1,16 +1,18 @@
 import EntityActiveBadge from './EntityActiveBadge.tsx';
+import { createFolderBrowser } from './FolderEntityList.tsx';
+import { ENTITY_FOLDERS, type EntityFolder } from '@tinytavern/shared';
+import { state } from '../../state/store.ts';
 import EntityPageTransfer from './EntityPageTransfer.tsx';
 import { SettingsDraftContext } from './SettingsSection.tsx';
-import { entitySettingsSchema } from './settingsSchema.ts';
+import { entitySettingsSchema, exportEntityDraft, importEntityDraft } from './settingsSchema.ts';
 import type { ENTITY_FIELDS, SettingsFieldSchema } from '@tinytavern/shared';
 import SettingsTransferButtons from './SettingsTransferButtons.tsx';
-import { entityTransferData, type TransferEntity } from '@tinytavern/shared';
+import { type TransferEntity } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 import SettingsActions, { SettingsActionsContext } from './SettingsActions.tsx';
 import { faChevronLeft, faPlus } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
-import { For, Show, createMemo, createSignal } from 'solid-js';
-import { collectionByName } from '../../state/collectionOrder.ts';
+import { Show, createSignal } from 'solid-js';
 import type { JSX } from 'solid-js';
 import type { EditorId, NoticeKind } from '../../util.ts';
 import { registerUiBack } from '../../state/uiBack.ts';
@@ -29,7 +31,7 @@ interface PaneEditor<Id extends number | string> {
   select: (id: EditorId<Id>) => void;
   save: () => Promise<boolean>;
   discard: () => void;
-  remove: () => Promise<void>;
+  remove: (event?: MouseEvent) => Promise<void>;
   duplicate: () => void;
 }
 
@@ -46,12 +48,13 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
   listActions?: JSX.Element;
   listFooter?: JSX.Element;
   formActions?: JSX.Element;
-  /** Filter between list actions and contents. */
-  listSearch?: JSX.Element;
   /** Actions for existing entities, before Delete. */
   extraActions?: JSX.Element;
-  /** Replaces the flat list, e.g. with character folders. */
-  listContent?: JSX.Element;
+  /** Supplies folder persistence for characters and media settings collections. */
+  folderBrowser?: Pick<
+    ReturnType<typeof createFolderBrowser>,
+    'NewButton' | 'Search' | 'List' | 'Dialog'
+  >;
   /** Entity currently in use, independent of editor selection. */
   activeId?: T['id'] | null;
   readOnly?: boolean;
@@ -62,7 +65,24 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
   children: JSX.Element;
 }) {
   const editor = props.editor;
-  const sortedItems = createMemo(() => collectionByName(props.items));
+  const folders =
+    props.folderBrowser ??
+    (props.transferType
+      ? createFolderBrowser<T, EntityFolder>({
+          items: () => props.items,
+          folders: () => state[ENTITY_FOLDERS[props.transferType!].state],
+          folderId: (item) => (item as { folderId?: number | null }).folderId ?? null,
+          selectedId: editor.selectedId,
+          activeId: () => props.activeId ?? null,
+          select: editor.select,
+          label: props.itemLabel,
+          noun: props.transferType,
+          create: (name) => api.entityFolders[props.transferType!].create({ name }),
+          rename: (id, name) => api.entityFolders[props.transferType!].patch(id, { name }),
+          remove: (id) => api.entityFolders[props.transferType!].remove(id),
+          onError: editor.setStatus,
+        })
+      : undefined);
   const exportDraft = async (fields?: readonly string[]) => {
     const draft = editor.draftData();
     const id = editor.selectedId();
@@ -94,10 +114,11 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
   const NewButton = () => (
     <button
       class="entity-new-btn"
+      aria-label={props.newLabel}
       classList={{ active: editor.selectedId() === 'new' }}
       onClick={() => editor.select('new')}
     >
-      <FontAwesomeIcon icon={faPlus} size={12} /> {props.newLabel}
+      <FontAwesomeIcon icon={faPlus} size={12} /> New
     </button>
   );
   return (
@@ -107,14 +128,13 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
         classList={{ 'detail-open': editor.nav.detailOpen() }}
       >
         <div class="entity-sidebar border-r border-r-solid border-r-subtle flex flex-col min-w-0 min-h-0 overflow-hidden bg-chrome">
-          <div class="entity-list flex flex-col flex-1 min-h-0 overflow-y-auto p-2 bg-chrome [&>button:where(:not(.entity-new-btn))]:flex [&>button:where(:not(.entity-new-btn))]:items-center [&>button:where(:not(.entity-new-btn))]:gap-2 [&>button:where(:not(.entity-new-btn))]:bg-clear [&>button:where(:not(.entity-new-btn))]:border-clear [&>button:where(:not(.entity-new-btn))]:text-left [&>button:where(:not(.entity-new-btn))]:min-h-control [&>button:where(:not(.entity-new-btn))]:py-1 [&>button:where(:not(.entity-new-btn))]:px-2 [&>button:where(:not(.entity-new-btn))]:rounded-sm [&>button:where(:not(.entity-new-btn))]:truncate [&_:where(.character-folder)_button]:flex [&_:where(.character-folder)_button]:items-center [&_:where(.character-folder)_button]:gap-2 [&_:where(.character-folder)_button]:bg-clear [&_:where(.character-folder)_button]:border-clear [&_:where(.character-folder)_button]:text-left [&_:where(.character-folder)_button]:min-h-control [&_:where(.character-folder)_button]:py-1 [&_:where(.character-folder)_button]:px-2 [&_:where(.character-folder)_button]:rounded-sm [&_:where(.character-folder)_button]:truncate [&_.entity-default-btn]:mb-1 [&_.entity-default-btn]:text-dim [&_button.in-use_.entity-list-label]:text-foreground [&_.entity-new-btn]:flex [&_.entity-new-btn]:items-center [&_.entity-new-btn]:gap-2 [&_.entity-new-btn]:justify-center [&>.entity-new-btn]:mb-2 [&_.entity-new-btn.active]:border-accent [&_.entity-new-btn.active]:shadow-clear [&_.avatar]:text-xs [&_.avatar]:size-6 [&_.character-folder]:flex [&_.character-folder]:flex-col [&_.character-folder-row]:grid [&_.character-folder-row]:items-center [&_.character-tree-entry]:min-h-8.5 [&_.character-tree-entry]:py-1 [&_.character-tree-entry]:px-2 [&_.character-folder-row>button]:min-h-8.5 [&_.character-folder-row>button]:py-1 [&_.character-folder-row>button]:px-2 [&_.character-folder-toggle]:min-w-0 [&_.character-folder-action]:justify-center [&_.character-folder-action]:text-muted [&_.character-folder-action]:opacity-0 [&_.character-folder-action]:invisible [&_.character-folder-action]:pointer-events-none [&_.character-folder-row:hover_.character-folder-action]:opacity-100 [&_.character-folder-row:hover_.character-folder-action]:visible [&_.character-folder-row:hover_.character-folder-action]:pointer-events-auto [&_.character-folder-row:focus-within_.character-folder-action]:opacity-100 [&_.character-folder-row:focus-within_.character-folder-action]:visible [&_.character-folder-row:focus-within_.character-folder-action]:pointer-events-auto [&_.character-tree-child]:ml-3 [&_.character-tree-child]:pl-5 [&_.character-tree-child]:relative [&_.character-tree-child::before]:absolute [&_.character-tree-child::before]:left-1.5 [&_.character-tree-child::before]:h-2 [&_.character-folder-empty]:pt-1 [&_.character-folder-empty]:pr-3 [&_.character-folder-empty]:pb-2 [&_.character-folder-empty]:pl-9.5 [&_.character-folder-empty]:text-muted [&_.character-folder-empty]:text-xs [&_.character-folder-empty]:italic small-touch:[&_.character-folder-action]:opacity-100 small-touch:[&_.character-folder-action]:visible small-touch:[&_.character-folder-action]:pointer-events-auto gap-[3px] [&_.character-folder]:gap-[3px] [&_.character-folder-row]:grid-cols-[minmax(0,_1fr)_30px_30px] [&_.character-tree-child::before]:top-[calc(50%_-_7px)] [&_.character-tree-child::before]:w-[7px]">
-            <Show when={props.listActions} fallback={<NewButton />}>
-              <div class="mb-2 flex gap-2 [&_button]:flex-1 [&_button]:flex [&_button]:items-center [&_button]:gap-2 [&_button]:justify-center [&_button]:whitespace-nowrap">
-                <NewButton />
-                {props.listActions}
-              </div>
-            </Show>
-            {props.listSearch}
+          <div class="entity-list flex flex-col flex-1 min-h-0 overflow-y-auto p-2 bg-chrome [&>button:where(:not(.entity-new-btn))]:flex [&>button:where(:not(.entity-new-btn))]:items-center [&>button:where(:not(.entity-new-btn))]:gap-2 [&>button:where(:not(.entity-new-btn))]:bg-clear [&>button:where(:not(.entity-new-btn))]:border-clear [&>button:where(:not(.entity-new-btn))]:text-left [&>button:where(:not(.entity-new-btn))]:min-h-control [&>button:where(:not(.entity-new-btn))]:py-1 [&>button:where(:not(.entity-new-btn))]:px-2 [&>button:where(:not(.entity-new-btn))]:rounded-sm [&>button:where(:not(.entity-new-btn))]:truncate [&_:where(.character-folder)_button]:flex [&_:where(.character-folder)_button]:items-center [&_:where(.character-folder)_button]:gap-2 [&_:where(.character-folder)_button]:bg-clear [&_:where(.character-folder)_button]:border-clear [&_:where(.character-folder)_button]:text-left [&_:where(.character-folder)_button]:min-h-control [&_:where(.character-folder)_button]:py-1 [&_:where(.character-folder)_button]:px-2 [&_:where(.character-folder)_button]:rounded-sm [&_:where(.character-folder)_button]:truncate [&_.entity-default-btn]:mb-1 [&_.entity-default-btn]:text-dim [&_button.in-use_.entity-list-label]:text-foreground [&_.entity-new-btn]:flex [&_.entity-new-btn]:items-center [&_.entity-new-btn]:gap-2 [&_.entity-new-btn]:justify-center [&>.entity-new-btn]:mb-2 [&_.entity-new-btn.active]:border-accent [&_.entity-new-btn.active]:shadow-clear [&_.avatar]:text-xs [&_.avatar]:size-6 [&_.character-folder]:flex [&_.character-folder]:flex-col [&_.character-folder-row]:grid [&_.character-folder-row]:items-center [&_.character-tree-entry]:min-h-8.5 [&_.character-tree-entry]:py-1 [&_.character-tree-entry]:px-2 [&_.character-folder-row>button]:min-h-8.5 [&_.character-folder-row>button]:py-1 [&_.character-folder-row>button]:px-2 [&_.character-folder-toggle]:min-w-0 [&_.character-folder-action]:justify-center [&_.character-folder-action]:text-muted [&_.character-folder-action]:opacity-0 [&_.character-folder-action]:invisible [&_.character-folder-action]:pointer-events-none [&_.character-folder-row:hover_.character-folder-action]:opacity-100 [&_.character-folder-row:hover_.character-folder-action]:visible [&_.character-folder-row:hover_.character-folder-action]:pointer-events-auto [&_.character-folder-row:focus-within_.character-folder-action]:opacity-100 [&_.character-folder-row:focus-within_.character-folder-action]:visible [&_.character-folder-row:focus-within_.character-folder-action]:pointer-events-auto small-touch:[&_.character-folder-action]:opacity-100 small-touch:[&_.character-folder-action]:visible small-touch:[&_.character-folder-action]:pointer-events-auto gap-[3px] [&_.character-folder]:gap-[3px] [&_.character-folder-row]:grid-cols-[minmax(0,_1fr)_30px_30px]">
+            <div class="mb-2 flex gap-2 [&_button]:flex-1 [&_button]:flex [&_button]:items-center [&_button]:gap-2 [&_button]:justify-center [&_button]:whitespace-nowrap">
+              <NewButton />
+              {folders && <folders.NewButton />}
+              {props.listActions}
+            </div>
+            {folders && <folders.Search />}
             <Show when={props.defaultOption}>
               {(option) => (
                 <button
@@ -134,31 +154,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
                 </button>
               )}
             </Show>
-            <Show
-              when={props.listContent}
-              fallback={
-                <For each={sortedItems()}>
-                  {(item) => (
-                    <button
-                      classList={{
-                        active: editor.selectedId() === item.id,
-                        'in-use': props.activeId === item.id,
-                      }}
-                      onClick={() => editor.select(item.id)}
-                    >
-                      <span class="entity-list-label text-ellipsis flex items-center flex-1 min-w-0 gap-2 overflow-hidden">
-                        {props.itemLabel(item)}
-                      </span>
-                      <Show when={props.activeId === item.id}>
-                        <EntityActiveBadge />
-                      </Show>
-                    </button>
-                  )}
-                </For>
-              }
-            >
-              {props.listContent}
-            </Show>
+            {folders && <folders.List />}
           </div>
           <Show when={props.listFooter || props.transferType}>
             <div class="border-t border-t-solid border-t-subtle flex flex-none gap-1 flex-wrap p-2 pb-[max(var(--space-2),_env(safe-area-inset-bottom))]">
@@ -201,10 +197,10 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
                             type={`entity:${type()}`}
                             onError={editor.setStatus}
                             exportData={async () => {
-                              return entityTransferData(type(), await exportDraft());
+                              return exportEntityDraft(type(), await exportDraft());
                             }}
                             importData={(data) =>
-                              editor.importData(entityTransferData(type(), data), props.readOnly)
+                              editor.importData(importEntityDraft(type(), data), props.readOnly)
                             }
                           />
                         )}
@@ -218,7 +214,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
                           <button
                             class="danger-btn"
                             disabled={editor.saving()}
-                            onClick={() => void editor.remove()}
+                            onClick={(event) => void editor.remove(event)}
                           >
                             Delete
                           </button>
@@ -270,6 +266,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
           </p>
         </Show>
       </div>
+      {folders && <folders.Dialog />}
     </SettingsDraftContext.Provider>
   );
 }

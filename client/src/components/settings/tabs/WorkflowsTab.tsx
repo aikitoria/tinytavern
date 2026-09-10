@@ -169,8 +169,7 @@ export default function WorkflowsTab() {
         items={items()}
         itemLabel={(item) => item.name}
         newLabel="New"
-        listActions={<folders.NewButton />}
-        listContent={<folders.List />}
+        folderBrowser={folders}
         listFooter={
           <SettingsTransferButtons
             type="page:workflows"
@@ -204,6 +203,7 @@ export default function WorkflowsTab() {
           />
         }
       >
+        <WorkflowSetupHelp />
         <SettingsSection
           title="Workflow"
           id="workflow"
@@ -236,9 +236,7 @@ export default function WorkflowsTab() {
             onChange={(fields) => setDraft((value) => ({ ...value, ...fields }))}
           />
         </SettingsSection>
-        <WorkflowSetupHelp />
       </EntityEditorPane>
-      <folders.Dialog />
     </>
   );
 }

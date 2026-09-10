@@ -165,16 +165,9 @@ export default function Header() {
               </div>
               <div class="header-context overflow-x-auto inline-flex items-center min-w-0 gap-2 ml-auto small-touch:display-none max-w-[min(45vw,_520px)]">
                 <Select
-                  class={`w-auto max-w-45 flex-initial [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5 ${activeEndpoint() ? '' : 'header-context-warn'}`}
+                  class={`w-auto max-w-45 flex-initial ${activeEndpoint() ? '' : 'header-context-warn'}`}
                   value={String(contextValue('endpointId') ?? '')}
-                  buttonLabel={
-                    <>
-                      <span class="flex-none text-dim compact:display-none">Endpoint</span>
-                      <span class="header-context-value truncate min-w-0">
-                        {activeEndpoint()?.name ?? 'None'}
-                      </span>
-                    </>
-                  }
+                  buttonLabel={activeEndpoint()?.name ?? 'None'}
                   ariaLabel="Conversation endpoint"
                   disabled={pendingContext() != null}
                   menuMinWidth={220}
@@ -199,16 +192,9 @@ export default function Header() {
                   ]}
                 />
                 <Select
-                  class="w-auto max-w-45 flex-initial [&_.select-label]:flex [&_.select-label]:items-baseline [&_.select-label]:gap-1.5"
+                  class="w-auto max-w-45 flex-initial"
                   value={String(contextValue('personaId') ?? '')}
-                  buttonLabel={
-                    <>
-                      <span class="flex-none text-dim compact:display-none">Persona</span>
-                      <span class="header-context-value truncate min-w-0">
-                        {personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}
-                      </span>
-                    </>
-                  }
+                  buttonLabel={personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}
                   ariaLabel={
                     personasEnabled()
                       ? 'Conversation persona'

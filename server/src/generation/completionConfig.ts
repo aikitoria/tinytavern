@@ -1,4 +1,9 @@
-import type { Endpoint, GenParams } from '@tinytavern/shared';
+import {
+  messagePrefillEnabled,
+  reasoningPrefillEnabled,
+  type Endpoint,
+  type GenParams,
+} from '@tinytavern/shared';
 import type { ChatMessage } from './prompt.ts';
 
 export interface CompletionOptions {
@@ -24,7 +29,7 @@ export function endpointReasoningPrefill(
   source: string | null | undefined,
   continuing = false,
 ): string {
-  if (endpoint.prefillMode === 'disabled') return '';
+  if (!reasoningPrefillEnabled(endpoint)) return '';
   const prefix = endpoint.reasoningPrefillPrefix;
   const text = source ?? '';
   if (!prefix) return text;
@@ -67,8 +72,7 @@ export function prepareStandaloneCompletion(
   const parameters = options.useEndpointParameters
     ? generationParameters(endpoint.genParams, maxTokens)
     : { max_tokens: maxTokens };
-  const enabled = endpoint.prefillMode !== 'disabled';
-  const messagePrefill = enabled ? options.messagePrefill || '' : '';
+  const messagePrefill = messagePrefillEnabled(endpoint) ? options.messagePrefill || '' : '';
   const reasoningPrefill = endpointReasoningPrefill(endpoint, options.reasoningPrefill);
   if (messagePrefill || reasoningPrefill) {
     messages.push({

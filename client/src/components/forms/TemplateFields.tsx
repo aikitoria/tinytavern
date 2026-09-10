@@ -89,14 +89,13 @@ export default function TemplateFields(props: {
           key: 'prefixNames',
           kind: 'check',
           label:
-            'Prefix speaker names into messages ("{{user}}: …", "{{char}}: …") and prefill the reply with the current speaker name (see /char)',
+            'Prefix speaker names in chat history ("{{user}}: …", "{{char}}: …") and prefill the reply name when supported',
         },
         {
           key: 'speakerHandoffTemplate',
           label: 'Speaker handoff prompt template',
           keys: ['speaker'],
-          rows: 2,
-          hint: 'Used when speaker names are enabled and the endpoint has prefills disabled. {{speaker}} is the requested speaker. Leave empty to send no handoff instruction.',
+          hint: 'Used by /char when speaker name prefixes or assistant message prefills are disabled. {{speaker}} is the requested speaker. Leave empty to send no handoff instruction.',
         },
         {
           key: 'usesPersonas',
@@ -107,7 +106,6 @@ export default function TemplateFields(props: {
           key: 'steerTemplate',
           label: custom('Regeneration prompt template'),
           keys: ['instruction'],
-          rows: 2,
           hint: 'Used when regenerating a reply with an instruction. {{instruction}} is replaced with the requested change for that regeneration only. Leave empty to disable regeneration with an instruction.',
         },
       ],

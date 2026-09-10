@@ -4,6 +4,7 @@ import { once, EventEmitter } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
 import { test, onTestFinished } from 'bun:test';
 import {
+  DEFAULT_SETTINGS,
   newRequestId,
   preparePromptTrace,
   type MediaJob,
@@ -355,8 +356,21 @@ test('application HTTP and WebSocket contracts', async () => {
       });
       const viewer = await connect();
       viewer.socket.send(JSON.stringify({ sub: chat.id }));
-      for (const mode of ['deepseek', 'disabled'] as const) {
-        await request('PATCH', `/api/endpoints/${endpoint.id}`, { prefillMode: mode });
+      for (const [mode, allowReasoningPrefill, allowMessagePrefill, prefixNames] of [
+        ['deepseek', true, true, true],
+        ['vllm', true, false, false],
+        ['none', false, true, false],
+        ['disabled', true, true, true],
+      ] as const) {
+        await request('PATCH', `/api/endpoints/${endpoint.id}`, {
+          prefillMode: mode,
+          allowReasoningPrefill,
+          allowMessagePrefill,
+        });
+        await request('PATCH', `/api/templates/${template.id}`, { prefixNames });
+        const reasoningEnabled = mode !== 'disabled' && allowReasoningPrefill;
+        const messageEnabled = mode !== 'disabled' && allowMessagePrefill;
+        const namePrefix = prefixNames && messageEnabled ? 'Guest:' : '';
         const before = await tree(chat.id);
         const trace = await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`);
         assert.deepEqual(
@@ -370,26 +384,27 @@ test('application HTTP and WebSocket contracts', async () => {
         );
         assert.equal(
           trace.reasoningPrefill,
-          mode === 'disabled' ? null : 'Endpoint reasoning\nTemplate reasoning',
+          reasoningEnabled ? 'Endpoint reasoning\nTemplate reasoning' : null,
         );
         const pendingMessage = `  Pending ${mode} {{char}} $&\nSecond line  `;
         const preview = preparePromptTrace(trace, pendingMessage);
         const pending = preview.messages[preview.pendingMessageIndex!]!;
-        assert(pending.content.includes(`Trace user: ${pendingMessage.trim()}`));
-        if (mode === 'deepseek') {
-          assert.equal(pending.content, `Prologue\n\nTrace user: ${pendingMessage.trim()}`);
+        const userContent = `${prefixNames ? 'Trace user: ' : ''}${pendingMessage.trim()}`;
+        assert.equal(
+          pending.content,
+          mode === 'deepseek' ? `Prologue\n\n${userContent}` : userContent,
+        );
+        if (mode !== 'disabled') {
           assert.deepEqual(preview.messages.at(-1), {
             role: 'assistant',
-            content: 'Guest: Template reply',
-            reasoning_content: 'Endpoint reasoning\nTemplate reasoning',
-            prefix: true,
+            content: messageEnabled ? `${namePrefix ? namePrefix + ' ' : ''}Template reply` : '',
+            ...(reasoningEnabled
+              ? { reasoning_content: 'Endpoint reasoning\nTemplate reasoning' }
+              : {}),
+            ...(mode === 'deepseek' ? { prefix: true } : {}),
           });
         } else {
           assert.equal(preview.prefillMessageIndex, null);
-          assert.equal(
-            pending.content,
-            `Trace user: ${pendingMessage.trim()}\n[System Note]\nReply as Guest.`,
-          );
           assert(
             trace.messages.some(
               (message) => message.reasoning_content === 'Endpoint reasoning\nTemplate reasoning',
@@ -416,7 +431,7 @@ test('application HTTP and WebSocket contracts', async () => {
         assert.deepEqual(liveTrace.stream, {
           messageId: sent.assistantMessageId,
           generationToken: liveMessage.generationToken,
-          namePrefix: mode === 'disabled' ? '' : 'Guest:',
+          namePrefix,
         });
         assert.deepEqual(
           liveTrace.messages,
@@ -442,9 +457,19 @@ test('application HTTP and WebSocket contracts', async () => {
         await viewer.wait(
           (event) => event.t === 'final' && event.message.id === sent.assistantMessageId,
         );
+        const completedTrace = await request<PromptTrace>(
+          'GET',
+          `/api/conversations/${chat.id}/trace`,
+        );
+        assert.equal(completedTrace.stream, undefined);
+        assert.equal(completedTrace.speakerHandoff, null, 'The same speaker needs no new handoff');
         assert.equal(
-          (await request<PromptTrace>('GET', `/api/conversations/${chat.id}/trace`)).stream,
-          undefined,
+          completedTrace.messages
+            .map((message) => message.content)
+            .join('\n')
+            .split('Reply as Guest.').length - 1,
+          1,
+          'The historical speaker change remains after completion without accumulating copies',
         );
         const actual = completionRequests.slice(start).find((entry) => entry.stream)!;
         assert.deepEqual(
@@ -452,6 +477,14 @@ test('application HTTP and WebSocket contracts', async () => {
           actual.messages,
           `${mode}: trace must match the actual upstream messages`,
         );
+        if (!messageEnabled) {
+          await request(
+            'POST',
+            `/api/messages/${sent.assistantMessageId}/continue`,
+            guard(await tree(chat.id)),
+            400,
+          );
+        }
       }
       const closed = once(viewer.socket, 'close');
       viewer.socket.close();
@@ -774,6 +807,41 @@ test('application HTTP and WebSocket contracts', async () => {
     upstreamStatus = 200;
   });
 
+  await step('bulk character deletion preserves chats and releases avatars', async () => {
+    const { existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+    const character = await request<{ id: number }>('POST', '/api/characters', {
+      name: 'Delete me',
+    });
+    await request('POST', '/api/characters', { name: 'Delete me too' });
+    const chat = await request<{ id: number }>('POST', '/api/conversations', {
+      characterId: character.id,
+    });
+    const before = await tree(chat.id);
+    const avatar = await fetch(`${base}/api/characters/${character.id}/avatar`, {
+      method: 'PUT',
+      body: makePlaceholderPng(),
+    });
+    assert.equal(avatar.status, 200);
+    await avatar.arrayBuffer();
+    const avatarPath = join(process.env.DATA_DIR!, 'avatars', `character-${character.id}.png`);
+    assert(existsSync(avatarPath));
+    const count = (await request<unknown[]>('GET', '/api/characters')).length;
+    assert.deepEqual(await request('DELETE', '/api/characters'), { deleted: count });
+    assert.deepEqual(await request('GET', '/api/characters'), []);
+    const remaining = await request<{ id: number; characterId: number | null }[]>(
+      'GET',
+      '/api/conversations',
+    );
+    assert.equal(remaining.find((item) => item.id === chat.id)!.characterId, null);
+    const after = await tree(chat.id);
+    assert.deepEqual(after.messages, before.messages);
+    assert(after.mutationRevision > before.mutationRevision);
+    assert.equal(existsSync(avatarPath), false);
+    assert.deepEqual(await request('DELETE', '/api/characters'), { deleted: 0 });
+  });
+
   await step('password sessions, protected media, logout and socket revocation', async () => {
     const settings = await request<Settings>('GET', '/api/settings');
     const response = await fetch(base + '/api/settings', {
@@ -804,6 +872,23 @@ test('application HTTP and WebSocket contracts', async () => {
     await request('GET', '/api/conversations');
     const authenticated = await connect();
     const closed = once(authenticated.socket, 'close');
+    const previous = await request<Settings>('GET', '/api/settings');
+    const resetBody = {
+      ...DEFAULT_SETTINGS,
+      imageGeneration: { ...DEFAULT_SETTINGS.imageGeneration, promptPresets: {} },
+      expectedRevision: previous.revision,
+    };
+    await request('PUT', '/api/settings', { ...resetBody, expectedRevision: -1 }, 409);
+    const reset = await request<Settings>('PUT', '/api/settings', resetBody);
+    assert.deepEqual(reset, {
+      ...DEFAULT_SETTINGS,
+      imageGeneration: resetBody.imageGeneration,
+      revision: previous.revision + 1,
+      hasPassword: true,
+    });
+    assert.equal((await request<Endpoint[]>('GET', '/api/endpoints'))[0]!.hasApiKey, true);
+    assert((await request<unknown[]>('GET', '/api/conversations')).length > 0);
+    await request('PUT', '/api/settings', { ...previous, expectedRevision: reset.revision });
     const current = await request<Settings>('GET', '/api/settings');
     const changed = await fetch(base + '/api/settings', {
       method: 'PUT',

@@ -22,11 +22,12 @@ export const ENTITY_FIELDS = {
     /** Inline template override; replaces templateId with the same settings. */
     customTemplate: null as CustomTemplate | null,
   },
-  presets: { name: '', content: '' },
-  templates: { name: '', ...DEFAULT_CUSTOM_TEMPLATE },
-  personas: { name: '', description: '' },
+  presets: { name: '', folderId: null as number | null, content: '' },
+  templates: { name: '', folderId: null as number | null, ...DEFAULT_CUSTOM_TEMPLATE },
+  personas: { name: '', folderId: null as number | null, description: '' },
   endpoints: {
     name: '',
+    folderId: null as number | null,
     baseUrl: '',
     apiKey: '',
     /** Null omits the model field, letting the endpoint choose. */
@@ -37,6 +38,8 @@ export const ENTITY_FIELDS = {
     systemPromptSuffix: '',
     /** Literal text before the task/template reasoning prefill. */
     reasoningPrefillPrefix: '',
+    allowReasoningPrefill: true,
+    allowMessagePrefill: true,
     /** 'none' uses a trailing message; 'vllm' uses continue_final_message; 'deepseek' uses prefix. */
     prefillMode: 'none' as 'disabled' | 'none' | 'vllm' | 'deepseek',
   },

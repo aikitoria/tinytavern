@@ -1,3 +1,5 @@
+export * from './entityFolders.ts';
+import type { EntityFolderTopic, EntityFolder } from './entityFolders.ts';
 export * from './settingsSections.ts';
 export { readSseData } from './sse.ts';
 export * from './media.ts';
@@ -111,11 +113,7 @@ export function characterChatName(
   return character?.chatName?.trim() || character?.name || 'Assistant';
 }
 
-export interface CharacterFolder {
-  id: number;
-  name: string;
-  createdAt: number;
-}
+export type CharacterFolder = EntityFolder;
 
 /** Saved image-generation overrides; omitted fields use the built-in defaults. */
 export interface ImageGenerationSettings {
@@ -190,17 +188,19 @@ export function systemNote(prompt: string): string {
     /^(?:\s*\[(?:System Note|(?:IMAGE|VIDEO) PROMPT(?: REVISION)? (?:TASK|CONTEXT))\]\s*)+/i,
     '',
   );
-  return `[System Note]\n${body}`;
+  if (/^<system_instruction>[\s\S]*<\/system_instruction>$/i.test(body.trim())) return body;
+  return `<system_instruction>\n${body}\n</system_instruction>`;
 }
 
-export const DEFAULT_TITLE_PROMPT = `[System Note]
+export const DEFAULT_TITLE_PROMPT = `<system_instruction>
 Pause the conversation and summarize it as a short sidebar title.
 Use the conversation above as context; do not answer its dialogue or continue the roleplay.
 
 Write a concise title of 3–6 words that captures the main topic or situation.
-Return only the title, without quotation marks, labels, or commentary.`;
+Return only the title, without quotation marks, labels, or commentary.
+</system_instruction>`;
 
-export const DEFAULT_DRAFT_COMPLETION_PROMPT = `[System Note]
+export const DEFAULT_DRAFT_COMPLETION_PROMPT = `<system_instruction>
 The conversation above is context for a writing-assistance task.
 Complete the unfinished user message below instead of answering it.
 
@@ -216,7 +216,8 @@ Do not wrap it in quotation marks or additional code fences.
 
 <unfinished_user_input>
 {{draft}}
-</unfinished_user_input>`;
+</unfinished_user_input>
+</system_instruction>`;
 
 export const DEFAULT_AVATAR_PROMPT =
   'Write an image-generation prompt for a portrait avatar. Head and shoulders, facing forward. Reply with only the prompt.';
@@ -224,7 +225,7 @@ export const DEFAULT_AVATAR_CONTEXT =
   'Name: {{name}}\nAvatar details: {{description}}\nScenario: {{scenario}}\nFirst message: {{firstMessage}}';
 
 export const DEFAULT_CHAT_IMAGE_REVISION_CONTEXT =
-  '[System Note]\nThe next assistant message is the original image-generation prompt to revise.';
+  '<system_instruction>\nThe next assistant message is the original image-generation prompt to revise.\n</system_instruction>';
 
 export const DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL =
   '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>';
@@ -237,12 +238,12 @@ export function expandPromptSlots(template: string, values: Record<string, strin
 }
 
 export const DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE =
-  '[System Note]\n' +
+  '<system_instruction>\n' +
   'The conversation above is reference context only. Do not continue the roleplay or answer its dialogue. ' +
   'Revise the specified image-generation prompt and return only the complete revised image-generation prompt, with no analysis, commentary, tags, or quotation marks. ' +
   'Preserve every detail that the revision does not explicitly change. Do not modify anything else.\n\n' +
   'The immediately preceding assistant message contains the original image prompt.\n\n' +
-  '<revision_instruction>\n{{instruction}}\n</revision_instruction>';
+  '<revision_instruction>\n{{instruction}}\n</revision_instruction>\n</system_instruction>';
 
 export const DEFAULT_IMAGE_PROMPT_REVISION: StandalonePromptTemplate = {
   systemPrompt:
@@ -307,7 +308,7 @@ export type InvalidateEntity =
   | 'conversations'
   | 'gallery'
   | 'characters'
-  | 'characterFolders'
+  | EntityFolderTopic
   | 'presets'
   | 'templates'
   | 'personas'

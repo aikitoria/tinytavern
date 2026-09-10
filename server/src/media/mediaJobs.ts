@@ -522,10 +522,9 @@ function prepareContext(row: MediaJobRow, configuration: MediaJobConfiguration) 
   };
   const inputs = JSON.parse(row.inputs_json) as MediaJobInputSnapshot[];
   const promptsBySlot = new Map(inputs.map((input) => [input.slot, input.prompt]));
-  const slots = mediaInputSlots(workflow);
   for (let index = 0; index < MEDIA_INPUT_PROMPT_KEYS.length; index++) {
     // Include absent inputs as empty values so the same preset works with any workflow.
-    values[MEDIA_INPUT_PROMPT_KEYS[index]!] = promptsBySlot.get(slots[index] ?? '') ?? '';
+    values[MEDIA_INPUT_PROMPT_KEYS[index]!] = promptsBySlot.get(`input${index + 1}`) ?? '';
   }
   const expand = (text: string) => expandTemplate(text, values);
   let messages: ChatMessage[];

@@ -1,3 +1,4 @@
+import { messagePrefillEnabled } from '@tinytavern/shared';
 import { faAnglesRight, faPaperPlane, faStop, faWrench } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
@@ -186,7 +187,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
   const resumable = () => {
     const endpointId = selectedConversation()?.endpointId ?? state.settings.activeEndpointId;
     const endpoint = state.endpoints.find((candidate) => candidate.id === endpointId);
-    if (endpoint?.prefillMode === 'disabled') return null;
+    if (endpoint && !messagePrefillEnabled(endpoint)) return null;
     const path = activePath();
     const last = path[path.length - 1];
     return last &&

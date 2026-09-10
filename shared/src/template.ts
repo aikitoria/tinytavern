@@ -1,7 +1,8 @@
 export const DEFAULT_STEER_TEMPLATE =
-  '[System Note]\n[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]';
+  '<system_instruction>\n[Revision request: modify only this aspect of the immediately preceding assistant response: {{instruction}}. Preserve all other content and details. Do not modify anything else. Return only the revised response.]\n</system_instruction>';
 
-export const DEFAULT_SPEAKER_HANDOFF_TEMPLATE = '[System Note]\n<Note: Reply as {{speaker}}>';
+export const DEFAULT_SPEAKER_HANDOFF_TEMPLATE =
+  '<system_instruction>\n<Note: Reply as {{speaker}}>\n</system_instruction>';
 
 export const DEFAULT_CUSTOM_TEMPLATE = {
   /** Template for the system message. */
@@ -18,7 +19,7 @@ export const DEFAULT_CUSTOM_TEMPLATE = {
   usesPersonas: true,
   /** Expands {{instruction}} for this regeneration only. */
   steerTemplate: DEFAULT_STEER_TEMPLATE,
-  /** Speaker handoff when prefills are disabled; empty = no note. */
+  /** Speaker transition instruction; empty = no note. */
   speakerHandoffTemplate: DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
 };
 export type CustomTemplate = typeof DEFAULT_CUSTOM_TEMPLATE;

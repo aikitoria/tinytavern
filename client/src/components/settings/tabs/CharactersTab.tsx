@@ -84,9 +84,9 @@ export default function CharactersTab() {
       </>
     ),
     noun: 'characters',
-    create: (name) => api.characterFolders.create({ name }),
-    rename: (id, name) => api.characterFolders.patch(id, { name }),
-    remove: api.characterFolders.remove,
+    create: (name) => api.entityFolders.characters.create({ name }),
+    rename: (id, name) => api.entityFolders.characters.patch(id, { name }),
+    remove: api.entityFolders.characters.remove,
     onError: editor.setStatus,
   });
 
@@ -138,7 +138,6 @@ export default function CharactersTab() {
         newLabel="New"
         listActions={
           <>
-            <folders.NewButton />
             <button title="Import character PNGs" onClick={() => cardInput.click()}>
               Import
             </button>
@@ -156,7 +155,7 @@ export default function CharactersTab() {
             />
           </>
         }
-        listContent={<folders.List />}
+        folderBrowser={folders}
         extraActions={
           <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
             Export PNG
@@ -318,7 +317,6 @@ export default function CharactersTab() {
           />
         </SettingsSection>
       </EntityEditorPane>
-      <folders.Dialog />
     </>
   );
 }

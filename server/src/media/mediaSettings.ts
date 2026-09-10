@@ -1,5 +1,6 @@
 import {
   mediaInputSlots,
+  normalizeMediaWorkflowInputs,
   mediaWorkflowError,
   MEDIA_INPUT_NAME,
   MAX_MEDIA_INPUTS,
@@ -45,7 +46,11 @@ export function parseComfyUrl(value: unknown): string {
   return comfyUrl;
 }
 
-export function parseMediaWorkflow(entry: unknown, ids?: Set<string>): MediaWorkflow {
+export function parseMediaWorkflow(
+  entry: unknown,
+  ids?: Set<string>,
+  normalizeInputs = true,
+): MediaWorkflow {
   const item = object(entry, 'workflow');
   const inputBindings: MediaInputBindings = {};
   for (const [context, raw] of Object.entries(object(item.inputBindings ?? {}, 'input bindings'))) {
@@ -86,7 +91,7 @@ export function parseMediaWorkflow(entry: unknown, ids?: Set<string>): MediaWork
   ids?.add(workflow.id);
   const invalid = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
   if (invalid) throw new HttpError(400, `${workflow.name}: ${invalid}`);
-  return workflow;
+  return normalizeInputs ? normalizeMediaWorkflowInputs(workflow).workflow : workflow;
 }
 
 /** Direct rendering has no input editor; all required image bindings must be absent. */

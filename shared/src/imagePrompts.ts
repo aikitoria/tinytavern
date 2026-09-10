@@ -2,13 +2,13 @@ import type { MediaPromptPreset } from './media.ts';
 
 const IMAGE_CHAT_PROMPTS = {
   describe:
-    "[System Note]\nDescribe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Reply with only the prompt.",
+    "<system_instruction>\nDescribe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Reply with only the prompt.\n</system_instruction>",
   characterInstruction:
-    "[System Note]\nDescribe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Apply this instruction: {{instruction}}. Reply with only the prompt.",
-  face: "[System Note]\nDescribe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting. Reply with only the prompt.",
+    "<system_instruction>\nDescribe {{char}}'s current appearance and surroundings as a single detailed image-generation prompt. Apply this instruction: {{instruction}}. Reply with only the prompt.\n</system_instruction>",
+  face: "<system_instruction>\nDescribe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting. Reply with only the prompt.\n</system_instruction>",
   faceInstruction:
-    "[System Note]\nDescribe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting, and apply this instruction: {{instruction}}. Reply with only the prompt.",
-  instruction: '[System Note]\n{{instruction}}',
+    "<system_instruction>\nDescribe {{char}}'s face and current appearance as a single detailed close-up portrait image-generation prompt. Focus on facial features, hair, expression, and lighting, and apply this instruction: {{instruction}}. Reply with only the prompt.\n</system_instruction>",
+  instruction: '<system_instruction>\n{{instruction}}\n</system_instruction>',
 };
 
 export const DEFAULT_MEDIA_CHAT_PRESETS: MediaPromptPreset[] = [

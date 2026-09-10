@@ -23,7 +23,7 @@ import {
   toggleGroupByCharacter,
 } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
-import { confirmAction } from '../../state/confirm.ts';
+import { confirmDelete } from '../../state/confirm.ts';
 import Avatar from '../ui/Avatar.tsx';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
 import ReferenceEditButton from '../ui/ReferenceEditButton.tsx';
@@ -112,12 +112,15 @@ export default function Sidebar() {
   const remove = async (id: number, event: MouseEvent) => {
     event.stopPropagation();
     if (
-      !(await confirmAction({
-        title: 'Delete conversation?',
-        message: 'This permanently deletes the conversation and its generated images.',
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: 'Delete conversation?',
+          message: 'This permanently deletes the conversation and its generated images.',
+          confirmLabel: 'Delete',
+          danger: true,
+        },
+        event,
+      ))
     )
       return;
     try {

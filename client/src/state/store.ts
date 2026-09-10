@@ -11,7 +11,7 @@ import { createMemo, createRoot, createSignal, batch } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
   Character,
-  CharacterFolder,
+  EntityFolder,
   Conversation,
   Endpoint,
   GalleryItem,
@@ -55,7 +55,11 @@ interface TreeState {
 interface AppState {
   conversations: Conversation[];
   characters: Character[];
-  characterFolders: CharacterFolder[];
+  characterFolders: EntityFolder[];
+  endpointFolders: EntityFolder[];
+  personaFolders: EntityFolder[];
+  templateFolders: EntityFolder[];
+  presetFolders: EntityFolder[];
   presets: Preset[];
   templates: Template[];
   personas: Persona[];
@@ -82,6 +86,10 @@ export const [state, setState] = createStore<AppState>({
   conversations: [],
   characters: [],
   characterFolders: [],
+  endpointFolders: [],
+  personaFolders: [],
+  templateFolders: [],
+  presetFolders: [],
   presets: [],
   templates: [],
   personas: [],
@@ -273,7 +281,19 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
   characters: loader('characters', api.characters.list, (data) =>
     setState('characters', reconcile(data, { key: 'id' })),
   ),
-  characterFolders: loader('characterFolders', api.characterFolders.list, (data) =>
+  presetFolders: loader('presetFolders', api.entityFolders.presets.list, (data) =>
+    setState('presetFolders', reconcile(data, { key: 'id' })),
+  ),
+  templateFolders: loader('templateFolders', api.entityFolders.templates.list, (data) =>
+    setState('templateFolders', reconcile(data, { key: 'id' })),
+  ),
+  personaFolders: loader('personaFolders', api.entityFolders.personas.list, (data) =>
+    setState('personaFolders', reconcile(data, { key: 'id' })),
+  ),
+  endpointFolders: loader('endpointFolders', api.entityFolders.endpoints.list, (data) =>
+    setState('endpointFolders', reconcile(data, { key: 'id' })),
+  ),
+  characterFolders: loader('characterFolders', api.entityFolders.characters.list, (data) =>
     setState('characterFolders', reconcile(data, { key: 'id' })),
   ),
   presets: loader('presets', api.presets.list, (data) =>

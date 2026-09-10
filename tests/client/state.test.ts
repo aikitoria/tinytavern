@@ -12,7 +12,7 @@ test('pending prompt trace preserves history and replaces only its editable tail
     reasoningPrefill: 'Global reasoning\nTemplate reasoning',
     messagePrefill: '',
     namePrefill: null,
-    disabledPrefillSpeakerNote: 'Reply as Guest.',
+    speakerHandoff: 'Reply as Guest.',
   };
   const original = structuredClone(prompt);
   const first = prepareChatMessages(prompt, { prefillMode: 'none', pendingMessage: ' first ' });
@@ -23,8 +23,14 @@ test('pending prompt trace preserves history and replaces only its editable tail
     first.messages[0],
     'Keystrokes retain the committed history DOM',
   );
-  assert.equal(first.messages[1]!.content, 'Earlier user message\n\nfirst');
-  assert.equal(second.messages[1]!.content, 'Earlier user message\n\nsecond');
+  assert.equal(
+    first.messages[1]!.content,
+    'Earlier user message\n\nfirst\n<system_instruction>\nReply as Guest.\n</system_instruction>',
+  );
+  assert.equal(
+    second.messages[1]!.content,
+    'Earlier user message\n\nsecond\n<system_instruction>\nReply as Guest.\n</system_instruction>',
+  );
   assert.equal(second.pendingMessageIndex, 1);
   assert.equal(second.prefillMessageIndex, 2);
   assert.deepEqual(second.messages[2], {
@@ -38,7 +44,7 @@ test('pending prompt trace preserves history and replaces only its editable tail
   });
   assert.equal(
     disabled.messages[1]!.content,
-    'Earlier user message\n\nthird\n[System Note]\nReply as Guest.',
+    'Earlier user message\n\nthird\n<system_instruction>\nReply as Guest.\n</system_instruction>',
   );
   assert.equal(disabled.prefillMessageIndex, null);
   assert.deepEqual(prompt, original);
@@ -62,7 +68,10 @@ test('pending prompt trace preserves history and replaces only its editable tail
   );
   const withDraft = preparePromptTrace(trace, 'Next message');
   assert.strictEqual(withDraft.messages[2], historicalAssistant);
-  assert.deepEqual(withDraft.messages[3], { role: 'user', content: 'User: Next message' });
+  assert.deepEqual(withDraft.messages[3], {
+    role: 'user',
+    content: 'User: Next message\n<system_instruction>\nReply as Guest.\n</system_instruction>',
+  });
   assert.equal(withDraft.prefillMessageIndex, 4);
   assert.equal(withDraft.messages[4]!.reasoning_content, prompt.reasoningPrefill);
   const awaitingReply = preparePromptTrace({ ...trace, messages: prompt.messages }, '');

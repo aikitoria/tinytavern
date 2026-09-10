@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
-test('workflows derive arbitrary named inputs and preserve legacy bindings without output categories', async () => {
+test('legacy workflows convert to numbered bindings without changing graph behavior', async () => {
   const {
     compileMediaWorkflow,
     expandMediaWorkflow,
@@ -162,7 +162,29 @@ test('workflows derive arbitrary named inputs and preserve legacy bindings witho
     workflows: [workflow],
     defaultWorkflowId: workflow.id,
   };
-  assert.deepEqual(parseMediaRendering(settings), settings);
+  const normalized = parseMediaRendering(settings)!.workflows[0]!;
+  assert.deepEqual(
+    mediaInputSlots(normalized),
+    Array.from({ length: 7 }, (_, i) => `input${i + 1}`),
+  );
+  assert.deepEqual(normalized.inputBindings, { chat: { input6: 'character-avatar' } });
+  const numbered = Object.fromEntries(
+    mediaInputSlots(workflow).map((slot, i) => [
+      `input${i + 1}`,
+      bindings[slot as keyof typeof bindings],
+    ]),
+  );
+  const converted = expandMediaWorkflow(compileMediaWorkflow(normalized.json), {
+    prompt,
+    seed: 123,
+    job_id: 'job',
+    ...numbered,
+  }) as typeof graph;
+  assert.deepEqual(converted.linked, graph.linked);
+  assert.equal(converted.mask.inputs.image, bindings.source);
+  assert.equal(converted.subject.inputs.image, bindings.subject);
+  assert.equal(converted.custom.inputs.filename, bindings.clothing);
+  assert.equal(converted.text.inputs.value, prompt);
   for (const overrides of [
     { folders: [{ id: 'folder', name: 'Missing', workflowIds: ['missing'] }] },
     { folders: [{ id: 'folder', name: 'Duplicate', workflowIds: [workflow.id, workflow.id] }] },
@@ -493,4 +515,57 @@ test('comfy graph progress', async () => {
   assert.equal(save.value, 0, 'Sampler steps do not leak into the next node');
   assert.deepEqual(progress.update('execution_success', {})?.graph, { value: 3, max: 3 });
   assert.equal(progress.update('status', {}), null);
+});
+
+test('numbered bindings sort numerically, share images and retain sparse numbers', async () => {
+  const { compileMediaWorkflow, expandMediaWorkflow, normalizeMediaWorkflowInputs } =
+    await import('@tinytavern/shared');
+  const graph = {
+    last: {
+      class_type: 'LoadImage',
+      inputs: { image: 'sample.png' },
+      _meta: { title: 'Style [image:input64]' },
+    },
+    second: {
+      class_type: 'LoadImage',
+      inputs: { image: 'sample.png' },
+      _meta: { title: 'Subject [image:input2]' },
+    },
+    mask: {
+      class_type: 'LoadImageMask',
+      inputs: { image: 'sample.png' },
+      _meta: { title: 'Subject [image:input2]' },
+    },
+  };
+  const json = JSON.stringify(graph);
+  const compiled = compileMediaWorkflow(json);
+  assert.deepEqual(compiled.imageInputs, [
+    { name: 'input2', label: 'Subject' },
+    { name: 'input64', label: 'Style' },
+  ]);
+  const expanded = expandMediaWorkflow(compiled, {
+    prompt: '',
+    seed: 0,
+    job_id: 'job',
+    input2: 'subject.webp',
+    input64: 'style.png',
+  }) as typeof graph;
+  assert.equal(expanded.second.inputs.image, 'subject.webp');
+  assert.equal(expanded.mask.inputs.image, 'subject.webp');
+  assert.equal(expanded.last.inputs.image, 'style.png');
+  const workflow = {
+    id: 'sparse',
+    name: 'Sparse',
+    json,
+    inputBindings: {},
+    standalonePromptPresetId: null,
+    chatPromptPresetId: null,
+    textOutputNodeId: null,
+  };
+  assert.equal(normalizeMediaWorkflowInputs(workflow).workflow, workflow);
+  for (const invalid of ['input0', 'input65', 'input01'])
+    assert.throws(
+      () => compileMediaWorkflow(json.replaceAll('input64', invalid)),
+      /input1 through input64/,
+    );
 });

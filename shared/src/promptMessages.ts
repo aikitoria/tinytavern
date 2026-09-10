@@ -13,12 +13,25 @@ export interface ChatPrompt {
   reasoningPrefill: string | null;
   messagePrefill: string | null;
   namePrefill: string | null;
-  disabledPrefillSpeakerNote: string | null;
+  speakerHandoff: string | null;
+}
+
+interface PrefillCapabilities {
+  prefillMode: Endpoint['prefillMode'];
+  allowReasoningPrefill?: boolean;
+  allowMessagePrefill?: boolean;
+}
+
+export function messagePrefillEnabled(options: PrefillCapabilities): boolean {
+  return options.prefillMode !== 'disabled' && options.allowMessagePrefill !== false;
+}
+
+export function reasoningPrefillEnabled(options: PrefillCapabilities): boolean {
+  return options.prefillMode !== 'disabled' && options.allowReasoningPrefill !== false;
 }
 
 /** Server-resolved history and seeds; the browser adds only its unsent composer text. */
-export interface PromptTrace extends ChatPrompt {
-  prefillMode: Endpoint['prefillMode'];
+export interface PromptTrace extends ChatPrompt, PrefillCapabilities {
   userMessagePrefix: string;
   /** The captured request history; reply buffers arrive through the existing tree stream. */
   stream?: { messageId: number; generationToken: number; namePrefix: string };
@@ -36,6 +49,8 @@ export function preparePromptTrace(trace: PromptTrace, pendingMessage: string) {
   }
   return prepareChatMessages(trace, {
     prefillMode: trace.prefillMode,
+    allowReasoningPrefill: trace.allowReasoningPrefill,
+    allowMessagePrefill: trace.allowMessagePrefill,
     userMessagePrefix: trace.userMessagePrefix,
     pendingMessage,
   });
@@ -73,11 +88,20 @@ export function appendChatMessage(messages: PromptMessage[], message: PromptMess
   messages.push(message);
 }
 
+/** Keep a handoff immediately before its reply, including consecutive assistant turns. */
+export function appendSpeakerHandoff(messages: PromptMessage[], instruction: string): void {
+  const note = systemNote(instruction);
+  if (!note) return;
+  const previous = messages.at(-1);
+  if (previous?.role === 'user') {
+    messages[messages.length - 1] = { ...previous, content: `${previous.content}\n${note}` };
+  } else appendChatMessage(messages, { role: 'user', content: note });
+}
+
 /** Shared by live generations and the prompt trace, including strict role ordering. */
 export function prepareChatMessages(
   prompt: ChatPrompt,
-  options: {
-    prefillMode: Endpoint['prefillMode'];
+  options: PrefillCapabilities & {
     content?: string;
     reasoning?: string;
     pendingMessage?: string;
@@ -101,28 +125,22 @@ export function prepareChatMessages(
     pendingMessageIndex = messages.length - 1;
   }
   let prefillMessageIndex: number | null = null;
-  if (options.prefillMode === 'disabled') {
-    const note = systemNote(prompt.disabledPrefillSpeakerNote ?? '');
-    if (note) {
-      const userIndex = messages.findLastIndex((message) => message.role === 'user');
-      if (userIndex !== -1) {
-        const message = messages[userIndex]!;
-        messages[userIndex] = { ...message, content: `${message.content}\n${note}` };
-      } else append({ role: 'user', content: note });
-    }
-  } else {
-    const content = options.content ?? prompt.messagePrefill ?? '';
-    const reasoning = options.reasoning ?? prompt.reasoningPrefill ?? '';
-    const name = prompt.namePrefill;
-    if (content || reasoning || name) {
-      append({
-        role: 'assistant',
-        content: name ? (content ? `${name} ${content}` : name) : content,
-        ...(reasoning ? { reasoning_content: reasoning } : {}),
-      });
-      prefillMessageIndex = messages.length - 1;
-      if (options.prefillMode === 'deepseek') messages[prefillMessageIndex]!.prefix = true;
-    }
+  const allowMessage = messagePrefillEnabled(options);
+  if (!allowMessage || !prompt.namePrefill)
+    appendSpeakerHandoff(messages, prompt.speakerHandoff ?? '');
+  const content = allowMessage ? (options.content ?? prompt.messagePrefill ?? '') : '';
+  const reasoning = reasoningPrefillEnabled(options)
+    ? (options.reasoning ?? prompt.reasoningPrefill ?? '')
+    : '';
+  const name = allowMessage ? prompt.namePrefill : null;
+  if (content || reasoning || name) {
+    append({
+      role: 'assistant',
+      content: name ? (content ? `${name} ${content}` : name) : content,
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
+    });
+    prefillMessageIndex = messages.length - 1;
+    if (options.prefillMode === 'deepseek') messages[prefillMessageIndex]!.prefix = true;
   }
   return {
     messages,

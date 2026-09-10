@@ -39,7 +39,7 @@ import {
   state,
   toast,
 } from '../../state/store.ts';
-import { confirmAction } from '../../state/confirm.ts';
+import { confirmDelete } from '../../state/confirm.ts';
 import { filterGallery, indexGallery } from '../../galleryModel.ts';
 import { errorMessage } from '../../util.ts';
 import {
@@ -428,16 +428,19 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       setSelectionMode(false);
     });
   };
-  const deleteSelected = async () => {
+  const deleteSelected = async (event: MouseEvent) => {
     const items = selectedItems();
     if (!items.length || bulkDeleting()) return;
     if (
-      !(await confirmAction({
-        title: `Delete ${items.length} selected ${items.length === 1 ? 'item' : 'items'}?`,
-        message: 'This permanently deletes the selected items and their prompts.',
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: `Delete ${items.length} selected ${items.length === 1 ? 'item' : 'items'}?`,
+          message: 'This permanently deletes the selected items and their prompts.',
+          confirmLabel: 'Delete',
+          danger: true,
+        },
+        event,
+      ))
     )
       return;
     const stillSelected = new Set(selectedItems().map((item) => item.id));
@@ -465,15 +468,18 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       setBulkDeleting(false);
     }
   };
-  const deleteItem = async (item: GalleryItem) => {
+  const deleteItem = async (item: GalleryItem, event: MouseEvent) => {
     const kind = item.media?.kind === 'video' ? 'video' : 'image';
     if (
-      !(await confirmAction({
-        title: `Delete saved ${kind}?`,
-        message: `This permanently deletes the saved ${kind} and prompt.`,
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
+      !(await confirmDelete(
+        {
+          title: `Delete saved ${kind}?`,
+          message: `This permanently deletes the saved ${kind} and prompt.`,
+          confirmLabel: 'Delete',
+          danger: true,
+        },
+        event,
+      ))
     )
       return;
     try {
@@ -588,7 +594,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                       type="button"
                       class="danger"
                       disabled={bulkDeleting() || !selectedItems().length}
-                      onClick={() => void deleteSelected()}
+                      onClick={(event) => void deleteSelected(event)}
                     >
                       <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete
                     </button>

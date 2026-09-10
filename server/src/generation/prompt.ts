@@ -11,6 +11,7 @@ import {
   systemNote,
   expandPromptSlots,
   appendChatMessage,
+  appendSpeakerHandoff,
   prepareChatMessages,
   type PromptMessage,
   type ImageGenerationSettings,
@@ -111,8 +112,8 @@ export interface BuiltPrompt {
   messagePrefill: string | null;
   /** "Name:" when the template prefixes speaker names. */
   namePrefill: string | null;
-  /** Configured speaker handoff appended to the final user turn when prefills are disabled. */
-  disabledPrefillSpeakerNote: string | null;
+  /** Speaker instruction used when the requested name cannot be prefilled. */
+  speakerHandoff: string | null;
   /** {{char}}/{{user}} as this prompt resolved them (persona honors usesPersonas). */
   charName: string;
   userName: string;
@@ -163,6 +164,9 @@ export function buildChatMessages(
   const prefixNames = template?.prefixNames ?? false;
   const speakerFor = (msg: Message) =>
     msg.role === 'user' ? userName : msg.name?.trim() || charName;
+  const handoff = (speaker: string) =>
+    expandPromptSlots(template?.speakerHandoffTemplate ?? '', { speaker });
+  let previousSpeaker = charName;
 
   const messages: ChatMessage[] = [];
   if (systemContent) appendChatMessage(messages, { role: 'system', content: systemContent });
@@ -174,8 +178,13 @@ export function buildChatMessages(
     const reasoning = msg.role === 'assistant' ? msg.reasoning?.trim() : '';
     // Preserve reasoning-only assistant turns in history.
     if (trimmedContent.length === 0 && !reasoning) continue;
+    const speaker = speakerFor(msg).trim();
+    if (msg.role === 'assistant') {
+      if (speaker !== previousSpeaker) appendSpeakerHandoff(messages, handoff(speaker));
+      previousSpeaker = speaker;
+    }
     const content = prefixNames
-      ? `${speakerFor(msg).trim()}: ${trimmedContent}`
+      ? `${speaker}: ${trimmedContent}`
       : trimmedContent || '(No visible response)';
     appendChatMessage(messages, {
       role: msg.role,
@@ -185,25 +194,12 @@ export function buildChatMessages(
   }
 
   const currentSpeaker = speakerName?.trim() || charName;
-  const previousAssistant = history.findLast(
-    (message) =>
-      message.role === 'assistant' &&
-      message.status !== 'streaming' &&
-      (message.content.trim().length > 0 || !!message.reasoning?.trim()),
-  );
-  const previousSpeaker = previousAssistant ? speakerFor(previousAssistant).trim() : null;
-  const needsDisabledPrefillSpeakerNote =
-    prefixNames &&
-    (currentSpeaker !== charName ||
-      (currentSpeaker === charName && previousSpeaker != null && previousSpeaker !== charName));
   return {
     messages,
     reasoningPrefill: reasoningPrefill || null,
     messagePrefill: messagePrefill || null,
     namePrefill: prefixNames ? `${currentSpeaker}:` : null,
-    disabledPrefillSpeakerNote: needsDisabledPrefillSpeakerNote
-      ? expandPromptSlots(template?.speakerHandoffTemplate ?? '', { speaker: currentSpeaker })
-      : null,
+    speakerHandoff: currentSpeaker !== previousSpeaker ? handoff(currentSpeaker) : null,
     charName,
     userName,
   };
@@ -230,7 +226,7 @@ export function buildToolPrompt(
     reasoningPrefill: built.reasoningPrefill,
     messagePrefill: null,
     namePrefill: null,
-    disabledPrefillSpeakerNote: null,
+    speakerHandoff: null,
   };
 }
 
@@ -321,6 +317,6 @@ export function buildSteeredToolPrompt(
     reasoningPrefill: built.reasoningPrefill,
     messagePrefill: null,
     namePrefill: null,
-    disabledPrefillSpeakerNote: null,
+    speakerHandoff: null,
   };
 }

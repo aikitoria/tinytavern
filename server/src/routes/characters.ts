@@ -68,7 +68,8 @@ defineEntityRoutes<Character>({
       return parseCustomTemplate(raw);
     },
   }),
-  invalidateOnDelete: ['conversations'],
+  allowDeleteAll: true,
+  invalidateOnDelete: ['conversations', 'gallery'],
   onDelete: (id) => deleteAvatarFiles('character', id),
   onDuplicate: (sourceId, newId) => {
     // Also clears a stale avatar URL when the source's file is missing.

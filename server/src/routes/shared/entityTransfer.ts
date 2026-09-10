@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
   ENTITY_TRANSFER_FIELDS,
+  ENTITY_FOLDERS,
+  transferString,
   entityTransferData,
   namedItem,
   takeNamedCollectionItem,
@@ -36,13 +38,27 @@ export function defineEntityTransfer<T extends { id: number }>(
 ): void {
   if (!Object.hasOwn(ENTITY_TRANSFER_FIELDS, cfg.table)) return;
   const type = cfg.table as TransferEntity;
+  const folderConfig = ENTITY_FOLDERS[type];
+  const folderRows = () =>
+    rows(folderConfig.table).map((row) => ({ id: Number(row.id), name: String(row.name) }));
+  const folderColumn = cfg.fields.findIndex((field) => field.column === 'folder_id');
   const snapshot = () =>
     createHash('sha256')
-      .update(JSON.stringify({ rows: rows(cfg.table), revision: getSettings().revision }))
+      .update(
+        JSON.stringify({
+          rows: rows(cfg.table),
+          folders: folderRows(),
+          revision: getSettings().revision,
+        }),
+      )
       .digest('hex');
   const exportItem = (row: Record<string, unknown>) => {
     const entity = cfg.toDto(row);
-    const item = entityTransferData(type, entity);
+    const item = entityTransferData(type, {
+      ...entity,
+      folderId:
+        row.folder_id == null ? null : rowById(folderConfig.table, Number(row.folder_id)).name,
+    });
     if (type === 'personas') {
       const avatar = readAvatarFile('persona', entity.id);
       item.avatarData = avatar ? `data:image/png;base64,${avatar.toString('base64')}` : null;
@@ -56,6 +72,7 @@ export function defineEntityTransfer<T extends { id: number }>(
       snapshot: snapshot(),
       document: transferDocument(`page:${type}`, {
         items: entities.map(exportItem),
+        folders: folderRows().map(({ name }) => ({ name })),
         ...(cfg.settingsRef
           ? { active: entities.find((row) => row.id === activeId)?.name ?? null }
           : {}),
@@ -74,6 +91,28 @@ export function defineEntityTransfer<T extends { id: number }>(
       const data = transferData(input.document, `${single ? 'entity' : 'page'}:${type}`);
       const source = single ? { items: [data] } : transferObject(data);
       const incoming = transferArray(source.items).map((entry) => entityTransferData(type, entry));
+      const folders = folderRows();
+      const folderNames = new Map<string, string>();
+      const folderName = (value: unknown) => {
+        const name = transferString(value, 'Folder name').trim();
+        if (!name) throw new HttpError(400, 'Folder name is required');
+        return name;
+      };
+      if (!single && source.folders !== undefined) {
+        for (const folder of transferArray(source.folders)) {
+          const name = folderName(folder.name);
+          const key = name.toLowerCase();
+          if (folderNames.has(key)) throw new HttpError(400, 'Folder names must be unique');
+          folderNames.set(key, name);
+        }
+      }
+      for (const item of incoming) {
+        if (item.folderId != null) {
+          const name = folderName(item.folderId);
+          item.folderId = name;
+          folderNames.set(name.toLowerCase(), name);
+        }
+      }
       const all = rows(cfg.table);
       const candidates: (Record<string, unknown> & { name: string })[] = all.map((row) => ({
         ...row,
@@ -110,14 +149,32 @@ export function defineEntityTransfer<T extends { id: number }>(
         }
         // Imported sampling settings replace the exported parameter object in full.
         if (type === 'endpoints') item.replaceGenParams = true;
-        const values = writer.values(item, current);
-        return { name, values, id: current ? Number(current.id) : null, avatar };
+        const folderName = typeof item.folderId === 'string' ? item.folderId : undefined;
+        const values = writer.values(
+          {
+            ...item,
+            ...(folderName === undefined
+              ? {}
+              : { folderId: namedItem(folders, folderName)?.id ?? null }),
+          },
+          current,
+        );
+        return { name, values, id: current ? Number(current.id) : null, avatar, folderName };
       });
       const backups: { id: number; data: Buffer | null }[] = [];
       const imported: { name: string; id: number }[] = [];
       try {
         transaction(() => {
+          for (const name of folderNames.values()) {
+            if (namedItem(folders, name)) continue;
+            const result = stmt(
+              `INSERT INTO ${folderConfig.table} (name, created_at) VALUES (?, ?)`,
+            ).run(name, Date.now());
+            folders.push({ id: Number(result.lastInsertRowid), name });
+          }
           for (const item of plan) {
+            if (item.folderName !== undefined)
+              item.values[folderColumn] = namedItem(folders, item.folderName)!.id;
             const id = item.id ?? writer.insert(item.values);
             if (item.id !== null) writer.update(id, item.values);
             if (item.avatar !== undefined) {
@@ -158,6 +215,7 @@ export function defineEntityTransfer<T extends { id: number }>(
         else if (item.avatar !== undefined) deleteObsoleteAvatarFiles('persona', id);
       }
       invalidate(cfg.table);
+      invalidate(folderConfig.state);
       invalidate('settings');
       discardSpeculativeSwipes();
       bumpAllConversationRevisions();

@@ -1,4 +1,14 @@
-import { For, createEffect, createSignal, onCleanup } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  onCleanup,
+} from 'solid-js';
+
+export const DEFAULT_TEXTAREA_ROWS = 8;
 
 const TOKEN_RE = /\{\{[^{}]*\}\}/g;
 const BASIC_KEYS = new Set(['char', 'user']);
@@ -63,6 +73,28 @@ export default function MacroTextarea(props: {
   onText?: (text: string) => void;
 }) {
   const [text, setTextSignal] = createSignal('');
+  const diagnosticId = createUniqueId();
+  const keys = createMemo(
+    () =>
+      new Set(
+        (
+          props.keys ?? [
+            ...(props.template ? TEMPLATE_KEYS : BASIC_KEYS),
+            ...(props.extraKeys ?? []),
+          ]
+        ).map((key) => key.toLowerCase()),
+      ),
+  );
+  const highlighted = createMemo(() => segments(text(), keys(), props.template === true));
+  const invalid = createMemo(() =>
+    [
+      ...new Set(
+        highlighted()
+          .filter((segment) => segment.kind === 'invalid')
+          .map((segment) => segment.text),
+      ),
+    ].join(', '),
+  );
   const setText = (next: string) => {
     setTextSignal(next);
     props.onText?.(next);
@@ -112,40 +144,35 @@ export default function MacroTextarea(props: {
   };
 
   return (
-    <div
-      class="macro-box [&_textarea]:block [&_textarea]:relative [&_textarea]:bg-clear [&_textarea::-webkit-scrollbar]:w-2.5 [&_textarea::-webkit-scrollbar-thumb]:bg-hover [&_textarea::-webkit-scrollbar-track]:bg-clear [&_textarea::-webkit-scrollbar-corner]:bg-clear"
-      classList={props.classList}
-    >
-      <div
-        class={`macro-overlay overflow-hidden wrap-break-word absolute inset-0 border border-solid border-transparent rounded-sm py-control-y px-3 whitespace-pre-wrap text-transparent pointer-events-none [&_mark]:text-transparent ${props.class ?? ''}`}
-        ref={overlay}
-        aria-hidden="true"
-      >
-        <For
-          each={segments(
-            text(),
-            props.keys
-              ? new Set(props.keys)
-              : new Set([
-                  ...(props.template ? TEMPLATE_KEYS : BASIC_KEYS),
-                  ...(props.extraKeys ?? []),
-                ]),
-            props.template === true,
-          )}
+    <div class="min-w-0" classList={props.classList}>
+      <div class="macro-box [&_textarea]:block [&_textarea]:relative [&_textarea]:bg-clear [&_textarea::-webkit-scrollbar]:w-2.5 [&_textarea::-webkit-scrollbar-thumb]:bg-hover [&_textarea::-webkit-scrollbar-track]:bg-clear [&_textarea::-webkit-scrollbar-corner]:bg-clear">
+        <div
+          class={`macro-overlay overflow-hidden wrap-break-word absolute inset-0 border border-solid border-transparent rounded-sm py-control-y px-3 whitespace-pre-wrap text-transparent pointer-events-none [&_mark]:text-transparent ${props.class ?? ''}`}
+          ref={overlay}
+          aria-hidden="true"
         >
-          {(seg) => (seg.kind ? <mark class={`macro-${seg.kind}`}>{seg.text}</mark> : seg.text)}
-        </For>
-        {'\n'}
+          <For each={highlighted()}>
+            {(seg) => (seg.kind ? <mark class={`macro-${seg.kind}`}>{seg.text}</mark> : seg.text)}
+          </For>
+          {'\n'}
+        </div>
+        <textarea
+          ref={attach}
+          aria-invalid={invalid() ? true : undefined}
+          aria-describedby={invalid() ? diagnosticId : undefined}
+          readOnly={props.readOnly}
+          rows={props.rows ?? DEFAULT_TEXTAREA_ROWS}
+          class={props.class}
+          placeholder={props.placeholder}
+          onInput={(e) => setText(e.currentTarget.value)}
+          onScroll={syncScroll}
+        />
       </div>
-      <textarea
-        ref={attach}
-        readOnly={props.readOnly}
-        rows={props.rows ?? 8}
-        class={props.class}
-        placeholder={props.placeholder}
-        onInput={(e) => setText(e.currentTarget.value)}
-        onScroll={syncScroll}
-      />
+      <Show when={invalid()}>
+        <p id={diagnosticId} class="mt-1 text-xs text-danger wrap-anywhere">
+          Invalid macros in this field: {invalid()}
+        </p>
+      </Show>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import {
 export * from './workflowInputs.ts';
 
 export type MediaKind = 'image' | 'video';
-/** Stable workflow-defined name, shared by bindings, recipes and prompt variables. */
+/** Numbered image binding (input1–input64); legacy names are accepted during import. */
 export type MediaInputSlot = string;
 export type MediaInputContext = 'standalone' | 'chat' | 'avatar';
 export type MediaInputSource = `selected:${number}` | 'character-avatar' | 'persona-avatar';
@@ -114,7 +114,7 @@ export function mediaInputSlots(workflow: Pick<MediaWorkflow, 'json'>): MediaInp
 }
 
 export function defaultChatMediaPrompt(): string {
-  return `[System Note]\nUse the preceding conversation as reference context to write a detailed media-generation prompt. Follow the supplied instruction and the requirements of the selected workflow. Return only the complete final prompt, without analysis or commentary.\n\n<generation_instruction>\n{{instruction}}\n</generation_instruction>`;
+  return `<system_instruction>\nUse the preceding conversation as reference context to write a detailed media-generation prompt. Follow the supplied instruction and the requirements of the selected workflow. Return only the complete final prompt, without analysis or commentary.\n\n<generation_instruction>\n{{instruction}}\n</generation_instruction>\n</system_instruction>`;
 }
 
 export function defaultMediaPrompt(): StandalonePromptTemplate {
@@ -310,7 +310,8 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string
 const SYSTEM_SLOTS = new Set(['prompt', 'seed', 'job_id']);
 export const MEDIA_INPUT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 export const MAX_MEDIA_INPUTS = 64;
-/** Prompt templates address image inputs by their position in the workflow editor. */
+export const NUMBERED_MEDIA_INPUT = /^input([1-9]|[1-5][0-9]|6[0-4])$/;
+/** A prompt macro uses the same number as its image binding, including sparse inputs. */
 export const MEDIA_INPUT_PROMPT_KEYS = Array.from(
   { length: MAX_MEDIA_INPUTS },
   (_, index) => `input${index + 1}_prompt`,
@@ -319,6 +320,7 @@ const legacyImageSlot = (name: string) =>
   /^(?:source|first_frame|reference[1-9][0-9]*)$/.test(name);
 
 export function mediaInputLabel(name: string): string {
+  if (NUMBERED_MEDIA_INPUT.test(name)) return `Input ${name.slice(5)}`;
   if (name === 'source') return 'Source image';
   if (name === 'first_frame') return 'First frame';
   const reference = /^reference([0-9]+)$/.exec(name);
@@ -342,8 +344,9 @@ const MAX_COMPILED_SOURCE_LENGTH = 8 * 1024 * 1024;
 let compiledSourceLength = 0;
 
 /** Reuse the read-only compilation; expansion creates a fresh graph for every job. */
-export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
-  const cached = compiledWorkflows.get(json);
+export function compileMediaWorkflow(json: string, legacyOrder = false): CompiledMediaWorkflow {
+  const cacheKey = legacyOrder ? `legacy:${json}` : json;
+  const cached = compiledWorkflows.get(cacheKey);
   if (cached) return cached;
   let inString = false;
   let escaped = false;
@@ -399,9 +402,11 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
       );
       if (!match)
         throw new Error(
-          `Workflow node ${nodeId}: use Label [image:name] or Label [prompt], optionally with , field=input_name`,
+          `Workflow node ${nodeId}: use Label [image:input1] through [image:input64], or Label [prompt], optionally with , field=input_name`,
         );
       const slot = match[3] ?? 'prompt';
+      if (!legacyOrder && /^input\d/.test(slot) && !NUMBERED_MEDIA_INPUT.test(slot))
+        throw new Error(`Workflow node ${nodeId}: image inputs must be input1 through input64`);
       if (!MEDIA_INPUT_NAME.test(slot) || (match[3] && SYSTEM_SLOTS.has(slot)))
         throw new Error(`Workflow node ${nodeId}: invalid image input name ${slot}`);
       const field =
@@ -435,9 +440,14 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
     if (typeof value === 'string') {
       for (const match of value.matchAll(/\u001fTT:([a-z_0-9]+)\u001f/g)) {
         const name = match[1]!;
-        if (!SYSTEM_SLOTS.has(name) && !legacyImageSlot(name) && !labels.has(name))
+        if (
+          !SYSTEM_SLOTS.has(name) &&
+          !NUMBERED_MEDIA_INPUT.test(name) &&
+          !legacyImageSlot(name) &&
+          !labels.has(name)
+        )
           throw new Error(
-            `Unknown workflow macro {{${name}}}; declare a named image input in a node title`,
+            `Unknown workflow macro {{${name}}}; use input1 through input64 for image bindings`,
           );
         slots.add(name);
       }
@@ -446,34 +456,91 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
     }
   };
   discoverSlots(graph);
-  const legacyOrder = (name: string) =>
-    name === 'source'
-      ? 0
-      : name === 'first_frame'
-        ? 1
-        : /^reference[1-9][0-9]*$/.test(name)
-          ? Number(name.slice(9)) + 1
-          : Infinity;
+  const inputOrder = (name: string) =>
+    !legacyOrder && NUMBERED_MEDIA_INPUT.test(name)
+      ? Number(name.slice(5))
+      : name === 'source'
+        ? 0
+        : name === 'first_frame'
+          ? 1
+          : /^reference[1-9][0-9]*$/.test(name)
+            ? Number(name.slice(9)) + 1
+            : Infinity;
   const imageInputs = [...slots]
     .filter((slot) => !SYSTEM_SLOTS.has(slot))
-    .sort((a, b) => legacyOrder(a) - legacyOrder(b))
+    .sort((a, b) => inputOrder(a) - inputOrder(b))
     .map((name) => ({ name, label: labels.get(name) ?? mediaInputLabel(name) }));
   if (imageInputs.length > MAX_MEDIA_INPUTS)
     throw new Error(`Workflows support at most ${MAX_MEDIA_INPUTS} image inputs`);
   const compiled = { graph, slots, imageInputs, controls: discoverWorkflowInputs(graph) };
-  if (json.length <= MAX_COMPILED_SOURCE_LENGTH) {
+  if (cacheKey.length <= MAX_COMPILED_SOURCE_LENGTH) {
     while (
       compiledWorkflows.size >= MAX_COMPILED_WORKFLOWS ||
-      compiledSourceLength + json.length > MAX_COMPILED_SOURCE_LENGTH
+      compiledSourceLength + cacheKey.length > MAX_COMPILED_SOURCE_LENGTH
     ) {
       const oldest = compiledWorkflows.keys().next().value!;
       compiledWorkflows.delete(oldest);
       compiledSourceLength -= oldest.length;
     }
-    compiledWorkflows.set(json, compiled);
-    compiledSourceLength += json.length;
+    compiledWorkflows.set(cacheKey, compiled);
+    compiledSourceLength += cacheKey.length;
   }
   return compiled;
+}
+
+/** Upgrade legacy bindings once at persistence/import boundaries; graph links stay intact. */
+export function normalizeMediaWorkflowInputs(workflow: MediaWorkflow, legacyOrder = false) {
+  let compiled = workflow.json.trim() ? compileMediaWorkflow(workflow.json, legacyOrder) : null;
+  if (
+    !legacyOrder &&
+    compiled?.imageInputs.some((input) => !NUMBERED_MEDIA_INPUT.test(input.name))
+  ) {
+    legacyOrder = true;
+    compiled = compileMediaWorkflow(workflow.json, true);
+  }
+  const inputs = compiled?.imageInputs ?? [];
+  const slots = new Map(
+    inputs.map((input, index) => [input.name, legacyOrder ? `input${index + 1}` : input.name]),
+  );
+  if (!compiled || [...slots].every(([before, after]) => before === after))
+    return { workflow, slots };
+  const graph = structuredClone(compiled.graph) as Record<
+    string,
+    { class_type?: string; inputs?: Record<string, JsonValue>; _meta?: { title?: string } }
+  >;
+  for (const node of Object.values(graph)) {
+    if (!node || typeof node !== 'object' || !node.inputs) continue;
+    if (typeof node._meta?.title === 'string') {
+      node._meta.title = node._meta.title.replace(
+        /\[image:([a-z][a-z0-9_]*)/,
+        (match, name: string) => (slots.has(name) ? `[image:${slots.get(name)}` : match),
+      );
+    }
+    if (node.class_type === 'LoadImage' || node.class_type === 'LoadImageMask') {
+      const input = inputs.find((input) => node.inputs!.image === `${MARKER}${input.name}\u001f`);
+      if (input) {
+        const name = slots.get(input.name)!;
+        node.inputs.image = `${name}.png`;
+        if (!node._meta?.title?.includes('[image:'))
+          node._meta = { ...node._meta, title: `${input.label} [image:${name}]` };
+      }
+    }
+  }
+  const json = JSON.stringify(graph, null, 2)
+    .replace(
+      /\\u001fTT:([a-z_0-9]+)\\u001f/g,
+      (_, name: string) => `{{${slots.get(name) ?? name}}}`,
+    )
+    .replace(/"\{\{seed\}\}"/g, '{{seed}}');
+  const inputBindings = Object.fromEntries(
+    Object.entries(workflow.inputBindings).map(([context, bindings]) => [
+      context,
+      Object.fromEntries(
+        Object.entries(bindings).map(([slot, source]) => [slots.get(slot) ?? slot, source]),
+      ),
+    ]),
+  );
+  return { workflow: { ...workflow, json, inputBindings }, slots };
 }
 
 export function expandMediaWorkflow(

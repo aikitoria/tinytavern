@@ -21,6 +21,7 @@ import {
   faImages as faImagesSolid,
   faRotateRight,
   faSpinner,
+  faStar,
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
@@ -118,7 +119,7 @@ export function avatarGenerationAvailable(): boolean {
 export function mediaFavoriteTools() {
   return state.settings.mediaFavorites.map((favorite) => ({
     label: favorite.name,
-    icon: () => <FontAwesomeIcon icon={faImage} size={16} />,
+    icon: () => <FontAwesomeIcon icon={faStar} size={16} />,
     run: () => {
       const conversationId = state.selectedId;
       if (conversationId === null) return;
@@ -346,30 +347,26 @@ export function ImageGenerationSettingsFields(props: {
                 [
                   'promptRevisionContext',
                   'Context message template',
-                  3,
                   'Inserted before the original prompt when the chat does not end with a user turn. Leave empty to omit it.',
                 ],
                 [
                   'promptRevisionOriginal',
                   'Original prompt message template',
-                  4,
                   'Sent as the assistant turn being revised. Include {{prompt}}.',
                 ],
                 [
                   'promptRevisionTemplate',
                   'Prompt template',
-                  10,
                   'Instructions for revising the original image prompt.',
                 ],
               ] as const
             }
           >
-            {([key, label, rows, hint]) => (
+            {([key, label, hint]) => (
               <FormField
                 kind="macro"
                 field={revision.fields[key]}
                 label={label}
-                rows={rows}
                 keys={['instruction', 'prompt']}
                 hint={hint}
                 id={key === 'promptRevisionTemplate' ? 'image-revision-template' : undefined}

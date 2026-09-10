@@ -450,6 +450,7 @@ test('settings transfer', async () => {
       systemPromptPrefix: 'Prefix\n',
       systemPromptSuffix: '\nSuffix',
       reasoningPrefillPrefix: 'Reasoning\n',
+      allowMessagePrefill: false,
     });
     const endpoints = await request('GET', '/api/endpoints/settings-export');
     assert(!JSON.stringify(endpoints.document).includes('private-credential'));
@@ -474,6 +475,8 @@ test('settings transfer', async () => {
     assert.equal(endpointCopy.systemPromptPrefix, 'Prefix\n');
     assert.equal(endpointCopy.systemPromptSuffix, '\nSuffix');
     assert.equal(endpointCopy.reasoningPrefillPrefix, 'Reasoning\n');
+    assert.equal(endpointCopy.allowMessagePrefill, false);
+    assert.equal(endpointCopy.allowReasoningPrefill, true);
 
     const repeatedEndpoint = await request('POST', `/api/endpoints/${endpoint.id}/duplicate`);
     await request('POST', `/api/endpoints/${endpoint.id}/duplicate`);

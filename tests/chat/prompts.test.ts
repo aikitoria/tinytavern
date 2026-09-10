@@ -35,7 +35,7 @@ databaseCase('chat prompt', async () => {
     reasoningPrefill: null,
     messagePrefill: null,
     namePrefill: 'Guest:',
-    disabledPrefillSpeakerNote: '<Note: Reply as Guest>',
+    speakerHandoff: '<Note: Reply as Guest>',
     charName: 'Assistant',
     userName: 'User',
   };
@@ -44,11 +44,25 @@ databaseCase('chat prompt', async () => {
     rootWithNote.map((message) => message.role),
     ['system', 'user'],
   );
-  assert.equal(rootWithNote.at(-1)?.content, '[System Note]\n<Note: Reply as Guest>');
-  assert.equal(systemNote('[System Note]\nCustom'), '[System Note]\nCustom');
+  assert.equal(
+    rootWithNote.at(-1)?.content,
+    '<system_instruction>\n<Note: Reply as Guest>\n</system_instruction>',
+  );
+  assert.equal(
+    systemNote('[System Note]\nCustom'),
+    '<system_instruction>\nCustom\n</system_instruction>',
+  );
   assert.equal(systemNote(''), '');
-  assert.equal(systemNote('[IMAGE PROMPT TASK]\nCustom'), '[System Note]\nCustom');
-  assert.equal(systemNote('[System Note]\n[IMAGE PROMPT TASK]\nCustom'), '[System Note]\nCustom');
+  const wrapped = '<system_instruction>\nCustom\n</system_instruction>';
+  assert.equal(systemNote(wrapped), wrapped);
+  assert.equal(
+    systemNote('[IMAGE PROMPT TASK]\nCustom'),
+    '<system_instruction>\nCustom\n</system_instruction>',
+  );
+  assert.equal(
+    systemNote('[System Note]\n[IMAGE PROMPT TASK]\nCustom'),
+    '<system_instruction>\nCustom\n</system_instruction>',
+  );
 
   const { stmt, toConversation } = await import('../../server/src/db/db.ts');
   const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
@@ -116,14 +130,65 @@ databaseCase('chat prompt', async () => {
   ).run('Adjust {{instruction}} exactly.', 'Speak as {{speaker}} only.', templateId);
   assert.equal(resolveSteerTemplate(conversation), 'Adjust {{instruction}} exactly.');
   assert.equal(
-    buildChatMessages(conversation, [], 'Guest $& {{speaker}}').disabledPrefillSpeakerNote,
+    buildChatMessages(conversation, [], 'Guest $& {{speaker}}').speakerHandoff,
     'Speak as Guest $& {{speaker}} only.',
+  );
+  const { messageFixture } = await import('../support/fixtures.ts');
+  const { getMessage } = await import('../../server/src/conversations/tree.ts');
+  const { prepareChatMessages } = await import('@tinytavern/shared');
+  stmt("UPDATE templates SET prefix_names = 0, user_prologue = '' WHERE id = ?").run(templateId);
+  const historyRows: Record<string, string | null>[] = [
+    { role: 'user', content: 'Start' },
+    { content: 'Main character', name: null },
+    { role: 'user', content: 'Switch' },
+    { content: 'Guest reply', name: 'Guest' },
+    { role: 'user', content: 'Continue' },
+    { content: 'Same guest', name: 'Guest' },
+    { content: '', reasoning: 'Another speaker thinking', name: 'Other' },
+    { content: 'Back to main', name: null },
+  ];
+  const history = historyRows.map((fields) => getMessage(messageFixture(conversationId, fields))!);
+  const savedHistory = structuredClone(history);
+  const historical = buildChatMessages(conversation, history);
+  assert.deepEqual(
+    historical.messages.map(({ role, content }) => [role, content]),
+    [
+      ['user', 'Start'],
+      ['assistant', 'Main character'],
+      ['user', 'Switch\n<system_instruction>\nSpeak as Guest only.\n</system_instruction>'],
+      ['assistant', 'Guest reply'],
+      ['user', 'Continue'],
+      ['assistant', 'Same guest'],
+      ['user', '<system_instruction>\nSpeak as Other only.\n</system_instruction>'],
+      ['assistant', '(No visible response)'],
+      ['user', '<system_instruction>\nSpeak as Layout character only.\n</system_instruction>'],
+      ['assistant', 'Back to main'],
+    ],
+  );
+  assert.equal(historical.speakerHandoff, null);
+  const next = prepareChatMessages(buildChatMessages(conversation, history, 'Guest'), {
+    prefillMode: 'disabled',
+  });
+  assert.deepEqual(
+    next.messages.slice(0, -1),
+    historical.messages,
+    'A new handoff must not rewrite an earlier user turn across assistant replies',
+  );
+  assert.deepEqual(next.messages.at(-1), {
+    role: 'user',
+    content: '<system_instruction>\nSpeak as Guest only.\n</system_instruction>',
+  });
+  assert.equal(buildChatMessages(conversation, history.slice(0, 4), 'Guest').speakerHandoff, null);
+  assert.deepEqual(
+    history,
+    savedHistory,
+    'Handoffs are reconstructed without editing stored messages',
   );
   stmt("UPDATE templates SET steer_template = '', speaker_handoff_template = '' WHERE id = ?").run(
     templateId,
   );
   assert.throws(() => resolveSteerTemplate(conversation), { status: 400 });
-  assert.equal(buildChatMessages(conversation, [], 'Guest').disabledPrefillSpeakerNote, '');
+  assert.equal(buildChatMessages(conversation, [], 'Guest').speakerHandoff, '');
   const customRevision = {
     promptRevisionContext: 'Source follows: {{prompt}}',
     promptRevisionOriginal: 'SOURCE {{prompt}}',
@@ -139,9 +204,12 @@ databaseCase('chat prompt', async () => {
   );
   assert.deepEqual(revisionHistory, [
     { role: 'assistant', content: 'Unchanged chat' },
-    { role: 'user', content: `[System Note]\nSource follows: ${original}` },
+    {
+      role: 'user',
+      content: `<system_instruction>\nSource follows: ${original}\n</system_instruction>`,
+    },
     { role: 'assistant', content: `SOURCE ${original}`, reasoning_content: 'Original reasoning' },
-    { role: 'user', content: `[System Note]\nCHANGE ${instruction}` },
+    { role: 'user', content: `<system_instruction>\nCHANGE ${instruction}\n</system_instruction>` },
   ]);
   const noBridge: ChatMessage[] = [];
   appendImagePromptRevisionTask(noBridge, original, null, instruction, {
@@ -163,6 +231,7 @@ databaseCase('completion config', async () => {
   type ChatMessage = import('../../server/src/generation/prompt.ts').ChatMessage;
 
   const endpoint: Endpoint = {
+    folderId: null,
     id: 1,
     name: 'Test',
     baseUrl: '',
@@ -172,6 +241,8 @@ databaseCase('completion config', async () => {
     model: null,
     createdAt: 0,
     prefillMode: 'vllm',
+    allowReasoningPrefill: true,
+    allowMessagePrefill: true,
     systemPromptPrefix: '',
     systemPromptSuffix: '',
     reasoningPrefillPrefix: '',
@@ -186,6 +257,20 @@ databaseCase('completion config', async () => {
     },
   };
   const source: ChatMessage[] = [{ role: 'user', content: 'Revise this prompt' }];
+  for (const allowMessagePrefill of [false, true]) {
+    const split = prepareStandaloneCompletion(
+      { ...endpoint, allowMessagePrefill, allowReasoningPrefill: !allowMessagePrefill },
+      source,
+      1024,
+      { messagePrefill: 'Reply', reasoningPrefill: 'Think' },
+    );
+    assert.deepEqual(split.messages.at(-1), {
+      role: 'assistant',
+      content: allowMessagePrefill ? 'Reply' : '',
+      ...(!allowMessagePrefill ? { reasoning_content: 'Think' } : {}),
+    });
+  }
+
   const original = structuredClone(source);
   const additions = {
     ...endpoint,
@@ -377,7 +462,10 @@ databaseCase('draft completion', async () => {
     ),
     [
       { role: 'assistant', content: 'Chat prefix' },
-      { role: 'user', content: '[System Note]\nContinue: A {{draft}} $&' },
+      {
+        role: 'user',
+        content: '<system_instruction>\nContinue: A {{draft}} $&\n</system_instruction>',
+      },
     ],
   );
 });

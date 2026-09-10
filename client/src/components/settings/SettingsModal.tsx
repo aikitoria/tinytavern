@@ -30,6 +30,13 @@ import WorkflowsTab from './tabs/WorkflowsTab.tsx';
 import { ChatMediaPromptsTab, StandaloneMediaPromptsTab } from './tabs/MediaPromptsTab.tsx';
 
 const TABS: { key: string; label: string; group: string; component: Component }[] = [
+  { key: 'general', label: 'General', group: 'Application', component: GeneralTab },
+  {
+    key: 'model-connections',
+    label: 'Endpoints',
+    group: 'Application',
+    component: EndpointsTab,
+  },
   { key: 'characters', label: 'Characters', group: 'Chat', component: CharactersTab },
   { key: 'personas', label: 'Personas', group: 'Chat', component: PersonasTab },
   { key: 'system-prompts', label: 'System prompts', group: 'Chat', component: PresetsTab },
@@ -52,13 +59,6 @@ const TABS: { key: string; label: string; group: string; component: Component }[
     label: 'Generation settings',
     group: 'Media',
     component: MediaRenderingTab,
-  },
-  { key: 'general', label: 'General', group: 'Application', component: GeneralTab },
-  {
-    key: 'model-connections',
-    label: 'Model connections',
-    group: 'Application',
-    component: EndpointsTab,
   },
 ];
 

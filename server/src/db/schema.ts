@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 73;
+export const SCHEMA_VERSION = 77;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -10,8 +10,33 @@ CREATE TABLE settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE preset_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE template_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE persona_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE endpoint_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE presets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id INTEGER REFERENCES preset_folders(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
@@ -20,6 +45,7 @@ CREATE TABLE presets (
 
 CREATE TABLE personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id INTEGER REFERENCES persona_folders(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   avatar TEXT,
   description TEXT NOT NULL DEFAULT '',
@@ -28,6 +54,7 @@ CREATE TABLE personas (
 
 CREATE TABLE endpoints (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id INTEGER REFERENCES endpoint_folders(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   base_url TEXT NOT NULL,
   api_key TEXT NOT NULL DEFAULT '',
@@ -38,6 +65,8 @@ CREATE TABLE endpoints (
   system_prompt_prefix TEXT NOT NULL DEFAULT '',
   system_prompt_suffix TEXT NOT NULL DEFAULT '',
   reasoning_prefill_prefix TEXT NOT NULL DEFAULT '',
+  allow_reasoning_prefill INTEGER NOT NULL DEFAULT 1,
+  allow_message_prefill INTEGER NOT NULL DEFAULT 1,
   prefill_mode TEXT NOT NULL DEFAULT 'none'
 );
 
@@ -98,6 +127,7 @@ CREATE TABLE messages (
 
 CREATE TABLE templates (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id INTEGER REFERENCES template_folders(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
@@ -255,6 +285,10 @@ CREATE INDEX idx_conversations_persona ON conversations(persona_id) WHERE person
 CREATE INDEX idx_conversations_endpoint ON conversations(endpoint_id) WHERE endpoint_id IS NOT NULL;
 CREATE INDEX idx_characters_preset ON characters(preset_id) WHERE preset_id IS NOT NULL;
 CREATE INDEX idx_characters_template ON characters(template_id) WHERE template_id IS NOT NULL;
+CREATE INDEX idx_presets_folder ON presets(folder_id) WHERE folder_id IS NOT NULL;
+CREATE INDEX idx_templates_folder ON templates(folder_id) WHERE folder_id IS NOT NULL;
+CREATE INDEX idx_personas_folder ON personas(folder_id) WHERE folder_id IS NOT NULL;
+CREATE INDEX idx_endpoints_folder ON endpoints(folder_id) WHERE folder_id IS NOT NULL;
 CREATE INDEX idx_characters_folder ON characters(folder_id) WHERE folder_id IS NOT NULL;
 CREATE INDEX idx_gallery_image ON gallery_items(image);
 CREATE INDEX idx_gallery_updated ON gallery_items(updated_at DESC, id DESC);

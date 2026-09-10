@@ -480,12 +480,18 @@ databaseCase('media transfer', async () => {
   const importedRecipe = stmt('SELECT * FROM media_recipes WHERE id = ?').get(asset.recipeId!)!;
   const configuration = JSON.parse(String(importedRecipe.configuration_json));
   assert.equal(configuration.comfyUrl, getSettings().mediaRendering.comfyUrl);
-  assert.equal(configuration.workflow.json, workflow.json);
+  const expectedGraph = JSON.parse(workflow.json);
+  expectedGraph.load.inputs = { a: '{{input1}}', b: '{{input2}}', c: '{{input3}}' };
+  assert.deepEqual(JSON.parse(configuration.workflow.json), expectedGraph);
   assert.equal(configuration.workflow.standalonePromptPresetId, null);
   assert.equal(configuration.workflow.chatPromptPresetId, null);
   assert.deepEqual(configuration.workflowValues, { strength: 0.8 });
   assert.equal(getMediaAssetResultDetails(asset.id).seed, 4294967295);
   const importedInputs = JSON.parse(String(importedRecipe.inputs_json)) as MediaJobInput[];
+  assert.deepEqual(
+    importedInputs.map((input) => input.slot),
+    ['input1', 'input2', 'input3'],
+  );
   assert.equal(
     getMediaAssetResultDetails(importedInputs[0]!.assetId).seed,
     0,
@@ -498,7 +504,6 @@ databaseCase('media transfer', async () => {
     assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(String(row.path)))), png);
   }
   const rerun = createMediaJobFromAsset(asset.id, { requestKey: newRequestId() });
-  assert.equal(rerun.workflowSnapshot!.json, workflow.json);
   assert.equal(
     rerun.instruction,
     '  Change the background.\nKeep the pose.  ',
@@ -508,7 +513,7 @@ databaseCase('media transfer', async () => {
   assert.deepEqual(rerun.workflowValues, { strength: 0.8 });
   assert.equal(
     rerun.workflowSnapshot!.json,
-    workflow.json,
+    configuration.workflow.json,
     'Imported result reruns without a saved workflow or source job',
   );
   deleteMediaJob(requireMediaJob(rerun.id));
@@ -617,7 +622,7 @@ databaseCase('media transfer', async () => {
   const missingExport = exportPortableConversation(missingCopy.id);
   assert.deepEqual(
     missingExport.recipes![0]!.inputs,
-    editedRecipe.inputs,
+    editedRecipe.inputs.map((input, i) => ({ ...input, slot: `input${i + 1}` })),
     'Import/export preserves every deleted input slot without an image file',
   );
   const missingPaths = collectConversationImages(missingCopy.id);

@@ -1,11 +1,11 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import { faCheck, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import { state } from '../state/store.ts';
 import Avatar from '../components/ui/Avatar.tsx';
 import DropdownSurface from '../components/ui/DropdownSurface.tsx';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import ReferenceEditButton from '../components/ui/ReferenceEditButton.tsx';
-import { editReferencedEntity } from '../state/entityReferences.ts';
+import { entityOptions } from '../state/entityReferences.ts';
 
 export default function MediaCharacterPicker(props: {
   value: number[];
@@ -13,6 +13,15 @@ export default function MediaCharacterPicker(props: {
   onChange: (value: number[]) => void;
 }) {
   const [open, setOpen] = createSignal(false);
+  const options = createMemo(() => {
+    const characters = new Map(
+      state.characters.map((character) => [String(character.id), character]),
+    );
+    return entityOptions('characters', state.characters).map((option) => ({
+      ...option,
+      character: characters.get(option.value)!,
+    }));
+  });
   let button!: HTMLButtonElement;
   const label = () =>
     state.characters
@@ -67,37 +76,46 @@ export default function MediaCharacterPicker(props: {
             </Show>
           </span>
         </button>
-        <For each={state.characters}>
-          {(character) => (
-            <div
-              class="flex items-center gap-1 [&>button:first-child]:flex-1 [&>button:first-child]:min-w-0"
-              role="presentation"
-            >
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-label={character.name}
-                aria-checked={props.value.includes(character.id)}
-                onClick={() => toggle(character.id)}
-                disabled={props.disabled}
+        <For each={options()}>
+          {(option, index) => (
+            <>
+              <Show when={option.group && option.group !== options()[index() - 1]?.group}>
+                <div class="px-2 pt-2 pb-1 text-dim text-xs font-semibold" role="presentation">
+                  {option.group}
+                </div>
+              </Show>
+              <div
+                class="flex items-center gap-1 [&>button:first-child]:flex-1 [&>button:first-child]:min-w-0"
+                role="presentation"
               >
-                <Avatar src={character.avatarThumbnail} name={character.name} />
-                <span>{character.name}</span>
-                <span class="menu-check">
-                  <Show when={props.value.includes(character.id)}>
-                    <FontAwesomeIcon icon={faCheck} size={12} />
-                  </Show>
-                </span>
-              </button>
-              <ReferenceEditButton
-                label={character.name}
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  editReferencedEntity('characters', character.id);
-                }}
-              />
-            </div>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-label={option.group ? `${option.group}: ${option.label}` : option.label}
+                  aria-checked={props.value.includes(option.character.id)}
+                  onClick={() => toggle(option.character.id)}
+                  disabled={props.disabled}
+                >
+                  <span classList={{ 'pl-3': !!option.group }}>
+                    <Avatar src={option.character.avatarThumbnail} name={option.label} />
+                  </span>
+                  <span>{option.label}</span>
+                  <span class="menu-check">
+                    <Show when={props.value.includes(option.character.id)}>
+                      <FontAwesomeIcon icon={faCheck} size={12} />
+                    </Show>
+                  </span>
+                </button>
+                <ReferenceEditButton
+                  label={option.label}
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    option.edit?.();
+                  }}
+                />
+              </div>
+            </>
           )}
         </For>
       </DropdownSurface>

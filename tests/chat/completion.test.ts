@@ -194,7 +194,7 @@ databaseCase('generation stream', async () => {
     reasoningPrefill: null,
     messagePrefill: null,
     namePrefill: 'Hal:',
-    disabledPrefillSpeakerNote: null,
+    speakerHandoff: null,
     charName: 'Hal',
     userName: 'User',
   };
@@ -304,6 +304,26 @@ databaseCase('generation stream', async () => {
     assert.equal(getMessage(retryId)!.reasoning, 'Global\nTemplate reasoning');
     assert.deepEqual(prompt.messages, [{ role: 'user', content: 'Hello' }]);
 
+    stmt('UPDATE endpoints SET allow_message_prefill = 0 WHERE id = ?').run(endpointId);
+    const reasoningOnlyId = message();
+    startGeneration(conversation, reasoningOnlyId, undefined, { prompt: retryPrompt });
+    await flush();
+    const reasoningOnly = requests.at(-1)!;
+    assert.equal(reasoningOnly.messages.at(-1)!.content, '');
+    reasoningOnly.stream.write(upstreamFrame({ content: 'Partial reply' }));
+    await flush();
+    jest.advanceTimersByTime(120_000);
+    await flush();
+    assert.equal(getMessage(reasoningOnlyId)!.status, 'error');
+    assert.equal(getMessage(reasoningOnlyId)!.content, 'Partial reply');
+    jest.advanceTimersByTime(1000);
+    await flush();
+    assert.strictEqual(
+      requests.at(-1),
+      reasoningOnly,
+      'Reasoning prefills cannot resume visible content',
+    );
+
     // A request that stalls before returning response headers has the same deadline.
     let waitingSignal!: AbortSignal;
     mockFetch(
@@ -357,7 +377,7 @@ databaseCase('generation persistence', async () => {
     reasoningPrefill: null,
     messagePrefill: null,
     namePrefill: null,
-    disabledPrefillSpeakerNote: null,
+    speakerHandoff: null,
     charName: 'Assistant',
     userName: 'User',
   };
@@ -471,6 +491,7 @@ databaseCase('prompt reasoning', async () => {
   const { streamEndpointCompletion } = await import('../../server/src/generation/generation.ts');
   const { streamTextCompletion } = await import('../../client/src/state/api.ts');
   const endpoint: Endpoint = {
+    folderId: null,
     id: 1,
     name: 'Test',
     baseUrl: 'http://endpoint.invalid/v1',
@@ -480,6 +501,8 @@ databaseCase('prompt reasoning', async () => {
     model: null,
     createdAt: 0,
     prefillMode: 'vllm',
+    allowReasoningPrefill: true,
+    allowMessagePrefill: true,
     systemPromptPrefix: '',
     systemPromptSuffix: '',
     reasoningPrefillPrefix: '',

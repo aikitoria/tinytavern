@@ -195,15 +195,11 @@ function MediaPromptsPage(props: { chat: boolean }) {
                     ['{{char}} / {{user}}', 'Character and persona names in chat'],
                     [
                       '{{input1_prompt}}',
-                      'Saved prompt for the first image input listed in the editor; empty if unavailable.',
-                    ],
-                    [
-                      '{{input2_prompt}}',
-                      `Saved prompt for the second image input. Continue numbering up to ${MAX_MEDIA_INPUTS}; absent inputs and images without saved prompts give empty text.`,
+                      `Inserts the saved prompt for image input1. Use input1_prompt through input${MAX_MEDIA_INPUTS}_prompt to match image binding numbers. Missing prompts produce empty text.`,
                     ],
                     [
                       '{{#if input1_prompt}}…{{/if}}',
-                      'Include a block only when the first input has a saved prompt.',
+                      'Include a block only when input1 has a saved prompt.',
                     ],
                     [
                       '{{#if instruction}}…{{/if}}',
@@ -221,7 +217,6 @@ function MediaPromptsPage(props: { chat: boolean }) {
             value={value(field)}
             defaultValue={field === 'chatPrompt' ? defaultChatMediaPrompt() : defaults[field]}
             readOnly={props.readOnly}
-            rows={field.endsWith('Prefill') ? 3 : 10}
             template
             keys={keys}
             onChange={(text) => {
@@ -307,8 +302,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
             {presetTransfer()}
           </>
         }
-        listActions={<folders.NewButton />}
-        listContent={<folders.List />}
+        folderBrowser={folders}
         listFooter={
           <SettingsTransferButtons
             type={`page:${key}`}
@@ -355,7 +349,6 @@ function MediaPromptsPage(props: { chat: boolean }) {
         </SettingsSection>
         <Prefills />
       </EntityEditorPane>
-      <folders.Dialog />
     </>
   );
 }

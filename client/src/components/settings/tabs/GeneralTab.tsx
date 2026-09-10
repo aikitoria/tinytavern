@@ -31,7 +31,9 @@ export default function GeneralTab() {
   const [error, setError] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [removePassword, setRemovePassword] = createSignal(false);
-  const [deletingChats, setDeletingChats] = createSignal(false);
+  const [maintenance, setMaintenance] = createSignal<'chats' | 'characters' | 'settings' | null>(
+    null,
+  );
 
   const value = <K extends SettingKey>(key: K): Settings[K] => draft()[key] as Settings[K];
   const change = <K extends SettingKey>(key: K, value: Settings[K]) =>
@@ -77,30 +79,49 @@ export default function GeneralTab() {
   });
   const { save, discard, saving } = submission;
 
-  const deleteChats = async () => {
-    if (
-      state.conversations.length === 0 ||
-      !(await confirmAction({
-        title: 'Delete all chats?',
-        message:
-          'This permanently deletes every conversation and its generated images. Characters and settings are kept. This cannot be undone.',
-        confirmLabel: 'Delete all chats',
-        danger: true,
-      }))
-    )
-      return;
-    setDeletingChats(true);
+  const actions = {
+    chats: {
+      title: 'Delete all chats',
+      message:
+        'Permanently delete every conversation and its attached media. Characters and settings are kept. This cannot be undone.',
+    },
+    characters: {
+      title: 'Delete all characters',
+      message:
+        'Permanently delete every character and its avatar. Existing chats and gallery media are kept, with character associations removed. This cannot be undone.',
+    },
+    settings: {
+      title: 'Reset settings',
+      message:
+        'Restore all global settings to their defaults, removing configured media workflows, prompt libraries, favorites and avatar prompt presets. Unsaved edits on this page will be discarded. Chats, characters, saved connections, personas, chat templates, system prompts and the access password are kept. This cannot be undone.',
+    },
+  };
+  const runMaintenance = async (action: keyof typeof actions) => {
+    if (maintenance() || saving()) return;
+    const revision = state.settings.revision;
+    setMaintenance(action);
     try {
-      await deleteAllConversations();
+      const { title, message } = actions[action];
+      if (
+        !(await confirmAction({ title: `${title}?`, message, confirmLabel: title, danger: true }))
+      )
+        return;
+      if (action === 'chats') await deleteAllConversations();
+      else if (action === 'characters') await api.deleteAllCharacters();
+      else {
+        applySettings(await api.resetSettings(revision));
+        discard();
+        flashSaved();
+      }
       setError('');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setDeletingChats(false);
+      setMaintenance(null);
     }
   };
 
-  useSettingsGuard(submission);
+  useSettingsGuard({ ...submission, saving: () => saving() || maintenance() !== null });
 
   return (
     <SettingsDraftContext.Provider
@@ -111,7 +132,10 @@ export default function GeneralTab() {
         onError: setError,
       }}
     >
-      <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
+      <fieldset
+        disabled={maintenance() !== null}
+        class="form m-0 min-w-0 border-0 p-0 [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2"
+      >
         <SettingsSection title="Access" id="access" fields={[]}>
           <FormField
             label="Access password"
@@ -195,7 +219,6 @@ export default function GeneralTab() {
             <Field
               name="titlePrompt"
               kind="macro"
-              rows={5}
               label={
                 <>
                   Chat title prompt template
@@ -209,7 +232,6 @@ export default function GeneralTab() {
             <Field
               name="draftCompletionPrompt"
               kind="macro"
-              rows={7}
               keys={['draft']}
               label={
                 <>
@@ -227,18 +249,36 @@ export default function GeneralTab() {
           </p>
         </Show>
 
-        <SettingsSection title="Chat history" id="chat-history" fields={[]}>
+        <SettingsSection title="Data management" id="data-management" fields={[]}>
           <p class="hint">
-            Permanently delete every conversation and its generated images. Characters and settings
-            are kept.
+            These actions take effect immediately after confirmation and cannot be undone.
           </p>
-          <button
-            class="danger-btn"
-            disabled={deletingChats() || state.conversations.length === 0}
-            onClick={() => void deleteChats()}
-          >
-            {deletingChats() ? 'Deleting…' : 'Delete all chats'}
-          </button>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="danger-btn"
+              disabled={saving() || state.conversations.length === 0}
+              onClick={() => void runMaintenance('chats')}
+            >
+              {maintenance() === 'chats' ? 'Deleting…' : 'Delete all chats'}
+            </button>
+            <button
+              type="button"
+              class="danger-btn"
+              disabled={saving() || state.characters.length === 0}
+              onClick={() => void runMaintenance('characters')}
+            >
+              {maintenance() === 'characters' ? 'Deleting…' : 'Delete all characters'}
+            </button>
+            <button
+              type="button"
+              class="danger-btn"
+              disabled={saving()}
+              onClick={() => void runMaintenance('settings')}
+            >
+              {maintenance() === 'settings' ? 'Resetting…' : 'Reset settings'}
+            </button>
+          </div>
         </SettingsSection>
 
         <SettingsActions save={save} discard={discard} saving={saving()} saved={saved()}>
@@ -263,7 +303,7 @@ export default function GeneralTab() {
             }}
           />
         </SettingsActions>
-      </div>
+      </fieldset>
     </SettingsDraftContext.Provider>
   );
 }

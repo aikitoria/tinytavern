@@ -36,7 +36,7 @@ export default function GalleryDetail(props: {
   readOnly?: boolean;
   active?: boolean;
   showDetails: boolean;
-  onDelete: (item: GalleryItem) => Promise<void>;
+  onDelete: (item: GalleryItem, event: MouseEvent) => Promise<void>;
   onOpenSource: (id: number) => void;
   register: (actions: SettingsSectionActions) => () => void;
 }) {
@@ -149,11 +149,11 @@ export default function GalleryDetail(props: {
       toast('Could not copy the prompt.');
     }
   };
-  const remove = async () => {
+  const remove = async (event: MouseEvent) => {
     if (deleting()) return;
     setDeleting(true);
     try {
-      await props.onDelete(props.item);
+      await props.onDelete(props.item, event);
     } finally {
       setDeleting(false);
     }
@@ -436,7 +436,7 @@ export default function GalleryDetail(props: {
               type="button"
               class="danger"
               disabled={deleting()}
-              onClick={() => void remove()}
+              onClick={(event) => void remove(event)}
             >
               <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete saved{' '}
               {video() ? 'video' : 'image'}

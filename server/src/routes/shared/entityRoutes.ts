@@ -45,6 +45,7 @@ export interface EntityConfig<T extends { id: number }> {
   /** Entities that denormalize references to this one, re-fetched after a delete. */
   invalidateOnDelete?: InvalidateEntity[];
   onDelete?: (id: number) => void;
+  allowDeleteAll?: boolean;
   /** Copies external state (e.g. avatar files) after row duplication. */
   onDuplicate?: (sourceId: number, newId: number) => void;
 }
@@ -136,12 +137,36 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     const b = objectBody(body);
     writer.update(id, writer.values(b, row));
     invalidate(cfg.table);
-    discardSpeculativeSwipes();
-    bumpAllConversationRevisions();
-    for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
+    if (Object.keys(b).some((key) => key !== 'folderId')) {
+      discardSpeculativeSwipes();
+      bumpAllConversationRevisions();
+      for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
+    }
     return publish(cfg.toDto(rowById(cfg.table, id)));
   });
 
+  const afterDelete = (ids: number[]) => {
+    discardSpeculativeSwipes();
+    bumpAllConversationRevisions();
+    for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
+    invalidate(cfg.table);
+    for (const entity of cfg.invalidateOnDelete ?? []) invalidate(entity);
+    for (const id of ids) {
+      if (cfg.settingsRef && clearSettingReference(cfg.settingsRef, id)) invalidate('settings');
+      cfg.onDelete?.(id);
+    }
+  };
+  if (cfg.allowDeleteAll) {
+    route.del(`/api/${cfg.table}`, () => {
+      const ids = stmt(
+        `DELETE FROM ${cfg.table}${cfg.readOnlyColumn ? ` WHERE ${cfg.readOnlyColumn} = 0` : ''} RETURNING id`,
+      )
+        .all()
+        .map((row) => Number(row.id));
+      if (ids.length) afterDelete(ids);
+      return { deleted: ids.length };
+    });
+  }
   route.del(`/api/${cfg.table}/:id`, ({ params }) => {
     const id = positiveId(params.id);
     const row = rowById(cfg.table, id);
@@ -149,12 +174,6 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
       throw new HttpError(403, 'This default is read-only and cannot be deleted.');
     }
     stmt(`DELETE FROM ${cfg.table} WHERE id = ?`).run(id);
-    discardSpeculativeSwipes();
-    bumpAllConversationRevisions();
-    for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
-    cfg.onDelete?.(id);
-    invalidate(cfg.table);
-    for (const entity of cfg.invalidateOnDelete ?? []) invalidate(entity);
-    if (cfg.settingsRef && clearSettingReference(cfg.settingsRef, id)) invalidate('settings');
+    afterDelete([id]);
   });
 }

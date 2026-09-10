@@ -1,6 +1,6 @@
 import { Show, type ComponentProps, type JSX } from 'solid-js';
 import SettingLabel, { createDefaultField, type DefaultField } from './SettingField.tsx';
-import MacroTextarea from './MacroTextarea.tsx';
+import MacroTextarea, { DEFAULT_TEXTAREA_ROWS } from './MacroTextarea.tsx';
 import Select, { type SelectOption, type SelectHandle } from '../ui/Select.tsx';
 import MacroHelp from './MacroHelp.tsx';
 
@@ -101,7 +101,7 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
         readOnly={props.readOnly}
         disabled={props.disabled}
         placeholder={props.placeholder}
-        rows={props.rows}
+        rows={props.rows ?? DEFAULT_TEXTAREA_ROWS}
         class={props.class}
         classList={props.classList}
         onInput={(event) => change(event.currentTarget.value)}

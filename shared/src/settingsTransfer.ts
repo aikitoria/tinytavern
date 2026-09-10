@@ -1,7 +1,7 @@
 import { ENTITY_FIELDS } from './entityFields.ts';
 import { nextCollectionId } from './numericIds.ts';
 import type { Settings, MediaPromptPreset, MediaWorkflow, MediaCollectionFolder } from './index.ts';
-import { mediaWorkflowError, MAX_MEDIA_PRESETS } from './media.ts';
+import { normalizeMediaWorkflowInputs, mediaWorkflowError, MAX_MEDIA_PRESETS } from './media.ts';
 
 export interface SettingsTransferDocument {
   format: 'tinytavern-settings';
@@ -94,7 +94,9 @@ export function entityTransferData(type: TransferEntity, value: unknown): Record
   }
   if (typeof result.name !== 'string' || !result.name.trim()) throw new Error('Enter an item name');
   for (const [key, value] of Object.entries(result)) {
-    if (['prefixNames', 'usesPersonas'].includes(key)) {
+    if (
+      ['prefixNames', 'usesPersonas', 'allowReasoningPrefill', 'allowMessagePrefill'].includes(key)
+    ) {
       if (typeof value !== 'boolean') throw new Error(`${key} must be true or false`);
     } else if (key === 'genParams') {
       const params = transferObject(value);
@@ -104,7 +106,7 @@ export function entityTransferData(type: TransferEntity, value: unknown): Record
         )
       )
         throw new Error('Invalid generation parameters');
-    } else if ((key === 'model' || key === 'avatarData') && value === null) {
+    } else if ((key === 'model' || key === 'avatarData' || key === 'folderId') && value === null) {
       continue;
     } else transferString(value, key);
   }
@@ -320,7 +322,7 @@ export function importWorkflow(
   };
   const error = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
   if (error) throw new Error(error);
-  return workflow;
+  return normalizeMediaWorkflowInputs(workflow).workflow;
 }
 export function exportWorkflowLibrary(settings: Settings) {
   const value = settings.mediaRendering;

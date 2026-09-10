@@ -4,13 +4,15 @@ import { defineAvatarRoutes } from './shared/avatarRoutes.ts';
 import type { Persona } from '@tinytavern/shared';
 import { stmt, toPersona } from '../db/db.ts';
 import { copyAvatarFiles, deleteAvatarFiles } from '../characters/avatarStore.ts';
-import { defineEntityRoutes, entityFields } from './shared/entityRoutes.ts';
+import { defineEntityRoutes, entityFields, referenceValue } from './shared/entityRoutes.ts';
 
 defineEntityRoutes<Persona>({
   table: 'personas',
   toDto: toPersona,
   toPublic: publicAvatar,
-  fields: entityFields(ENTITY_FIELDS.personas),
+  fields: entityFields(ENTITY_FIELDS.personas, {
+    folderId: referenceValue('folderId', 'persona_folders'),
+  }),
   settingsRef: 'defaultPersonaId',
   invalidateOnDelete: ['conversations'],
   onDelete: (id) => deleteAvatarFiles('persona', id),

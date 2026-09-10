@@ -1,3 +1,4 @@
+import EntityFolderField from '../EntityFolderField.tsx';
 import SettingsSection from '../SettingsSection.tsx';
 import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
 import { api } from '../../../state/api.ts';
@@ -9,6 +10,7 @@ import TemplateFields, { type TemplateFieldsHandle } from '../../forms/TemplateF
 
 export default function TemplatesTab() {
   const nameEl = createDefaultField(() => '');
+  const folderEl = createDefaultField(() => '');
   let fields!: TemplateFieldsHandle;
 
   const editor = createEntityEditor({
@@ -16,10 +18,12 @@ export default function TemplatesTab() {
     items: () => state.templates,
     load: (template) => {
       nameEl.value = template?.name ?? '';
+      folderEl.value = String(template?.folderId ?? '');
       fields.value = template;
     },
     data: () => ({
       name: nameEl.value,
+      folderId: folderEl.value ? Number(folderEl.value) : null,
       ...fields.value,
     }),
     deletePrompt: 'Delete this template?',
@@ -40,11 +44,12 @@ export default function TemplatesTab() {
       newLabel="New template"
       activeId={state.settings.defaultTemplateId}
     >
-      <SettingsSection title="Basics" id="template-basics" fields={['name']}>
+      <SettingsSection title="Basics" id="template-basics" fields={['name', 'folderId']}>
         <SettingLabel for={nameEl.id()} field={readOnly() ? undefined : nameEl}>
           Name
         </SettingLabel>
         <input readOnly={readOnly()} ref={nameEl.ref} placeholder="Roleplay" />
+        <EntityFolderField type="templates" field={folderEl} readOnly={readOnly()} />
       </SettingsSection>
       <TemplateFields readOnly={readOnly()} ref={fields} />
     </EntityEditorPane>

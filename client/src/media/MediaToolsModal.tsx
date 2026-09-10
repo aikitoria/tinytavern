@@ -1054,7 +1054,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   </Show>
                 </div>
                 <For each={slots()}>
-                  {(slot, index) => (
+                  {(slot) => (
                     <div
                       class="flex items-center gap-3 field-group [&_.key-row]:flex-wrap"
                       role="group"
@@ -1081,7 +1081,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           class="media-reference-label m-0 text-sm font-semibold text-foreground"
                           id={`media-input-${slot}`}
                         >
-                          Input {index() + 1} · {inputLabel(slot)}
+                          {mediaInputLabel(slot)}
+                          {inputLabel(slot) !== mediaInputLabel(slot)
+                            ? ` · ${inputLabel(slot)}`
+                            : ''}
                         </span>
                         <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                           <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>

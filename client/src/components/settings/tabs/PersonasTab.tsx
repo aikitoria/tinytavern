@@ -1,3 +1,5 @@
+import { exportEntityDraft } from '../settingsSchema.ts';
+import EntityFolderField from '../EntityFolderField.tsx';
 import SettingsSection from '../SettingsSection.tsx';
 import type { Persona } from '@tinytavern/shared';
 import SettingLabel, { createDefaultField } from '../../forms/SettingField.tsx';
@@ -19,6 +21,7 @@ export default function PersonasTab() {
   const [avatarData, setAvatarData] = createSignal<string | null | undefined>();
   const [avatarGen, setAvatarGen] = createSignal(false);
   const nameEl = createDefaultField(() => '');
+  const folderEl = createDefaultField(() => '');
   const descriptionEl = createDefaultField(() => '');
 
   const editor = createEntityEditor({
@@ -28,20 +31,29 @@ export default function PersonasTab() {
     load: (persona: (Persona & { avatarData?: string | null }) | undefined) => {
       setAvatarData(persona?.avatarData);
       nameEl.value = persona?.name ?? '';
+      folderEl.value = String(persona?.folderId ?? '');
       descriptionEl.value = persona?.description ?? '';
     },
     data: () => ({
       name: nameEl.value,
+      folderId: folderEl.value ? Number(folderEl.value) : null,
       description: descriptionEl.value,
       ...(avatarData() === undefined ? {} : { avatarData: avatarData() }),
     }),
     create: (data) =>
-      data.avatarData === undefined ? api.personas.create(data) : api.personas.import(data, null),
+      data.avatarData === undefined
+        ? api.personas.create(data)
+        : api.personas.import(exportEntityDraft('personas', data), null),
     patch: (id, data) =>
       data.avatarData === undefined
         ? api.personas.patch(id, data)
         : api.personas.import(
-            { name: nameEl.value, description: descriptionEl.value, ...data },
+            exportEntityDraft('personas', {
+              name: nameEl.value,
+              description: descriptionEl.value,
+              folderId: folderEl.value ? Number(folderEl.value) : null,
+              ...data,
+            }),
             id,
           ),
     deletePrompt: 'Delete this persona?',
@@ -66,7 +78,11 @@ export default function PersonasTab() {
         description: 'New conversations will start without a persona selected.',
       }}
     >
-      <SettingsSection title="Basics" id="persona-basics" fields={['name', 'avatarData']}>
+      <SettingsSection
+        title="Basics"
+        id="persona-basics"
+        fields={['name', 'folderId', 'avatarData']}
+      >
         <Show when={avatarData() !== undefined}>
           <div class="flex items-center gap-3 [&_.avatar]:size-14">
             <Avatar src={avatarData()} name={nameEl.value || '?'} />
@@ -98,6 +114,7 @@ export default function PersonasTab() {
         </Show>
         <SettingLabel field={nameEl}>Name (used as {'{{user}}'})</SettingLabel>
         <input ref={nameEl.ref} placeholder="Your name" />
+        <EntityFolderField type="personas" field={folderEl} />
       </SettingsSection>
       <SettingsSection
         title="Persona description"

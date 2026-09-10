@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, useContext, type JSX } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, on, useContext, type JSX } from 'solid-js';
 import { faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { exportSettingsSection, importSettingsSection } from '@tinytavern/shared';
@@ -52,32 +52,35 @@ export default function SettingsSection(props: {
             props.title
           )}
         </h3>
-        <div
-          class="flex gap-1 shrink-0"
-          title={unavailable() ? 'This section has no transferable settings.' : undefined}
-        >
-          <SettingsTransferButtons
-            type={`section:${props.id}`}
-            importLabel={`Import ${props.title}`}
-            exportLabel={`Export ${props.title}`}
-            disabledImport={unavailable()}
-            disabledExport={unavailable()}
-            onError={(message) => draft?.onError(message)}
-            exportData={async () => {
-              const paths = fields();
-              return exportSettingsSection(
-                draft!.schema,
-                paths,
-                draft!.exportRead ? await draft!.exportRead(paths) : draft!.read(),
-              );
-            }}
-            importData={(data) => {
-              const next = importSettingsSection(draft!.schema, fields(), data, draft!.read());
-              draft!.write(next);
-              draft!.onError('');
-            }}
-          />
-        </div>
+        <Show when={fields().length}>
+          <div
+            class="flex gap-1 shrink-0"
+            title={unavailable() ? 'This section has no transferable settings.' : undefined}
+          >
+            <SettingsTransferButtons
+              compact
+              type={`section:${props.id}`}
+              importLabel={`Import ${props.title}`}
+              exportLabel={`Export ${props.title}`}
+              disabledImport={unavailable()}
+              disabledExport={unavailable()}
+              onError={(message) => draft?.onError(message)}
+              exportData={async () => {
+                const paths = fields();
+                return exportSettingsSection(
+                  draft!.schema,
+                  paths,
+                  draft!.exportRead ? await draft!.exportRead(paths) : draft!.read(),
+                );
+              }}
+              importData={(data) => {
+                const next = importSettingsSection(draft!.schema, fields(), data, draft!.read());
+                draft!.write(next);
+                draft!.onError('');
+              }}
+            />
+          </div>
+        </Show>
       </div>
       {collapsible ? (
         <div class="form-stack" classList={{ hidden: !expanded() }}>

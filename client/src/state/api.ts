@@ -1,4 +1,6 @@
+import { ENTITY_FOLDERS, type FolderEntity, type EntityFolder } from '@tinytavern/shared';
 import {
+  DEFAULT_SETTINGS,
   transferDocument,
   type TransferEntity,
   type SettingsTransferDocument,
@@ -6,7 +8,6 @@ import {
 import type { MediaImageConfig } from '@tinytavern/shared';
 import type {
   Character,
-  CharacterFolder,
   Conversation,
   Endpoint,
   GalleryItem,
@@ -357,6 +358,15 @@ export const api = {
   deleteGalleryItems: (ids: number[]) =>
     request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
+  deleteAllCharacters: () => request<{ deleted: number }>('DELETE', '/api/characters'),
+  resetSettings: (expectedRevision: number): Promise<Settings> =>
+    api.putSettings(
+      {
+        ...DEFAULT_SETTINGS,
+        imageGeneration: { ...DEFAULT_SETTINGS.imageGeneration, promptPresets: {} },
+      },
+      expectedRevision,
+    ),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),
   patchConversation: mutation<Conversation, Partial<Conversation>>('conversations', '', 'PATCH'),
@@ -443,7 +453,12 @@ export const api = {
         contentType: 'application/octet-stream',
       }),
   },
-  characterFolders: resource<CharacterFolder>('character-folders'),
+  entityFolders: Object.fromEntries(
+    Object.entries(ENTITY_FOLDERS).map(([entity, { path }]) => [
+      entity,
+      resource<EntityFolder>(path),
+    ]),
+  ) as Record<FolderEntity, ReturnType<typeof resource<EntityFolder>>>,
   templates: entity<Template>('templates'),
   presets: entity<Preset>('presets'),
   personas: {

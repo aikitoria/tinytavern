@@ -1,4 +1,9 @@
-import { readSseData, prepareChatMessages } from '@tinytavern/shared';
+import {
+  readSseData,
+  prepareChatMessages,
+  messagePrefillEnabled,
+  reasoningPrefillEnabled,
+} from '@tinytavern/shared';
 import { publicMessage } from '../media/mediaUrls.ts';
 import type { Conversation, Endpoint, GenMeta, Message, PromptTrace } from '@tinytavern/shared';
 import { stmt, toEndpoint, toMessage, transaction } from '../db/db.ts';
@@ -86,22 +91,22 @@ export function activePromptTrace(mid: number): PromptTrace | null {
   const gen = active.get(mid);
   if (!gen?.requestContext) return null;
   const { endpoint, built } = gen.requestContext;
-  const { messages } = prepareChatMessages(
-    { ...built, namePrefill: null },
-    { prefillMode: endpoint.prefillMode, content: '', reasoning: '' },
-  );
+  const prepared = prepareChatMessages(built, { ...endpoint, content: '', reasoning: '' });
+  const messages = prepared.messages.slice(0, prepared.prefillMessageIndex ?? undefined);
   return {
     messages: withEndpointSystemPrompt(endpoint, messages),
     reasoningPrefill: null,
     messagePrefill: null,
     namePrefill: null,
-    disabledPrefillSpeakerNote: null,
+    speakerHandoff: null,
     prefillMode: endpoint.prefillMode,
+    allowReasoningPrefill: endpoint.allowReasoningPrefill,
+    allowMessagePrefill: endpoint.allowMessagePrefill,
     userMessagePrefix: '',
     stream: {
       messageId: mid,
       generationToken: gen.generationToken,
-      namePrefix: endpoint.prefillMode === 'disabled' ? '' : (built.namePrefill ?? ''),
+      namePrefix: messagePrefillEnabled(endpoint) ? (built.namePrefill ?? '') : '',
     },
   };
 }
@@ -260,8 +265,9 @@ export function startGeneration(
       if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err)) {
         // Without prefills, retrying would append a fresh answer to the partial result.
         if (
-          gen.requestContext?.endpoint.prefillMode === 'disabled' &&
-          (gen.content.length > 0 || gen.reasoning.length > 0)
+          gen.requestContext &&
+          ((gen.content.length > 0 && !messagePrefillEnabled(gen.requestContext.endpoint)) ||
+            (gen.reasoning.length > 0 && !reasoningPrefillEnabled(gen.requestContext.endpoint)))
         ) {
           gen.meta.error ??= err instanceof Error ? err.message : String(err);
           finalize(gen, 'error');
@@ -304,7 +310,7 @@ export function resolveEndpoint(conversation: Conversation | null): Endpoint {
 }
 
 export function supportsAssistantContinuation(conversation: Conversation): boolean {
-  return resolveEndpoint(conversation).prefillMode !== 'disabled';
+  return messagePrefillEnabled(resolveEndpoint(conversation));
 }
 
 /** Shared wire construction; callers retain their own deadlines and retry policy. */
@@ -507,17 +513,20 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   gen.model = endpoint.model;
 
   // Seed fresh replies only; retries/resumes already carry the template in their buffers.
-  if (endpoint.prefillMode !== 'disabled') {
+  if (!isResume || reasoningPrefillEnabled(endpoint)) {
     gen.reasoning = endpointReasoningPrefill(
       endpoint,
       isResume ? gen.reasoning : built.reasoningPrefill,
       isResume,
     );
-    if (!isResume && built.messagePrefill) gen.content = built.messagePrefill;
   }
+  if (!isResume && messagePrefillEnabled(endpoint) && built.messagePrefill)
+    gen.content = built.messagePrefill;
 
   const { messages, prefilled } = prepareChatMessages(built, {
     prefillMode: endpoint.prefillMode,
+    allowReasoningPrefill: endpoint.allowReasoningPrefill,
+    allowMessagePrefill: endpoint.allowMessagePrefill,
     content: gen.content,
     reasoning: gen.reasoning,
   });

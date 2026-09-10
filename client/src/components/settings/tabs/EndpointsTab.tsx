@@ -1,3 +1,4 @@
+import EntityFolderField from '../EntityFolderField.tsx';
 import SettingsSection from '../SettingsSection.tsx';
 import SettingLabel from '../../forms/SettingField.tsx';
 import { For, Show, createSignal, createUniqueId } from 'solid-js';
@@ -17,6 +18,7 @@ export default function EndpointsTab() {
   const [keyCleared, setKeyCleared] = createSignal(false);
   const form = createFormFields({
     name: '',
+    folderId: '',
     baseUrl: '',
     apiKey: '',
     temperature: '',
@@ -27,6 +29,8 @@ export default function EndpointsTab() {
     presencePenalty: '',
     reasoningEffort: '',
     prefillMode: 'none',
+    allowReasoningPrefill: true,
+    allowMessagePrefill: true,
     systemPromptPrefix: '',
     systemPromptSuffix: '',
     reasoningPrefillPrefix: '',
@@ -50,9 +54,12 @@ export default function EndpointsTab() {
       setModel(endpoint?.model ?? '');
       form.load({
         name: endpoint?.name ?? '',
+        folderId: String(endpoint?.folderId ?? ''),
         baseUrl: endpoint?.baseUrl ?? '',
         apiKey: importing ? keyEl.value : '',
         prefillMode: endpoint?.prefillMode ?? 'none',
+        allowReasoningPrefill: endpoint?.allowReasoningPrefill ?? true,
+        allowMessagePrefill: endpoint?.allowMessagePrefill ?? true,
         systemPromptPrefix: endpoint?.systemPromptPrefix ?? '',
         systemPromptSuffix: endpoint?.systemPromptSuffix ?? '',
         reasoningPrefillPrefix: endpoint?.reasoningPrefillPrefix ?? '',
@@ -65,9 +72,12 @@ export default function EndpointsTab() {
     data: () => {
       const {
         name,
+        folderId,
         baseUrl,
         apiKey,
         prefillMode,
+        allowReasoningPrefill,
+        allowMessagePrefill,
         reasoningEffort,
         systemPromptPrefix,
         systemPromptSuffix,
@@ -83,10 +93,13 @@ export default function EndpointsTab() {
         genParams.reasoningEffort = reasoningEffort as GenParams['reasoningEffort'];
       return {
         name,
+        folderId: folderId ? Number(folderId) : null,
         baseUrl,
         model: model() || null,
         genParams,
         prefillMode: prefillMode as Endpoint['prefillMode'],
+        allowReasoningPrefill,
+        allowMessagePrefill,
         systemPromptPrefix,
         systemPromptSuffix,
         reasoningPrefillPrefix,
@@ -127,9 +140,10 @@ export default function EndpointsTab() {
       <SettingsSection
         title="Connection"
         id="endpoint-connection"
-        fields={['name', 'baseUrl', 'model']}
+        fields={['name', 'folderId', 'baseUrl', 'model']}
       >
         <FormField field={form.fields.name} label="Name" placeholder="Local llama.cpp" />
+        <EntityFolderField type="endpoints" field={form.fields.folderId} />
         <FormField
           field={form.fields.baseUrl}
           label="Base URL"
@@ -214,29 +228,26 @@ export default function EndpointsTab() {
           field={form.fields.systemPromptPrefix}
           label="System prompt prefix"
           kind="textarea"
-          rows={4}
           hint="Added before the assembled system prompt."
         />
         <FormField
           field={form.fields.systemPromptSuffix}
           label="System prompt suffix"
           kind="textarea"
-          rows={4}
           hint="Added after the assembled system prompt. If there is no system prompt, the prefix and suffix form one."
         />
         <FormField
           field={form.fields.reasoningPrefillPrefix}
           label="Reasoning prefill prefix"
           kind="textarea"
-          rows={4}
-          hint="Added before the prompt template's reasoning prefill, or used on its own when that is empty. Requires prefill support to be enabled."
+          hint="Added before the prompt template's reasoning prefill, or used on its own when that is empty. Requires reasoning prefills to be enabled."
         />
       </SettingsSection>
 
       <SettingsSection
         title="Advanced generation"
         id="endpoint-generation"
-        fields={['genParams', 'prefillMode']}
+        fields={['genParams', 'prefillMode', 'allowReasoningPrefill', 'allowMessagePrefill']}
       >
         <p class="hint">Empty sampling fields are omitted so backend defaults still apply.</p>
         <div
@@ -273,17 +284,32 @@ export default function EndpointsTab() {
           </div>
         </div>
 
-        <FormField
-          field={form.fields.prefillMode}
-          label="Prefill support"
-          hint="Used by resume, speaker-name, and template prefills."
-          options={[
-            { value: 'disabled', label: 'Disabled (do not send prefills)' },
-            { value: 'none', label: 'Generic (trailing assistant message)' },
-            { value: 'vllm', label: 'vLLM (continue_final_message)' },
-            { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
-          ]}
-        />
+        <div class="flex items-end gap-3 flex-wrap">
+          <div class="flex flex-col gap-2 min-w-45 flex-1">
+            <FormField
+              field={form.fields.prefillMode}
+              label="Prefill support"
+              options={[
+                { value: 'disabled', label: 'Disabled (do not send prefills)' },
+                { value: 'none', label: 'Generic (trailing assistant message)' },
+                { value: 'vllm', label: 'vLLM (continue_final_message)' },
+                { value: 'deepseek', label: 'DeepSeek beta (prefix flag, needs /beta base URL)' },
+              ]}
+            />
+          </div>
+          <div class="flex items-center gap-3 flex-wrap min-h-control [&_.setting-label]:mt-0">
+            <FormField kind="check" field={form.fields.allowReasoningPrefill} label="Reasoning" />
+            <FormField
+              kind="check"
+              field={form.fields.allowMessagePrefill}
+              label="Assistant message"
+            />
+          </div>
+        </div>
+        <p class="hint">
+          Choose which prefills this endpoint accepts. Disabling assistant message prefills also
+          disables Resume; /char uses the speaker handoff instruction. Disabled mode turns off both.
+        </p>
       </SettingsSection>
     </EntityEditorPane>
   );
