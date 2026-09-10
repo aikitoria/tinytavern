@@ -39,7 +39,6 @@ import Avatar from '../ui/Avatar.tsx';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
 import Markdown from '../ui/Markdown.tsx';
 import Modal from '../ui/Modal.tsx';
-import PromptGenerationStatus from '../../media/PromptGenerationStatus.tsx';
 import MediaPromptMenuItems from '../../media/MediaPromptMenuItems.tsx';
 import { followMessageStream } from '../../messageStreamScroll.ts';
 
@@ -425,7 +424,7 @@ export default function MessageNode(props: {
             />
           </Show>
           <span class="msg-tools-left inline-flex items-center gap-1 msg-overlay-toolbar">
-            <Show when={props.message.reasoning && !(isTool() && streaming())}>
+            <Show when={props.message.reasoning}>
               <button
                 class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
                 classList={{ 'icon-btn-active': reasoningOpen() }}
@@ -435,7 +434,7 @@ export default function MessageNode(props: {
                 onClick={() => setShowReasoning(!showReasoning())}
               >
                 <FontAwesomeIcon icon={faLightbulb} size={15} />
-                <Show when={streaming() && !props.message.content}>
+                <Show when={streaming() && !isTool() && !props.message.content}>
                   <FontAwesomeIcon
                     icon={faSpinner}
                     size={10}
@@ -598,12 +597,7 @@ export default function MessageNode(props: {
             transition: dragging() ? 'none' : 'transform 0.18s ease-out, opacity 0.18s ease-out',
           }}
         >
-          <PromptGenerationStatus
-            active={isTool() && streaming()}
-            content={props.message.content}
-            reasoning={props.message.reasoning}
-          />
-          <Show when={props.message.reasoning && reasoningOpen() && !(isTool() && streaming())}>
+          <Show when={props.message.reasoning && reasoningOpen()}>
             <div class="reasoning-text py-2 px-3 whitespace-pre-wrap bg-thinking text-dim text-sm rounded-sm m-0 mt-1 mb-2">
               {props.message.reasoning}
             </div>

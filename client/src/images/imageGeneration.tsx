@@ -16,6 +16,7 @@ import {
 import type { MediaImageConfig, ImageGenerationSettings } from '@tinytavern/shared';
 import SettingLabel from '../components/forms/SettingField.tsx';
 import {
+  faArrowUpRightFromSquare,
   faChevronLeft,
   faChevronRight,
   faImages as faImagesSolid,
@@ -25,7 +26,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import { For, Show, createSignal, type JSX } from 'solid-js';
+import { For, Match, Show, Switch, createMemo, createSignal, type JSX } from 'solid-js';
 import {
   DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
   imageRevisionTemplateError,
@@ -46,6 +47,8 @@ import {
 import { errorMessage } from '../util.ts';
 import ImageViewer from '../components/ui/ImageViewer.tsx';
 import MediaPlayer from '../media/MediaPlayer.tsx';
+import VideoPreview from '../media/VideoPreview.tsx';
+import PromptGenerationStatus from '../media/PromptGenerationStatus.tsx';
 import MediaActions from '../media/MediaActions.tsx';
 import { openMediaTool, openMediaRerun } from '../media/navigation.ts';
 import MacroHelp from '../components/forms/MacroHelp.tsx';
@@ -494,10 +497,14 @@ export const imageMessage = {
     const mediaJob = () => mediaJobsByMessage().get(message().id);
     const renderProgress = () => mediaJob()?.progress;
     const livePreview = () => (message().imagePending ? renderProgress()?.preview : undefined);
-    const displayedImage = () =>
-      livePreview() ?? (currentVideo() ? currentVideo()?.thumbnail : currentImage());
+    const liveVideo = createMemo(() => {
+      const preview = message().imagePending ? renderProgress()?.videoPreview : undefined;
+      return preview && Object.values(preview.frames).some(Boolean) ? preview : undefined;
+    });
+    const displayedImage = () => (currentVideo() ? currentVideo()?.thumbnail : currentImage());
     // Collapse the prompt on the first preview to keep the render in focus.
-    const promptCollapsed = () => media().length > 0 || livePreview() != null;
+    const promptCollapsed = () =>
+      media().length > 0 || livePreview() != null || liveVideo() != null;
     const onActivePath = () => activePath().some((active) => active.id === message().id);
     const canRender = () => canRenderImage(message());
     const savedItem = () => {
@@ -528,18 +535,21 @@ export const imageMessage = {
     };
 
     const Header = () => (
-      <Show when={promptCollapsed()}>
-        <button
-          class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
-          classList={{ 'icon-btn-active': showPrompt() }}
-          title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
-          aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
-          aria-expanded={showPrompt()}
-          onClick={() => setShowPrompt(!showPrompt())}
-        >
-          <FontAwesomeIcon icon={faFileLines} size={15} />
-        </button>
-      </Show>
+      <>
+        <PromptGenerationStatus active={ctx.streaming()} content={message().content} />
+        <Show when={promptCollapsed()}>
+          <button
+            class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
+            classList={{ 'icon-btn-active': showPrompt() }}
+            title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
+            aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
+            aria-expanded={showPrompt()}
+            onClick={() => setShowPrompt(!showPrompt())}
+          >
+            <FontAwesomeIcon icon={faFileLines} size={15} />
+          </button>
+        </Show>
+      </>
     );
 
     const HeaderTools = () => (
@@ -557,7 +567,7 @@ export const imageMessage = {
                 })
               }
             >
-              <FontAwesomeIcon icon={faSpinner} size={12} />
+              <FontAwesomeIcon icon={faArrowUpRightFromSquare} size={12} />
             </button>
           )}
         </Show>
@@ -651,7 +661,7 @@ export const imageMessage = {
 
     const Body = () => (
       <>
-        <Show when={!promptCollapsed() || showPrompt()}>
+        <Show when={message().content && (!promptCollapsed() || showPrompt())}>
           <div class="msg-content">
             <Markdown
               content={message().content}
@@ -660,36 +670,60 @@ export const imageMessage = {
             />
           </div>
         </Show>
-        <Show
-          when={!ctx.inMap?.() && !livePreview() && currentVideo()}
-          fallback={
-            <Show when={displayedImage()}>
-              <CrossfadeImage
-                class="msg-image block cursor-zoom-in w-full"
-                classList={{ 'msg-image-live': livePreview() != null }}
-                src={displayedImage()!}
-                alt={livePreview() ? 'Image rendering preview' : 'Generated image'}
-                wrapperClass="msg-image-crossfade w-full"
-                onClick={() => {
-                  if (!livePreview() && !currentVideo() && !ctx.inMap?.()) {
-                    setViewerOpen(true);
+        <Switch>
+          <Match when={liveVideo()}>
+            {(preview) => (
+              <div class="msg-image msg-image-live [&>canvas]:max-h-none">
+                <Show
+                  when={!ctx.inMap?.()}
+                  fallback={
+                    <img
+                      class="block w-full"
+                      src={Object.values(preview().frames).find(Boolean)!}
+                      alt="Video rendering preview"
+                      decoding="async"
+                    />
                   }
-                }}
+                >
+                  <VideoPreview preview={preview()} active={state.modal === null} />
+                </Show>
+              </div>
+            )}
+          </Match>
+          <Match when={livePreview()}>
+            {(src) => (
+              <img
+                class="msg-image msg-image-live block w-full"
+                src={src()}
+                alt="Image rendering preview"
+                decoding="async"
               />
-              <Show when={viewerOpen() && !livePreview()}>
-                <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
-              </Show>
-            </Show>
-          }
-        >
-          {(asset) => (
-            <MediaPlayer
-              asset={asset()}
+            )}
+          </Match>
+          <Match when={!ctx.inMap?.() && currentVideo()}>
+            {(asset) => (
+              <MediaPlayer
+                asset={asset()}
+                class="msg-image block cursor-zoom-in w-full"
+                active={state.modal === null}
+              />
+            )}
+          </Match>
+          <Match when={displayedImage()}>
+            <CrossfadeImage
               class="msg-image block cursor-zoom-in w-full"
-              active={state.modal === null}
+              src={displayedImage()!}
+              alt="Generated image"
+              wrapperClass="msg-image-crossfade w-full"
+              onClick={() => {
+                if (!currentVideo() && !ctx.inMap?.()) setViewerOpen(true);
+              }}
             />
-          )}
-        </Show>
+            <Show when={viewerOpen()}>
+              <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
+            </Show>
+          </Match>
+        </Switch>
         <Show when={message().genMeta?.imageError && !message().imagePending}>
           <div class="text-danger border border-solid border-danger py-2 px-3 mt-2 text-sm rounded-sm">
             Image render failed: {message().genMeta!.imageError}{' '}
@@ -707,7 +741,11 @@ export const imageMessage = {
       HeaderTools,
       Body,
       hideName: true,
-      fullBleed: () => displayedImage() != null || currentVideo() != null,
+      fullBleed: () =>
+        displayedImage() != null ||
+        currentVideo() != null ||
+        livePreview() != null ||
+        liveVideo() != null,
     };
   },
 };
