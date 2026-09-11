@@ -116,6 +116,76 @@ databaseCase('media files', async () => {
   }
 });
 
+databaseCase('gallery video uploads', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { readFileSync, existsSync, readdirSync, unlinkSync } = await import('node:fs');
+  const { basename, join } = await import('node:path');
+  const { IMAGES_DIR, stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
+  const { copyImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
+  await import('../../server/src/routes/gallery.ts');
+  const { server, base, request } = await testApi();
+  const webm = join(IMAGES_DIR, 'upload-source.webm');
+  const mp4 = join(IMAGES_DIR, 'upload-source.mp4');
+  await renderMediaFixture(webm, 64, 48, true);
+  await promisify(execFile)('ffmpeg', [
+    '-v',
+    'error',
+    '-i',
+    webm,
+    '-c:v',
+    'libx264',
+    '-threads',
+    '1',
+    '-y',
+    mp4,
+  ]);
+  try {
+    for (const [source, mime] of [
+      [webm, 'video/webm'],
+      [mp4, 'video/mp4'],
+    ] as const) {
+      const original = readFileSync(source);
+      const response = await fetch(`${base}/api/gallery/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: original,
+      });
+      assert.equal(response.status, 200, await response.clone().text());
+      const item = (await response.json()) as import('@tinytavern/shared').GalleryItem;
+      assert.equal(item.media?.kind, 'video');
+      assert.equal(item.media?.mime, mime);
+      assert.equal(item.imageWidth, 64);
+      assert.equal(item.imageHeight, 48);
+      assert(item.media!.duration! > 0);
+      const path = String(
+        stmt('SELECT path FROM media_assets WHERE id = ?').get(item.media!.id)!.path,
+      );
+      const file = join(IMAGES_DIR, basename(path));
+      assert.deepEqual(readFileSync(file), original, 'Uploads preserve the original video bytes');
+      const copied = copyImage(path)!;
+      assert.equal(mediaAssetForPath(copied)?.mime, mime);
+      assert.equal(mediaAssetForPath(copied)?.duration, item.media!.duration);
+      await request('DELETE', `/api/gallery/${item.id}`, undefined, 204);
+      assert(!existsSync(file), 'Deleting the gallery entry releases its video');
+      assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(copied))), original);
+      deleteImageFiles([copied]);
+    }
+    const invalid = await fetch(`${base}/api/gallery/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'video/mp4' },
+      body: 'not a video',
+    });
+    assert.equal(invalid.status, 400, 'A claimed video MIME type cannot bypass validation');
+    assert.equal(stmt('SELECT count(*) AS n FROM media_assets').get()!.n, 0);
+    assert(!readdirSync(IMAGES_DIR).some((name) => name.endsWith('.part')));
+  } finally {
+    await server.stop(true);
+    unlinkSync(webm);
+    unlinkSync(mp4);
+  }
+});
+
 databaseCase('media thumbnails', async () => {
   const { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } =
     await import('node:fs');

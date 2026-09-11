@@ -280,7 +280,46 @@ test('schema baseline initializes once and rejects unsupported versions', async 
     assert.deepEqual(existing.query('PRAGMA integrity_check').get(), { integrity_check: 'ok' });
     assert.deepEqual(existing.query('PRAGMA foreign_key_check').all(), []);
   }
-  for (const unsupported of [SCHEMA_VERSION - 1, SCHEMA_VERSION + 1]) {
+  {
+    using legacy = new Database(path);
+    legacy.exec(`
+      PRAGMA user_version = 81;
+      INSERT INTO gallery_folders(id, name, created_at) VALUES (1, 'Keep', 1);
+      INSERT INTO characters(id, name, created_at) VALUES (100, 'Uploads', 1);
+      INSERT INTO media_assets(id, path, created_at) VALUES
+        (101, '/images/media-101.png', 1), (102, '/images/media-102.png', 1),
+        (103, '/images/media-103.png', 1), (104, '/images/media-104.png', 1);
+      INSERT INTO media_characters(asset_id, character_id) VALUES (103, 100);
+      INSERT INTO gallery_items(id, folder_id, character_name, prompt, image, created_at, updated_at) VALUES
+        (101, NULL, 'Uploads', '', '/images/media-101.png', 1, 1),
+        (102, 1, 'Uploads', '', '/images/media-102.png', 1, 1),
+        (103, NULL, 'Uploads', '', '/images/media-103.png', 1, 1),
+        (104, NULL, 'Media tools', '', '/images/media-104.png', 1, 1);
+    `);
+  }
+  const upgraded = start();
+  assert.equal(upgraded.status, 0, upgraded.stderr);
+  {
+    using migrated = new Database(path);
+    const folder = migrated
+      .query<{ id: number }, []>("SELECT id FROM gallery_folders WHERE name = 'Uploads'")
+      .get()!;
+    assert(folder, 'Existing unfiled uploads receive a folder during migration');
+    assert.deepEqual(
+      migrated.query('SELECT id, folder_id, character_name FROM gallery_items ORDER BY id').all(),
+      [
+        { id: 101, folder_id: folder.id, character_name: '' },
+        { id: 102, folder_id: 1, character_name: '' },
+        { id: 103, folder_id: null, character_name: 'Uploads' },
+        { id: 104, folder_id: null, character_name: '' },
+      ],
+    );
+    assert.deepEqual(migrated.query('PRAGMA user_version').get(), { user_version: SCHEMA_VERSION });
+    assert.deepEqual(migrated.query('PRAGMA foreign_key_check').all(), []);
+  }
+  const upgradedAgain = start();
+  assert.equal(upgradedAgain.status, 0, upgradedAgain.stderr);
+  for (const unsupported of [80, SCHEMA_VERSION + 1]) {
     {
       using existing = new Database(path);
       existing.exec(`PRAGMA user_version = ${unsupported}`);

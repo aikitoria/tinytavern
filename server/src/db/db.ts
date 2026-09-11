@@ -119,6 +119,26 @@ function migrate(target: number, apply: () => void): void {
   version = target;
 }
 // Register future upgrades here with migrate(nextVersion, apply).
+migrate(82, () => {
+  const uploaded = `character_name = 'Uploads'
+    AND source_conversation_id IS NULL AND source_message_id IS NULL AND source_image IS NULL
+    AND EXISTS (SELECT 1 FROM media_assets a WHERE a.path = gallery_items.image
+      AND a.recipe_id IS NULL AND NOT EXISTS (SELECT 1 FROM media_characters mc WHERE mc.asset_id = a.id))`;
+  stmt(`INSERT INTO gallery_folders(name, created_at)
+    SELECT 'Uploads', ? WHERE EXISTS (SELECT 1 FROM gallery_items WHERE ${uploaded} AND folder_id IS NULL)
+    ON CONFLICT(name) DO NOTHING`).run(Date.now());
+  stmt(`UPDATE gallery_items SET character_name = '',
+    folder_id = COALESCE(folder_id, (SELECT id FROM gallery_folders WHERE name = 'Uploads'))
+    WHERE ${uploaded}`).run();
+});
+
+migrate(83, () => {
+  stmt(`UPDATE gallery_items SET character_name = ''
+    WHERE character_name IN ('Uploads', 'Media tools') AND NOT EXISTS (
+      SELECT 1 FROM media_assets a JOIN media_characters mc ON mc.asset_id = a.id
+      WHERE a.path = gallery_items.image
+    )`).run();
+});
 
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.

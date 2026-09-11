@@ -107,13 +107,37 @@ async function hasWebmHeader(path: string): Promise<boolean> {
   return docType === 'webm';
 }
 
-async function readVideoMetadata(path: string, signal: AbortSignal) {
-  if (!(await hasWebmHeader(path))) {
-    throw new InvalidMediaOutput('Comfy must return AV1 video in a WebM container');
+async function readVideoMetadata(path: string, signal: AbortSignal, uploaded: boolean) {
+  const webm = await hasWebmHeader(path);
+  const invalid = () =>
+    new InvalidMediaOutput(
+      uploaded
+        ? 'Upload a valid PNG, JPEG, WebP image, or MP4 or WebM video'
+        : 'Comfy must return AV1 video in a WebM container',
+    );
+  if (!webm) {
+    if (!uploaded) throw invalid();
+    const file = await open(path, 'r');
+    try {
+      const header = Buffer.alloc(12);
+      const { bytesRead } = await file.read(header, 0, header.length, 0);
+      if (
+        bytesRead < 12 ||
+        header.toString('ascii', 4, 8) !== 'ftyp' ||
+        header.toString('ascii', 8, 12) === 'qt  '
+      )
+        throw invalid();
+    } finally {
+      await file.close();
+    }
   }
   const args = [
     '-v',
     'error',
+    '-protocol_whitelist',
+    'file',
+    '-format_whitelist',
+    'matroska,webm,mov',
     '-select_streams',
     'v:0',
     '-show_entries',
@@ -126,12 +150,21 @@ async function readVideoMetadata(path: string, signal: AbortSignal) {
     timeout: 30_000,
     maxBuffer: 64 * 1024,
     signal,
+  }).catch((error) => {
+    if (signal.aborted) throw error;
+    throw invalid();
   });
   const probe = JSON.parse(stdout) as VideoProbe;
   const video = probe.streams?.[0];
-  const isWebm = probe.format?.format_name?.split(',').includes('webm');
-  if (!isWebm || video?.codec_name !== 'av1' || !video.width || !video.height) {
-    throw new InvalidMediaOutput('Comfy must return AV1 video in a WebM container');
+  const formats = probe.format?.format_name?.split(',');
+  if (
+    !formats?.includes(webm ? 'webm' : 'mp4') ||
+    !video?.codec_name ||
+    (!uploaded && video.codec_name !== 'av1') ||
+    !video.width ||
+    !video.height
+  ) {
+    throw invalid();
   }
 
   const seconds = Number(probe.format?.duration);
@@ -139,6 +172,8 @@ async function readVideoMetadata(path: string, signal: AbortSignal) {
     width: video.width,
     height: video.height,
     duration: Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+    ext: webm ? '.webm' : '.mp4',
+    mime: webm ? 'video/webm' : 'video/mp4',
   };
 }
 
@@ -147,6 +182,7 @@ export async function downloadMedia(
   response: Response,
   kind: MediaKind,
   signal: AbortSignal,
+  origin: 'comfy' | 'upload' = 'comfy',
 ): Promise<DownloadedMedia> {
   if (!response.ok || !response.body) {
     throw new Error(`Comfy download failed (${response.status})`);
@@ -196,12 +232,12 @@ export async function downloadMedia(
       width = size.width;
       height = size.height;
     } else {
-      const metadata = await readVideoMetadata(temporary, signal);
+      const metadata = await readVideoMetadata(temporary, signal, origin === 'upload');
       width = metadata.width;
       height = metadata.height;
       duration = metadata.duration;
-      ext = '.webm';
-      mime = 'video/webm';
+      ext = metadata.ext;
+      mime = metadata.mime;
     }
     await syncFile(temporary);
     const path = `/images/media-${reservation.id}${ext}`;

@@ -30,7 +30,9 @@ export function adjacentGalleryIndex(
 export const galleryCharacterKeys = (item: Pick<GalleryItem, 'characters' | 'characterName'>) =>
   item.characters.length
     ? item.characters.map((character) => `id:${character.id}`)
-    : [`name:${item.characterName}`];
+    : item.characterName
+      ? [`name:${item.characterName}`]
+      : [];
 
 export function indexGallery(items: readonly GalleryItem[]) {
   return items
@@ -78,6 +80,82 @@ export interface GalleryLayout {
   rows: GalleryRow[];
   height: number;
   rowById: Map<number, number>;
+  headings: GalleryFolderHeading[];
+}
+
+export interface GalleryFolderGroup {
+  id: number | null;
+  name: string;
+  items: GalleryItem[];
+}
+
+export interface GalleryFolderHeading {
+  id: number | null;
+  name: string;
+  count: number;
+  top: number;
+  height: number;
+}
+
+const folderCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/** Preserve the selected date order within each folder, with unfiled media last. */
+export function groupGalleryByFolder(
+  items: readonly GalleryItem[],
+  folders: readonly { id: number; name: string }[],
+): GalleryFolderGroup[] {
+  const names = new Map(folders.map((folder) => [folder.id, folder.name]));
+  const groups = new Map<number | null, GalleryFolderGroup>();
+  for (const item of items) {
+    let group = groups.get(item.folderId);
+    if (!group) {
+      group = {
+        id: item.folderId,
+        name: item.folderId === null ? 'Unfiled' : (names.get(item.folderId) ?? 'Folder'),
+        items: [],
+      };
+      groups.set(item.folderId, group);
+    }
+    group.items.push(item);
+  }
+  return [...groups.values()].sort((a, b) =>
+    a.id === null ? 1 : b.id === null ? -1 : folderCollator.compare(a.name, b.name) || a.id - b.id,
+  );
+}
+
+/** Each folder has its own justified rows; headings share the grid's viewport culling. */
+export function layoutGalleryFolders(
+  groups: readonly GalleryFolderGroup[],
+  width: number,
+  targetHeight: number,
+  gap = 8,
+): GalleryLayout {
+  const result: GalleryLayout = { rows: [], rowById: new Map(), headings: [], height: 0 };
+  if (width <= 0 || targetHeight <= 0) return result;
+  let itemOffset = 0;
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    const top = result.height + (result.headings.length ? 16 : 0);
+    const headingHeight = 40;
+    result.headings.push({
+      id: group.id,
+      name: group.name,
+      count: group.items.length,
+      top,
+      height: headingHeight,
+    });
+    const section = layoutGallery(group.items, width, targetHeight, gap);
+    const rowOffset = result.rows.length;
+    for (const row of section.rows) {
+      row.top += top + headingHeight;
+      for (const cell of row.cells) cell.index += itemOffset;
+      result.rows.push(row);
+    }
+    for (const [id, row] of section.rowById) result.rowById.set(id, row + rowOffset);
+    itemOffset += group.items.length;
+    result.height = top + headingHeight + section.height;
+  }
+  return result;
 }
 
 const aspectRatio = (item: GalleryItem) =>
@@ -94,7 +172,7 @@ export function layoutGallery(
 ): GalleryLayout {
   const rows: GalleryRow[] = [];
   const rowById = new Map<number, number>();
-  if (width <= 0 || targetHeight <= 0) return { rows, rowById, height: 0 };
+  if (width <= 0 || targetHeight <= 0) return { rows, rowById, headings: [], height: 0 };
   let start = 0;
   let sum = 0;
   let top = 0;
@@ -139,11 +217,14 @@ export function layoutGallery(
     }
   }
   if (start < items.length) emit(items.length, sum, true);
-  return { rows, rowById, height: Math.max(0, top - gap) };
+  return { rows, rowById, headings: [], height: Math.max(0, top - gap) };
 }
 
 /** First row whose bottom is below the given offset; shared by culling and anchoring. */
-export function galleryRowAt(rows: readonly GalleryRow[], offset: number): number {
+export function galleryRowAt(
+  rows: readonly Pick<GalleryRow, 'top' | 'height'>[],
+  offset: number,
+): number {
   let low = 0;
   let high = rows.length;
   while (low < high) {
@@ -156,7 +237,7 @@ export function galleryRowAt(rows: readonly GalleryRow[], offset: number): numbe
 }
 
 export function visibleGalleryRows(
-  rows: readonly GalleryRow[],
+  rows: readonly Pick<GalleryRow, 'top' | 'height'>[],
   top: number,
   height: number,
   overscan = 500,

@@ -256,7 +256,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     location.hash = formatPageLocation(parent);
     assert.equal(dialogStack.top(), frame, 'Closing settings retains the mounted media editor');
     const started = nextAction();
-    controls.get('Prepare a new prompt from your instruction, then render it')!.onClick!();
+    controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
     const current = await started;
     assert.equal(submitted!.workflowId, 'b');
     assert.equal(submitted!.instruction, 'Animate the selected image');
@@ -292,7 +292,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     await Promise.resolve();
     controls.get('media-instruction')!.onInput!({ currentTarget: { value: 'Next edit' } });
     const preparing = nextAction();
-    controls.get('Prepare a new prompt from your instruction, then render it')!.onClick!();
+    controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
     const accepted = await preparing;
     assert.equal(
       submitted!.prompt,
@@ -477,7 +477,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     });
     applyMediaJob({ ...preparingJob, revision: 2, prompt: 'More partial prompt' });
     const prepared = nextAction();
-    controls.get('Prepare a new prompt from your instruction, then render it')!.onClick!();
+    controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
     const preparationCopy = await prepared;
     assert.notEqual(
       preparationCopy.id,

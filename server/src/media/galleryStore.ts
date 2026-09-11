@@ -17,14 +17,14 @@ export function insertGalleryAsset(
   const now = Date.now();
   const characterName =
     mediaCharacterNames(asset.id) ||
-    source.characterName ||
-    (source.conversationId == null
-      ? null
-      : stmt(`SELECT c.name FROM characters c
+    (source.characterName ??
+      ((source.conversationId == null
+        ? null
+        : stmt(`SELECT c.name FROM characters c
         JOIN conversations conv ON conv.character_id = c.id WHERE conv.id = ?`).get(
-          source.conversationId,
-        )?.name) ||
-    'Media tools';
+            source.conversationId,
+          )?.name) ||
+        ''));
   return Number(
     stmt(`INSERT INTO gallery_items (
       character_name, source_conversation_id, source_message_id, source_image,

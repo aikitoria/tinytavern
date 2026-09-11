@@ -37,6 +37,8 @@ import {
   faChevronLeft,
   faChevronRight,
   faRotateRight,
+  faPen,
+  faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   compileMediaWorkflow,
@@ -87,7 +89,7 @@ import {
 } from './jobCards.ts';
 
 const selectRowClass =
-  'items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-[minmax(0,_42%)_minmax(0,_1fr)]';
+  'items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-2';
 
 interface ToolDraft extends MediaJobDraft {
   workflowValues: MediaWorkflowValues;
@@ -122,6 +124,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const [variationsLoaded, setVariationsLoaded] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [renderSettingsOpen, setRenderSettingsOpen] = createSignal(false);
   const paneActive = useDialogActive();
   const [fullSizeImage, setFullSizeImage] = createSignal<string | null>(null);
   const [picker, setPicker] = createSignal<MediaJobInput['slot'] | '@all' | null>(null);
@@ -270,6 +273,17 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   });
   const selectedWorkflow = () => workflowView().id;
   const workflowControls = createMediaWorkflowControls(() => workflowView().workflow?.json);
+  const renderSettingsSummary = createMemo(() =>
+    workflowControls()
+      .controls.flatMap((control) => {
+        const value = workflowView().values[control.key] ?? control.value;
+        if (control.type === 'boolean') return value === true ? [control.label] : [];
+        if (control.input === 'aspect_ratio') return [String(value).split(' ')[0]!];
+        if (control.unit) return [`${value} ${control.unit}`];
+        return [`${control.label}: ${String(value).replace(/\s+/g, ' ').slice(0, 80)}`];
+      })
+      .join(' · '),
+  );
   const workflowInterface = createMemo(() => {
     try {
       const json = workflowView().workflow?.json;
@@ -362,6 +376,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       if (error) return error;
     }
     return '';
+  });
+  createEffect(() => {
+    if (workflowError()) setRenderSettingsOpen(true);
   });
   createEffect(
     on(workflowControls, ({ controls }) => {
@@ -1054,12 +1071,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
               </Show>
             </section>
             <aside
-              class="detail-panel media-tool-form flex flex-col gap-4 flex-none min-h-0 p-4 overflow-y-auto bg-panel border-l border-l-solid border-l-subtle [&>*]:shrink-0 [&_textarea]:block [&_textarea]:w-full [&_textarea]:min-h-20 [&_textarea]:resize-y [&_.hint]:m-0 [&_.hint]:text-xs [&_.notice]:m-0 [&_.notice]:text-xs mobile:w-full mobile:overflow-visible [&.media-tool-form]:gap-0 [&.media-tool-form]:min-w-0 [&.media-tool-form]:p-0 [&.media-tool-form]:overflow-hidden mobile:[&.media-tool-form]:overflow-visible [&>.media-tool-fields]:flex [&>.media-tool-fields]:flex-col [&>.media-tool-fields]:min-h-0 [&>.media-tool-fields]:gap-2 [&>.media-tool-fields]:p-3 [&>.media-tool-fields]:overflow-y-auto [&>.media-tool-fields]:flex-auto [&_.field-group]:p-2 [&_.field-group_label]:text-sm [&_.field-group_label]:font-semibold [&_.field-group_label]:mt-2 [&_.field-group_label]:text-foreground [&_.workflow-inputs_label]:m-0 [&_.key-row]:flex-wrap [&_[role=status]]:m-0 mobile:[&>.media-tool-fields]:flex-none mobile:[&>.media-tool-fields]:overflow-visible w-[var(--detail-panel-width,_450px)]"
+              class="detail-panel media-tool-form flex flex-col gap-4 flex-none min-h-0 p-4 overflow-y-auto bg-panel border-l border-l-solid border-l-subtle [&>*]:shrink-0 [&_textarea]:block [&_textarea]:w-full [&_textarea]:min-h-20 [&_textarea]:resize-y [&_.hint]:m-0 [&_.hint]:text-xs [&_.notice]:m-0 [&_.notice]:text-xs mobile:w-full mobile:overflow-visible [&.media-tool-form]:gap-0 [&.media-tool-form]:min-w-0 [&.media-tool-form]:p-0 [&.media-tool-form]:overflow-hidden mobile:[&.media-tool-form]:overflow-visible [&>.media-tool-fields]:flex [&>.media-tool-fields]:flex-col [&>.media-tool-fields]:min-h-0 [&>.media-tool-fields]:gap-2 [&>.media-tool-fields]:p-3 [&>.media-tool-fields]:overflow-y-auto [&>.media-tool-fields]:flex-auto [&_.workflow-inputs_label]:m-0 [&_.key-row]:flex-wrap [&_[role=status]]:m-0 mobile:[&>.media-tool-fields]:flex-none mobile:[&>.media-tool-fields]:overflow-visible w-[var(--detail-panel-width,_450px)]"
               aria-label="Media controls"
             >
               <div class="media-tool-fields [&>*]:shrink-0 [&>textarea]:min-h-16 [&>#media-prompt]:shrink-0 [&>#media-prompt]:min-h-45 [&>#media-prompt]:flex-auto [&>.media-prompt-thinking]:shrink-0 [&>.media-prompt-thinking]:min-h-45 [&>.media-prompt-thinking]:flex-auto [&>label]:text-sm [&>label]:font-semibold [&>label]:mt-2 [&>label]:text-foreground mobile:[&>#media-prompt]:flex-none mobile:[&>.media-prompt-thinking]:flex-none">
                 <dl
-                  class="grid m-0 text-sm gap-y-1 gap-x-3 [&_dt]:text-dim [&_dd]:m-0 [&_dd]:wrap-anywhere grid-cols-[auto_minmax(0,_1fr)_auto_auto]"
+                  class="grid m-0 text-xs gap-y-1 gap-x-3 [&_dt]:text-dim [&_dd]:m-0 [&_dd]:wrap-anywhere grid-cols-[auto_minmax(0,_1fr)_auto_auto]"
                   aria-label="Context and destination"
                 >
                   <dt>Context</dt>
@@ -1105,7 +1122,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 <For each={slots()}>
                   {(slot) => (
                     <div
-                      class="flex items-center gap-3 field-group [&_.key-row]:flex-wrap"
+                      class="flex items-center gap-3 media-form-section [&_.key-row]:flex-wrap"
                       role="group"
                       aria-labelledby={`media-input-${slot}`}
                     >
@@ -1145,11 +1162,24 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             : ''}
                         </span>
                         <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
-                          <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>
-                            {inputForSlot(slot) ? 'Replace' : `Choose ${inputKind(slot)}`}
+                          <button
+                            classList={{ 'icon-btn': Boolean(inputForSlot(slot)) }}
+                            title={`${inputForSlot(slot) ? 'Replace' : 'Choose'} ${inputLabel(slot)}`}
+                            aria-label={
+                              inputForSlot(slot) ? `Replace ${inputLabel(slot)}` : undefined
+                            }
+                            disabled={busy() || frozen()}
+                            onClick={() => setPicker(slot)}
+                          >
+                            <Show when={inputForSlot(slot)} fallback={`Choose ${inputKind(slot)}`}>
+                              <FontAwesomeIcon icon={faPen} size={14} />
+                            </Show>
                           </button>
                           <Show when={inputForSlot(slot)}>
                             <button
+                              class="icon-btn"
+                              title={`Remove ${inputLabel(slot)}`}
+                              aria-label={`Remove ${inputLabel(slot)}`}
                               disabled={busy() || frozen()}
                               onClick={() =>
                                 setDraft(
@@ -1158,7 +1188,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                                 )
                               }
                             >
-                              Remove
+                              <FontAwesomeIcon icon={faXmark} size={14} />
                             </button>
                             <Show when={slots().length > 1}>
                               <button
@@ -1196,19 +1226,58 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </div>
                   )}
                 </For>
-                <Show when={workflowControls().controls.length > 0}>
-                  <div
-                    class="items-start grid gap-2 field-group [&_.setting-label]:m-0 [&_.setting-label]:min-h-6 [&_.workflow-input>label]:min-h-6"
-                    role="group"
-                    aria-label="Workflow inputs"
-                  >
-                    <WorkflowInputs
-                      controls={workflowControls().controls}
-                      values={workflowView().values}
+                <Show when={hasPrompt() && !draft.avatarContext}>
+                  <div class={selectRowClass}>
+                    <label>Preset</label>
+                    <Select
+                      ariaLabel="Media prompt preset"
+                      value={selectedPromptId()}
+                      buttonLabel={draft.presetId ? undefined : defaultPromptLabel()}
                       disabled={busy() || frozen()}
-                      onChange={(key, value) => setDraft('workflowValues', key, value)}
+                      options={promptOptions()}
+                      onChange={(value) => setDraft('presetId', value || null)}
                     />
                   </div>
+                </Show>
+                <Show when={workflowControls().controls.length > 0}>
+                  <details
+                    class="media-form-section media-render-settings"
+                    open={renderSettingsOpen()}
+                    onToggle={(event) => setRenderSettingsOpen(event.currentTarget.open)}
+                  >
+                    <summary>
+                      <span class="flex-1 min-w-0">
+                        <strong class="block text-sm font-semibold text-foreground">
+                          Render settings
+                        </strong>
+                        <Show when={!renderSettingsOpen()}>
+                          <span
+                            class="block text-xs text-dim truncate mt-1"
+                            title={renderSettingsSummary()}
+                          >
+                            {renderSettingsSummary()}
+                          </span>
+                        </Show>
+                      </span>
+                      <FontAwesomeIcon
+                        icon={faChevronRight}
+                        size={12}
+                        class="media-settings-chevron text-muted"
+                      />
+                    </summary>
+                    <div
+                      class="workflow-inputs items-start grid grid-cols-2 narrow-panel:grid-cols-1 gap-y-2 gap-x-3 mt-3 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&>.workflow-input:not(.workflow-input-boolean)]:col-span-full [&_.setting-label]:m-0 [&_.setting-label]:min-h-6 [&_.workflow-input>label]:min-h-6"
+                      role="group"
+                      aria-label="Workflow inputs"
+                    >
+                      <WorkflowInputs
+                        controls={workflowControls().controls}
+                        values={workflowView().values}
+                        disabled={busy() || frozen()}
+                        onChange={(key, value) => setDraft('workflowValues', key, value)}
+                      />
+                    </div>
+                  </details>
                 </Show>
                 <Show when={workflowError()}>
                   <p class="notice notice-error" role="alert">
@@ -1219,48 +1288,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   <p class="hint">Add a workflow in Settings → Media rendering.</p>
                 </Show>
                 <Show when={hasPrompt()}>
-                  <Show when={!draft.avatarContext}>
-                    <div class={selectRowClass}>
-                      <label>Prompt preset</label>
-                      <Select
-                        ariaLabel="Media prompt preset"
-                        value={selectedPromptId()}
-                        buttonLabel={
-                          draft.presetId ? undefined : `Default: ${defaultPromptLabel()}`
-                        }
-                        disabled={busy() || frozen()}
-                        options={promptOptions()}
-                        onChange={(value) => setDraft('presetId', value || null)}
-                      />
-                    </div>
-                  </Show>
-                  <div class="mt-1 flex items-center flex-wrap justify-between gap-y-1 gap-x-2 [&>label]:m-0 [&>label]:text-sm [&>label]:font-semibold">
-                    <label for="media-instruction">Instruction</label>
-                    <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
-                      <button
-                        disabled={
-                          busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                        }
-                        title={
-                          usesChatContext()
-                            ? 'Prepare a prompt from this chat’s active branch and your instruction'
-                            : 'Prepare a prompt from your instruction'
-                        }
-                        onClick={() => void run('prepare')}
-                      >
-                        Prepare prompt
-                      </button>
-                      <button
-                        disabled={
-                          busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                        }
-                        title="Prepare a new prompt from your instruction, then render it"
-                        onClick={() => void run('prepare', true)}
-                      >
-                        Prepare and render
-                      </button>
-                    </div>
-                  </div>
+                  <label for="media-instruction">Instruction</label>
                   <textarea
                     id="media-instruction"
                     rows={3}
@@ -1268,6 +1296,30 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     readOnly={busy() || frozen()}
                     onInput={(event) => updateInstruction(event.currentTarget.value)}
                   />
+                  <div class="grid grid-cols-2 narrow-panel:grid-cols-1 gap-3 [&>button]:min-w-0">
+                    <button
+                      disabled={
+                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                      }
+                      title={
+                        usesChatContext()
+                          ? 'Write a prompt from this chat’s active branch and your instruction'
+                          : 'Write a prompt from your instruction'
+                      }
+                      onClick={() => void run('prepare')}
+                    >
+                      Write prompt
+                    </button>
+                    <button
+                      disabled={
+                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                      }
+                      title="Write a new prompt from your instruction, then render it"
+                      onClick={() => void run('prepare', true)}
+                    >
+                      Write and render
+                    </button>
+                  </div>
                   <div class="flex items-center gap-2 flex-wrap justify-between mt-2 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&_label]:m-0">
                     <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
                     <Show when={preparingPrompt()}>

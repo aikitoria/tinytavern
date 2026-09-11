@@ -299,16 +299,11 @@ export const api = {
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
   gallery: () => request<GalleryItem[]>('GET', '/api/gallery'),
-  uploadGalleryImage: (
-    file: File,
-    characterId: number | null,
-    characterName?: string,
-    folderId?: number | null,
-  ) => {
+  uploadGalleryMedia: (file: File, characterId: number | null, folderId?: number | null) => {
     const query = new URLSearchParams();
-    if (folderId != null) query.set('folderId', String(folderId));
+    if (folderId !== undefined)
+      query.set('folderId', folderId === null ? 'root' : String(folderId));
     if (characterId != null) query.set('characterId', String(characterId));
-    else if (characterName) query.set('characterName', characterName);
     return request<GalleryItem>('POST', `/api/gallery/upload?${query}`, undefined, {
       rawBody: file,
       contentType: file.type || 'application/octet-stream',

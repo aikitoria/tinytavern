@@ -193,14 +193,20 @@ function scrollArea(clientHeight: number, scrollHeight: number) {
 
 test('gallery layout', async () => {
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
-  const { filterGallery, indexGallery, layoutGallery, visibleGalleryRows } =
-    await import('../../client/src/galleryModel.ts');
+  const {
+    filterGallery,
+    indexGallery,
+    layoutGallery,
+    visibleGalleryRows,
+    groupGalleryByFolder,
+    layoutGalleryFolders,
+  } = await import('../../client/src/galleryModel.ts');
 
   const items: GalleryItem[] = Array.from({ length: 5000 }, (_, index) => ({
     folderId: index % 3 === 0 ? 1 : null,
     id: index + 1,
     characters: index % 2 ? [{ id: 7, name: 'Ashina' }] : [],
-    characterName: index % 2 ? 'Ashina' : 'Uploads',
+    characterName: index % 2 ? 'Ashina' : '',
     sourceMessageId: null,
     sourceConversationId: null,
     sourceImage: null,
@@ -246,6 +252,52 @@ test('gallery layout', async () => {
   }
   assert.equal(layoutGallery([], 1000, 240).height, 0);
   assert.equal(layoutGallery(items, 0, 240).height, 0);
+  const groups = groupGalleryByFolder(items, [{ id: 1, name: 'Uploads' }]);
+  assert.deepEqual(
+    groups.map((group) => group.name),
+    ['Uploads', 'Unfiled'],
+  );
+  assert.deepEqual(
+    groups[0]!.items,
+    items.filter((item) => item.folderId === 1),
+  );
+  const groupedItems = groups.flatMap((group) => group.items);
+  const grouped = layoutGalleryFolders(groups, 768, 240);
+  assert.equal(grouped.rowById.size, items.length);
+  assert.deepEqual(
+    grouped.headings.map((heading) => heading.count),
+    [1667, 3333],
+  );
+  let previousBottom = 0;
+  for (const row of grouped.rows) {
+    assert(row.top >= previousBottom, 'Folder sections never overlap');
+    previousBottom = row.top + row.height;
+    const folderId = row.cells[0]!.item.folderId;
+    for (const cell of row.cells) {
+      assert.equal(cell.item.folderId, folderId, 'Rows never mix folders');
+      assert.equal(
+        groupedItems[cell.index]!.id,
+        cell.item.id,
+        'Keyboard indices match grouped detail navigation',
+      );
+      assert.equal(grouped.rows[grouped.rowById.get(cell.item.id)!], row);
+    }
+    const heading = grouped.headings.find((heading) => heading.id === folderId)!;
+    assert(row.top >= heading.top + heading.height, 'Items clear their folder heading');
+  }
+  assert.equal(grouped.height, previousBottom);
+  const groupedVisible = visibleGalleryRows(grouped.rows, 20000, 700);
+  assert(
+    groupedVisible.end - groupedVisible.start < 35,
+    'Grouping retains bounded viewport rendering',
+  );
+  const heading = grouped.headings[1]!;
+  const headingVisible = visibleGalleryRows(grouped.headings, heading.top, heading.height, 0);
+  assert.equal(
+    headingVisible.start,
+    1,
+    'Folder separators are culled independently from image rows',
+  );
   assert(
     layoutGallery(
       items.slice(0, 100).map((item) => ({ ...item, imageWidth: 1, imageHeight: 100000 })),
@@ -276,7 +328,8 @@ test('gallery layout', async () => {
   assert.equal(filterGallery(index, '', 'all', false, null).length, 3333);
   assert.equal(filterGallery(index, '', 'all', false, 999).length, 0);
   assert.equal(filterGallery(index, 'absent', 'all', false).length, 0);
-  assert.equal(filterGallery(index, '', 'name:Uploads', false).length, 2500);
+  assert.equal(filterGallery(index, '', 'name:Uploads', false).length, 0);
+  assert.equal(filterGallery(index, '', 'name:', false).length, 0);
 
   const combined = {
     ...items[1]!,

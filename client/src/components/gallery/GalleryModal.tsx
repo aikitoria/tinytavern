@@ -14,6 +14,7 @@ import {
   faCheck,
   faCheckDouble,
   faSliders,
+  faFolderTree,
   faListCheck,
   faMagnifyingGlass,
   faSpinner,
@@ -46,10 +47,12 @@ import { confirmDelete } from '../../state/confirm.ts';
 import {
   adjacentGalleryIndex,
   filterGallery,
+  groupGalleryByFolder,
   indexGallery,
   resolveGalleryFolder,
 } from '../../galleryModel.ts';
 import { errorMessage } from '../../util.ts';
+import { listenForGalleryPaste } from '../../galleryClipboard.ts';
 import {
   mediaToolLinks,
   openMediaJobs,
@@ -264,6 +267,9 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
   const [selectionMode, setSelectionMode] = createSignal(false);
   const [toolsOpen, setToolsOpen] = createSignal(false);
   const [optionsOpen, setOptionsOpen] = createSignal(false);
+  const [groupedByFolder, setGroupedByFolder] = createSignal(
+    readPreference('groupByFolder') === '1',
+  );
   let toolsButton: HTMLButtonElement | undefined;
   const [selectedIds, setSelectedIds] = createSignal<ReadonlySet<number>>(new Set<number>());
   const [bulkBusy, setBulkBusy] = createSignal(false);
@@ -306,9 +312,13 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     if (items.length !== pickedIds().length) setPickedIds(items.map((item) => item.id));
   });
   const index = createMemo(() => indexGallery(galleryItems()));
-  const filtered = createMemo(() =>
+  const matching = createMemo(() =>
     filterGallery(index(), search(), characterKey(), sort() === 'oldest', folderId()),
   );
+  const folderGroups = createMemo(() =>
+    groupedByFolder() ? groupGalleryByFolder(matching(), state.galleryFolders) : undefined,
+  );
+  const filtered = createMemo(() => folderGroups()?.flatMap((group) => group.items) ?? matching());
   const filteredIndex = createMemo(
     () => new Map(filtered().map((item, index) => [item.id, index])),
   );
@@ -321,7 +331,9 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     for (const item of galleryItems()) {
       const associations = item.characters.length
         ? item.characters
-        : [{ id: null, name: item.characterName }];
+        : item.characterName
+          ? [{ id: null, name: item.characterName }]
+          : [];
       for (const character of associations) {
         const key = character.id === null ? `name:${character.name}` : `id:${character.id}`;
         const current = groups.get(key);
@@ -351,7 +363,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
         const file = files[cursor++]!;
         try {
           if (file.size > 64 * 1024 * 1024) throw new Error('maximum size is 64 MB');
-          await api.uploadGalleryImage(file, character?.id ?? null, character?.name, targetFolder);
+          await api.uploadGalleryMedia(file, character?.id ?? null, targetFolder);
           saved++;
         } catch (err) {
           errors.push(`${file.name}: ${errorMessage(err)}`);
@@ -361,7 +373,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     };
     await Promise.all([worker(), worker()]);
     setUploadProgress(null);
-    if (saved) toast(`Uploaded ${saved} ${saved === 1 ? 'image' : 'images'}.`, 'success');
+    if (saved) toast(`Uploaded ${saved} ${saved === 1 ? 'item' : 'items'}.`, 'success');
     if (errors.length) toast(`${errors.length} failed. ${errors.slice(0, 2).join('; ')}`);
   };
   const clearFilters = () => {
@@ -452,7 +464,23 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     event.preventDefault();
     navigateDetail(event.key === 'ArrowLeft' ? -1 : 1);
   };
-  onMount(() => document.addEventListener('keydown', onKey));
+  onMount(() => {
+    document.addEventListener('keydown', onKey);
+    onCleanup(
+      listenForGalleryPaste({
+        active: () => props.active !== false,
+        dialog: () => fileInput.closest<HTMLElement>('[role="dialog"]'),
+        kind: () => (props.picker ? (props.picker.kind ?? 'image') : undefined),
+        upload: (files) => {
+          if (uploadProgress() || bulkBusy()) {
+            toast('Wait for the current gallery update to finish before pasting.');
+            return;
+          }
+          void upload(files);
+        },
+      }),
+    );
+  });
   onCleanup(() => {
     clearTimeout(searchTimer);
     cancelAnimationFrame(focusFrame);
@@ -654,6 +682,21 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                 >
                   <FontAwesomeIcon icon={faSliders} size={15} />
                 </button>
+                <button
+                  type="button"
+                  class="icon-btn"
+                  classList={{ 'icon-btn-active': groupedByFolder() }}
+                  title="Group by folder"
+                  aria-label="Group by folder"
+                  aria-pressed={groupedByFolder()}
+                  onClick={() => {
+                    const next = !groupedByFolder();
+                    setGroupedByFolder(next);
+                    savePreference('groupByFolder', next ? '1' : '0');
+                  }}
+                >
+                  <FontAwesomeIcon icon={faFolderTree} size={15} />
+                </button>
               </div>
             </Show>
             <div class="gallery-header-actions flex items-center justify-end flex-none min-w-0 gap-2 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:gap-1 [&>button]:min-h-control [&>button]:h-control small:gap-1">
@@ -679,21 +722,19 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                     </button>
                   )}
                 </Show>
-                <Show when={props.picker?.kind !== 'video'}>
-                  <button
-                    title="Upload images"
-                    aria-label="Upload images"
-                    onClick={() => fileInput.click()}
-                    disabled={uploadProgress() !== null}
-                  >
-                    <FontAwesomeIcon
-                      icon={uploadProgress() ? faSpinner : faUpload}
-                      size={14}
-                      class={uploadProgress() ? 'spinner' : ''}
-                    />
-                    <span class="gallery-action-label">Upload</span>
-                  </button>
-                </Show>
+                <button
+                  title={`Upload ${props.picker?.kind === 'video' ? 'videos' : 'images'}`}
+                  aria-label={`Upload ${props.picker?.kind === 'video' ? 'videos' : 'images'}`}
+                  onClick={() => fileInput.click()}
+                  disabled={uploadProgress() !== null}
+                >
+                  <FontAwesomeIcon
+                    icon={uploadProgress() ? faSpinner : faUpload}
+                    size={14}
+                    class={uploadProgress() ? 'spinner' : ''}
+                  />
+                  <span class="gallery-action-label">Upload</span>
+                </button>
                 <button
                   class="primary-btn"
                   disabled={pickedItems().length === 0}
@@ -718,8 +759,8 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                           </span>
                           <button
                             type="button"
-                            title="Upload images"
-                            aria-label="Upload images"
+                            title="Upload images or videos (Ctrl+V to paste)"
+                            aria-label="Upload images or videos"
                             disabled={uploadProgress() != null}
                             onClick={() => fileInput.click()}
                           >
@@ -890,20 +931,12 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           class="gallery-workspace flex flex-col relative flex-1 min-h-0 mobile:block mobile:overflow-visible"
           onDragEnter={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
-            if (props.picker?.kind === 'video') {
-              event.preventDefault();
-              return;
-            }
             event.preventDefault();
             dragDepth++;
             setDragging(true);
           }}
           onDragOver={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
-            if (props.picker?.kind === 'video') {
-              event.preventDefault();
-              return;
-            }
             event.preventDefault();
             event.dataTransfer.dropEffect = uploadProgress() || bulkBusy() ? 'none' : 'copy';
           }}
@@ -915,10 +948,6 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           }}
           onDrop={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
-            if (props.picker?.kind === 'video') {
-              event.preventDefault();
-              return;
-            }
             event.preventDefault();
             dragDepth = 0;
             setDragging(false);
@@ -926,11 +955,19 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           }}
         >
           <input
-            ref={fileInput}
+            ref={(element) => {
+              fileInput = element;
+            }}
             type="file"
             hidden
             multiple
-            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            accept={
+              props.picker
+                ? props.picker.kind === 'video'
+                  ? 'video/mp4,video/webm,.mp4,.webm'
+                  : 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp'
+                : 'image/png,image/jpeg,image/webp,video/mp4,video/webm,.png,.jpg,.jpeg,.webp,.mp4,.webm'
+            }
             onChange={(event) => {
               const files = [...(event.currentTarget.files ?? [])];
               event.currentTarget.value = '';
@@ -945,15 +982,22 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                   ? 'Upload in progress'
                   : bulkBusy()
                     ? 'Gallery update in progress'
-                    : 'Drop images to upload'}
+                    : 'Drop images or videos to upload'}
               </strong>
-              <span>PNG, JPEG, WebP · Up to 64 MB each</span>
+              <span>PNG, JPEG, WebP, MP4, WebM · Up to 64 MB each</span>
             </div>
           </Show>
           <GalleryGrid
             items={filtered()}
+            groups={folderGroups()}
             targetHeight={imageSize()}
-            resetKey={JSON.stringify([search(), characterKey(), sort(), folderKey()])}
+            resetKey={JSON.stringify([
+              search(),
+              characterKey(),
+              sort(),
+              folderKey(),
+              groupedByFolder(),
+            ])}
             hidden={detailItem() != null || filtered().length === 0}
             active={props.active}
             selecting={props.picker !== undefined || selectionMode()}

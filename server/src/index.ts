@@ -51,6 +51,7 @@ const MIME: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
 };
 
 function safeJoin(root: string, urlPath: string): string | null {

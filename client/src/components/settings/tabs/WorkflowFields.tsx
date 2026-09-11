@@ -208,7 +208,9 @@ export function WorkflowSetupHelp() {
           <dd>
             Name a constant node <code>Style [input]</code> to make it editable. For numeric limits,
             use <code>Steps [input: min=1, max=100, step=1]</code>. Add <code>order=0</code> inside
-            the brackets to set display order.
+            the brackets to set display order. Add a numeric display unit, such as{' '}
+            <code>Duration (seconds) [input: unit=s]</code>, to show <code>10 s</code> in the
+            collapsed render summary. The control label and submitted number stay the same.
           </dd>
         </div>
         <div>

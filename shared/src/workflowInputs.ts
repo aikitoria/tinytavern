@@ -5,6 +5,8 @@ interface WorkflowInputBase {
   nodeId: string;
   input: string;
   label: string;
+  /** Optional display suffix for numeric controls; never changes the submitted value. */
+  unit?: string;
 }
 
 export type MediaWorkflowInput = WorkflowInputBase &
@@ -62,7 +64,7 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
     const fail: (message: string) => never = (message) => {
       throw new Error(`Workflow node ${nodeId} (${title}): ${message}`);
     };
-    const match = title.match(/^(.+?)\s*\[input(?::\s*([^\]]*))?\]\s*$/);
+    const match = title.match(/^(.+?)\s*\[input(?:(?::\s*|\s+)([^\]]*))?\]\s*$/);
     if (!match || !match[1]!.trim()) fail('Use Label [input: parameter=value, ...]');
     const classType = String(node.class_type);
     const resolution = classType === 'ResolutionSelector';
@@ -79,7 +81,9 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
       }
     }
     const allowed =
-      spec.type === 'int' || spec.type === 'float' ? ['min', 'max', 'step', 'order'] : ['order'];
+      spec.type === 'int' || spec.type === 'float'
+        ? ['min', 'max', 'step', 'order', 'unit']
+        : ['order'];
     for (const key of parameters.keys()) {
       if (!allowed.includes(key)) fail(`Unknown ${spec.type} parameter ${key}`);
     }
@@ -106,6 +110,7 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
       nodeId,
       input: spec.input,
       label: defaultResolutionLabel ? 'Megapixels' : resolution ? `${label} megapixels` : label,
+      unit: parameters.get('unit') ?? (resolution ? 'MP' : undefined),
     };
     let control: MediaWorkflowInput;
     if (spec.type === 'boolean') {

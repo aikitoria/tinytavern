@@ -169,7 +169,8 @@ export function savedImageDimensions(imagePath: string) {
  * Committed reservations advance AUTOINCREMENT even if later released; exclusive creation
  * protects file names left by an outer transaction that rolled back its reservation. */
 export function reserveMediaFile(extension: string): { id: number; path: string } {
-  if (!/^\.(png|jpe?g|webp|webm|part)$/.test(extension)) throw new Error('Invalid media extension');
+  if (!/^\.(png|jpe?g|webp|webm|mp4|part)$/.test(extension))
+    throw new Error('Invalid media extension');
   return stmt(`INSERT INTO media_assets(path, created_at)
     VALUES ('/images/media-' || (COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'), 0) + 1) || ?, ?)
     RETURNING id, path`).get(extension, Date.now()) as { id: number; path: string };
@@ -178,15 +179,17 @@ export function reserveMediaFile(extension: string): { id: number; path: string 
 function registerImage(path: string, byteSize: number): void {
   const size = savedImageDimensions(path);
   const ext = extname(path).toLowerCase();
-  const kind = ext === '.webm' ? 'video' : 'image';
+  const kind = ext === '.webm' || ext === '.mp4' ? 'video' : 'image';
   const mime =
-    ext === '.webm'
-      ? 'video/webm'
-      : ext === '.webp'
-        ? 'image/webp'
-        : ext === '.jpg' || ext === '.jpeg'
-          ? 'image/jpeg'
-          : 'image/png';
+    ext === '.mp4'
+      ? 'video/mp4'
+      : ext === '.webm'
+        ? 'video/webm'
+        : ext === '.webp'
+          ? 'image/webp'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : 'image/png';
   stmt(`UPDATE media_assets SET kind = ?, mime = ?, byte_size = ?, width = ?, height = ?
     WHERE path = ?`).run(kind, mime, byteSize, size?.width ?? null, size?.height ?? null, path);
   invalidateMediaAsset(path);

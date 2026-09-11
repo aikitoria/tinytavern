@@ -270,10 +270,12 @@ export default function GalleryDetail(props: {
           <Show
             when={props.item.characters.length}
             fallback={
-              <div class="flex items-center gap-2 [&_.avatar]:size-8 [&>div]:flex [&>div]:flex-col [&>div]:min-w-0 [&_strong]:text-body-small [&_strong]:truncate [&_time]:text-dim [&_time]:text-xs">
-                <Avatar name={props.item.characterName} src={null} />
-                <strong>{props.item.characterName}</strong>
-              </div>
+              <Show when={props.item.characterName}>
+                <div class="flex items-center gap-2 [&_.avatar]:size-8 [&>div]:flex [&>div]:flex-col [&>div]:min-w-0 [&_strong]:text-body-small [&_strong]:truncate [&_time]:text-dim [&_time]:text-xs">
+                  <Avatar name={props.item.characterName} src={null} />
+                  <strong>{props.item.characterName}</strong>
+                </div>
+              </Show>
             }
           >
             <For each={props.item.characters}>

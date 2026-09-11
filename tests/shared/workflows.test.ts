@@ -172,7 +172,11 @@ test('workflow inputs', async () => {
   });
   const graph = {
     frames: node('PrimitiveInt', 81, 'Frames [input: min=1, max=241, step=4]'),
-    duration: node('PrimitiveFloat', 2.5, 'Duration (seconds) [input: min=1, max=10, step=0.5]'),
+    duration: node(
+      'PrimitiveFloat',
+      2.5,
+      'Duration (seconds) [input: min=1, max=10, step=0.5, unit=s]',
+    ),
     text: node('PrimitiveStringMultiline', 'soft light', 'Style [input]'),
     sampler: { class_type: 'KSampler', inputs: { seed: 123, text: '{{prompt}}', steps: 20 } },
     noise: { class_type: 'RandomNoise', inputs: { noise_seed: 456 } },
@@ -188,6 +192,27 @@ test('workflow inputs', async () => {
     ['Frames', 'Duration (seconds)', 'Style', 'Chosen seed', 'Enable upscale'],
   );
   assert.equal(compiled.controls[1]!.type, 'float');
+  assert.equal(compiled.controls[1]!.unit, 's');
+  assert.equal(compiled.controls[0]!.unit, undefined, 'Units are optional');
+  for (const unit of ['s', 'fps', '%', 'µs']) {
+    const annotated = compile({
+      custom: node('PrimitiveInt', 10, `Custom measurement [input unit=${unit}]`),
+    });
+    assert.equal(annotated.controls[0]!.unit, unit);
+    assert.equal(annotated.controls[0]!.label, 'Custom measurement');
+    assert.deepEqual(validateWorkflowValues(annotated.controls, { custom: 20 }), { custom: 20 });
+  }
+  for (const title of [
+    'Bad [input: unit=]',
+    'Bad [input: unit=s, unit=ms]',
+    'Bad [input: unit=per second]',
+  ]) {
+    assert.throws(() => compile({ bad: node('PrimitiveInt', 10, title) }));
+  }
+  assert.throws(
+    () => compile({ toggle: node('PrimitiveBoolean', true, 'Enabled [input: unit=s]') }),
+    /Unknown boolean parameter unit/,
+  );
   const original = JSON.stringify(compiled.graph);
   const text = '"quoted" \\ path\n{{seed}} {{prompt}} $&';
   const result = expandMediaWorkflow(
@@ -304,6 +329,8 @@ test('workflow inputs', async () => {
     latent: { class_type: 'EmptyLatentImage', inputs: { width: ['size', 0], height: ['size', 1] } },
   };
   const resolution = compile(resolutionGraph);
+  assert.equal(resolution.controls[0]!.unit, undefined, 'Aspect ratios have no numeric unit');
+  assert.equal(resolution.controls[1]!.unit, 'MP', 'Resolution supplies its built-in display unit');
   const orderedGraph = {
     '1': node('PrimitiveInt', 20, 'Steps [input]'),
     '2': node('PrimitiveFloat', 5, 'Duration [input: min=1, max=15, order=2]'),

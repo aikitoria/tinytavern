@@ -2,6 +2,30 @@
   container-type: inline-size;
 }
 
+.media-form-section {
+  border: 0;
+  border-block: 1px solid var(--border);
+  @apply py-2;
+}
+
+.media-form-section + .media-form-section {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.media-render-settings > summary {
+  @apply flex items-center gap-3 min-h-control cursor-pointer;
+  list-style: none;
+}
+
+.media-render-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.media-render-settings[open] .media-settings-chevron {
+  transform: rotate(90deg);
+}
+
 @media (min-width: 768px) and (pointer: fine) {
   .media-tool-form {
     --control-height: 30px;

@@ -11,8 +11,13 @@ import {
 } from 'solid-js';
 import { faCheck, faImage, faPlay, faFilm } from '@fortawesome/free-solid-svg-icons';
 import type { GalleryItem } from '@tinytavern/shared';
-import { galleryRowAt, layoutGallery, visibleGalleryRows } from '../../galleryModel.ts';
-import type { GalleryCell, GalleryLayout } from '../../galleryModel.ts';
+import {
+  galleryRowAt,
+  layoutGallery,
+  layoutGalleryFolders,
+  visibleGalleryRows,
+} from '../../galleryModel.ts';
+import type { GalleryCell, GalleryLayout, GalleryFolderGroup } from '../../galleryModel.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 
 function GalleryVideoPreview(props: { url: string }) {
@@ -156,6 +161,7 @@ function GalleryTile(props: {
 
 export default function GalleryGrid(props: {
   items: GalleryItem[];
+  groups?: GalleryFolderGroup[];
   targetHeight: number;
   resetKey: string;
   hidden: boolean;
@@ -194,7 +200,16 @@ export default function GalleryGrid(props: {
   const [view, setView] = createSignal({ top: 0, height: 600 });
   const [documentVisible, setDocumentVisible] = createSignal(!document.hidden);
   const [focusedId, setFocusedId] = createSignal<number | null>(null);
-  const layout = createMemo(() => layoutGallery(props.items, width(), props.targetHeight));
+  const layout = createMemo(() =>
+    props.groups
+      ? layoutGalleryFolders(props.groups, width(), props.targetHeight)
+      : layoutGallery(props.items, width(), props.targetHeight),
+  );
+  const renderedHeadings = createMemo(() => {
+    const headings = layout().headings;
+    const { start, end } = visibleGalleryRows(headings, view().top, view().height);
+    return headings.slice(start, end);
+  });
   const range = createMemo(
     () => visibleGalleryRows(layout().rows, view().top, view().height),
     undefined,
@@ -426,6 +441,18 @@ export default function GalleryGrid(props: {
         aria-label="Saved images and videos"
         style={{ height: `${layout().height}px` }}
       >
+        <For each={renderedHeadings()}>
+          {(heading) => (
+            <div
+              class="absolute inset-x-0 flex items-center gap-3 text-dim"
+              style={{ top: `${heading.top}px`, height: `${heading.height}px` }}
+            >
+              <h3 class="m-0 text-sm font-semibold text-foreground truncate">{heading.name}</h3>
+              <span class="text-xs tabular-nums">{heading.count}</span>
+              <span class="flex-1 border-t border-t-solid border-t-line" />
+            </div>
+          )}
+        </For>
         <For each={[...renderedCells().keys()]}>
           {(id) => {
             const position = () => renderedCells().get(id)!;

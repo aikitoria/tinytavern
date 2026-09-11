@@ -55,10 +55,22 @@ test('entity folders preserve contents and transfer by name with atomic imports'
       return response.json() as Promise<GalleryItem>;
     };
     const images = [await upload(`?folderId=${galleryFolder.id}`), await upload()];
+    const uploadsFolder = (await request('GET', '/api/gallery-folders')).find(
+      (folder: { name: string }) => folder.name === 'Uploads',
+    );
+    assert(uploadsFolder, 'Default uploads create an Uploads folder');
     assert.deepEqual(
       images.map((item) => item.folderId),
-      [galleryFolder.id, null],
+      [galleryFolder.id, uploadsFolder.id],
     );
+    assert.equal(images[1]!.characterName, '');
+    assert.deepEqual(images[1]!.characters, [], 'Uploads are not a character association');
+    const repeated = await upload();
+    assert.equal(repeated.folderId, uploadsFolder.id, 'Default uploads reuse the same folder');
+    const root = await upload('?folderId=root');
+    assert.equal(root.folderId, null, 'An explicitly selected root overrides the default folder');
+    await request('DELETE', `/api/gallery/${repeated.id}`, undefined, 204);
+    await request('DELETE', `/api/gallery/${root.id}`, undefined, 204);
     const owners = stmt("SELECT * FROM media_owners WHERE owner_type = 'gallery'").all();
     const move = (
       folderId: number | null,

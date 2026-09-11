@@ -8,6 +8,7 @@ import { insertGalleryAsset } from '../media/galleryStore.ts';
 import type { GalleryItem } from '@tinytavern/shared';
 import {
   mediaAssetForPath,
+  invalidateMediaAsset,
   stmt,
   toGalleryItem as canonicalGalleryItem,
   transaction,
@@ -20,6 +21,7 @@ import { objectBody, optionalNullableId, optionalString, positiveId } from '../h
 import { requireReference } from './shared/entityUtils.ts';
 import { describeImage, descriptionWorkflow } from '../media/mediaDescription.ts';
 import { streamResponse } from '../http/streamResponse.ts';
+import { downloadMedia, InvalidMediaOutput } from '../media/mediaFiles.ts';
 
 observeInvalidation((entity) => {
   if (entity === 'characters') invalidate('gallery');
@@ -68,27 +70,72 @@ route.get('/api/gallery', () =>
 // One original per request avoids base64 copies and bounds concurrent upload memory.
 route.post(
   '/api/gallery/upload',
-  ({ req, raw }) => {
-    if (!raw?.length) throw new HttpError(400, 'image file is empty');
+  async ({ req, raw }) => {
+    if (!raw?.length) throw new HttpError(400, 'media file is empty');
     const format = rasterImageFormat(raw);
     const size = format && imageDimensions(raw);
-    if (!format || !size) throw new HttpError(400, 'Upload a valid PNG, JPEG, or WebP image');
+    if (format && !size) throw new HttpError(400, 'Upload a valid PNG, JPEG, or WebP image');
     const query = new URL(req.url!, 'http://localhost').searchParams;
-    const folderId = query.has('folderId') ? positiveId(query.get('folderId')!, 'folderId') : null;
+    const defaultFolder = !query.has('folderId');
+    let folderId =
+      !defaultFolder && query.get('folderId') !== 'root'
+        ? positiveId(query.get('folderId')!, 'folderId')
+        : null;
     requireReference('gallery_folders', folderId, 'folderId');
     const characterId = query.has('characterId') ? positiveId(query.get('characterId')!) : null;
-    let characterName = query.get('characterName')?.trim() || 'Uploads';
+    let characterName = '';
     if (characterId != null) {
       const character = stmt('SELECT name FROM characters WHERE id = ?').get(characterId) as
         { name: string } | undefined;
       if (!character) throw new HttpError(404, 'character not found');
       characterName = character.name;
-    } else if (characterName.length > 500) throw new HttpError(400, 'character name is too long');
-    const saved = saveImage(format.ext, raw);
+    }
+    let saved: string | undefined;
+    if (format) saved = saveImage(format.ext, raw);
+    else {
+      try {
+        const media = await downloadMedia(new Response(raw), 'video', req.signal, 'upload');
+        saved = media.path;
+        stmt(`UPDATE media_assets SET kind = ?, mime = ?, byte_size = ?, width = ?, height = ?, duration = ?
+          WHERE path = ?`).run(
+          media.kind,
+          media.mime,
+          media.byteSize,
+          media.width,
+          media.height,
+          media.duration,
+          saved,
+        );
+        invalidateMediaAsset(saved);
+      } catch (error) {
+        if (saved) deleteImageFiles([saved]);
+        if (error instanceof InvalidMediaOutput) throw new HttpError(400, error.message);
+        throw error;
+      }
+    }
     try {
+      // Video probing yields: the destination and character can disappear in the meantime.
+      requireReference('gallery_folders', folderId, 'folderId');
+      if (characterId !== null) {
+        const character = stmt('SELECT name FROM characters WHERE id = ?').get(characterId);
+        if (!character) throw new HttpError(404, 'character not found');
+        characterName = String(character.name);
+      }
       const asset = mediaAssetForPath(saved)!;
-      if (characterId !== null) setMediaCharacters(asset.id, [characterId]);
-      const item = galleryItem(insertGalleryAsset(asset, { characterName, prompt: '', folderId }));
+      let createdFolder = false;
+      const item = transaction(() => {
+        if (defaultFolder) {
+          createdFolder =
+            stmt(`INSERT INTO gallery_folders(name, created_at) VALUES ('Uploads', ?)
+            ON CONFLICT(name) DO NOTHING`).run(Date.now()).changes > 0;
+          folderId = Number(
+            stmt("SELECT id FROM gallery_folders WHERE name = 'Uploads'").get()!.id,
+          );
+        }
+        if (characterId !== null) setMediaCharacters(asset.id, [characterId]);
+        return galleryItem(insertGalleryAsset(asset, { characterName, prompt: '', folderId }));
+      });
+      if (createdFolder) invalidate('galleryFolders');
       invalidate('gallery');
       return item;
     } catch (err) {
@@ -295,7 +342,7 @@ route.patch('/api/gallery/:id', ({ params, body }) => {
     transaction(() => {
       if (charactersChanged) setMediaCharacters(asset.id, characterIds);
       const characterName = charactersChanged
-        ? mediaCharacterNames(asset.id) || (asset.recipeId ? 'Media tools' : 'Uploads')
+        ? mediaCharacterNames(asset.id)
         : String(row.character_name);
       stmt(`UPDATE gallery_items SET prompt = ?, character_name = ?, folder_id = ?,
         updated_at = MAX(updated_at + 1, ?) WHERE id = ?`).run(
