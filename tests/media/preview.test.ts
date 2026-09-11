@@ -113,7 +113,7 @@ test('media latency', async () => {
     name: 'Latency',
     inputBindings: {},
     textOutputNodeId: null,
-    json: '{"loader":{"class_type":"Loader","inputs":{}},"sampler":{"class_type":"Test","_meta":{"title":"Motion sampler"},"inputs":{"model":["loader",0],"prompt":"{{prompt}}","seed":{{seed}}}}}',
+    json: '{"loader":{"class_type":"Loader","inputs":{}},"sampler":{"class_type":"Test","_meta":{"title":"Motion sampler"},"inputs":{"model":["loader",0],"prompt":"{{prompt}}","seed":0}}}',
     standalonePromptPresetId: null,
     chatPromptPresetId: null,
   };
@@ -287,8 +287,8 @@ test('media latency', async () => {
     await waitFor(() => Boolean(updates.at(-1)?.videoPreview?.frames[0]));
     assert.deepEqual(
       Object.keys(updates.at(-1)!.videoPreview!.frames),
-      ['0', '1'],
-      'A socket reconnect preserves existing frames while accepting resumed updates',
+      ['0'],
+      'Frame zero starts a new denoise sequence after reconnect, without mixing old frames',
     );
     reconnectedSocket.send(JSON.stringify({ type: 'executing', data: { node: 'next-sampler' } }));
     reconnectedSocket.send(videoPreviewFrame(2, 'next-sampler'));

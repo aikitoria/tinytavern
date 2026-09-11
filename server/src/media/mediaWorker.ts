@@ -1,3 +1,5 @@
+import { requireMediaWorkflow } from './mediaWorkflows.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 import { ComfyGraphProgress, type ComfyProgressData } from './comfy/comfyGraphProgress.ts';
 import { cleanupDiscardedMediaDraft } from './mediaDrafts.ts';
 import { randomUUID } from 'node:crypto';
@@ -118,7 +120,7 @@ function flushProgress(id: number): void {
   const current = mediaLive.get(id);
   if (!current || stopping) return;
   const progress = { ...current.progress };
-  // Snapshots retain the bounded cache. Frequent events send only changed frame indices.
+  // Snapshots retain the complete sequence. Frequent events batch arriving frame indices.
   if (pendingVideoPreviews.has(id)) {
     progress.videoPreview = pendingVideoPreviews.get(id)!;
     pendingVideoPreviews.delete(id);
@@ -149,7 +151,7 @@ function publishProgress(id: number, progress: MediaJob['progress']): void {
     const pending = pendingVideoPreviews.get(id);
     pendingVideoPreviews.set(
       id,
-      incoming && pending?.id === incoming.id
+      incoming && pending?.id === incoming.id && pending.sequence === incoming.sequence
         ? { ...incoming, frames: { ...pending.frames, ...incoming.frames } }
         : incoming,
     );
@@ -201,14 +203,17 @@ function openProgress(row: MediaJobRow): Promise<void> {
       sockets.delete(row.id);
     }
   });
+  const workflow = getSettings().mediaRendering.workflows.find(
+    (item) => item.id === row.workflow_id,
+  );
   const graphProgress = new ComfyGraphProgress(
-    compileMediaWorkflow(configuration(row).workflow.json).graph,
+    workflow?.json ? compileMediaWorkflow(workflow.json).graph : {},
   );
   const cachedPreview = mediaLive.get(row.id)?.progress?.videoPreview;
   const previewMetadata = cachedPreview ?? config.videoPreview;
   let executingNode: string | null = previewMetadata?.nodeId ?? null;
   let videoPreview = previewMetadata
-    ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.frames)
+    ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.sequence)
     : null;
   let pendingVideoHeader: ComfyVideoPreview | null = null;
   socket.addEventListener('message', ({ data: raw }) => {
@@ -430,7 +435,7 @@ async function uploadInputs(
     if (remoteName === undefined) {
       const asset = stmt('SELECT path, mime FROM media_assets WHERE id = ?').get(input.assetId);
       if (!asset) {
-        throw new Error('A pinned reference image is missing');
+        throw new Error('A pinned reference media asset is missing');
       }
       const file: ComfyFile = {
         filename: `tinytavern-${row.request_key}-asset-${input.assetId}${extname(String(asset.path))}`,
@@ -493,7 +498,8 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
     return;
   }
   const submissionId = randomUUID();
-  const graph = compileMediaWorkflow(config.workflow.json);
+  const workflow = requireMediaWorkflow(config.workflowId);
+  const graph = compileMediaWorkflow(workflow.json);
   const prompt = expandMediaWorkflow(
     graph,
     {
@@ -506,7 +512,11 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
   );
   // Comfy's installed API accepts this exact ID. Persist it BEFORE POST and
   // never POST again once acceptance is uncertain, even after a process crash.
-  updateMediaJob(row.id, { submission_id: submissionId, state: 'reconciling' });
+  updateMediaJob(row.id, {
+    submission_id: submissionId,
+    state: 'reconciling',
+    configuration_json: JSON.stringify({ ...config, textOutputNodeId: workflow.textOutputNodeId }),
+  });
   publishMediaJob(row.id);
   const response = await fetch(`${config.comfyUrl}/prompt`, {
     method: 'POST',
@@ -628,8 +638,8 @@ async function retrieve(
 ): Promise<void> {
   const config = configuration(row);
   const outputs = history.outputs ?? {};
-  if (config.workflow.textOutputNodeId !== null) {
-    const result = comfyTextOutput(outputs, config.workflow.textOutputNodeId);
+  if (config.textOutputNodeId != null) {
+    const result = comfyTextOutput(outputs, config.textOutputNodeId);
     transaction(() => {
       updateMediaJob(row.id, { result_text: result });
       finishMediaJob(row.id, 'succeeded');

@@ -33,7 +33,7 @@ export default function MediaRenderingTab() {
       try {
         if (workflow.textOutputNodeId !== null) return false;
         const compiled = compileMediaWorkflow(workflow.json);
-        return compiled.slots.has('prompt') && compiled.imageInputs.length === 0;
+        return compiled.slots.has('prompt') && compiled.mediaInputs.length === 0;
       } catch {
         return false;
       }
@@ -237,7 +237,7 @@ export default function MediaRenderingTab() {
         >
           <p class="hint">
             Prepare the selected prompt using the conversation and run the workflow immediately.
-            Workflows must have a prompt input and no image inputs.
+            Workflows must have a prompt input and no media inputs.
           </p>
           <SettingsCollectionTable
             items={form.favorites()}

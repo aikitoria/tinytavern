@@ -32,7 +32,7 @@ test('media description', async () => {
   assert.equal(mediaWorkflowError(IMAGE_DESCRIPTION_WORKFLOW), null);
   const compiled = compileMediaWorkflow(IMAGE_DESCRIPTION_WORKFLOW.json);
   const expanded = expandMediaWorkflow(compiled, {
-    source: 'uploaded.png',
+    input1: 'uploaded.png',
     seed: 12345,
     prompt: '',
     job_id: 'test',

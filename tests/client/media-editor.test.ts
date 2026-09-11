@@ -13,11 +13,11 @@ import {
 } from '../../client/src/media/inputSelection.ts';
 
 test('bulk input selection retains slot assignments, gaps and sources outside the gallery', () => {
-  const slots = ['source', 'subject', 'reference4'];
+  const slots = ['input1', 'input2', 'input4'];
   const selectable = new Set([1, 2, 3]);
   const swapped = [
-    { slot: 'subject', assetId: 1 },
-    { slot: 'source', assetId: 2 },
+    { slot: 'input2', assetId: 1 },
+    { slot: 'input1', assetId: 2 },
   ];
   const ordered = orderedMediaInputs(slots, swapped);
   assert.deepEqual(
@@ -27,17 +27,17 @@ test('bulk input selection retains slot assignments, gaps and sources outside th
   assert.deepEqual(reconcileMediaInputSelection(slots, swapped, [2, 1], selectable), ordered);
   assert.deepEqual(reconcileMediaInputSelection(slots, swapped, [1], selectable), [swapped[0]]);
   assert.deepEqual(reconcileMediaInputSelection(slots, [swapped[0]!], [1, 3], selectable), [
-    { slot: 'source', assetId: 3 },
+    { slot: 'input1', assetId: 3 },
     swapped[0],
   ]);
   const repeated = [
-    { slot: 'source', assetId: 1 },
-    { slot: 'reference4', assetId: 1 },
+    { slot: 'input1', assetId: 1 },
+    { slot: 'input4', assetId: 1 },
   ];
   assert.deepEqual(reconcileMediaInputSelection(slots, repeated, [1, 1], selectable), repeated);
-  const avatar = { slot: 'subject', assetId: 99 };
+  const avatar = { slot: 'input2', assetId: 99 };
   assert.deepEqual(reconcileMediaInputSelection(slots, [avatar], [3], selectable), [
-    { slot: 'source', assetId: 3 },
+    { slot: 'input1', assetId: 3 },
     avatar,
   ]);
 });
@@ -107,9 +107,13 @@ test('media drafts retain edits across settings, generation and ordered job snap
     textOutputNodeId: null,
     chatPromptPresetId: null,
     standalonePromptPresetId: null,
-    inputBindings: { standalone: { source: 'selected:1' } },
+    inputBindings: { standalone: { input1: 'selected:1' } },
     json: JSON.stringify({
-      '1': { class_type: 'LoadImage', inputs: { image: 'source.png' } },
+      '1': {
+        class_type: 'LoadImage',
+        inputs: { image: 'sample.png' },
+        _meta: { title: 'Input 1 [image:input1]' },
+      },
       '2': { class_type: 'PrimitiveString', inputs: { value: '{{prompt}}' } },
       '3': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
       duration: {
@@ -138,7 +142,6 @@ test('media drafts retain edits across settings, generation and ordered job snap
     textResult: null,
     temporary: false,
     workflowId: 'b',
-    workflowSnapshot: b,
     presetId: null,
     state: 'draft',
     instruction: '',
@@ -262,7 +265,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
       7,
       'The gallery destination survives workflow changes and child panes',
     );
-    assert.deepEqual(submitted!.inputs, [{ slot: 'source', assetId: source.id }]);
+    assert.deepEqual(submitted!.inputs, [{ slot: 'input1', assetId: source.id }]);
     assert.equal(keys[0], frame.media!.requestKey);
     assert.equal(
       current.id,
@@ -322,7 +325,6 @@ test('media drafts retain edits across settings, generation and ordered job snap
         ...values,
         draft: { ...job.draft!, revision: variationKeys.length + 1 },
         sourceJobId: job.id,
-        workflowSnapshot: values.workflowId === 'a' ? a : b,
         inputs: (values.inputs ?? []).map((input) => ({ ...input, prompt: '' })),
       });
     };
@@ -412,6 +414,18 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.equal(restoredPreview.media!.jobId, 302, 'Preview navigation retains the editor anchor');
     assert.equal(restoredPreview.media!.previewJobId, 301);
     assert.equal(restoredPreview.media!.assetId, 802);
+    const retainedEditor = dialogStack.top();
+    openMediaTool('a', { jobId: 301, assetId: 801 });
+    assert.equal(dialogStack.top(), retainedEditor, 'Opening an output retains the working editor');
+    assert.equal(parsePageLocation(location.hash).media!.jobId, 302);
+    assert.equal(parsePageLocation(location.hash).media!.previewJobId, 301);
+    assert.equal(parsePageLocation(location.hash).media!.assetId, 801);
+    openMediaTool('a', { jobId: 301, assetId: 802 });
+    assert.equal(
+      parsePageLocation(location.hash).media!.assetId,
+      802,
+      'Opening a sibling output selects its exact asset',
+    );
     dispose();
     const restoredJobs = JSON.parse(JSON.stringify(state.mediaJobs)) as Record<number, MediaJob>;
     for (const id of Object.keys(state.mediaJobs)) setState('mediaJobs', Number(id), undefined!);
@@ -546,7 +560,6 @@ test('media drafts retain edits across settings, generation and ordered job snap
         return makeJob(avatarJobId++, {
           avatarContext: draft.avatarContext,
           workflowId: avatarWorkflow.id,
-          workflowSnapshot: avatarWorkflow,
         });
       };
       let started!: () => void;

@@ -1,10 +1,10 @@
+import { requireMediaWorkflow } from '../media/mediaWorkflows.ts';
+import { invalidate } from '../realtime/events.ts';
 import { setMediaCharacters } from '../media/mediaCharacters.ts';
 import {
   nextCollectionId,
   namedItem,
   mediaInputSlots,
-  normalizeImportedWorkflow,
-  normalizeMediaWorkflowInputs,
   compileMediaWorkflow,
   validateWorkflowValues,
   type MediaWorkflowValues,
@@ -16,7 +16,7 @@ import { copyImage, saveImage } from '../media/images.ts';
 import { HttpError } from '../http/router.ts';
 import { parseMediaWorkflow } from '../media/mediaSettings.ts';
 import { requireString } from '../http/validation.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettings, putSettings } from '../settings/settingsStore.ts';
 import {
   mediaRecipeSeed,
   saveMediaRecipe,
@@ -59,7 +59,7 @@ export function exportImageRecipes(
       const configuration = JSON.parse(
         String(row.configuration_json),
       ) as MediaRecipe['configuration'];
-      const workflow = configuration.workflow;
+      const workflow = requireMediaWorkflow(configuration.workflowId);
       const inputs = JSON.parse(String(row.inputs_json)) as MediaRecipeInput[];
       recipe = {
         workflowValues: configuration.workflowValues,
@@ -86,6 +86,8 @@ export function exportImageRecipes(
           const source = stmt('SELECT path, kind FROM media_assets WHERE id = ?').get(
             input.assetId,
           );
+          // Conversation transfers omit video files but preserve the missing input slot.
+          if (source?.kind === 'video') return { slot, assetId: null, prompt: input.prompt };
           if (!source || source.kind !== 'image') {
             throw new HttpError(409, 'Cannot export a missing image recipe reference');
           }
@@ -140,21 +142,19 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
     if (!id || id.length > 200 || recipes.has(id)) {
       throw new HttpError(400, 'Image recipe IDs must be nonempty and unique');
     }
-    const originalWorkflow = parseMediaWorkflow(
-      {
-        ...normalizeImportedWorkflow(object(source.workflow)),
-        standalonePromptPresetId: null,
-        inputBindings: {},
-        chatPromptPresetId: null,
-      },
-      undefined,
-      false,
-    );
-    const { workflow, slots: renamedSlots } = normalizeMediaWorkflowInputs(originalWorkflow);
+    const workflow = parseMediaWorkflow({
+      ...object(source.workflow),
+      standalonePromptPresetId: null,
+      inputBindings: {},
+      chatPromptPresetId: null,
+    });
     if (workflow.textOutputNodeId !== null || !workflow.json.trim()) {
       throw new HttpError(400, 'Image recipes require an image workflow');
     }
-    const slots = [...renamedSlots.keys()];
+    const inputKinds = new Map(
+      compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]),
+    );
+    const slots = [...inputKinds.keys()];
     if (!Array.isArray(source.inputs) || source.inputs.length !== slots.length) {
       throw new HttpError(400, 'Image recipe references do not match the workflow');
     }
@@ -164,8 +164,10 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
       if (input.slot !== slot) {
         throw new HttpError(400, 'Image recipe references must follow workflow slot order');
       }
+      if (input.assetId !== null && inputKinds.get(slot) === 'video')
+        throw new HttpError(400, 'Conversation transfers cannot include video reference files');
       return {
-        slot: renamedSlots.get(slot)!,
+        slot,
         assetId: input.assetId === null ? null : text(input.assetId, 'reference asset ID', 200),
         prompt: input.prompt === undefined ? undefined : text(input.prompt, 'reference prompt'),
       };
@@ -272,7 +274,9 @@ export function importRecipeImages(
       }),
     );
   }
-  const rendering = getSettings().mediaRendering;
+  const settings = getSettings();
+  const rendering = settings.mediaRendering;
+  let addedWorkflow = false;
   const recipeIds = new Map<string, number>();
   for (const recipe of recipes.values()) {
     const inputs = recipe.inputs.map((input) => ({
@@ -285,16 +289,17 @@ export function importRecipeImages(
           ? ''
           : (recipes.get(assets.get(input.assetId)?.recipeId ?? '')?.prompt ?? '')),
     }));
+    let workflow = namedItem(rendering.workflows, recipe.workflow.name);
+    if (!workflow) {
+      workflow = { ...recipe.workflow, id: nextCollectionId(rendering.workflows) };
+      rendering.workflows.push(workflow);
+      addedWorkflow = true;
+    }
     const id = saveMediaRecipe(
       {
         comfyUrl: rendering.comfyUrl,
         timeoutSeconds: rendering.jobTimeoutSeconds,
-        workflow: {
-          ...recipe.workflow,
-          id:
-            namedItem(rendering.workflows, recipe.workflow.name)?.id ??
-            nextCollectionId(rendering.workflows),
-        },
+        workflowId: workflow.id,
         workflowValues: recipe.workflowValues,
       },
       inputs,
@@ -302,6 +307,10 @@ export function importRecipeImages(
       { instruction: recipe.instruction, seed: recipe.seed },
     );
     recipeIds.set(recipe.id, id);
+  }
+  if (addedWorkflow) {
+    putSettings({ ...settings, revision: settings.revision + 1 });
+    invalidate('settings');
   }
   for (const [id, asset] of assets) {
     if (asset.recipeId !== null) {

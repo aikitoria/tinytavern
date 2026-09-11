@@ -154,7 +154,7 @@ test('media restart', async () => {
     standalonePromptPresetId: null,
     chatPromptPresetId: null,
     json: JSON.stringify({
-      load: { class_type: 'LoadImage', inputs: { image: '{{first_frame}}' } },
+      load: { class_type: 'LoadImage', inputs: { image: '{{input1}}' } },
       save: {
         class_type: 'SaveVideo',
         inputs: { text: '{{prompt}}', filename_prefix: '{{job_id}}' },
@@ -181,7 +181,7 @@ test('media restart', async () => {
 
     workflowId: workflow.id,
     prompt: 'Slow camera move',
-    inputs: [{ slot: 'first_frame', assetId: mediaAssetForPath(inputPath)!.id }],
+    inputs: [{ slot: 'input1', assetId: mediaAssetForPath(inputPath)!.id }],
   });
   startMediaJob(requireMediaJob(draft.id), {}, false);
   const children = new Set<ChildProcess>();

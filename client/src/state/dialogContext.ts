@@ -4,6 +4,8 @@ import { guardPageNavigation, readPageLocation } from './pageLocation.ts';
 
 export const DialogContext = createContext<{ frame: DialogFrame; active: Accessor<boolean> }>();
 export const useDialogActive = () => useContext(DialogContext)?.active ?? (() => true);
+export const useDialogMediaPreview = () =>
+  useContext(DialogContext)?.frame.mediaPreview ?? (() => undefined);
 export function useDialogPage() {
   const context = useContext(DialogContext);
   return () => context?.frame.page ?? readPageLocation();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
-test('legacy workflows convert to numbered bindings without changing graph behavior', async () => {
+test('workflows require strict JSON and numbered bindings without filename inference', async () => {
   const {
     compileMediaWorkflow,
     expandMediaWorkflow,
@@ -13,178 +13,97 @@ test('legacy workflows convert to numbered bindings without changing graph behav
   } = await import('@tinytavern/shared');
   const { parseMediaRendering, parseMediaPrompts } =
     await import('../../server/src/media/mediaSettings.ts');
-  type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
   const graph = {
     source: { class_type: 'LoadImage', inputs: { image: 'source.png' } },
-    mask: {
-      class_type: 'LoadImageMask',
-      inputs: { image: 'samples/source.png [input]', channel: 'alpha' },
-    },
     first: { class_type: 'LoadImage', inputs: { image: 'first_frame.png' } },
-    ref1: { class_type: 'LoadImage', inputs: { image: 'reference1.png' } },
-    ref2: { class_type: 'LoadImage', inputs: { image: 'samples/reference2.png' } },
-    ref3: { class_type: 'LoadImage', inputs: { image: 'reference3.png [input]' } },
+    reference: { class_type: 'LoadImageMask', inputs: { image: 'samples/reference1.png [input]' } },
     subject: {
       class_type: 'LoadImage',
-      inputs: { image: 'source.png' },
-      _meta: { title: 'Subject [image:subject]' },
+      inputs: { image: 'reference1.png' },
+      _meta: { title: 'Subject [image:input1]' },
     },
     custom: {
       class_type: 'CustomLoader',
-      inputs: { filename: 'example.png' },
-      _meta: { title: 'Clothing [image:clothing, field=filename]' },
+      inputs: { filename: 'sample.png' },
+      _meta: { title: 'Clothing [image:input2, field=filename]' },
     },
     text: {
       class_type: 'PrimitiveString',
-      inputs: { value: 'Example prompt' },
+      inputs: { value: 'example' },
       _meta: { title: 'Prompt [prompt]' },
     },
-    output: {
-      class_type: 'AnyOutput',
-      inputs: { text: 'prefix {{prompt}}', image: 'reference1.png' },
-    },
-    fixed: { class_type: 'LoadImage', inputs: { image: 'my-reference1.png' } },
-    external: { class_type: 'LoadImage', inputs: { image: 'reference1.png [output]' } },
+    sampler: { class_type: 'KSampler', inputs: { seed: 0 } },
     linked: { class_type: 'LoadImage', inputs: { image: ['filename', 0] } },
   };
-  const workflow: MediaWorkflow = {
+  const workflow = {
     id: 'unusual',
     name: 'Unusual workflow',
     json: JSON.stringify(graph),
     standalonePromptPresetId: null,
     chatPromptPresetId: null,
     textOutputNodeId: null,
-    inputBindings: { chat: { subject: 'character-avatar' } },
+    inputBindings: { chat: { input1: 'character-avatar' as const } },
   };
   assert.equal(mediaWorkflowError(workflow), null);
-  assert.deepEqual(mediaInputSlots(workflow), [
-    'source',
-    'first_frame',
-    'reference1',
-    'reference2',
-    'reference3',
-    'subject',
-    'clothing',
-  ]);
+  assert.deepEqual(mediaInputSlots(workflow), ['input1', 'input2']);
   const compiled = compileMediaWorkflow(workflow.json);
-  assert.equal(
-    compileMediaWorkflow(workflow.json),
-    compiled,
-    'Identical source reuses compilation',
-  );
+  assert.equal(compileMediaWorkflow(workflow.json), compiled);
   const original = JSON.stringify(compiled.graph);
   const prompt = 'Quotes " \\ newline\n literal {{seed}} $&';
-  const bindings = {
+  const values = {
     prompt,
     seed: 123,
     job_id: 'job',
-    source: 'jobs/source.webp',
-    first_frame: 'jobs/first.png',
-    reference1: 'jobs/one.jpg',
-    reference2: 'jobs/two.png',
-    reference3: 'jobs/three.png',
-    subject: 'jobs/subject.png',
-    clothing: 'jobs/clothing.png',
+    input1: 'subject.webp',
+    input2: 'clothing.png',
   };
-  const result = expandMediaWorkflow(compiled, bindings) as typeof graph;
-  assert.equal(result.source.inputs.image, bindings.source);
-  assert.equal(result.mask.inputs.image, bindings.source);
-  assert.equal(result.first.inputs.image, bindings.first_frame);
-  assert.equal(result.ref1.inputs.image, bindings.reference1);
-  assert.equal(result.ref2.inputs.image, bindings.reference2);
-  assert.equal(result.ref3.inputs.image, bindings.reference3);
-  assert.equal(
-    result.subject.inputs.image,
-    bindings.subject,
-    'Named titles override legacy sample filenames',
-  );
-  assert.equal(result.custom.inputs.filename, bindings.clothing);
+  const result = expandMediaWorkflow(compiled, values) as typeof graph;
+  assert.equal(result.subject.inputs.image, values.input1);
+  assert.equal(result.custom.inputs.filename, values.input2);
   assert.equal(result.text.inputs.value, prompt);
-  assert.equal(result.output.inputs.text, `prefix ${prompt}`);
-  assert.equal(
-    result.output.inputs.image,
-    'reference1.png',
-    'Only actual loader fields bind legacy filenames',
-  );
-  assert.equal(result.fixed.inputs.image, 'my-reference1.png');
-  assert.equal(result.external.inputs.image, 'reference1.png [output]');
-  assert.deepEqual(result.linked.inputs.image, ['filename', 0]);
+  assert.equal(result.sampler.inputs.seed, 123);
+  for (const key of ['source', 'first', 'reference', 'linked'] as const)
+    assert.deepEqual(result[key], graph[key]);
   result.subject.inputs.image = 'mutated';
+  assert.equal(JSON.stringify(compiled.graph), original);
   assert.equal(
-    (expandMediaWorkflow(compiled, bindings) as typeof graph).subject.inputs.image,
-    bindings.subject,
-  );
-  assert.equal(
-    JSON.stringify(compiled.graph),
-    original,
-    'Expansion never mutates the shared compilation',
+    (expandMediaWorkflow(compiled, values) as typeof graph).subject.inputs.image,
+    values.input1,
   );
   assert.throws(
     () => expandMediaWorkflow(compiled, { prompt, seed: 1, job_id: 'missing' }),
     /Missing workflow input/,
   );
-  const namedOnly = { ...workflow, json: JSON.stringify({ subject: graph.subject }) };
-  assert.deepEqual(
-    mediaInputSlots(namedOnly),
-    ['subject'],
-    'Overridden sample bindings leave no phantom slots',
-  );
   assert.equal(
-    mediaWorkflowError(namedOnly),
-    null,
-    'Promptless transformation workflows are valid',
+    mediaWorkflowError({ ...workflow, textOutputNodeId: 'missing' })?.includes('existing node'),
+    true,
   );
-  assert.equal(mediaWorkflowError({ ...workflow, textOutputNodeId: 'output' }), null);
-  assert.match(mediaWorkflowError({ ...workflow, textOutputNodeId: 'missing' })!, /existing node/);
-  for (const node of [
-    { ...graph.linked, _meta: { title: 'Subject [image:subject]' } },
-    { ...graph.subject, _meta: { title: 'Subject [image:prompt]' } },
-    { ...graph.subject, _meta: { title: 'Subject [image:Subject]' } },
-  ])
-    assert.throws(() => compileMediaWorkflow(JSON.stringify({ node })));
   for (const json of [
+    '{"seed":{{seed}}}',
     '{"seed":"{{seed}}"}',
     '{"text":{{prompt}}}',
     '{"{{prompt}}":1}',
+    '{"text":"{{reference1}}"}',
+    '{"text":"{{source}}"}',
+    '{"text":"{{first_frame}}"}',
     '{"text":"{{unknown}}"}',
-    '{"seed":1{{seed}}}',
-  ]) {
+  ])
     assert.throws(() => compileMediaWorkflow(json), json);
-  }
-  const seeds = compileMediaWorkflow('{"1":{"inputs":{"seed":{{seed}},"text":"{{prompt}}"}}}');
-  assert.equal(
-    (expandMediaWorkflow(seeds, bindings) as { '1': { inputs: { seed: number } } })['1'].inputs
-      .seed,
-    123,
-  );
+  for (const name of ['subject', 'input0', 'input65', 'input01', 'prompt'])
+    assert.throws(() =>
+      compileMediaWorkflow(
+        JSON.stringify({
+          ...graph,
+          subject: { ...graph.subject, _meta: { title: `Subject [image:${name}]` } },
+        }),
+      ),
+    );
   const settings = {
     ...DEFAULT_MEDIA_RENDERING,
     workflows: [workflow],
     defaultWorkflowId: workflow.id,
   };
-  const normalized = parseMediaRendering(settings)!.workflows[0]!;
-  assert.deepEqual(
-    mediaInputSlots(normalized),
-    Array.from({ length: 7 }, (_, i) => `input${i + 1}`),
-  );
-  assert.deepEqual(normalized.inputBindings, { chat: { input6: 'character-avatar' } });
-  const numbered = Object.fromEntries(
-    mediaInputSlots(workflow).map((slot, i) => [
-      `input${i + 1}`,
-      bindings[slot as keyof typeof bindings],
-    ]),
-  );
-  const converted = expandMediaWorkflow(compileMediaWorkflow(normalized.json), {
-    prompt,
-    seed: 123,
-    job_id: 'job',
-    ...numbered,
-  }) as typeof graph;
-  assert.deepEqual(converted.linked, graph.linked);
-  assert.equal(converted.mask.inputs.image, bindings.source);
-  assert.equal(converted.subject.inputs.image, bindings.subject);
-  assert.equal(converted.custom.inputs.filename, bindings.clothing);
-  assert.equal(converted.text.inputs.value, prompt);
+  assert.deepEqual(parseMediaRendering(settings)!.workflows[0], workflow);
   for (const overrides of [
     { folders: [{ id: 'folder', name: 'Missing', workflowIds: ['missing'] }] },
     { folders: [{ id: 'folder', name: 'Duplicate', workflowIds: [workflow.id, workflow.id] }] },
@@ -518,8 +437,7 @@ test('comfy graph progress', async () => {
 });
 
 test('numbered bindings sort numerically, share images and retain sparse numbers', async () => {
-  const { compileMediaWorkflow, expandMediaWorkflow, normalizeMediaWorkflowInputs } =
-    await import('@tinytavern/shared');
+  const { compileMediaWorkflow, expandMediaWorkflow } = await import('@tinytavern/shared');
   const graph = {
     last: {
       class_type: 'LoadImage',
@@ -539,9 +457,9 @@ test('numbered bindings sort numerically, share images and retain sparse numbers
   };
   const json = JSON.stringify(graph);
   const compiled = compileMediaWorkflow(json);
-  assert.deepEqual(compiled.imageInputs, [
-    { name: 'input2', label: 'Subject' },
-    { name: 'input64', label: 'Style' },
+  assert.deepEqual(compiled.mediaInputs, [
+    { name: 'input2', label: 'Subject', kind: 'image' },
+    { name: 'input64', label: 'Style', kind: 'image' },
   ]);
   const expanded = expandMediaWorkflow(compiled, {
     prompt: '',
@@ -562,10 +480,79 @@ test('numbered bindings sort numerically, share images and retain sparse numbers
     chatPromptPresetId: null,
     textOutputNodeId: null,
   };
-  assert.equal(normalizeMediaWorkflowInputs(workflow).workflow, workflow);
+  assert.equal(compileMediaWorkflow(workflow.json), compiled);
   for (const invalid of ['input0', 'input65', 'input01'])
     assert.throws(
       () => compileMediaWorkflow(json.replaceAll('input64', invalid)),
       /input1 through input64/,
     );
+});
+
+test('video bindings share numbered slots while preserving types, loader fields and graph links', async () => {
+  const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } =
+    await import('@tinytavern/shared');
+  const graph = {
+    video: {
+      class_type: 'LoadVideo',
+      inputs: { file: 'sample.webm' },
+      _meta: { title: 'Clip [video:input1]' },
+    },
+    repeat: { class_type: 'LoadVideo', inputs: { file: '{{input1}}' } },
+    image: {
+      class_type: 'LoadImage',
+      inputs: { image: 'sample.png' },
+      _meta: { title: 'Style [image:input2]' },
+    },
+    components: { class_type: 'GetVideoComponents', inputs: { video: ['video', 0] } },
+  };
+  const compiled = compileMediaWorkflow(JSON.stringify(graph));
+  assert.deepEqual(compiled.mediaInputs, [
+    { name: 'input1', label: 'Clip', kind: 'video' },
+    { name: 'input2', label: 'Style', kind: 'image' },
+  ]);
+  const expanded = expandMediaWorkflow(compiled, {
+    prompt: '',
+    seed: 1,
+    job_id: 'job',
+    input1: 'original.webm',
+    input2: 'style.webp',
+  }) as typeof graph;
+  assert.equal(expanded.video!.inputs.file, 'original.webm');
+  assert.equal(expanded.repeat!.inputs.file, 'original.webm');
+  assert.equal(expanded.image!.inputs.image, 'style.webp');
+  assert.deepEqual(expanded.components!.inputs.video, ['video', 0]);
+  assert.throws(
+    () =>
+      compileMediaWorkflow(
+        JSON.stringify({
+          ...graph,
+          conflict: { class_type: 'LoadImage', inputs: { image: '{{input1}}' } },
+        }),
+      ),
+    /both image and video/,
+  );
+  assert.throws(
+    () =>
+      compileMediaWorkflow(
+        JSON.stringify({ video: { ...graph.video, inputs: { file: ['other', 0] } } }),
+      ),
+    /literal string/,
+  );
+  const workflow = {
+    id: 'video',
+    name: 'Video',
+    json: JSON.stringify(graph),
+    inputBindings: { standalone: { input1: 'selected:1' as const } },
+    standalonePromptPresetId: null,
+    chatPromptPresetId: null,
+    textOutputNodeId: null,
+  };
+  assert.equal(mediaWorkflowError(workflow), null);
+  assert.match(
+    mediaWorkflowError({
+      ...workflow,
+      inputBindings: { standalone: { input1: 'character-avatar' } },
+    })!,
+    /not an avatar/,
+  );
 });

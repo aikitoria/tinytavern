@@ -1,5 +1,6 @@
 import { For, Show, createResource } from 'solid-js';
 import { mediaInputLabel, type MediaAsset } from '@tinytavern/shared';
+import MediaPlayer from '../../media/MediaPlayer.tsx';
 import { api } from '../../state/api.ts';
 import { galleryRevision } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
@@ -24,11 +25,11 @@ export default function GallerySourceImages(props: {
   );
   return (
     <Show when={inputs.loading || inputs()?.error || inputs()?.images.length}>
-      <section class="form-stack" aria-label="Source images">
-        <label>Source images</label>
+      <section class="form-stack" aria-label="Source media">
+        <label>Source media</label>
         <Show when={inputs.loading}>
           <p class="hint" role="status">
-            Loading source images…
+            Loading source media…
           </p>
         </Show>
         <Show when={inputs()?.error}>
@@ -47,27 +48,41 @@ export default function GallerySourceImages(props: {
                 fallback={
                   <div class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left text-muted cursor-zoom-in cursor-default [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm">
                     <span class="h-20 border border-dashed border-line grid place-items-center w-full rounded-sm">
-                      Deleted image
+                      Deleted media
                     </span>
                     <span>{mediaInputLabel(input.slot)}</span>
                   </div>
                 }
               >
                 {(asset) => (
-                  <button
-                    type="button"
-                    class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left cursor-zoom-in [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm"
-                    aria-label={`View ${mediaInputLabel(input.slot).toLowerCase()}`}
-                    onClick={() => props.onView(asset().url)}
+                  <Show
+                    when={asset().kind === 'video'}
+                    fallback={
+                      <button
+                        type="button"
+                        class="flex items-center min-w-0 gap-3 p-2 bg-clear text-left cursor-zoom-in [&_img]:block [&_img]:flex-none [&_img]:rounded-sm [&_img]:object-contain [&_img]:size-12 [&_span]:text-sm"
+                        aria-label={`View ${mediaInputLabel(input.slot).toLowerCase()}`}
+                        onClick={() => props.onView(asset().url)}
+                      >
+                        <img
+                          src={asset().thumbnail ?? asset().url}
+                          alt={mediaInputLabel(input.slot)}
+                          loading="lazy"
+                          decoding="async"
+                        />
+                        <span>{mediaInputLabel(input.slot)}</span>
+                      </button>
+                    }
                   >
-                    <img
-                      src={asset().thumbnail ?? asset().url}
-                      alt={mediaInputLabel(input.slot)}
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span>{mediaInputLabel(input.slot)}</span>
-                  </button>
+                    <div class="form-stack">
+                      <span>{mediaInputLabel(input.slot)}</span>
+                      <MediaPlayer
+                        asset={asset()}
+                        active={props.active}
+                        class="w-full max-h-48 object-contain"
+                      />
+                    </div>
+                  </Show>
                 )}
               </Show>
             )}

@@ -8,6 +8,7 @@ export const IMAGE_DESCRIPTION_WORKFLOW_JSON = JSON.stringify(
         image: 'source.png',
       },
       class_type: 'LoadImage',
+      _meta: { title: 'Image [image:input1]' },
     },
     '3': {
       inputs: {
@@ -31,7 +32,7 @@ export const IMAGE_DESCRIPTION_WORKFLOW_JSON = JSON.stringify(
 export const IMAGE_DESCRIPTION_WORKFLOW: MediaWorkflow = {
   id: 'image-description',
   name: 'Qwen image description',
-  inputBindings: { standalone: { source: 'selected:1' } },
+  inputBindings: { standalone: { input1: 'selected:1' } },
   textOutputNodeId: '4',
   json: IMAGE_DESCRIPTION_WORKFLOW_JSON,
   standalonePromptPresetId: null,

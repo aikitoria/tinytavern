@@ -92,7 +92,7 @@ test('media input prompts', async () => {
     let recipeId: number | null = null;
     if (prompt !== null) {
       recipeId = saveMediaRecipe(
-        { comfyUrl: 'http://unused.invalid', workflow: imageWorkflow, timeoutSeconds: 60 },
+        { comfyUrl: 'http://unused.invalid', workflowId: imageWorkflow.id, timeoutSeconds: 60 },
         [],
         prompt,
       );
@@ -176,7 +176,7 @@ test('media input prompts', async () => {
   const expected = `INPUT1<${original}>`;
   for (const value of Object.values(context.template)) assert.equal(value, expected);
   const recipeId = saveMediaRecipe(
-    { comfyUrl: 'http://unused.invalid', workflow: workflows[0]!, timeoutSeconds: 60 },
+    { comfyUrl: 'http://unused.invalid', workflowId: workflows[0]!.id, timeoutSeconds: 60 },
     unchanged.inputs,
     'Final generated prompt',
   );
@@ -466,7 +466,7 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
   assert.deepEqual(missing.inputs, []);
   assert.throws(
     () => startMediaJob(requireMediaJob(missing.id), {}, false),
-    /required images/,
+    /required media/,
     'Never execute sample image filenames when required selections are absent',
   );
   deleteMediaJob(requireMediaJob(missing.id));

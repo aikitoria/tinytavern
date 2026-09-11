@@ -1,25 +1,26 @@
-import { compileMediaWorkflow, type MediaJob } from '@tinytavern/shared';
+import { compileMediaWorkflow, type MediaJob, type MediaWorkflow } from '@tinytavern/shared';
 
-/** Read once when opening a result; never consult the current workflow or editor. */
+/** Resolve labels from the saved workflow and values from the result. */
 export function resultWorkflowDetails(
-  job: Pick<MediaJob, 'workflowSnapshot' | 'workflowValues' | 'seed'>,
+  job: Pick<MediaJob, 'workflowId' | 'workflowValues' | 'seed'>,
+  workflows: MediaWorkflow[],
 ) {
-  const snapshot = job.workflowSnapshot;
+  const workflow = workflows.find((workflow) => workflow.id === job.workflowId);
   let available = false;
   let parameters = Object.entries(job.workflowValues).map(([label, value]) => ({ label, value }));
-  if (snapshot) {
+  if (workflow) {
     try {
-      parameters = compileMediaWorkflow(snapshot.json).controls.map((control) => ({
+      parameters = compileMediaWorkflow(workflow.json).controls.map((control) => ({
         label: control.label,
         value: job.workflowValues[control.key] ?? control.value,
       }));
       available = true;
     } catch {
-      // Older snapshots may no longer compile. Keep their saved overrides readable.
+      // Keep saved overrides readable if the current workflow cannot compile.
     }
   }
   return {
-    name: snapshot?.name ?? 'Unavailable',
+    name: workflow?.name ?? 'Unavailable',
     seed: job.seed,
     available,
     parameters: parameters.map(({ label, value }) => ({

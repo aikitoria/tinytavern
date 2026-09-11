@@ -10,7 +10,7 @@ export default function MediaJobList(props: {
   busy: boolean;
   more: boolean;
   loading: boolean;
-  onOpen: (job: MediaJob) => void;
+  onOpen: (job: MediaJob, assetId?: number) => void;
   onRemove: (job: MediaJob) => void;
   onLoadMore: () => void;
 }) {

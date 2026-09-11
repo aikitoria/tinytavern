@@ -1,3 +1,5 @@
+import { putSettings } from '../../server/src/settings/settingsStore.ts';
+import { requireMediaWorkflow } from '../../server/src/media/mediaWorkflows.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
 import { conversationFixture, messageFixture } from '../support/fixtures.ts';
@@ -89,7 +91,7 @@ databaseCase('conversation transfer', async () => {
     active_image: 1,
     created_at: now - 700,
     render_recipe_id: createImageRecipe(
-      imageConfig('{"node":{"inputs":{"text":"{{prompt}}","seed":{{seed}}}}}', 'http://comfy:8588'),
+      imageConfig('{"node":{"inputs":{"text":"{{prompt}}","seed":0}}}', 'http://comfy:8588'),
       'image prompt',
     ),
   });
@@ -187,9 +189,9 @@ databaseCase('conversation transfer', async () => {
     importedPrompt.id,
   ) as { render_recipe_id: number };
   assert(
-    getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflow.json.includes(
-      '{{seed}}',
-    ),
+    requireMediaWorkflow(
+      getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflowId,
+    ).json.includes('\"seed\":0'),
     'stored render configuration still supports rerendering',
   );
   const sibling = importedRows.find((row) => row.content === 'Short red hair');
@@ -392,20 +394,31 @@ databaseCase('media transfer', async () => {
       load: {
         class_type: 'Load',
         inputs: {
-          a: '{{reference1}}',
-          b: '{{reference2}}',
-          c: '{{reference3}}',
+          a: '{{input1}}',
+          b: '{{input2}}',
+          c: '{{input3}}',
         },
       },
       save: { class_type: 'SaveImage', inputs: { filename_prefix: '{{job_id}}' } },
     }),
   };
   const inputs: MediaJobInput[] = [
-    { slot: 'reference3', assetId: referenceId },
-    { slot: 'reference2', assetId: referenceId },
-    { slot: 'reference1', assetId: sourceId },
+    { slot: 'input3', assetId: referenceId },
+    { slot: 'input2', assetId: referenceId },
+    { slot: 'input1', assetId: sourceId },
   ];
   function recipe(id: number, path: string, workflow: MediaWorkflow, inputs: MediaJobInput[]) {
+    const settings = getSettings();
+    putSettings({
+      ...settings,
+      mediaRendering: {
+        ...settings.mediaRendering,
+        workflows: [
+          ...settings.mediaRendering.workflows.filter((w) => w.id !== workflow.id),
+          workflow,
+        ],
+      },
+    });
     stmt(
       'INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(
@@ -415,7 +428,7 @@ databaseCase('media transfer', async () => {
       JSON.stringify({
         comfyUrl: 'http://private-user:private-secret@source-only:8588',
         timeoutSeconds: 1234,
-        workflow,
+        workflowId: workflow.id,
         workflowValues: workflow.id === 'saved-edit' ? { strength: 0.8 } : {},
         seed: workflow.id === 'saved-edit' ? 4294967295 : 0,
         temporary: true,
@@ -476,7 +489,7 @@ databaseCase('media transfer', async () => {
   );
   assert.deepEqual(
     portable.recipes![0]!.inputs.map((input) => input.slot),
-    ['reference1', 'reference2', 'reference3'],
+    ['input1', 'input2', 'input3'],
   );
   const json = JSON.stringify(portable);
   for (const secret of [
@@ -523,9 +536,15 @@ databaseCase('media transfer', async () => {
   assert.equal(configuration.comfyUrl, getSettings().mediaRendering.comfyUrl);
   const expectedGraph = JSON.parse(workflow.json);
   expectedGraph.load.inputs = { a: '{{input1}}', b: '{{input2}}', c: '{{input3}}' };
-  assert.deepEqual(JSON.parse(configuration.workflow.json), expectedGraph);
-  assert.equal(configuration.workflow.standalonePromptPresetId, null);
-  assert.equal(configuration.workflow.chatPromptPresetId, null);
+  assert.deepEqual(JSON.parse(requireMediaWorkflow(configuration.workflowId).json), expectedGraph);
+  assert.equal(
+    requireMediaWorkflow(configuration.workflowId).standalonePromptPresetId,
+    workflow.standalonePromptPresetId,
+  );
+  assert.equal(
+    requireMediaWorkflow(configuration.workflowId).chatPromptPresetId,
+    workflow.chatPromptPresetId,
+  );
   assert.deepEqual(configuration.workflowValues, { strength: 0.8 });
   assert.equal(getMediaAssetResultDetails(asset.id).seed, 4294967295);
   const importedInputs = JSON.parse(String(importedRecipe.inputs_json)) as MediaJobInput[];
@@ -553,9 +572,9 @@ databaseCase('media transfer', async () => {
   assert.equal(rerun.inputs.length, 3);
   assert.deepEqual(rerun.workflowValues, { strength: 0.8 });
   assert.equal(
-    rerun.workflowSnapshot!.json,
-    configuration.workflow.json,
-    'Imported result reruns without a saved workflow or source job',
+    requireMediaWorkflow(rerun.workflowId!).json,
+    requireMediaWorkflow(configuration.workflowId).json,
+    'Imported result references the matching saved workflow without retaining its own graph',
   );
   deleteMediaJob(requireMediaJob(rerun.id));
   stmt('DELETE FROM conversations WHERE id = ?').run(imported.id);
@@ -677,7 +696,9 @@ databaseCase('media transfer', async () => {
   });
   assert.deepEqual(missingRerun.inputs, []);
   assert.equal(
-    (await import('@tinytavern/shared')).mediaInputSlots(missingRerun.workflowSnapshot!).length,
+    (await import('@tinytavern/shared')).mediaInputSlots(
+      requireMediaWorkflow(missingRerun.workflowId!),
+    ).length,
     3,
   );
   deleteMediaJob(requireMediaJob(missingRerun.id));

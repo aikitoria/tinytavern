@@ -33,7 +33,10 @@ export default function AvatarGenerateModal(props: {
   const streaming = () => job()?.state === 'preparing';
   const reasoning = () => job()?.reasoning ?? '';
   const hasPrompt = () => {
-    const workflow = job()?.workflowSnapshot ?? image?.workflow;
+    const workflow =
+      state.settings.mediaRendering.workflows.find(
+        (workflow) => workflow.id === job()?.workflowId,
+      ) ?? image?.workflow;
     return workflow ? compileMediaWorkflow(workflow.json).slots.has('prompt') : false;
   };
   const rendering = () => submitting() || (job() !== undefined && mediaJobActive(job()!.state));

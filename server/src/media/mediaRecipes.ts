@@ -34,7 +34,7 @@ export function saveMediaRecipe(
         ? input.assetId
         : null,
   }));
-  const { comfyUrl, workflow, timeoutSeconds, workflowValues, characterIds } = configuration;
+  const { comfyUrl, workflowId, timeoutSeconds, workflowValues, characterIds } = configuration;
   const inserted = stmt(`
     INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -46,7 +46,7 @@ export function saveMediaRecipe(
     instruction,
     JSON.stringify({
       comfyUrl,
-      workflow,
+      workflowId,
       timeoutSeconds,
       workflowValues,
       characterIds,
@@ -65,11 +65,11 @@ export function saveMediaRecipe(
   return id;
 }
 
-/** Image prompt commands capture the selected complete workflow before text generation. */
+/** Keep the selected workflow reference for image prompt commands. */
 export function imageRenderConfiguration(config: MediaImageConfig): MediaJobConfiguration {
   return {
     comfyUrl: config.comfyUrl,
-    workflow: config.workflow,
+    workflowId: config.workflow.id,
     timeoutSeconds: getSettings().mediaRendering.jobTimeoutSeconds,
   };
 }
@@ -111,7 +111,7 @@ export function getMediaAssetResultDetails(assetId: number): MediaResultDetails 
   return {
     instruction: recipe.instruction,
     prompt: recipe.prompt,
-    workflowSnapshot: recipe.configuration.workflow ?? null,
+    workflowId: recipe.configuration.workflowId,
     workflowValues: recipe.configuration.workflowValues ?? {},
     seed: mediaRecipeSeed(recipe),
   };

@@ -15,7 +15,7 @@ export function descriptionWorkflow(workflowId?: string) {
   return {
     comfyUrl: settings.comfyUrl,
     timeoutSeconds: settings.jobTimeoutSeconds,
-    workflow,
+    workflowId: workflow.id,
     temporary: true,
   };
 }

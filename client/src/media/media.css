@@ -41,3 +41,13 @@
     --detail-panel-width: 100%;
   }
 }
+
+.video-preview > canvas {
+  grid-area: 1 / 1;
+  display: none;
+  width: 100%;
+  min-height: 0;
+  max-height: inherit;
+  object-fit: contain;
+  opacity: 0;
+}

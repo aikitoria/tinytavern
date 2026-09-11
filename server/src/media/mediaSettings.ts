@@ -1,8 +1,7 @@
 import {
   mediaInputSlots,
-  normalizeMediaWorkflowInputs,
   mediaWorkflowError,
-  MEDIA_INPUT_NAME,
+  NUMBERED_MEDIA_INPUT,
   MAX_MEDIA_INPUTS,
   MAX_MEDIA_PRESETS,
   type MediaCollectionFolder,
@@ -46,11 +45,7 @@ export function parseComfyUrl(value: unknown): string {
   return comfyUrl;
 }
 
-export function parseMediaWorkflow(
-  entry: unknown,
-  ids?: Set<string>,
-  normalizeInputs = true,
-): MediaWorkflow {
+export function parseMediaWorkflow(entry: unknown, ids?: Set<string>): MediaWorkflow {
   const item = object(entry, 'workflow');
   const inputBindings: MediaInputBindings = {};
   for (const [context, raw] of Object.entries(object(item.inputBindings ?? {}, 'input bindings'))) {
@@ -61,7 +56,7 @@ export function parseMediaWorkflow(
       throw new HttpError(400, 'Too many input bindings');
     const entries = Object.entries(bindings).map(([slot, source]) => {
       if (
-        !MEDIA_INPUT_NAME.test(slot) ||
+        !NUMBERED_MEDIA_INPUT.test(slot) ||
         typeof source !== 'string' ||
         (!['character-avatar', 'persona-avatar'].includes(source) &&
           !/^selected:([1-9]|[1-5][0-9]|6[0-4])$/.test(source))
@@ -91,7 +86,7 @@ export function parseMediaWorkflow(
   ids?.add(workflow.id);
   const invalid = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
   if (invalid) throw new HttpError(400, `${workflow.name}: ${invalid}`);
-  return normalizeInputs ? normalizeMediaWorkflowInputs(workflow).workflow : workflow;
+  return workflow;
 }
 
 /** Direct rendering has no input editor; all required image bindings must be absent. */
@@ -104,7 +99,7 @@ export function parseImageConfig(raw: unknown): MediaImageConfig {
     workflow.textOutputNodeId !== null ||
     mediaInputSlots(workflow).length
   ) {
-    throw new HttpError(400, 'Choose a configured media workflow with no image inputs');
+    throw new HttpError(400, 'Choose a configured media workflow with no media inputs');
   }
   return { workflow, comfyUrl };
 }

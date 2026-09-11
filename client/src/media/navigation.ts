@@ -35,12 +35,15 @@ export interface MediaToolSession {
   assets: MediaAsset[];
 }
 
-function revisitDialog(frame: DialogFrame | undefined): boolean {
+function revisitDialog(frame: DialogFrame | undefined, onReturn?: () => void): boolean {
   if (!frame) return false;
   if (frame !== dialogStack.top()) {
     const target = frame.page;
-    navigatePageWithGuards(target, () => returnToPageLocation(target, () => restorePage(target)));
-  }
+    navigatePageWithGuards(target, () => {
+      onReturn?.();
+      returnToPageLocation(target, () => restorePage(target));
+    });
+  } else onReturn?.();
   return true;
 }
 
@@ -52,16 +55,23 @@ export function openMediaTool(
     prompt?: string;
     input?: { asset: MediaAsset; slot?: MediaJobInput['slot'] };
     jobId?: number;
+    assetId?: number;
   } = {},
 ): void {
   const existing = options.jobId ? dialogStack.findJob(options.jobId, state.mediaJobs) : undefined;
-  if (revisitDialog(existing)) return;
+  if (
+    revisitDialog(existing, () =>
+      existing!.selectMediaPreview({ jobId: options.jobId!, assetId: options.assetId }),
+    )
+  )
+    return;
   const input = options.input;
   const conversationId = options.conversationId ?? null;
   const session: MediaToolSession = {
     requestKey: newRequestId(),
     workflowId,
     jobId: options.jobId ?? null,
+    assetId: options.assetId,
     contextConversationId: conversationId,
     galleryFolderId: conversationId === null ? (options.galleryFolderId ?? null) : null,
     destination: conversationId === null ? 'gallery' : 'chat',

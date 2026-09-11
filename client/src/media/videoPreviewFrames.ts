@@ -4,27 +4,29 @@ interface Bitmap {
   close(): void;
 }
 
-export interface VideoPreviewFrame<T extends Bitmap> {
-  index: number;
-  bitmap: T;
+export interface VideoPreviewSequence<T> {
+  frames: readonly T[];
+  frameRate: number;
+  release(): void;
 }
 
-/** Eagerly decode received frames, then publish a complete available snapshot in one swap. */
+/** Decode arriving frames eagerly; only complete denoise sequences reach playback. */
 export function createVideoPreviewFrames<T extends Bitmap>(
   decode: (source: string, signal: AbortSignal) => Promise<T>,
-  publish: (frames: readonly VideoPreviewFrame<T>[]) => void,
+  publish: (sequence: VideoPreviewSequence<T>) => void,
 ) {
   interface Entry {
     source: string;
     controller: AbortController;
     settled: boolean;
+    references: number;
     bitmap?: T;
   }
   const entries = new Map<string, Entry>();
   let desired = new Map<number, string>();
-  let displayed: readonly VideoPreviewFrame<T>[] = [];
-  let displayedSources = new Set<string>();
-  let id = '';
+  let preview: MediaVideoPreview | undefined;
+  let publishedId = '';
+  let publishedSequence = '';
   let active = false;
   let disposed = false;
 
@@ -32,39 +34,43 @@ export function createVideoPreviewFrames<T extends Bitmap>(
     entries.delete(entry.source);
     entry.controller.abort();
     entry.bitmap?.close();
+    entry.bitmap = undefined;
   }
 
   function collect() {
     const wanted = active ? new Set(desired.values()) : new Set<string>();
     for (const entry of entries.values()) {
-      if (!wanted.has(entry.source) && !displayedSources.has(entry.source)) release(entry);
+      if (!wanted.has(entry.source) && !entry.references) release(entry);
     }
   }
 
   function commit() {
-    if (!active || disposed) return;
-    const next: VideoPreviewFrame<T>[] = [];
-    const sources = new Set<string>();
-    for (const [index, source] of desired) {
-      const entry = entries.get(source);
-      if (!entry?.settled) return;
-      if (entry.bitmap) {
-        next.push({ index, bitmap: entry.bitmap });
-        sources.add(source);
-      }
+    if (!active || disposed || !preview || desired.size !== preview.frameCount) return;
+    if (publishedId === preview.id && publishedSequence === preview.sequence) return;
+    const frames: T[] = [];
+    const retained = new Set<Entry>();
+    for (let index = 0; index < preview.frameCount; index++) {
+      const source = desired.get(index);
+      const entry = source === undefined ? undefined : entries.get(source);
+      // Failed or missing frames keep the previous complete sequence playing.
+      if (!entry?.settled || !entry.bitmap) return;
+      frames.push(entry.bitmap);
+      retained.add(entry);
     }
-    // A bad batch should not blank a usable preview. Changed sources can retry later.
-    if (desired.size && !next.length) return;
-    next.sort((a, b) => a.index - b.index);
-    const changed =
-      next.length !== displayed.length ||
-      next.some(
-        (frame, index) =>
-          frame.index !== displayed[index]!.index || frame.bitmap !== displayed[index]!.bitmap,
-      );
-    displayed = next;
-    displayedSources = sources;
-    if (changed) publish(next);
+    publishedId = preview.id;
+    publishedSequence = preview.sequence;
+    for (const entry of retained) entry.references++;
+    let released = false;
+    publish({
+      frames,
+      frameRate: preview.frameRate,
+      release() {
+        if (released) return;
+        released = true;
+        for (const entry of retained) entry.references--;
+        collect();
+      },
+    });
     collect();
   }
 
@@ -77,7 +83,7 @@ export function createVideoPreviewFrames<T extends Bitmap>(
       }
       entry.bitmap = bitmap;
     } catch {
-      // Malformed or cancelled frames never block the next usable snapshot.
+      // A malformed or cancelled sequence cannot replace a usable preview.
     }
     if (disposed || entries.get(entry.source) !== entry) return;
     entry.settled = true;
@@ -85,19 +91,13 @@ export function createVideoPreviewFrames<T extends Bitmap>(
   }
 
   return {
-    update(preview: MediaVideoPreview, enabled: boolean) {
+    update(next: MediaVideoPreview, enabled: boolean) {
       if (disposed) return;
-      if (id !== preview.id) {
-        for (const entry of entries.values()) release(entry);
-        displayed = [];
-        displayedSources.clear();
-        id = preview.id;
-        publish(displayed);
-      }
+      preview = next;
       desired = new Map(
-        Object.entries(preview.frames).flatMap(([key, source]) => {
+        Object.entries(next.frames).flatMap(([key, source]) => {
           const index = Number(key);
-          return source && Number.isInteger(index) && index >= 0 && index < preview.frameCount
+          return source && Number.isInteger(index) && index >= 0 && index < next.frameCount
             ? [[index, source] as const]
             : [];
         }),
@@ -108,12 +108,11 @@ export function createVideoPreviewFrames<T extends Bitmap>(
       const pending: Entry[] = [];
       for (const source of new Set(desired.values())) {
         if (entries.has(source)) continue;
-        const entry = { source, controller: new AbortController(), settled: false };
+        const entry = { source, controller: new AbortController(), settled: false, references: 0 };
         entries.set(source, entry);
         pending.push(entry);
       }
-      // Start every new frame immediately, independently of playback and other decodes.
-      // Identical JPEGs share one bitmap, including across successive snapshots.
+      // Identical JPEGs share one bitmap, including across the two fading sequences.
       for (const entry of pending) void load(entry);
       commit();
     },
@@ -121,8 +120,7 @@ export function createVideoPreviewFrames<T extends Bitmap>(
       disposed = true;
       for (const entry of entries.values()) release(entry);
       desired.clear();
-      displayed = [];
-      displayedSources.clear();
+      preview = undefined;
     },
   };
 }

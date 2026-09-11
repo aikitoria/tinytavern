@@ -45,7 +45,7 @@ test('media prompts', async () => {
     name: 'Video',
     inputBindings: {},
     textOutputNodeId: null,
-    json: '{"1":{"inputs":{"prompt":"{{prompt}}","seed":{{seed}}}}}',
+    json: '{"1":{"inputs":{"prompt":"{{prompt}}","seed":0}}}',
     standalonePromptPresetId: 'formatted',
     chatPromptPresetId: 'formatted',
   };
@@ -296,7 +296,7 @@ test('media prompts', async () => {
       job.id,
     )!;
     assert.equal(
-      JSON.parse(String(recipe.configuration_json)).workflow.id,
+      JSON.parse(String(recipe.configuration_json)).workflowId,
       replacementWorkflow.id,
       'Changing the workflow before submission updates the same message recipe',
     );

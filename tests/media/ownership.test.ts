@@ -189,14 +189,14 @@ databaseCase(
     const { imageConfig } = await import('../support/imageConfig.ts');
     const configuration = {
       ...imageConfig(
-        '{"load":{"class_type":"LoadImage","inputs":{"a":"{{source}}","b":"{{reference}}"}},"save":{"class_type":"SaveImage","inputs":{"images":["load",0]}}}',
+        '{"load":{"class_type":"LoadImage","inputs":{"a":"{{input1}}","b":"{{input2}}"}},"save":{"class_type":"SaveImage","inputs":{"images":["load",0]}}}',
         'http://unused.invalid',
       ),
       timeoutSeconds: 60,
     };
     const sources = [0, 1].map(() => mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!);
     const inputs = sources.map((asset, index) => ({
-      slot: index ? 'reference' : 'source',
+      slot: index ? 'input2' : 'input1',
       assetId: asset.id,
       prompt: `Source ${index}`,
     }));
@@ -212,7 +212,15 @@ databaseCase(
       created_at: 1,
       updated_at: 1,
     });
-    const recipe = saveMediaRecipe(configuration, inputs, 'Result');
+    const recipe = saveMediaRecipe(
+      {
+        comfyUrl: configuration.comfyUrl,
+        workflowId: configuration.workflow.id,
+        timeoutSeconds: configuration.timeoutSeconds,
+      },
+      inputs,
+      'Result',
+    );
     const output = mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!;
     stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipe, output.id);
     insertFixture('gallery_items', {
@@ -315,7 +323,7 @@ databaseCase('media characters', async () => {
     textOutputNodeId: null,
     standalonePromptPresetId: null,
     chatPromptPresetId: null,
-    json: '{"text":{"inputs":{"prompt":"{{prompt}}"}},"a":{"class_type":"LoadImage","inputs":{"image":"reference1.png"}},"b":{"class_type":"LoadImage","inputs":{"image":"reference2.png"}}}',
+    json: '{"text":{"inputs":{"prompt":"{{prompt}}"}},"a":{"class_type":"LoadImage","inputs":{"image":"reference1.png"},"_meta":{"title":"Input 1 [image:input1]"}},"b":{"class_type":"LoadImage","inputs":{"image":"reference2.png"},"_meta":{"title":"Input 2 [image:input2]"}}}',
   }));
   putSettings({ ...getSettings(), mediaRendering: { ...getSettings().mediaRendering, workflows } });
   const jobs = workflows.map((workflow) => {
@@ -324,7 +332,7 @@ databaseCase('media characters', async () => {
       workflowId: workflow.id,
       prompt: 'Both characters',
       reviewBeforeSave: true,
-      inputs: inputs.map((asset, index) => ({ slot: `reference${index + 1}`, assetId: asset.id })),
+      inputs: inputs.map((asset, index) => ({ slot: `input${index + 1}`, assetId: asset.id })),
     });
     assert.deepEqual(
       job.characterIds,

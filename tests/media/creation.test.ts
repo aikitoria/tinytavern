@@ -1,3 +1,4 @@
+import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
 import assert from 'node:assert/strict';
 import { newRequestId } from '@tinytavern/shared';
 import { databaseCase } from '../support/database.ts';
@@ -6,6 +7,22 @@ import { createMediaJob } from '../../server/src/media/mediaJobs.ts';
 import { requireMediaJob } from '../../server/src/media/mediaJobStore.ts';
 
 databaseCase('variations distinguish explicit defaults from inherited selections', async () => {
+  const settings = getSettings();
+  putSettings({
+    ...settings,
+    mediaRendering: {
+      ...settings.mediaRendering,
+      workflows: ['original-workflow', 'new-workflow'].map((id) => ({
+        id,
+        name: id,
+        json: '{"output":{"inputs":{}}}',
+        inputBindings: {},
+        textOutputNodeId: null,
+        standalonePromptPresetId: null,
+        chatPromptPresetId: null,
+      })),
+    },
+  });
   const conversationId = conversationFixture();
   const original = createMediaJob({
     requestKey: newRequestId(),

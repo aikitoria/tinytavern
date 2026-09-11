@@ -24,27 +24,27 @@ export default function MediaActions(props: {
     });
   };
   return (
-    <Show when={props.asset.kind === 'image'}>
+    <>
       <button
         ref={button}
         type="button"
         classList={{ 'icon-btn': props.compact }}
-        aria-label="Image tools"
-        title="Image tools"
+        aria-label="Media tools"
+        title="Media tools"
         aria-haspopup="menu"
         aria-expanded={open()}
         disabled={props.disabled}
         onClick={() => setOpen(!open())}
       >
         <FontAwesomeIcon icon={faWandMagicSparkles} size={14} />
-        <Show when={!props.compact}> Image tools</Show>
+        <Show when={!props.compact}> Media tools</Show>
       </button>
       <DropdownSurface
         open={open()}
         anchor={() => button}
         onClose={() => setOpen(false)}
         role="menu"
-        ariaLabel="Image tools"
+        ariaLabel="Media tools"
         fitContentWidth
         minWidth={240}
         keyboardNavigation
@@ -58,6 +58,6 @@ export default function MediaActions(props: {
           )}
         </For>
       </DropdownSurface>
-    </Show>
+    </>
   );
 }

@@ -66,7 +66,7 @@ test('media drafts', async () => {
   }
   const start = (id: number) => startMediaJob(requireMediaJob(id), {}, false);
   const workflow = imageConfig(
-    '{"output":{"inputs":{"text":"{{prompt}}","seed":{{seed}}}}}',
+    '{"output":{"inputs":{"text":"{{prompt}}","seed":0}}}',
     'http://unused.invalid',
   ).workflow;
   putSettings({
@@ -118,7 +118,7 @@ test('media drafts', async () => {
   });
   // Job IDs and recipe IDs occupy independent rowid namespaces.
   const decoy = saveMediaRecipe(
-    { comfyUrl: 'http://unused.invalid', workflow, timeoutSeconds: 0 },
+    { comfyUrl: 'http://unused.invalid', workflowId: workflow.id, timeoutSeconds: 0 },
     [],
     'Unrelated recipe',
     { id: first.id },
@@ -405,7 +405,7 @@ test('media drafts', async () => {
     stmt('SELECT folder_id FROM gallery_items WHERE image = ?').get(resavedAsset.url)!.folder_id,
     null,
   );
-  const resavedInput = job({ inputs: [{ slot: 'source', assetId: resavedAsset.id }] });
+  const resavedInput = job({ inputs: [{ slot: 'input1', assetId: resavedAsset.id }] });
   assert.equal(
     resavedInput.assets[0]!.id,
     resavedAsset.id,
@@ -472,7 +472,7 @@ test('media drafts', async () => {
     id: 'edit',
     inputBindings: {},
     textOutputNodeId: null,
-    json: '{"output":{"inputs":{"text":"{{prompt}}","image":"{{reference1}}"}}}',
+    json: '{"output":{"inputs":{"text":"{{prompt}}","image":"{{input1}}"}}}',
   };
   putSettings({
     ...getSettings(),
@@ -482,7 +482,7 @@ test('media drafts', async () => {
     workflowId: editWorkflow.id,
     prompt: 'Discard this',
     reviewBeforeSave: true,
-    inputs: [{ assetId: input.id, slot: 'reference1' }],
+    inputs: [{ assetId: input.id, slot: 'input1' }],
   });
   start(discarded.id);
   const queued = [discarded.id];

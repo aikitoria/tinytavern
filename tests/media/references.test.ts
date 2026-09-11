@@ -1,3 +1,4 @@
+import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
 import { testApi } from '../support/http.ts';
 import { renderMediaFixture } from '../support/media.ts';
 import { conversationFixture, insertFixture } from '../support/fixtures.ts';
@@ -54,7 +55,7 @@ test('media source images', async () => {
       name: 'First frame',
       inputBindings: {},
       textOutputNodeId: null,
-      json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","image":"{{first_frame}}"}}}',
+      json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","image":"{{input1}}"}}}',
       standalonePromptPresetId: null,
       chatPromptPresetId: null,
     },
@@ -63,22 +64,24 @@ test('media source images', async () => {
       name: 'References',
       inputBindings: {},
       textOutputNodeId: null,
-      json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","images":["{{reference1}}","{{reference2}}","{{reference3}}"]}}}',
+      json: '{"1":{"class_type":"Test","inputs":{"prompt":"{{prompt}}","images":["{{input1}}","{{input2}}","{{input3}}"]}}}',
       standalonePromptPresetId: null,
       chatPromptPresetId: null,
     },
   ];
+  const settings = getSettings();
+  putSettings({ ...settings, mediaRendering: { ...settings.mediaRendering, workflows } });
   const savedInputs = [
-    [{ slot: 'first_frame' as const, assetId: firstAsset.id, prompt: '' }],
+    [{ slot: 'input1' as const, assetId: firstAsset.id, prompt: '' }],
     [
-      { slot: 'reference1' as const, assetId: firstAsset.id, prompt: '' },
-      { slot: 'reference2' as const, assetId: referenceAsset.id, prompt: '' },
-      { slot: 'reference3' as const, assetId: firstAsset.id, prompt: '' },
+      { slot: 'input1' as const, assetId: firstAsset.id, prompt: '' },
+      { slot: 'input2' as const, assetId: referenceAsset.id, prompt: '' },
+      { slot: 'input3' as const, assetId: firstAsset.id, prompt: '' },
     ],
   ];
   const results = workflows.map((workflow, index) => {
     const recipeId = saveMediaRecipe(
-      { comfyUrl: 'http://127.0.0.1:1', workflow, timeoutSeconds: 60 },
+      { comfyUrl: 'http://127.0.0.1:1', workflowId: workflow.id, timeoutSeconds: 60 },
       savedInputs[index]!,
       'Saved prompt',
       { instruction: 'Original instruction', seed: index === 0 ? 0 : undefined },
@@ -135,7 +138,7 @@ test('media source images', async () => {
         {
           instruction: 'Original instruction',
           prompt: 'Saved prompt',
-          workflowSnapshot: workflows[index],
+          workflowId: workflows[index]!.id,
           workflowValues: {},
           seed: index === 0 ? 0 : null,
         },
@@ -178,9 +181,9 @@ test('media source images', async () => {
     assert.deepEqual(
       partial.map(({ slot, asset }) => ({ slot, assetId: asset?.id ?? null })),
       [
-        { slot: 'reference1', assetId: null },
-        { slot: 'reference2', assetId: referenceAsset.id },
-        { slot: 'reference3', assetId: null },
+        { slot: 'input1', assetId: null },
+        { slot: 'input2', assetId: referenceAsset.id },
+        { slot: 'input3', assetId: null },
       ],
     );
     await request('POST', '/api/gallery/bulk-delete', { ids: [referenceGallery] });
@@ -193,12 +196,12 @@ test('media source images', async () => {
       'Idle jobs and recipes do not retain deleted inputs',
     );
     const lateRecipe = saveMediaRecipe(
-      { comfyUrl: 'http://127.0.0.1:1', workflow: workflows[0]!, timeoutSeconds: 60 },
+      { comfyUrl: 'http://127.0.0.1:1', workflowId: workflows[0]!.id, timeoutSeconds: 60 },
       savedInputs[0]!,
       'Result completed after source deletion',
     );
     assert.deepEqual(getMediaRecipe(lateRecipe).inputs, [
-      { slot: 'first_frame', assetId: null, prompt: '' },
+      { slot: 'input1', assetId: null, prompt: '' },
     ]);
     stmt('DELETE FROM media_recipes WHERE id = ?').run(lateRecipe);
     finishMediaJob(activeJob.id, 'failed', 'Test finished');
@@ -221,8 +224,8 @@ test('media source images', async () => {
         requestKey: testRequestKey(`rerun-${index}`),
       })) as MediaJob;
       assert.deepEqual(rerun.inputs, [], 'Reruns leave missing input selectors empty');
-      assert.equal(rerun.workflowSnapshot!.id, workflows[index]!.id);
-      assert.equal(rerun.workflowSnapshot!.json, workflows[index]!.json);
+      assert.equal(rerun.workflowId, workflows[index]!.id);
+      assert(!('workflowSnapshot' in rerun));
       const render = await fetch(`${base}/api/media/jobs/${rerun.id}/render`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

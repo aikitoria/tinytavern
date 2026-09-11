@@ -80,9 +80,10 @@ export default function MediaJobsModal() {
           busy={false}
           more={more()}
           loading={loading()}
-          onOpen={(job) =>
+          onOpen={(job, assetId) =>
             openMediaTool(job.workflowId, {
               jobId: job.id,
+              assetId,
               conversationId: job.contextConversationId,
             })
           }

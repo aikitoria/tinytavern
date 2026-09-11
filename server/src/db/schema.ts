@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 79;
+export const SCHEMA_VERSION = 81;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `

@@ -7,7 +7,11 @@ import MediaResultDetails from './MediaResultDetails.tsx';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 import { createStreamScroll } from '../streamScroll.ts';
 import { prepareTextareaResize } from '../textareaResize.ts';
-import { useDialogActive, useDialogNavigationGuard } from '../state/dialogContext.ts';
+import {
+  useDialogActive,
+  useDialogMediaPreview,
+  useDialogNavigationGuard,
+} from '../state/dialogContext.ts';
 import { rememberMediaPage } from '../state/pageLocation.ts';
 import {
   For,
@@ -26,6 +30,7 @@ import {
   faArrowUp,
   faArrowDown,
   faImage,
+  faVideo,
   faDownload,
   faExpand,
   faCircleInfo,
@@ -217,6 +222,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const selectedIndex = () =>
     mediaVariationIndex(candidates(), viewedVariation(), review()?.selectedAssetId);
   const selectedVariation = () => candidates()[selectedIndex()];
+  const requestedPreview = useDialogMediaPreview();
+  createEffect(() => {
+    const selection = requestedPreview();
+    if (selection) setViewedVariation(selection);
+  });
   const cancelTarget = () => {
     const selected = selectedVariation()?.job;
     return selected && mediaJobActive(selected.state) ? selected : runningJob();
@@ -231,7 +241,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   );
   const hasResults = () =>
     Boolean(videoPreview() || preview() || selected() || selectedVariation()?.job.textResult);
-  const sourcePreviewLabel = () => inputLabel(orderedInputs()[0]?.slot ?? 'source');
+  const sourcePreviewLabel = () => inputLabel(orderedInputs()[0]?.slot ?? 'input1');
   const sourcePreview = () =>
     orderedInputs()[0] ? assets[orderedInputs()[0]!.assetId] : session.assets[0];
   const title = () =>
@@ -240,13 +250,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       : usesChatContext()
         ? 'Generate media from chat'
         : 'Generate media';
-  const workflows = createMemo(() => {
-    const snapshot = job()?.workflowSnapshot;
-    const saved = state.settings.mediaRendering.workflows;
-    return snapshot
-      ? [...saved.filter((workflow) => workflow.id !== snapshot.id), snapshot]
-      : saved;
-  });
+  const workflows = () => state.settings.mediaRendering.workflows;
   const workflowView = createMemo(() =>
     mediaWorkflowView(
       job(),
@@ -274,13 +278,15 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       return null;
     }
   });
-  const slots = () => workflowInterface()?.imageInputs.map((input) => input.name) ?? [];
+  const slots = () => workflowInterface()?.mediaInputs.map((input) => input.name) ?? [];
+  const inputKinds = createMemo(
+    () => new Map(workflowInterface()?.mediaInputs.map((input) => [input.name, input.kind]) ?? []),
+  );
+  const inputKind = (slot: string) => inputKinds().get(slot) ?? 'image';
+  const uniformInputs = () => new Set(inputKinds().values()).size <= 1;
   const orderedInputs = createMemo(() => orderedMediaInputs(slots(), draft.inputs));
   const selectableAssetIds = createMemo(
-    () =>
-      new Set(
-        state.gallery.flatMap((item) => (item.media?.kind === 'image' ? [item.media.id] : [])),
-      ),
+    () => new Set(state.gallery.flatMap((item) => (item.media ? [item.media.id] : []))),
   );
   const bulkInputCapacity = () =>
     slots().length -
@@ -301,6 +307,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       draft.inputs,
       {
         selectedAssets: session.assets,
+        inputKinds: inputKinds(),
         characterAvatar: Boolean(state.characters.find((item) => item.id === characterId)?.avatar),
         personaAvatar: Boolean(state.personas.find((item) => item.id === personaId)?.avatar),
       },
@@ -308,16 +315,24 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   });
   const hasPrompt = () => workflowInterface()?.slots.has('prompt') ?? false;
   const inputLabel = (slot: string) =>
-    workflowInterface()?.imageInputs.find((input) => input.name === slot)?.label ??
+    workflowInterface()?.mediaInputs.find((input) => input.name === slot)?.label ??
     mediaInputLabel(slot);
   const fillSelectedInputs = (inputs: MediaJobInput[], workflow = workflowView().workflow) => {
     if (!workflow) return inputs;
     const next = [...inputs];
     const bindings = workflow.inputBindings[inputContext()] ?? {};
+    let kinds: Map<string, MediaAsset['kind']>;
+    try {
+      kinds = new Map(
+        compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]),
+      );
+    } catch {
+      return inputs;
+    }
     for (const [slot, source] of Object.entries(bindings)) {
       if (next.some((input) => input.slot === slot) || !source.startsWith('selected:')) continue;
       const asset = session.assets[Number(source.slice(9)) - 1];
-      if (asset?.kind === 'image') next.push({ slot, assetId: asset.id });
+      if (asset && asset.kind === kinds.get(slot)) next.push({ slot, assetId: asset.id });
     }
     return next;
   };
@@ -328,7 +343,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         if (!jobId())
           setDraft(
             'inputs',
-            fillSelectedInputs(draft.inputs.filter((input) => slots().includes(input.slot))),
+            fillSelectedInputs(
+              draft.inputs.filter(
+                (input) => inputKinds().get(input.slot) === assets[input.assetId]?.kind,
+              ),
+            ),
           );
       },
     ),
@@ -670,11 +689,13 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   );
   const chooseWorkflow = (value: string) => {
     const workflow = workflows().find((item) => item.id === value);
-    let allowed: string[] = [];
+    let allowed = new Map<string, MediaAsset['kind']>();
     try {
-      allowed = workflow
-        ? compileMediaWorkflow(workflow.json).imageInputs.map((input) => input.name)
-        : [];
+      allowed = new Map(
+        workflow
+          ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind])
+          : [],
+      );
     } catch {
       /* The workflow error is displayed by its editor. */
     }
@@ -684,7 +705,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         workflowId: value || null,
         presetId: null,
         inputs: fillSelectedInputs(
-          draft.inputs.filter((input) => allowed.includes(input.slot)),
+          draft.inputs.filter((input) => allowed.get(input.slot) === assets[input.assetId]?.kind),
           workflow,
         ),
       });
@@ -715,7 +736,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   };
   const moveReference = (slot: MediaJobInput['slot'], direction: -1 | 1) => {
     const otherSlot = slots()[slots().indexOf(slot) + direction];
-    if (!otherSlot) return;
+    if (!otherSlot || inputKind(slot) !== inputKind(otherSlot)) return;
     setDraft(
       'inputs',
       draft.inputs.map((input) => {
@@ -872,11 +893,22 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       }
                     >
                       {(asset) => (
-                        <img
-                          class="media-result block object-contain w-full max-h-[100cqh]"
-                          src={asset().url}
-                          alt={sourcePreviewLabel()}
-                        />
+                        <Show
+                          when={asset().kind === 'video'}
+                          fallback={
+                            <img
+                              class="media-result block object-contain w-full max-h-[100cqh]"
+                              src={asset().url}
+                              alt={sourcePreviewLabel()}
+                            />
+                          }
+                        >
+                          <MediaPlayer
+                            asset={asset()}
+                            class="media-result block object-contain w-full max-h-[100cqh]"
+                            active={paneActive() && picker() === null}
+                          />
+                        </Show>
                       )}
                     </Show>
                   }
@@ -953,7 +985,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                               instruction: candidate().job.instruction,
                               prompt: candidate().job.prompt,
                               variation: selectedIndex() + 1,
-                              workflow: resultWorkflowDetails(candidate().job),
+                              workflow: resultWorkflowDetails(candidate().job, workflows()),
                             })
                           }
                         >
@@ -1064,9 +1096,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       Fill from context
                     </button>
                   </Show>
-                  <Show when={slots().length > 1 && bulkInputCapacity() > 0}>
+                  <Show when={slots().length > 1 && uniformInputs() && bulkInputCapacity() > 0}>
                     <button disabled={busy() || frozen()} onClick={() => setPicker('@all')}>
-                      Choose input images
+                      Choose input {inputKind(slots()[0]!) === 'video' ? 'videos' : 'images'}
                     </button>
                   </Show>
                 </div>
@@ -1080,16 +1112,25 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       <div class="h-12 border border-solid border-line bg-canvas grid place-items-center overflow-hidden text-dim rounded-sm grow-0 shrink-0 basis-12 [&_img]:min-h-0 [&_img]:object-contain [&_img]:size-full">
                         <Show
                           when={inputForSlot(slot)}
-                          fallback={<FontAwesomeIcon icon={faImage} size={24} />}
+                          fallback={
+                            <FontAwesomeIcon
+                              icon={inputKind(slot) === 'video' ? faVideo : faImage}
+                              size={24}
+                            />
+                          }
                         >
                           {(input) => (
-                            <img
-                              src={
-                                assets[input().assetId]?.thumbnail ?? assets[input().assetId]?.url
+                            <Show
+                              when={
+                                assets[input().assetId]?.thumbnail ??
+                                (assets[input().assetId]?.kind === 'image'
+                                  ? assets[input().assetId]?.url
+                                  : undefined)
                               }
-                              alt={inputLabel(slot)}
-                              decoding="async"
-                            />
+                              fallback={<FontAwesomeIcon icon={faVideo} size={24} />}
+                            >
+                              {(url) => <img src={url()} alt={inputLabel(slot)} decoding="async" />}
+                            </Show>
                           )}
                         </Show>
                       </div>
@@ -1105,7 +1146,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         </span>
                         <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                           <button disabled={busy() || frozen()} onClick={() => setPicker(slot)}>
-                            {inputForSlot(slot) ? 'Replace' : 'Choose image'}
+                            {inputForSlot(slot) ? 'Replace' : `Choose ${inputKind(slot)}`}
                           </button>
                           <Show when={inputForSlot(slot)}>
                             <button
@@ -1124,7 +1165,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                                 class="icon-btn"
                                 title={`Move ${inputLabel(slot).toLowerCase()} up`}
                                 aria-label={`Move ${inputLabel(slot).toLowerCase()} up`}
-                                disabled={busy() || frozen() || slots().indexOf(slot) === 0}
+                                disabled={
+                                  busy() ||
+                                  frozen() ||
+                                  slots().indexOf(slot) === 0 ||
+                                  inputKind(slots()[slots().indexOf(slot) - 1]!) !== inputKind(slot)
+                                }
                                 onClick={() => moveReference(slot, -1)}
                               >
                                 <FontAwesomeIcon icon={faArrowUp} size={14} />
@@ -1134,7 +1180,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                                 title={`Move ${inputLabel(slot).toLowerCase()} down`}
                                 aria-label={`Move ${inputLabel(slot).toLowerCase()} down`}
                                 disabled={
-                                  busy() || frozen() || slots().indexOf(slot) >= slots().length - 1
+                                  busy() ||
+                                  frozen() ||
+                                  slots().indexOf(slot) >= slots().length - 1 ||
+                                  inputKind(slots()[slots().indexOf(slot) + 1]!) !== inputKind(slot)
                                 }
                                 onClick={() => moveReference(slot, 1)}
                               >
@@ -1393,6 +1442,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         {(slot) => (
           <GalleryModal
             picker={{
+              kind: inputKind(slot() === '@all' ? slots()[0]! : slot()),
               maximum: slot() === '@all' ? bulkInputCapacity() : 1,
               selectedAssetIds: orderedInputs()
                 .filter((input) =>

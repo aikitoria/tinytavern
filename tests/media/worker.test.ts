@@ -41,7 +41,7 @@ test('media jobs', async () => {
     name: 'Image',
     inputBindings: {},
     textOutputNodeId: null,
-    json: '{"1":{"class_type":"Text","inputs":{"text":"{{prompt}}","seed":{{seed}}}},"9":{"class_type":"SaveImage","inputs":{"filename_prefix":"{{job_id}}"}}}',
+    json: '{"1":{"class_type":"Text","inputs":{"text":"{{prompt}}","seed":0}},"9":{"class_type":"SaveImage","inputs":{"filename_prefix":"{{job_id}}"}}}',
     standalonePromptPresetId: null,
     chatPromptPresetId: null,
   };
@@ -53,9 +53,21 @@ test('media jobs', async () => {
     textOutputNodeId: null,
     json: JSON.stringify({
       '1': { class_type: 'Text', inputs: { text: '{{prompt}}', seed: 123 } },
-      reference3: { class_type: 'LoadImage', inputs: { image: 'reference3.png' } },
-      reference1: { class_type: 'LoadImage', inputs: { image: 'samples/reference1.png' } },
-      reference2: { class_type: 'LoadImage', inputs: { image: 'reference2.png [input]' } },
+      reference3: {
+        class_type: 'LoadImage',
+        inputs: { image: 'reference3.png' },
+        _meta: { title: 'Input 3 [image:input3]' },
+      },
+      reference1: {
+        class_type: 'LoadImage',
+        inputs: { image: 'samples/reference1.png' },
+        _meta: { title: 'Input 1 [image:input1]' },
+      },
+      reference2: {
+        class_type: 'LoadImage',
+        inputs: { image: 'reference2.png [input]' },
+        _meta: { title: 'Input 2 [image:input2]' },
+      },
       '9': { class_type: 'SaveImage', inputs: { filename_prefix: '{{job_id}}' } },
     }),
   };
@@ -171,7 +183,7 @@ test('media jobs', async () => {
     });
     const preparation = draft('cancel-preparation-reference', {
       workflowId: editWorkflow.id,
-      inputs: ['reference1', 'reference2', 'reference3'].map((slot) => ({
+      inputs: ['input1', 'input2', 'input3'].map((slot) => ({
         slot,
         assetId: cancelledInputId,
       })),
@@ -259,9 +271,9 @@ test('media jobs', async () => {
 
       workflowId: editWorkflow.id,
       inputs: [
-        { slot: 'reference2', assetId: sourceId },
-        { slot: 'reference3', assetId: sourceId },
-        { slot: 'reference1', assetId: sourceId },
+        { slot: 'input2', assetId: sourceId },
+        { slot: 'input3', assetId: sourceId },
+        { slot: 'input1', assetId: sourceId },
       ],
     });
     startMediaJob(requireMediaJob(edit.id), {}, false);
@@ -297,6 +309,22 @@ test('media jobs', async () => {
       ...getSettings(),
       mediaRendering: { ...renderingSettings, workflows: [imageWorkflow] },
     });
+    assert.throws(
+      () =>
+        createMediaJobFromAsset(edited.outputs[0]!.id, {
+          requestKey: testRequestKey('deleted-workflow'),
+        }),
+      /workflow no longer exists/,
+    );
+    const enhancedGraph = JSON.parse(editWorkflow.json);
+    enhancedGraph['1'].inputs.enhanced = true;
+    putSettings({
+      ...getSettings(),
+      mediaRendering: {
+        ...renderingSettings,
+        workflows: [imageWorkflow, { ...editWorkflow, json: JSON.stringify(enhancedGraph) }],
+      },
+    });
     const restored = createMediaJobFromAsset(edited.outputs[0]!.id, {
       requestKey: testRequestKey('recipe-rerun'),
     });
@@ -306,11 +334,27 @@ test('media jobs', async () => {
       editInstruction,
       'Rerun restores the instruction after job deletion',
     );
-    assert.equal(restored.workflowSnapshot?.json, editWorkflow.json);
+    assert.equal(restored.workflowId, editWorkflow.id);
     editMediaJob(requireMediaJob(restored.id), { prompt: 'A changed edit prompt' });
     startMediaJob(requireMediaJob(restored.id), {}, false);
     const restoredResult = await waitFor(restored.id, 'succeeded');
-    assert.equal(uploads[1]!.name, `tinytavern-${restored.id}-asset-${sourceId}.png`);
+    assert.equal(submitted.get(restoredResult.comfyPromptId!)!.prompt['1']!.inputs.enhanced, true);
+    assert(
+      !(
+        'workflow' in
+        JSON.parse(
+          String(
+            stmt('SELECT configuration_json FROM media_recipes WHERE id = ?').get(
+              restoredResult.outputs[0]!.recipeId!,
+            )!.configuration_json,
+          ),
+        )
+      ),
+    );
+    assert.equal(
+      uploads[1]!.name,
+      `tinytavern-${testRequestKey('recipe-rerun')}-asset-${sourceId}.png`,
+    );
     assert.notEqual(
       uploads[1]!.name,
       uploadedPath,
@@ -319,7 +363,7 @@ test('media jobs', async () => {
     assert.equal(
       restoredResult.outputs.length,
       2,
-      'Recipes rerun after job history and saved workflow deletion',
+      'Recipes rerun after job history deletion using the current saved workflow',
     );
     assert.equal(
       submitted.get(restoredResult.comfyPromptId!)!.prompt['1']!.inputs.text,
@@ -464,6 +508,115 @@ test('media jobs', async () => {
       'Cancel interrupts an in-flight download rather than waiting for its request timeout',
     );
     holdDownloads = false;
+
+    const { renderMediaFixture } = await import('../support/media.ts');
+    const sourceVideoFile = join(IMAGES_DIR, 'video-input-fixture.webm');
+    await renderMediaFixture(sourceVideoFile, 64, 48, true);
+    const originalVideo = readFileSync(sourceVideoFile);
+    const videoPath = saveImage('.webm', originalVideo);
+    const videoId = mediaAssetForPath(videoPath)!.id;
+    const stillPath = saveImage('.png', raster);
+    const stillId = mediaAssetForPath(stillPath)!.id;
+    for (const path of [videoPath, stillPath]) {
+      insertFixture('gallery_items', {
+        character_name: 'Input',
+        prompt: 'Captured input prompt',
+        image: path,
+        created_at: 1,
+        updated_at: 1,
+      });
+    }
+    const videoWorkflow: MediaWorkflow = {
+      ...imageWorkflow,
+      id: 'video-input',
+      name: 'Video input',
+      inputBindings: { standalone: { input1: 'selected:1', input2: 'selected:2' } },
+      json: JSON.stringify({
+        video: {
+          class_type: 'LoadVideo',
+          inputs: { file: 'sample.webm' },
+          _meta: { title: 'Clip [video:input1]' },
+        },
+        repeated: { class_type: 'LoadVideo', inputs: { file: '{{input1}}' } },
+        image: { class_type: 'LoadImage', inputs: { image: '{{input2}}' } },
+        frames: { class_type: 'GetVideoComponents', inputs: { video: ['video', 0] } },
+        '9': {
+          class_type: 'SaveImage',
+          inputs: { images: ['frames', 0], filename_prefix: '{{job_id}}' },
+        },
+      }),
+    };
+    putSettings({
+      ...getSettings(),
+      mediaRendering: {
+        ...getSettings().mediaRendering,
+        workflows: [...getSettings().mediaRendering.workflows, videoWorkflow],
+      },
+    });
+    const invalidKind = draft('wrong-video-input-kind', {
+      workflowId: videoWorkflow.id,
+      inputs: [
+        { slot: 'input1', assetId: stillId },
+        { slot: 'input2', assetId: stillId },
+      ],
+    });
+    assert.throws(
+      () => startMediaJob(requireMediaJob(invalidKind.id), {}, false),
+      /requires a video/,
+    );
+    const videoJob = draft('video-input-roundtrip', {
+      workflowId: videoWorkflow.id,
+      fillInputs: { selectedAssetIds: [videoId, stillId] },
+    });
+    assert.deepEqual(
+      videoJob.inputs.map((input) => input.assetId),
+      [videoId, stillId],
+    );
+    assert.equal(videoJob.inputs[0]!.prompt, 'Captured input prompt');
+    const uploadCount = uploads.length;
+    startMediaJob(requireMediaJob(videoJob.id), {}, false);
+    const videoResult = await waitFor(videoJob.id, 'succeeded');
+    const videoUploads = uploads.slice(uploadCount);
+    assert.equal(videoUploads.length, 2, 'Repeated video bindings upload the original only once');
+    const videoUpload = videoUploads.find((upload) => upload.name.endsWith('.webm'))!;
+    assert.deepEqual(
+      videoUpload.data,
+      originalVideo,
+      'Videos return to Comfy byte-for-byte without transcoding',
+    );
+    const videoGraph = submitted.get(videoResult.comfyPromptId!)!.prompt;
+    assert.equal(videoGraph.video!.inputs.file, videoUpload.name);
+    assert.equal(videoGraph.repeated!.inputs.file, videoUpload.name);
+    assert.deepEqual(videoGraph.frames!.inputs.video, ['video', 0]);
+    await drainRemoteCleanup();
+    assert(
+      [...deleted].some((query) => {
+        const params = new URLSearchParams(query);
+        return params.get('filename') === videoUpload.name && params.get('type') === 'input';
+      }),
+      'Cleanup deletes the original uploaded video from Comfy',
+    );
+    assert(
+      existsSync(join(IMAGES_DIR, basename(videoPath))),
+      'Remote cleanup preserves the locally owned video',
+    );
+    const { exportImageRecipes, parseImageRecipes } =
+      await import('../../server/src/conversations/conversationImageRecipes.ts');
+    const resultAsset = videoResult.outputs[0]!;
+    const exported = exportImageRecipes(new Map([[resultAsset.url, 'result']]), (path) => path);
+    assert.equal(
+      exported.recipes[0]!.inputs.find((input) => input.slot === 'input1')!.assetId,
+      null,
+    );
+    assert.equal(
+      parseImageRecipes(exported.recipes).size,
+      1,
+      'Video-free conversation exports retain the recipe and input slot',
+    );
+    const videoRerun = createMediaJobFromAsset(resultAsset.id, {
+      requestKey: testRequestKey('video-input-rerun'),
+    });
+    assert.equal(videoRerun.inputs.find((input) => input.slot === 'input1')!.assetId, videoId);
   } finally {
     stopMediaWorker();
     await sleep(30);

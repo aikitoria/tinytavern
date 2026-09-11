@@ -9,7 +9,7 @@ import {
 export * from './workflowInputs.ts';
 
 export type MediaKind = 'image' | 'video';
-/** Numbered image binding (input1–input64); legacy names are accepted during import. */
+/** Numbered media binding (input1–input64). */
 export type MediaInputSlot = string;
 export type MediaInputContext = 'standalone' | 'chat' | 'avatar';
 export type MediaInputSource = `selected:${number}` | 'character-avatar' | 'persona-avatar';
@@ -109,7 +109,7 @@ export const DEFAULT_MEDIA_PROMPTS: MediaPromptSettings = {
 
 export function mediaInputSlots(workflow: Pick<MediaWorkflow, 'json'>): MediaInputSlot[] {
   return workflow.json.trim()
-    ? compileMediaWorkflow(workflow.json).imageInputs.map((input) => input.name)
+    ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => input.name)
     : [];
 }
 
@@ -146,7 +146,7 @@ export interface MediaJobInput {
   assetId: number;
 }
 
-/** Server-captured metadata for the selected image; clients submit only the selection. */
+/** Server-captured metadata for the selected media; clients submit only the selection. */
 export interface MediaJobInputSnapshot extends MediaJobInput {
   prompt: string;
 }
@@ -158,9 +158,9 @@ export interface MediaAssetInput {
 
 /** Original render metadata, independent of editable gallery annotations. */
 export interface MediaResultDetails {
+  workflowId: string | null;
   instruction: string;
   prompt: string;
-  workflowSnapshot: MediaWorkflow | null;
   workflowValues: MediaWorkflowValues;
   seed: number | null;
 }
@@ -216,6 +216,8 @@ export type MediaJobState =
 export interface MediaVideoPreview {
   /** Changes for each sampler preview sequence, even when a node runs again. */
   id: string;
+  /** One complete denoise update; frame zero starts a new sequence. */
+  sequence: string;
   nodeId: string;
   frameCount: number;
   frameRate: number;
@@ -245,7 +247,8 @@ export function mergeMediaProgress(
   const next = { ...current, ...update };
   if (update.videoPreview) {
     const frames =
-      current?.videoPreview?.id === update.videoPreview.id
+      current?.videoPreview?.id === update.videoPreview.id &&
+      current.videoPreview.sequence === update.videoPreview.sequence
         ? { ...current.videoPreview.frames, ...update.videoPreview.frames }
         : { ...update.videoPreview.frames };
     for (const [index, frame] of Object.entries(frames)) {
@@ -265,7 +268,6 @@ export interface MediaJob {
   draft: MediaDraft | null;
   revision: number;
   workflowId: string | null;
-  workflowSnapshot: MediaWorkflow | null;
   presetId: string | null;
   state: MediaJobState;
   instruction: string;
@@ -309,24 +311,16 @@ export type WorkflowValues = { prompt: string; seed: number; job_id: string } & 
   string | number | undefined
 >;
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-const SYSTEM_SLOTS = new Set(['prompt', 'seed', 'job_id']);
-export const MEDIA_INPUT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+const SYSTEM_SLOTS = new Set(['prompt', 'job_id']);
 export const MAX_MEDIA_INPUTS = 64;
 export const NUMBERED_MEDIA_INPUT = /^input([1-9]|[1-5][0-9]|6[0-4])$/;
-/** A prompt macro uses the same number as its image binding, including sparse inputs. */
+/** A prompt macro uses the same number as its media binding, including sparse inputs. */
 export const MEDIA_INPUT_PROMPT_KEYS = Array.from(
   { length: MAX_MEDIA_INPUTS },
   (_, index) => `input${index + 1}_prompt`,
 );
-const legacyImageSlot = (name: string) =>
-  /^(?:source|first_frame|reference[1-9][0-9]*)$/.test(name);
-
 export function mediaInputLabel(name: string): string {
-  if (NUMBERED_MEDIA_INPUT.test(name)) return `Input ${name.slice(5)}`;
-  if (name === 'source') return 'Source image';
-  if (name === 'first_frame') return 'First frame';
-  const reference = /^reference([0-9]+)$/.exec(name);
-  return reference ? `Reference ${reference[1]}` : name.replaceAll('_', ' ');
+  return `Input ${name.slice(5)}`;
 }
 
 const MARKER = '\u001fTT:';
@@ -335,61 +329,47 @@ interface CompiledMediaWorkflow {
   graph: JsonValue;
   slots: ReadonlySet<string>;
   controls: MediaWorkflowInput[];
-  imageInputs: { name: string; label: string }[];
+  mediaInputs: { name: string; label: string; kind: MediaKind }[];
 }
 
-// Bound both small-workflow count and retained source size. Cache by content so
-// editing a saved workflow never replaces a running job's captured graph.
+// Bound cached workflow count and source size; reuse each compiled definition across submissions.
 const compiledWorkflows = new Map<string, CompiledMediaWorkflow>();
 const MAX_COMPILED_WORKFLOWS = 64;
 const MAX_COMPILED_SOURCE_LENGTH = 8 * 1024 * 1024;
 let compiledSourceLength = 0;
 
 /** Reuse the read-only compilation; expansion creates a fresh graph for every job. */
-export function compileMediaWorkflow(json: string, legacyOrder = false): CompiledMediaWorkflow {
-  const cacheKey = legacyOrder ? `legacy:${json}` : json;
-  const cached = compiledWorkflows.get(cacheKey);
+export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
+  const cached = compiledWorkflows.get(json);
   if (cached) return cached;
-  let inString = false;
-  let escaped = false;
-  let encoded = '';
   const slots = new Set<string>();
-  for (let i = 0; i < json.length; i++) {
-    const match = json.slice(i).match(/^\{\{([a-z_0-9]+)\}\}/i);
-    if (match) {
-      const key = match[1]!.toLowerCase();
-      if (escaped) throw new Error(`{{${key}}} must not follow an unpaired backslash`);
-      if (key === 'seed' ? inString : !inString)
-        throw new Error(
-          key === 'seed'
-            ? '{{seed}} must be a JSON number value'
-            : `{{${key}}} must be inside a JSON string`,
-        );
-      const marker = JSON.stringify(`${MARKER}${key}\u001f`);
-      encoded += inString ? marker.slice(1, -1) : marker;
-      slots.add(key);
-      i += match[0].length - 1;
-      continue;
-    }
-    const char = json[i]!;
-    encoded += char;
-    if (escaped) escaped = false;
-    else if (inString && char === '\\') escaped = true;
-    else if (char === '"') inString = !inString;
-  }
-  const graph = JSON.parse(encoded) as JsonValue;
+  const graph = JSON.parse(json, (_key, value: JsonValue) =>
+    typeof value === 'string'
+      ? value.replace(
+          /\{\{([a-z_0-9]+)\}\}/gi,
+          (_, key: string) => `${MARKER}${key.toLowerCase()}\u001f`,
+        )
+      : value,
+  ) as JsonValue;
   if (!graph || typeof graph !== 'object' || Array.isArray(graph))
     throw new Error('Workflow must be an API-format JSON object');
   // Macros belong in input values, never node IDs or property names.
   const checkKeys = (value: JsonValue): void => {
     if (!value || typeof value !== 'object') return;
     for (const [key, child] of Object.entries(value)) {
-      if (key.includes(MARKER)) throw new Error('Workflow macros cannot appear in object keys');
+      if (key.includes(MARKER) || /\{\{[a-z_0-9]+\}\}/i.test(key))
+        throw new Error('Workflow macros cannot appear in object keys');
       checkKeys(child);
     }
   };
   checkKeys(graph);
   const labels = new Map<string, string>();
+  const kinds = new Map<string, MediaKind>();
+  const bindKind = (slot: string, kind: MediaKind) => {
+    if (kinds.has(slot) && kinds.get(slot) !== kind)
+      throw new Error(`Media input ${slot} cannot be both image and video`);
+    kinds.set(slot, kind);
+  };
   // Titles override sample filenames. Only literal fields are bindable; never sever graph links.
   for (const [nodeId, node] of Object.entries(graph)) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
@@ -397,24 +377,25 @@ export function compileMediaWorkflow(json: string, legacyOrder = false): Compile
     if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) continue;
     const meta = node._meta;
     const title = meta && typeof meta === 'object' && !Array.isArray(meta) ? meta.title : undefined;
-    const annotation = typeof title === 'string' && /\[(?:image|prompt)\b/.test(title);
+    const annotation = typeof title === 'string' && /\[(?:image|video|prompt)\b/.test(title);
     if (annotation) {
       const match = title.match(
-        /^(.*?)\s*\[(image:([a-z][a-z0-9_]*)|prompt)(?:,\s*field=([a-zA-Z_][a-zA-Z0-9_]*))?\]\s*$/,
+        /^(.*?)\s*\[((?:image|video):([a-z][a-z0-9_]*)|prompt)(?:,\s*field=([a-zA-Z_][a-zA-Z0-9_]*))?\]\s*$/,
       );
       if (!match)
         throw new Error(
-          `Workflow node ${nodeId}: use Label [image:input1] through [image:input64], or Label [prompt], optionally with , field=input_name`,
+          `Workflow node ${nodeId}: use Label [image:input1] or [video:input1] through input64, or Label [prompt], optionally with , field=input_name`,
         );
       const slot = match[3] ?? 'prompt';
-      if (!legacyOrder && /^input\d/.test(slot) && !NUMBERED_MEDIA_INPUT.test(slot))
-        throw new Error(`Workflow node ${nodeId}: image inputs must be input1 through input64`);
-      if (!MEDIA_INPUT_NAME.test(slot) || (match[3] && SYSTEM_SLOTS.has(slot)))
-        throw new Error(`Workflow node ${nodeId}: invalid image input name ${slot}`);
+      if (match[3] && !NUMBERED_MEDIA_INPUT.test(slot))
+        throw new Error(`Workflow node ${nodeId}: media inputs must be input1 through input64`);
+      const kind: MediaKind = match[2]!.startsWith('video:') ? 'video' : 'image';
       const field =
         match[4] ??
         (match[3]
-          ? 'image'
+          ? kind === 'video'
+            ? 'file'
+            : 'image'
           : ['value', 'text', 'string'].find((key) => typeof inputs[key] === 'string'));
       if (!field || typeof inputs[field] !== 'string')
         throw new Error(
@@ -422,19 +403,28 @@ export function compileMediaWorkflow(json: string, legacyOrder = false): Compile
         );
       inputs[field] = `${MARKER}${slot}\u001f`;
       if (match[3]) {
-        const label = match[1]!.trim() || mediaInputLabel(slot);
+        bindKind(slot, kind);
+        const label = match[1]!.trim() || `Input ${slot.slice(5)}`;
         if (labels.has(slot) && labels.get(slot) !== label)
-          throw new Error(`Image input ${slot} has conflicting labels`);
+          throw new Error(`Media input ${slot} has conflicting labels`);
         labels.set(slot, label);
       }
-      continue;
     }
-    if (node.class_type !== 'LoadImage' && node.class_type !== 'LoadImageMask') continue;
-    if (typeof inputs.image !== 'string') continue;
-    const match = inputs.image.match(
-      /(?:^|\/)(source|first_frame|reference[1-9][0-9]*)\.png(?: \[input\])?$/,
-    );
-    if (match) inputs.image = `${MARKER}${match[1]}\u001f`;
+  }
+  for (const node of Object.values(graph)) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+    const kind =
+      node.class_type === 'LoadVideo'
+        ? 'video'
+        : node.class_type === 'LoadImage' || node.class_type === 'LoadImageMask'
+          ? 'image'
+          : null;
+    const inputs = node.inputs;
+    if (!kind || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)) continue;
+    const value = inputs[kind === 'video' ? 'file' : 'image'];
+    if (typeof value === 'string')
+      for (const match of value.matchAll(/\u001fTT:([a-z_0-9]+)\u001f/g))
+        if (!SYSTEM_SLOTS.has(match[1]!)) bindKind(match[1]!, kind);
   }
   // Recompute after title bindings so overridden sample macros do not leave phantom inputs.
   slots.clear();
@@ -442,14 +432,9 @@ export function compileMediaWorkflow(json: string, legacyOrder = false): Compile
     if (typeof value === 'string') {
       for (const match of value.matchAll(/\u001fTT:([a-z_0-9]+)\u001f/g)) {
         const name = match[1]!;
-        if (
-          !SYSTEM_SLOTS.has(name) &&
-          !NUMBERED_MEDIA_INPUT.test(name) &&
-          !legacyImageSlot(name) &&
-          !labels.has(name)
-        )
+        if (!SYSTEM_SLOTS.has(name) && !NUMBERED_MEDIA_INPUT.test(name))
           throw new Error(
-            `Unknown workflow macro {{${name}}}; use input1 through input64 for image bindings`,
+            `Unknown workflow macro {{${name}}}; use input1 through input64 for media bindings`,
           );
         slots.add(name);
       }
@@ -458,91 +443,30 @@ export function compileMediaWorkflow(json: string, legacyOrder = false): Compile
     }
   };
   discoverSlots(graph);
-  const inputOrder = (name: string) =>
-    !legacyOrder && NUMBERED_MEDIA_INPUT.test(name)
-      ? Number(name.slice(5))
-      : name === 'source'
-        ? 0
-        : name === 'first_frame'
-          ? 1
-          : /^reference[1-9][0-9]*$/.test(name)
-            ? Number(name.slice(9)) + 1
-            : Infinity;
-  const imageInputs = [...slots]
+  const mediaInputs = [...slots]
     .filter((slot) => !SYSTEM_SLOTS.has(slot))
-    .sort((a, b) => inputOrder(a) - inputOrder(b))
-    .map((name) => ({ name, label: labels.get(name) ?? mediaInputLabel(name) }));
-  if (imageInputs.length > MAX_MEDIA_INPUTS)
-    throw new Error(`Workflows support at most ${MAX_MEDIA_INPUTS} image inputs`);
-  const compiled = { graph, slots, imageInputs, controls: discoverWorkflowInputs(graph) };
-  if (cacheKey.length <= MAX_COMPILED_SOURCE_LENGTH) {
+    .sort((a, b) => Number(a.slice(5)) - Number(b.slice(5)))
+    .map((name) => ({
+      name,
+      label: labels.get(name) ?? `Input ${name.slice(5)}`,
+      kind: kinds.get(name) ?? 'image',
+    }));
+  if (mediaInputs.length > MAX_MEDIA_INPUTS)
+    throw new Error(`Workflows support at most ${MAX_MEDIA_INPUTS} media inputs`);
+  const compiled = { graph, slots, mediaInputs, controls: discoverWorkflowInputs(graph) };
+  if (json.length <= MAX_COMPILED_SOURCE_LENGTH) {
     while (
       compiledWorkflows.size >= MAX_COMPILED_WORKFLOWS ||
-      compiledSourceLength + cacheKey.length > MAX_COMPILED_SOURCE_LENGTH
+      compiledSourceLength + json.length > MAX_COMPILED_SOURCE_LENGTH
     ) {
       const oldest = compiledWorkflows.keys().next().value!;
       compiledWorkflows.delete(oldest);
       compiledSourceLength -= oldest.length;
     }
-    compiledWorkflows.set(cacheKey, compiled);
-    compiledSourceLength += cacheKey.length;
+    compiledWorkflows.set(json, compiled);
+    compiledSourceLength += json.length;
   }
   return compiled;
-}
-
-/** Upgrade legacy bindings once at persistence/import boundaries; graph links stay intact. */
-export function normalizeMediaWorkflowInputs(workflow: MediaWorkflow, legacyOrder = false) {
-  let compiled = workflow.json.trim() ? compileMediaWorkflow(workflow.json, legacyOrder) : null;
-  if (
-    !legacyOrder &&
-    compiled?.imageInputs.some((input) => !NUMBERED_MEDIA_INPUT.test(input.name))
-  ) {
-    legacyOrder = true;
-    compiled = compileMediaWorkflow(workflow.json, true);
-  }
-  const inputs = compiled?.imageInputs ?? [];
-  const slots = new Map(
-    inputs.map((input, index) => [input.name, legacyOrder ? `input${index + 1}` : input.name]),
-  );
-  if (!compiled || [...slots].every(([before, after]) => before === after))
-    return { workflow, slots };
-  const graph = structuredClone(compiled.graph) as Record<
-    string,
-    { class_type?: string; inputs?: Record<string, JsonValue>; _meta?: { title?: string } }
-  >;
-  for (const node of Object.values(graph)) {
-    if (!node || typeof node !== 'object' || !node.inputs) continue;
-    if (typeof node._meta?.title === 'string') {
-      node._meta.title = node._meta.title.replace(
-        /\[image:([a-z][a-z0-9_]*)/,
-        (match, name: string) => (slots.has(name) ? `[image:${slots.get(name)}` : match),
-      );
-    }
-    if (node.class_type === 'LoadImage' || node.class_type === 'LoadImageMask') {
-      const input = inputs.find((input) => node.inputs!.image === `${MARKER}${input.name}\u001f`);
-      if (input) {
-        const name = slots.get(input.name)!;
-        node.inputs.image = `${name}.png`;
-        if (!node._meta?.title?.includes('[image:'))
-          node._meta = { ...node._meta, title: `${input.label} [image:${name}]` };
-      }
-    }
-  }
-  const json = JSON.stringify(graph, null, 2)
-    .replace(
-      /\\u001fTT:([a-z_0-9]+)\\u001f/g,
-      (_, name: string) => `{{${slots.get(name) ?? name}}}`,
-    )
-    .replace(/"\{\{seed\}\}"/g, '{{seed}}');
-  const inputBindings = Object.fromEntries(
-    Object.entries(workflow.inputBindings).map(([context, bindings]) => [
-      context,
-      Object.fromEntries(
-        Object.entries(bindings).map(([slot, source]) => [slots.get(slot) ?? slot, source]),
-      ),
-    ]),
-  );
-  return { workflow: { ...workflow, json, inputBindings }, slots };
 }
 
 export function expandMediaWorkflow(
@@ -552,7 +476,6 @@ export function expandMediaWorkflow(
 ): Record<string, unknown> {
   const expand = (value: JsonValue): JsonValue => {
     if (typeof value === 'string') {
-      if (value === `${MARKER}seed\u001f`) return values.seed;
       return value.replace(/\u001fTT:([a-z_0-9]+)\u001f/g, (_, key: keyof WorkflowValues) => {
         const replacement = Object.hasOwn(values, key) ? values[key] : undefined;
         if (replacement == null) throw new Error(`Missing workflow input: ${key}`);
@@ -583,10 +506,12 @@ export function mediaWorkflowError(workflow: MediaWorkflow): string | null {
       const node = (compiled.graph as Record<string, unknown>)[workflow.textOutputNodeId];
       if (!node || typeof node !== 'object') return 'Choose an existing node for the text output';
     }
-    const names = new Set(compiled.imageInputs.map((input) => input.name));
+    const names = new Map(compiled.mediaInputs.map((input) => [input.name, input.kind]));
     for (const bindings of Object.values(workflow.inputBindings)) {
-      for (const name of Object.keys(bindings)) {
+      for (const [name, source] of Object.entries(bindings)) {
         if (!names.has(name)) return `Automatic binding ${name} is not an input of this workflow`;
+        if (names.get(name) === 'video' && !source.startsWith('selected:'))
+          return `Video input ${name} requires selected video media, not an avatar`;
       }
     }
     return null;

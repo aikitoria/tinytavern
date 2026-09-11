@@ -34,6 +34,6 @@ export function restoreMediaInputs(
         asset ??= job.outputs.at(-1);
       }
     }
-    if (asset?.kind === 'image') return { inputs: [], assets: [asset] };
+    if (asset) return { inputs: [], assets: [asset] };
   }
 }

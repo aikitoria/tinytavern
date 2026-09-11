@@ -6,7 +6,7 @@ import VideoPreview from './VideoPreview.tsx';
 import { MEDIA_JOB_STATUS, type MediaJobResult } from './jobCards.ts';
 
 const tileClass =
-  'relative grid place-items-center shrink-0 w-26 phone:w-18 p-0 overflow-hidden rounded-sm bg-chrome border-clear text-muted [&:not(:has(img,canvas))]:aspect-square [&>img]:block [&>img]:w-full [&>img]:h-auto [&>canvas.media-result]:w-full [&>canvas.media-result]:h-auto [&>canvas.media-result]:max-h-none';
+  'relative grid place-items-center shrink-0 w-26 phone:w-18 p-0 overflow-hidden rounded-sm bg-chrome border-clear text-muted [&:not(:has(img,canvas))]:aspect-square [&>img]:block [&>img]:w-full [&>img]:h-auto [&>.video-preview]:max-h-none';
 const captionClass =
   'media-job-preview-label absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 py-0.5 px-1 text-white text-micro';
 
@@ -65,7 +65,7 @@ export default function MediaJobPreviews(props: {
   active: boolean;
   pageActive?: boolean;
   disabled: boolean;
-  onOpen: (job: MediaJob) => void;
+  onOpen: (job: MediaJob, assetId?: number) => void;
 }) {
   let strip!: HTMLDivElement;
   const count = createMemo(() => props.results.length + props.pending.length);
@@ -91,7 +91,7 @@ export default function MediaJobPreviews(props: {
             type="button"
             class={tileClass}
             disabled={props.disabled}
-            onClick={() => props.onOpen(result.job)}
+            onClick={() => props.onOpen(result.job, result.asset.id)}
             aria-label={`Open job for variation ${index() + 1}`}
           >
             <Show

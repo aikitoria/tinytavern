@@ -25,6 +25,13 @@ test('context filling is available only for an empty mapped slot with a usable s
   }
   assert.equal(canFillMediaInputs(['subject'], { subject: 'selected:2' }, [], available), false);
   assert.equal(canFillMediaInputs(['subject'], { subject: 'selected:3' }, [], available), false);
+  const videoContext = { ...available, inputKinds: new Map([['subject', 'video' as const]]) };
+  assert.equal(canFillMediaInputs(['subject'], { subject: 'selected:2' }, [], videoContext), true);
+  assert.equal(canFillMediaInputs(['subject'], { subject: 'selected:1' }, [], videoContext), false);
+  assert.equal(
+    canFillMediaInputs(['subject'], { subject: 'character-avatar' }, [], videoContext),
+    false,
+  );
   assert.equal(
     canFillMediaInputs(
       ['subject', 'style'],

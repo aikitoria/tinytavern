@@ -318,7 +318,6 @@ test('media job cards', async () => {
       textResult: null,
       temporary: false,
       workflowId: null,
-      workflowSnapshot: null,
       presetId: null,
       state: 'draft',
       instruction: '',
@@ -470,21 +469,17 @@ test('media job cards', async () => {
   const captured = job(10, {
     state: 'rendering',
     workflowId: snapshot.id,
-    workflowSnapshot: snapshot,
     workflowValues: { duration: 7 },
   });
   const localValues = { duration: 20 };
-  // Captured selection and values survive both editing and deleting the saved workflow.
-  for (const workflows of [[edited, other], []]) {
-    const locked = mediaWorkflowView(captured, other.id, workflows, localValues, true);
-    assert.deepEqual(locked, { id: snapshot.id, workflow: snapshot, values: { duration: 7 } });
-    assert.equal(locked.workflow, snapshot, 'Keep the captured graph identity');
-  }
+  const locked = mediaWorkflowView(captured, other.id, [edited, other], localValues, true);
+  assert.deepEqual(locked, { id: snapshot.id, workflow: edited, values: { duration: 7 } });
+  assert.equal(mediaWorkflowView(captured, other.id, [], localValues, true).workflow, undefined);
   const unlocked = mediaWorkflowView(captured, other.id, [other], localValues, false);
   assert.equal(unlocked.workflow, other);
   assert.equal(unlocked.values, localValues, 'Unlocked edits retain their local values');
   const defaulted = mediaWorkflowView(
-    job(11, { workflowSnapshot: snapshot }),
+    job(11, { workflowId: snapshot.id }),
     snapshot.id,
     [edited],
     {},
@@ -492,8 +487,8 @@ test('media job cards', async () => {
   );
   assert.equal(
     compileMediaWorkflow(defaulted.workflow!.json).controls[0]!.value,
-    5,
-    'Omitted overrides use captured control defaults',
+    9,
+    'Omitted overrides use current workflow defaults',
   );
   createRoot((dispose) => {
     try {

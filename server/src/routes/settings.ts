@@ -154,7 +154,7 @@ route.put('/api/settings', ({ req, headers, body }) => {
     ) {
       throw new HttpError(
         400,
-        `${favorite.name}: favorites require a chat prompt preset and a configured workflow with a prompt and no image inputs`,
+        `${favorite.name}: favorites require a chat prompt preset and a configured workflow with a prompt and no media inputs`,
       );
     }
     return true;

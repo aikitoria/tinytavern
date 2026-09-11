@@ -6,7 +6,6 @@ import type {
   MediaJobInputSnapshot,
   MediaJobState,
   MediaVideoPreview,
-  MediaWorkflow,
   MediaWorkflowValues,
   Endpoint,
   StandalonePromptTemplate,
@@ -24,14 +23,16 @@ export interface MediaJobConfiguration {
   sourceCharacterIds?: number[];
   workflowValues?: MediaWorkflowValues;
   comfyUrl: string;
-  workflow: MediaWorkflow;
+  workflowId: string;
+  /** Output binding of a submitted run; no graph is retained. */
+  textOutputNodeId?: string | null;
   timeoutSeconds: number;
   temporary?: boolean;
   messageRenderOnly?: boolean;
   /** Remove a cancelled review variation only after its remote execution has stopped. */
   discardOnCancel?: boolean;
   /** VHS sends this header once per sampler; retain it across worker reconnects, without frames. */
-  videoPreview?: Omit<MediaVideoPreview, 'frames'>;
+  videoPreview?: Omit<MediaVideoPreview, 'frames' | 'sequence'>;
   /** Historical job snapshots can retain a label even after its character was deleted. */
   galleryOutput?: {
     characterName: string;
@@ -215,7 +216,6 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     draft: row.draft_id === null ? null : mediaDraft(row.draft_id),
     revision: row.revision,
     workflowId: row.workflow_id,
-    workflowSnapshot: configuration?.workflow ?? null,
     presetId: row.preset_id,
     state: row.state,
     instruction: row.instruction,

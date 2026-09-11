@@ -3,7 +3,6 @@ import type { MediaVideoPreview } from '@tinytavern/shared';
 import { rasterImageFormat } from '../images.ts';
 
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
-const MAX_CACHED_CHARACTERS = 16 * 1024 * 1024;
 const MAX_FRAMES = 512;
 
 /** Installed VHS protocol: event, JPEG type, VHS marker, index, 16-byte Pascal node ID, JPEG. */
@@ -25,28 +24,20 @@ export function parseVideoPreviewFrame(frame: Buffer) {
   };
 }
 
-/** Only size accounting lives here; the live job owns the actual cached frame strings. */
+/** Track sequence identity; the live job owns the complete cached frame strings. */
 export class ComfyVideoPreview {
-  readonly metadata: Omit<MediaVideoPreview, 'frames'>;
-  private sizes = new Map<number, number>();
-  private characters = 0;
+  readonly metadata: Omit<MediaVideoPreview, 'frames' | 'sequence'>;
+  private sequence = newRequestId();
 
-  private constructor(metadata: Omit<MediaVideoPreview, 'frames'>) {
+  private constructor(metadata: Omit<MediaVideoPreview, 'frames' | 'sequence'>) {
     this.metadata = metadata;
   }
 
-  /** Reuse the clip identity and account for frames already held in the live cache. */
-  static restore(
-    metadata: Omit<MediaVideoPreview, 'frames'>,
-    frames: MediaVideoPreview['frames'] = {},
-  ) {
+  /** Reuse the clip and sequence identity across worker reconnects. */
+  static restore(metadata: Omit<MediaVideoPreview, 'frames' | 'sequence'>, sequence?: string) {
     const { id, nodeId, frameCount, frameRate } = metadata;
     const preview = new ComfyVideoPreview({ id, nodeId, frameCount, frameRate });
-    for (const [key, frame] of Object.entries(frames)) {
-      if (!frame) continue;
-      preview.sizes.set(Number(key), frame.length);
-      preview.characters += frame.length;
-    }
+    if (sequence) preview.sequence = sequence;
     return preview;
   }
 
@@ -78,17 +69,11 @@ export class ComfyVideoPreview {
       decoded.index >= this.metadata.frameCount
     )
       return null;
-    this.characters -= this.sizes.get(decoded.index) ?? 0;
-    this.sizes.delete(decoded.index);
-    this.sizes.set(decoded.index, decoded.image.length);
-    this.characters += decoded.image.length;
-    const frames: MediaVideoPreview['frames'] = { [decoded.index]: decoded.image };
-    while (this.characters > MAX_CACHED_CHARACTERS) {
-      const [index, size] = this.sizes.entries().next().value!;
-      this.sizes.delete(index);
-      this.characters -= size;
-      frames[index] = null;
+    // The installed VHS previewer sends every denoise update in order, starting at zero.
+    if (decoded.index === 0) {
+      this.sequence = newRequestId();
     }
-    return { ...this.metadata, frames };
+    const frames: MediaVideoPreview['frames'] = { [decoded.index]: decoded.image };
+    return { ...this.metadata, sequence: this.sequence, frames };
   }
 }

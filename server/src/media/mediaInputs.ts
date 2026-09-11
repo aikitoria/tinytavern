@@ -1,6 +1,6 @@
 import {
   MAX_MEDIA_INPUTS,
-  mediaInputSlots,
+  compileMediaWorkflow,
   type MediaJobInputSnapshot,
   type MediaWorkflow,
 } from '@tinytavern/shared';
@@ -28,7 +28,7 @@ export function fillAutomaticMediaInputs(
     selected.length > MAX_MEDIA_INPUTS ||
     selected.some((id) => !Number.isSafeInteger(id) || id <= 0)
   )
-    throw new HttpError(400, 'Invalid selected input images');
+    throw new HttpError(400, 'Invalid selected input media');
   const conversation =
     conversationId === null
       ? null
@@ -52,16 +52,23 @@ export function fillAutomaticMediaInputs(
   }
   const mode = avatar ? 'avatar' : conversationId === null ? 'standalone' : 'chat';
   const bindings = workflow.inputBindings[mode] ?? {};
-  const allowed = new Set(mediaInputSlots(workflow));
+  const allowed = new Map(
+    compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]),
+  );
   const next = [...inputs];
   const copied = new Map<string, number>();
   for (const [slot, source] of Object.entries(bindings)) {
     if (!allowed.has(slot) || next.some((input) => input.slot === slot)) continue;
     if (source.startsWith('selected:')) {
       const assetId = selected[Number(source.slice(9)) - 1];
-      if (assetId !== undefined) next.push(...capture([{ slot, assetId }]));
+      if (assetId !== undefined) {
+        const asset = stmt('SELECT kind FROM media_assets WHERE id = ?').get(assetId);
+        if (asset && asset.kind !== allowed.get(slot)) continue;
+        next.push(...capture([{ slot, assetId }]));
+      }
       continue;
     }
+    if (allowed.get(slot) !== 'image') continue;
     const kind = source === 'character-avatar' ? 'character' : 'persona';
     const id = kind === 'character' ? characterId : personaId;
     if (id === null) continue;

@@ -28,7 +28,7 @@ export function startTemporaryMediaJob(
     const draft = createMediaJob(
       {
         requestKey: newRequestId(),
-        workflowId: configuration.workflow.id,
+        workflowId: configuration.workflowId,
         inputs,
         fillInputs,
         prompt,

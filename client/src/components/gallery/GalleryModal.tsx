@@ -193,6 +193,7 @@ function CharacterPicker(props: {
 }
 
 export interface GalleryPickerOptions {
+  kind?: 'image' | 'video';
   maximum: number;
   selectedAssetIds: number[];
   onConfirm: (items: GalleryItem[]) => void;
@@ -203,7 +204,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
   const navigation = createSettingsNavigation();
   if (!props.picker) useDialogNavigationGuard(navigation.navigate);
   const galleryItems = () =>
-    props.picker ? state.gallery.filter((item) => item.media?.kind === 'image') : state.gallery;
+    props.picker
+      ? state.gallery.filter((item) => item.media?.kind === (props.picker?.kind ?? 'image'))
+      : state.gallery;
+  const pickerNoun = () => (props.picker?.kind === 'video' ? 'videos' : 'images');
   const [pickedIds, setPickedIds] = createSignal<number[]>(
     (props.picker?.selectedAssetIds ?? []).flatMap((assetId) => {
       const item = state.gallery.find((entry) => entry.media?.id === assetId);
@@ -219,7 +223,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     } else if (selected.length < (props.picker?.maximum ?? 0)) {
       setPickedIds([...selected, id]);
     } else {
-      toast(`Choose up to ${props.picker?.maximum} images.`);
+      toast(`Choose up to ${props.picker?.maximum} ${pickerNoun()}.`);
     }
   };
   const leave = () =>
@@ -569,7 +573,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     <>
       <Modal
         active={props.active}
-        title={props.picker ? 'Choose reference images' : 'Gallery'}
+        title={props.picker ? `Choose reference ${pickerNoun()}` : 'Gallery'}
         hideCloseButton
         fullscreen
         class={`gallery-modal small-touch:[&_.modal-head]:gap-2 small-touch:[&_.modal-title]:display-none ${selectionMode() ? 'gallery-selection-mode' : ''} ${detailItem() ? 'gallery-detail-mode' : ''}`}
@@ -662,7 +666,9 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                   {(item) => (
                     <button
                       aria-label={
-                        pickedIds().includes(item().id) ? 'Remove selection' : 'Select image'
+                        pickedIds().includes(item().id)
+                          ? 'Remove selection'
+                          : `Select ${props.picker?.kind ?? 'image'}`
                       }
                       onClick={() => togglePicked(item().id)}
                     >
@@ -673,19 +679,21 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                     </button>
                   )}
                 </Show>
-                <button
-                  title="Upload images"
-                  aria-label="Upload images"
-                  onClick={() => fileInput.click()}
-                  disabled={uploadProgress() !== null}
-                >
-                  <FontAwesomeIcon
-                    icon={uploadProgress() ? faSpinner : faUpload}
-                    size={14}
-                    class={uploadProgress() ? 'spinner' : ''}
-                  />
-                  <span class="gallery-action-label">Upload</span>
-                </button>
+                <Show when={props.picker?.kind !== 'video'}>
+                  <button
+                    title="Upload images"
+                    aria-label="Upload images"
+                    onClick={() => fileInput.click()}
+                    disabled={uploadProgress() !== null}
+                  >
+                    <FontAwesomeIcon
+                      icon={uploadProgress() ? faSpinner : faUpload}
+                      size={14}
+                      class={uploadProgress() ? 'spinner' : ''}
+                    />
+                    <span class="gallery-action-label">Upload</span>
+                  </button>
+                </Show>
                 <button
                   class="primary-btn"
                   disabled={pickedItems().length === 0}
@@ -882,12 +890,20 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           class="gallery-workspace flex flex-col relative flex-1 min-h-0 mobile:block mobile:overflow-visible"
           onDragEnter={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
+            if (props.picker?.kind === 'video') {
+              event.preventDefault();
+              return;
+            }
             event.preventDefault();
             dragDepth++;
             setDragging(true);
           }}
           onDragOver={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
+            if (props.picker?.kind === 'video') {
+              event.preventDefault();
+              return;
+            }
             event.preventDefault();
             event.dataTransfer.dropEffect = uploadProgress() || bulkBusy() ? 'none' : 'copy';
           }}
@@ -899,6 +915,10 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           }}
           onDrop={(event) => {
             if (!event.dataTransfer?.types.includes('Files')) return;
+            if (props.picker?.kind === 'video') {
+              event.preventDefault();
+              return;
+            }
             event.preventDefault();
             dragDepth = 0;
             setDragging(false);
@@ -946,11 +966,17 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           <Show when={!detailItem() && filtered().length === 0}>
             <div class="flex items-center justify-center flex-col gap-2 flex-1 p-4 text-dim text-center text-sm [&>svg]:mb-2 [&>svg]:text-muted [&_strong]:text-foreground [&_strong]:text-lg">
               <FontAwesomeIcon icon={faImages} size={34} />
-              <strong>{state.gallery.length ? 'No matching images' : 'No saved images yet'}</strong>
+              <strong>
+                {state.gallery.length
+                  ? `No matching ${props.picker ? pickerNoun() : 'media'}`
+                  : 'No saved media yet'}
+              </strong>
               <span>
                 {state.gallery.length
                   ? 'Try another folder, prompt search or character.'
-                  : 'Upload images, drop them here, or save an image from chat.'}
+                  : props.picker?.kind === 'video'
+                    ? 'Save a generated video to the gallery to select it here.'
+                    : 'Upload images, drop them here, or save media from chat.'}
               </span>
               <Show when={state.gallery.length > 0}>
                 <button type="button" onClick={clearFilters}>

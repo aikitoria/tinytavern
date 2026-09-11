@@ -5,7 +5,6 @@ type PreparedStatement = Statement<SqlRow, SQLQueryBindings[]>;
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
-import { migrateMediaInputs } from './mediaInputMigration.ts';
 import type {
   Character,
   EntityFolder,
@@ -20,8 +19,6 @@ import type {
   Template,
 } from '@tinytavern/shared';
 import {
-  ENTITY_FOLDERS,
-  defaultChatMediaPrompt,
   DEFAULT_PROMPT_TEMPLATE,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_STEER_TEMPLATE,
@@ -68,7 +65,7 @@ export function stmt(sql: string): PreparedStatement {
 
 // Existing databases must already meet the minimum supported schema version.
 // Never renumber this baseline or silently open an older/newer schema.
-const BASELINE_VERSION = 73;
+const BASELINE_VERSION = 81;
 let version = Number(stmt('PRAGMA user_version').get()!.user_version);
 if (version !== 0 && (version < BASELINE_VERSION || version > SCHEMA_VERSION)) {
   throw new Error(
@@ -121,103 +118,7 @@ function migrate(target: number, apply: () => void): void {
   });
   version = target;
 }
-migrate(74, migrateMediaInputs);
-migrate(75, () => {
-  for (const entity of ['presets', 'templates', 'personas', 'endpoints'] as const) {
-    const { table } = ENTITY_FOLDERS[entity];
-    db.exec(`CREATE TABLE ${table} (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-      created_at INTEGER NOT NULL
-    )`);
-    db.exec(
-      `ALTER TABLE ${entity} ADD COLUMN folder_id INTEGER REFERENCES ${table}(id) ON DELETE SET NULL`,
-    );
-    db.exec(
-      `CREATE INDEX idx_${entity}_folder ON ${entity}(folder_id) WHERE folder_id IS NOT NULL`,
-    );
-  }
-});
-
-migrate(76, () => {
-  db.exec('ALTER TABLE endpoints ADD COLUMN allow_reasoning_prefill INTEGER NOT NULL DEFAULT 1');
-  db.exec('ALTER TABLE endpoints ADD COLUMN allow_message_prefill INTEGER NOT NULL DEFAULT 1');
-});
-
-migrate(77, () => {
-  const prompts = [
-    DEFAULT_SETTINGS.titlePrompt,
-    DEFAULT_SETTINGS.draftCompletionPrompt,
-    DEFAULT_SETTINGS.imageGeneration.promptRevisionContext,
-    DEFAULT_SETTINGS.imageGeneration.promptRevisionTemplate,
-    ...DEFAULT_SETTINGS.mediaChatPrompts.presets.flatMap((preset) =>
-      'chatPrompt' in preset ? [preset.chatPrompt] : [],
-    ),
-    DEFAULT_STEER_TEMPLATE,
-    DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
-    defaultChatMediaPrompt(),
-  ];
-  const replacements = new Map(
-    prompts.map((prompt) => [
-      prompt
-        .replaceAll('<system_instruction>', '[System Note]')
-        .replaceAll('\n</system_instruction>', ''),
-      prompt,
-    ]),
-  );
-  // Update only exact old defaults, including copies; preserve custom text and captured jobs.
-  const upgradeJson = (source: string) => {
-    let changed = false;
-    const upgraded = JSON.stringify(JSON.parse(source), (_key, value) => {
-      const replacement = typeof value === 'string' ? replacements.get(value) : undefined;
-      if (replacement === undefined) return value;
-      changed = true;
-      return replacement;
-    });
-    return changed ? upgraded : source;
-  };
-  const source = String(stmt("SELECT value FROM settings WHERE key = 'app'").get()!.value);
-  const upgraded = upgradeJson(source);
-  if (upgraded !== source) {
-    const settings = JSON.parse(upgraded);
-    settings.revision++;
-    stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(settings));
-  }
-  for (const column of ['steer_template', 'speaker_handoff_template'])
-    for (const [before, after] of replacements)
-      stmt(`UPDATE templates SET ${column} = ? WHERE ${column} = ?`).run(after, before);
-  for (const row of stmt(
-    'SELECT id, custom_template FROM characters WHERE custom_template IS NOT NULL',
-  ).all()) {
-    const source = String(row.custom_template);
-    const upgraded = upgradeJson(source);
-    if (upgraded !== source)
-      stmt('UPDATE characters SET custom_template = ? WHERE id = ?').run(upgraded, row.id!);
-  }
-});
-
-migrate(78, () => {
-  db.exec(`CREATE TABLE gallery_folders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-    created_at INTEGER NOT NULL
-  )`);
-  db.exec(
-    'ALTER TABLE gallery_items ADD COLUMN folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL',
-  );
-  db.exec(
-    'CREATE INDEX idx_gallery_folder ON gallery_items(folder_id) WHERE folder_id IS NOT NULL',
-  );
-});
-
-migrate(79, () => {
-  db.exec(
-    'ALTER TABLE media_jobs ADD COLUMN gallery_folder_id INTEGER REFERENCES gallery_folders(id) ON DELETE SET NULL',
-  );
-  db.exec(
-    'CREATE INDEX idx_media_jobs_gallery_folder ON media_jobs(gallery_folder_id) WHERE gallery_folder_id IS NOT NULL',
-  );
-});
+// Register future upgrades here with migrate(nextVersion, apply).
 
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.

@@ -83,7 +83,7 @@ test('settings transfer', async () => {
     name: 'Fast',
     inputBindings: {},
     textOutputNodeId: null,
-    json: '{"1":{"class_type":"Test","inputs":{"text":"{{prompt}}","seed":{{seed}}}}}',
+    json: '{"1":{"class_type":"Test","inputs":{"text":"{{prompt}}","seed":0}}}',
     chatPromptPresetId: 'chat-local',
     standalonePromptPresetId: 'gallery-local',
   };
@@ -345,7 +345,7 @@ test('settings transfer', async () => {
       ...workflow,
       json:
         workflow.json.slice(0, -1) +
-        ',"load":{"class_type":"LoadImage","inputs":{"image":"source.png"}}}',
+        ',"load":{"class_type":"LoadImage","inputs":{"image":"sample.png"},"_meta":{"title":"Input 1 [image:input1]"}}}',
     };
     await request(
       'PUT',

@@ -1,7 +1,7 @@
 import { ENTITY_FIELDS } from './entityFields.ts';
 import { nextCollectionId } from './numericIds.ts';
 import type { Settings, MediaPromptPreset, MediaWorkflow, MediaCollectionFolder } from './index.ts';
-import { normalizeMediaWorkflowInputs, mediaWorkflowError, MAX_MEDIA_PRESETS } from './media.ts';
+import { mediaWorkflowError, MAX_MEDIA_PRESETS } from './media.ts';
 
 export interface SettingsTransferDocument {
   format: 'tinytavern-settings';
@@ -245,42 +245,6 @@ export function exportWorkflow(workflow: MediaWorkflow, settings: Settings) {
   };
 }
 
-/** Version-1 export files may still use operation-based workflow fields. */
-export function normalizeImportedWorkflow(value: Record<string, unknown>): Record<string, unknown> {
-  if (!value.operation) return value;
-  const inputBindings: MediaWorkflow['inputBindings'] = {};
-  const bindings: Record<string, `selected:${number}`> = {};
-  if (value.operation === 'video-first') bindings.first_frame = 'selected:1';
-  else if (value.operation === 'image-describe') bindings.source = 'selected:1';
-  else if (value.operation === 'image-edit' || value.operation === 'video-references') {
-    for (let index = 1; index <= Number(value.referenceCount); index++)
-      bindings[`reference${index}`] = `selected:${index}`;
-  }
-  if (Object.keys(bindings).length) {
-    inputBindings.chat = { ...bindings };
-    inputBindings.standalone = { ...bindings };
-  }
-  let textOutputNodeId: string | null = null;
-  const json = transferString(value.json, 'Workflow JSON');
-  if (value.operation === 'image-describe' && json.trim()) {
-    const graph = JSON.parse(json.replace(/(?<!")\{\{seed\}\}/g, '0')) as Record<
-      string,
-      { class_type?: string }
-    >;
-    textOutputNodeId =
-      Object.entries(graph).find(([, node]) => node?.class_type === 'PreviewAny')?.[0] ?? null;
-  }
-  return {
-    id: value.id,
-    name: value.name,
-    json,
-    standalonePromptPresetId: null,
-    chatPromptPresetId: null,
-    inputBindings,
-    textOutputNodeId,
-  };
-}
-
 export function importWorkflow(
   value: unknown,
   workflows: MediaWorkflow[],
@@ -290,13 +254,11 @@ export function importWorkflow(
   const name = transferString(item.name, 'Workflow name');
   if (!name.trim()) throw new Error('Enter a workflow name');
   const existing = namedItem(workflows, name);
-  const normalized = normalizeImportedWorkflow(item);
   const resolve = (
     field: 'standalonePromptPreset' | 'chatPromptPreset',
     previous: string | null,
   ) => {
-    const requested =
-      field === 'standalonePromptPreset' && item.operation ? item.galleryPromptPreset : item[field];
+    const requested = item[field];
     if (requested === null) return null;
     const presets = (
       field === 'chatPromptPreset' ? settings.mediaChatPrompts : settings.mediaStandalonePrompts
@@ -307,13 +269,11 @@ export function importWorkflow(
     id: existing?.id ?? nextCollectionId(workflows),
     name,
     json: transferString(item.json, 'Workflow JSON'),
-    inputBindings: structuredClone(
-      normalized.inputBindings ?? {},
-    ) as MediaWorkflow['inputBindings'],
+    inputBindings: structuredClone(item.inputBindings ?? {}) as MediaWorkflow['inputBindings'],
     textOutputNodeId:
-      normalized.textOutputNodeId == null
+      item.textOutputNodeId == null
         ? null
-        : transferString(normalized.textOutputNodeId, 'Text output node ID'),
+        : transferString(item.textOutputNodeId, 'Text output node ID'),
     standalonePromptPresetId: resolve(
       'standalonePromptPreset',
       existing?.standalonePromptPresetId ?? null,
@@ -322,7 +282,7 @@ export function importWorkflow(
   };
   const error = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
   if (error) throw new Error(error);
-  return normalizeMediaWorkflowInputs(workflow).workflow;
+  return workflow;
 }
 export function exportWorkflowLibrary(settings: Settings) {
   const value = settings.mediaRendering;

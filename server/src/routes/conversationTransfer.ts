@@ -1,6 +1,5 @@
 import { mediaCharacters } from '../media/mediaCharacters.ts';
-import { getSettings } from '../settings/settingsStore.ts';
-import { getMediaRecipe, imageRenderConfiguration } from '../media/mediaRecipes.ts';
+import { getMediaRecipe } from '../media/mediaRecipes.ts';
 import { readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type { GenerationKind, MessageStatus, Role } from '@tinytavern/shared';
@@ -18,7 +17,6 @@ import { deleteImageFiles, rasterImageFormat } from '../media/images.ts';
 import { HttpError, route } from '../http/router.ts';
 import { getPathToMessage } from '../conversations/tree.ts';
 import { positiveId, requireObject as object, requireString } from '../http/validation.ts';
-import { parseImageConfig } from '../media/mediaSettings.ts';
 import {
   exportImageRecipes,
   importRecipeImages,
@@ -419,32 +417,7 @@ function parsePortableConversation(raw: unknown): {
     }
     let genMeta: JsonObject | null = null;
     if (source.genMeta != null) genMeta = object(source.genMeta, `messages[${i}].genMeta`);
-    let renderRecipeId = nullableString(source.renderRecipeId, `messages[${i}].renderRecipeId`);
-    if (!renderRecipeId && source.imageRender != null) {
-      const imported = object(source.imageRender, `messages[${i}].imageRender`);
-      const workflow = {
-        id: `imported-message-${id}`,
-        name: 'Imported image workflow',
-        inputBindings: {},
-        textOutputNodeId: null,
-        json: string(imported.workflow, 'imageRender.workflow'),
-        standalonePromptPresetId: null,
-        chatPromptPresetId: null,
-      };
-      const configuration = imageRenderConfiguration(
-        parseImageConfig({ workflow, comfyUrl: getSettings().mediaRendering.comfyUrl }),
-      );
-      renderRecipeId = `imported-message-${id}`;
-      if (recipes.has(renderRecipeId))
-        throw new HttpError(400, 'Duplicate imported message recipe');
-      recipes.set(renderRecipeId, {
-        id: renderRecipeId,
-        prompt: string(source.content, `messages[${i}].content`),
-        instruction: '',
-        workflow: configuration.workflow,
-        inputs: [],
-      });
-    }
+    const renderRecipeId = nullableString(source.renderRecipeId, `messages[${i}].renderRecipeId`);
     return {
       id,
       parentId: nullablePositiveInteger(source.parentId, `messages[${i}].parentId`),

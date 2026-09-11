@@ -51,6 +51,8 @@ function GalleryVideoPreview(props: { url: string }) {
 
 function GalleryTile(props: {
   cell: GalleryCell;
+  top: number;
+  height: number;
   count: number;
   selected: boolean;
   selecting: boolean;
@@ -70,10 +72,15 @@ function GalleryTile(props: {
   });
   return (
     <div
-      class="gallery-tile overflow-hidden h-full absolute bg-panel rounded-tight [&::after]:absolute [&::after]:inset-0 [&::after]:rounded-[inherit] [&::after]:pointer-events-none [&.selected::after]:border-2 [&.selected::after]:border-solid [&.selected::after]:border-accent [&:focus-within::after]:border-2 [&:focus-within::after]:border-solid [&:focus-within::after]:border-accent [&.selecting_.gallery-image-button]:cursor-pointer [&.selecting_.gallery-image-button:disabled]:opacity-45 [&.selecting_.gallery-image-button:disabled]:cursor-wait [&:hover_.gallery-tile-caption]:opacity-100 [&:focus-within_.gallery-tile-caption]:opacity-100 [&.selected_.gallery-selection-check]:border-accent [&.selected_.gallery-selection-check]:bg-accent"
+      class="gallery-tile overflow-hidden absolute bg-panel rounded-tight [&::after]:absolute [&::after]:inset-0 [&::after]:rounded-[inherit] [&::after]:pointer-events-none [&.selected::after]:border-2 [&.selected::after]:border-solid [&.selected::after]:border-accent [&:focus-within::after]:border-2 [&:focus-within::after]:border-solid [&:focus-within::after]:border-accent [&.selecting_.gallery-image-button]:cursor-pointer [&.selecting_.gallery-image-button:disabled]:opacity-45 [&.selecting_.gallery-image-button:disabled]:cursor-wait [&:hover_.gallery-tile-caption]:opacity-100 [&:focus-within_.gallery-tile-caption]:opacity-100 [&.selected_.gallery-selection-check]:border-accent [&.selected_.gallery-selection-check]:bg-accent"
       classList={{ selected: props.selected, selecting: props.selecting }}
       role="listitem"
-      style={{ left: `${props.cell.left}px`, width: `${props.cell.width}px` }}
+      style={{
+        top: `${props.top}px`,
+        height: `${props.height}px`,
+        left: `${props.cell.left}px`,
+        width: `${props.cell.width}px`,
+      }}
     >
       <button
         type="button"
@@ -204,6 +211,31 @@ export default function GalleryGrid(props: {
       rows.push(current.rows[focusRow]!);
     return rows;
   });
+  // Keep tiles mounted by gallery ID even when their row or position changes.
+  const renderedCells = createMemo(
+    () =>
+      new Map(
+        renderedRows().flatMap((row) =>
+          row.cells.map(
+            (cell) => [cell.item.id, { cell, top: row.top, height: row.height }] as const,
+          ),
+        ),
+      ),
+  );
+  const previewRows = createMemo(
+    () => {
+      const visible = new Set<number>();
+      if (props.hidden || props.active === false || !documentVisible()) return visible;
+      const { top, height } = view();
+      for (const row of renderedRows()) {
+        if (height > 0 && row.top < top + height && row.top + row.height > top)
+          visible.add(row.top);
+      }
+      return visible;
+    },
+    undefined,
+    { equals: (a, b) => a.size === b.size && [...a].every((top) => b.has(top)) },
+  );
   const updateViewport = () => {
     frame = 0;
     if (!props.hidden && props.active !== false) {
@@ -394,59 +426,44 @@ export default function GalleryGrid(props: {
         aria-label="Saved images and videos"
         style={{ height: `${layout().height}px` }}
       >
-        <For each={renderedRows()}>
-          {(row) => {
-            // Mounted overscan and keyboard-focused rows can lie outside the viewport.
-            // Share one visibility computation across every video in the row.
-            const preview = createMemo(() => {
-              if (props.hidden || props.active === false || !documentVisible()) return false;
-              const { top, height } = view();
-              return height > 0 && row.top < top + height && row.top + row.height > top;
-            });
+        <For each={[...renderedCells().keys()]}>
+          {(id) => {
+            const position = () => renderedCells().get(id)!;
+            const cell = () => position().cell;
             return (
-              <div
-                class="left-0 right-0 absolute"
-                role="presentation"
-                style={{ top: `${row.top}px`, height: `${row.height}px` }}
-              >
-                <For each={row.cells}>
-                  {(cell) => (
-                    <GalleryTile
-                      onInspect={
-                        props.onInspect
-                          ? () => {
-                              returnTop = scrollTop();
-                              returnId = cell.item.id;
-                              props.onInspect!(cell.item);
-                            }
-                          : undefined
+              <GalleryTile
+                top={position().top}
+                height={position().height}
+                cell={cell()}
+                preview={previewRows().has(position().top)}
+                onInspect={
+                  props.onInspect
+                    ? () => {
+                        returnTop = scrollTop();
+                        returnId = id;
+                        props.onInspect!(cell().item);
                       }
-                      selectionNumber={
-                        props.selectionOrder?.includes(cell.item.id)
-                          ? props.selectionOrder.indexOf(cell.item.id) + 1
-                          : undefined
-                      }
-                      cell={cell}
-                      preview={preview()}
-                      count={props.items.length}
-                      selected={props.selectedIds.has(cell.item.id)}
-                      selecting={props.selecting}
-                      tabStop={
-                        focusedId() === cell.item.id || (focusedId() == null && cell.index === 0)
-                      }
-                      onFocus={() => setFocusedId(cell.item.id)}
-                      onClick={() => {
-                        if (props.selecting) props.onToggle(cell.item.id);
-                        else {
-                          returnTop = scrollTop();
-                          returnId = cell.item.id;
-                          props.onOpen(cell.item);
-                        }
-                      }}
-                    />
-                  )}
-                </For>
-              </div>
+                    : undefined
+                }
+                selectionNumber={
+                  props.selectionOrder?.includes(id)
+                    ? props.selectionOrder.indexOf(id) + 1
+                    : undefined
+                }
+                count={props.items.length}
+                selected={props.selectedIds.has(id)}
+                selecting={props.selecting}
+                tabStop={focusedId() === id || (focusedId() == null && cell().index === 0)}
+                onFocus={() => setFocusedId(id)}
+                onClick={() => {
+                  if (props.selecting) props.onToggle(id);
+                  else {
+                    returnTop = scrollTop();
+                    returnId = id;
+                    props.onOpen(cell().item);
+                  }
+                }}
+              />
             );
           }}
         </For>

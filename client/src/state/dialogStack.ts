@@ -1,5 +1,5 @@
 import { newRequestId, type MediaJob } from '@tinytavern/shared';
-import { createSignal } from 'solid-js';
+import { createSignal, type Accessor } from 'solid-js';
 import type { RestoredMediaInputs } from '../media/restoreInputs.ts';
 import type { MediaToolSession } from '../media/navigation.ts';
 import { formatPageLocation, pageStack, type PageLocation } from './pageLocation.ts';
@@ -9,6 +9,8 @@ export interface DialogFrame {
   // Updated in place: the frame identity owns the mounted component and its local state.
   page: PageLocation;
   readonly media?: MediaToolSession;
+  readonly mediaPreview: Accessor<{ jobId: number; assetId?: number } | undefined>;
+  selectMediaPreview(selection: { jobId: number; assetId?: number }): void;
 }
 
 let nextFrameId = 0;
@@ -23,9 +25,12 @@ function createFrame(
 ): DialogFrame {
   const id = nextDialogId();
   const media = page.media;
+  const [mediaPreview, selectMediaPreview] = createSignal<{ jobId: number; assetId?: number }>();
   return {
     id,
     page,
+    mediaPreview,
+    selectMediaPreview,
     media:
       session ??
       (media

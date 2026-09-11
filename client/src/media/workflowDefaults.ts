@@ -20,7 +20,7 @@ export function createMediaWorkflowControls(source: () => string | undefined) {
   });
 }
 
-/** Locked controls describe the captured job, even when a local draft or settings differ. */
+/** Workflow controls always resolve the current saved definition. */
 export function mediaWorkflowView(
   job: MediaJob | undefined,
   selectedId: string,
@@ -28,11 +28,10 @@ export function mediaWorkflowView(
   draftValues: MediaWorkflowValues,
   locked: boolean,
 ) {
-  const id = locked && job ? (job.workflowSnapshot?.id ?? job.workflowId ?? '') : selectedId;
-  const snapshot = job?.workflowSnapshot;
+  const id = locked && job ? (job.workflowId ?? '') : selectedId;
   return {
     id,
-    workflow: snapshot?.id === id ? snapshot : workflows.find((workflow) => workflow.id === id),
+    workflow: workflows.find((workflow) => workflow.id === id),
     values: locked && job ? job.workflowValues : draftValues,
   };
 }

@@ -600,11 +600,18 @@ test('dialog stack', async () => {
     '#71+/gallery/35+/jobs',
     '#71+/gallery/35+/media/job/10',
     '#71+/gallery/999+/media/generate?workflow=animate',
-    '#71+/gallery/36+/media/generate?workflow=animate',
     '#71+/media/generate?workflow=animate',
   ]) {
     assert.equal(restoreMediaInputs(parsePageLocation(hash), galleryItems, {}), undefined, hash);
   }
+  assert.deepEqual(
+    restoreMediaInputs(
+      parsePageLocation('#71+/gallery/36+/media/generate?workflow=animate'),
+      galleryItems,
+      {},
+    ),
+    { inputs: [], assets: [video] },
+  );
   const sourceJobs = {
     6: { outputs: [otherImage], draft: { id: 4, selectedAssetId: 12 } },
     7: { outputs: [], draft: { id: 4, selectedAssetId: 12 } },

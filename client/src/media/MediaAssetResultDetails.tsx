@@ -1,7 +1,7 @@
 import { Show, createResource } from 'solid-js';
 import Modal from '../components/ui/Modal.tsx';
 import { api } from '../state/api.ts';
-import { toast } from '../state/store.ts';
+import { state, toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import MediaResultDetails from './MediaResultDetails.tsx';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
@@ -12,7 +12,11 @@ export default function MediaAssetResultDetails(props: { assetId: number; onClos
     async (id) => {
       try {
         const details = await api.mediaAssetResultDetails(id);
-        return { details, workflow: resultWorkflowDetails(details), error: '' };
+        return {
+          details,
+          workflow: resultWorkflowDetails(details, state.settings.mediaRendering.workflows),
+          error: '',
+        };
       } catch (error) {
         return { details: null, workflow: null, error: errorMessage(error) };
       }

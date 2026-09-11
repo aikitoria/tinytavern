@@ -51,7 +51,7 @@ export default function WorkflowFields(props: {
           'prompt',
           'seed',
           'job_id',
-          ...(compiled().workflow?.imageInputs.map((input) => input.name) ?? []),
+          ...(compiled().workflow?.mediaInputs.map((input) => input.name) ?? []),
         ]}
         placeholder="Paste a Comfy API-format workflow"
       />
@@ -106,9 +106,9 @@ export default function WorkflowFields(props: {
         onChange={(value) => patch({ textOutputNodeId: value || null })}
         hint="For description workflows, choose the node whose history output contains the text. Images and videos are detected from returned assets."
       />
-      <Show when={compiled().workflow?.imageInputs.length}>
+      <Show when={compiled().workflow?.mediaInputs.length}>
         <h4 class="m-0 text-sm">Automatic inputs</h4>
-        <p class="hint">Fill empty image inputs from these sources.</p>
+        <p class="hint">Fill empty media inputs from these sources.</p>
         <div class="overflow-x-auto">
           <table class="settings-table w-full">
             <thead>
@@ -120,11 +120,11 @@ export default function WorkflowFields(props: {
               </tr>
             </thead>
             <tbody>
-              <For each={compiled().workflow?.imageInputs ?? []}>
+              <For each={compiled().workflow?.mediaInputs ?? []}>
                 {(input) => (
                   <tr>
                     <th scope="row">
-                      {input.name} · {input.label}
+                      {input.name} · {input.label} ({input.kind})
                     </th>
                     <For each={['standalone', 'chat', 'avatar'] as const}>
                       {(context) => (
@@ -135,12 +135,16 @@ export default function WorkflowFields(props: {
                               value={current()?.inputBindings[context]?.[input.name] ?? ''}
                               options={[
                                 { value: '', label: 'Fill manually' },
-                                ...(compiled().workflow?.imageInputs ?? []).map((_, index) => ({
+                                ...(compiled().workflow?.mediaInputs ?? []).map((_, index) => ({
                                   value: `selected:${index + 1}`,
-                                  label: `Selected image ${index + 1}`,
+                                  label: `Selected media ${index + 1}`,
                                 })),
-                                { value: 'character-avatar', label: 'Character avatar' },
-                                { value: 'persona-avatar', label: 'Persona avatar' },
+                                ...(input.kind === 'image'
+                                  ? [
+                                      { value: 'character-avatar', label: 'Character avatar' },
+                                      { value: 'persona-avatar', label: 'Persona avatar' },
+                                    ]
+                                  : []),
                               ]}
                               onChange={(source) => bind(context, input.name, source)}
                             />
@@ -188,6 +192,15 @@ export function WorkflowSetupHelp() {
             Name a Load Image node <code>Subject [image:input1]</code>. Use <code>input1</code>{' '}
             through <code>input64</code>; “Subject” is just a label. Reuse a number to share an
             image between loaders.
+          </dd>
+        </div>
+        <div>
+          <dt>Videos</dt>
+          <dd>
+            Name a native Load Video node <code>Clip [video:input1]</code>. Its file input receives
+            the original video. Images and videos share the <code>input1</code> through{' '}
+            <code>input64</code> numbering; use a different number for each required source. Connect
+            Load Video to Get Video Components when downstream nodes need frames.
           </dd>
         </div>
         <div>

@@ -1,3 +1,4 @@
+import { state } from '../state/store.ts';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { faImage, faVideo, faComments, faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -25,13 +26,15 @@ export default function MediaJobCard(props: {
   conversations: ReadonlyMap<number, Conversation>;
   disabled: boolean;
   observe: (element: Element, visible: (value: boolean) => void) => () => void;
-  onOpen: (job: MediaJob) => void;
+  onOpen: (job: MediaJob, assetId?: number) => void;
   onRemove: (job: MediaJob) => void;
 }) {
   const job = () => props.group.job;
   const active = () => mediaJobActive(job().state);
   const preparing = () => job().state === 'preparing';
-  const label = () => job().workflowSnapshot?.name ?? 'Media generation';
+  const label = () =>
+    state.settings.mediaRendering.workflows.find((workflow) => workflow.id === job().workflowId)
+      ?.name ?? 'Unavailable workflow';
   const canOpen = () => !props.disabled;
   const conversation = () => props.conversations.get(job().contextConversationId!);
   const characters = createMemo(() => {
