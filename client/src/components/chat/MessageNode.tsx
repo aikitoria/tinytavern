@@ -1,40 +1,23 @@
+import { useConversationView } from './ConversationContext.tsx';
 import {
   faCheck,
   faChevronLeft,
   faChevronRight,
   faEllipsis,
   faGear,
+  faPen,
   faSpinner,
 } from '@fortawesome/free-solid-svg-icons';
 import { faLightbulb, faTrashCan } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from 'solid-js';
 import { characterChatName, type Message } from '@tinytavern/shared';
-import type { PendingSwipe } from '../../state/store.ts';
+import type { PendingSwipe } from '../../state/conversationSession.ts';
 import { api } from '../../state/api.ts';
-import {
-  extendMessageSelection,
-  messageIsSelected,
-  messageSelectionActive,
-  startMessageSelection,
-} from '../../state/messageSelection.ts';
-import {
-  branchConversation,
-  childrenByParent,
-  editRequestId,
-  navigateTree,
-  openCharacterSettings,
-  pendingSwipe,
-  selectedCharacter,
-  personasEnabled,
-  selectedPersona,
-  setEditRequestId,
-  siblingsOf,
-  state,
-  streamingMessage,
-} from '../../state/store.ts';
-import { messageSupportsSwipe, swipeMessage } from '../../messageSwipe.ts';
-import { imageMessage } from '../../images/imageGeneration.tsx';
+
+import { branchConversation, openCharacterSettings } from '../../state/store.ts';
+import { createMessageSwipe } from '../../messageSwipe.ts';
+
 import Avatar from '../ui/Avatar.tsx';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
 import Markdown from '../ui/Markdown.tsx';
@@ -42,17 +25,38 @@ import Modal from '../ui/Modal.tsx';
 import MediaPromptMenuItems from '../../media/MediaPromptMenuItems.tsx';
 import { followMessageStream } from '../../messageStreamScroll.ts';
 
-// On touch layouts, only the last-tapped message shows actions.
-const [touchedId, setTouchedId] = createSignal<number | null>(null);
-
-// At most one ⋯ menu is open at a time across the message list.
-const [moreMenuId, setMoreMenuId] = createSignal<number | null>(null);
-
 export default function MessageNode(props: {
   message: Message;
   inMap?: boolean;
   active?: boolean;
 }) {
+  const view = useConversationView();
+  const {
+    state,
+    extendMessageSelection,
+    messageIsSelected,
+    messageSelectionActive,
+    startMessageSelection,
+    childrenByParent,
+    editRequestId,
+    navigateTree,
+    pendingSwipe,
+    selectedCharacter,
+    personasEnabled,
+    selectedPersona,
+    setEditRequestId,
+    siblingsOf,
+    streamingMessage,
+    touchedId,
+    setTouchedId,
+    moreMenuId,
+    setMoreMenuId,
+  } = view.session;
+  const { imageMessage, messageSupportsSwipe, swipeMessage } = createMessageSwipe(
+    view.session,
+    view.active,
+  );
+
   const [editing, setEditing] = createSignal(false);
   const [showReasoning, setShowReasoning] = createSignal(false);
   let editArea: HTMLTextAreaElement | undefined;
@@ -321,6 +325,23 @@ export default function MessageNode(props: {
     if (moreMenuId() === props.message.id) setMoreMenuId(null);
   });
 
+  const SelectionToggle = () => (
+    <button
+      type="button"
+      class="bg-raised border-line text-dim icon-btn [&.active]:text-accent-text [&.active]:bg-accent [&.active]:border-accent"
+      classList={{
+        'min-w-chat-rail size-chat-rail': view.showAvatarRail !== false,
+        'min-w-6 size-6 shrink-0': view.showAvatarRail === false,
+        active: messageIsSelected(props.message.id),
+      }}
+      aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
+      aria-pressed={messageIsSelected(props.message.id)}
+      onClick={() => extendMessageSelection(props.message.id)}
+    >
+      {messageIsSelected(props.message.id) ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
+    </button>
+  );
+
   return (
     <article
       ref={(element) => {
@@ -337,6 +358,7 @@ export default function MessageNode(props: {
         'msg-full-bleed': imageView()?.fullBleed?.() === true,
         'msg-menu-open': menuOpen(),
         'msg-range-selected': messageIsSelected(props.message.id),
+        'msg-prompt-selected': view.selectedPrompt?.()?.messageId === props.message.id,
         touched: touchedId() === props.message.id,
       }}
       // Tree-map cards own branch clicks and touch panning.
@@ -348,7 +370,7 @@ export default function MessageNode(props: {
       onPointerUp={props.inMap ? undefined : onPointerUp}
       onPointerCancel={props.inMap ? undefined : onPointerCancel}
     >
-      <Show when={!props.inMap}>
+      <Show when={!props.inMap && view.showAvatarRail !== false}>
         <Show
           when={messageSelectionActive()}
           fallback={
@@ -364,18 +386,7 @@ export default function MessageNode(props: {
             </Show>
           }
         >
-          <button
-            type="button"
-            class="min-w-chat-rail bg-raised border-line text-dim icon-btn size-chat-rail [&.active]:text-accent-text [&.active]:bg-accent [&.active]:border-accent"
-            classList={{ active: messageIsSelected(props.message.id) }}
-            aria-label={`${messageIsSelected(props.message.id) ? 'Selected' : 'Select through'} ${name()} message`}
-            aria-pressed={messageIsSelected(props.message.id)}
-            onClick={() => extendMessageSelection(props.message.id)}
-          >
-            {messageIsSelected(props.message.id) ? (
-              <FontAwesomeIcon icon={faCheck} size={12} />
-            ) : null}
-          </button>
+          <SelectionToggle />
         </Show>
       </Show>
       <div
@@ -395,6 +406,9 @@ export default function MessageNode(props: {
         }
       >
         <div class="msg-head mb-0.5 flex items-center gap-2">
+          <Show when={view.showAvatarRail === false && !props.inMap && messageSelectionActive()}>
+            <SelectionToggle />
+          </Show>
           <Show
             when={!props.inMap && isAssistant() && selectedCharacter()}
             fallback={
@@ -504,75 +518,101 @@ export default function MessageNode(props: {
               </Show>
               <Show when={!streaming() && !editing()}>
                 <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
-                  <span class="inline-flex">
-                    <button
-                      ref={moreButton}
-                      type="button"
-                      class="icon-btn"
-                      classList={{ 'icon-btn-active': menuOpen() }}
-                      title="More"
-                      aria-label="More message actions"
-                      aria-haspopup="menu"
-                      aria-expanded={menuOpen()}
-                      onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
-                    >
-                      <FontAwesomeIcon icon={faEllipsis} size={16} />
-                    </button>
-                    <DropdownSurface
-                      open={menuOpen()}
-                      anchor={() => moreButton}
-                      onClose={closeMenu}
-                      class="msg-more-menu [&_button]:whitespace-nowrap [&_.danger]:text-danger"
-                      role="menu"
-                      ariaLabel="Message actions"
-                      placement="auto"
-                      align="end"
-                      fitContentWidth
-                      keyboardNavigation
-                      autoFocus
-                    >
-                      <MenuItem action={copy}>Copy</MenuItem>
-                      <MediaPromptMenuItems
-                        text={props.message.content}
-                        conversationId={props.message.conversationId}
-                        onClose={closeMenu}
-                      />
-                      <MenuItem disabled={props.message.imagePending} action={startEdit}>
-                        Edit
-                      </MenuItem>
-                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
-                      <Show when={isAssistant() || (isTool() && imageBehavior() != null)}>
-                        <MenuItem action={openSteer}>Regenerate</MenuItem>
-                      </Show>
-                      <MenuItem action={duplicate}>Duplicate</MenuItem>
-                      <MenuItem action={branchToConversation}>Branch chat</MenuItem>
-                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
-                      <MenuItem action={() => startMessageSelection(props.message.id)}>
-                        Select range
-                      </MenuItem>
-                      <Show when={canMoveUp()}>
-                        <MenuItem action={() => move('up')}>Move up</MenuItem>
-                      </Show>
-                      <Show when={canMoveDown()}>
-                        <MenuItem action={() => move('down')}>Move down</MenuItem>
-                      </Show>
-                      <div class="h-px my-1 mx-0 bg-line" role="separator" />
-                      <Show
-                        when={
-                          imageBehavior()?.canDeleteSwipe?.(props.message) || siblings().length > 1
-                        }
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    title="Edit"
+                    aria-label="Edit message"
+                    disabled={props.message.imagePending}
+                    onClick={startEdit}
+                  >
+                    <FontAwesomeIcon icon={faPen} size={14} />
+                  </button>
+                  <Show when={view.showMessageMenu !== false}>
+                    <span class="inline-flex">
+                      <button
+                        ref={moreButton}
+                        type="button"
+                        class="icon-btn"
+                        classList={{ 'icon-btn-active': menuOpen() }}
+                        title="More"
+                        aria-label="More message actions"
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen()}
+                        onClick={() => setMoreMenuId(menuOpen() ? null : props.message.id)}
                       >
-                        <MenuItem danger action={removeSwipe}>
-                          <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete swipe
+                        <FontAwesomeIcon icon={faEllipsis} size={16} />
+                      </button>
+                      <DropdownSurface
+                        open={menuOpen()}
+                        anchor={() => moreButton}
+                        onClose={closeMenu}
+                        class="msg-more-menu [&_button]:whitespace-nowrap [&_.danger]:text-danger"
+                        role="menu"
+                        ariaLabel="Message actions"
+                        placement="auto"
+                        align="end"
+                        fitContentWidth
+                        keyboardNavigation
+                        autoFocus
+                      >
+                        <MenuItem action={copy}>Copy</MenuItem>
+                        <MediaPromptMenuItems
+                          text={props.message.content}
+                          conversationId={props.message.conversationId}
+                          onClose={closeMenu}
+                        />
+                        <div class="h-px my-1 mx-0 bg-line" role="separator" />
+                        <Show when={isAssistant() || (isTool() && imageBehavior() != null)}>
+                          <MenuItem action={openSteer}>Regenerate</MenuItem>
+                        </Show>
+                        <MenuItem action={duplicate}>Duplicate</MenuItem>
+                        <MenuItem action={branchToConversation}>Branch chat</MenuItem>
+                        <div class="h-px my-1 mx-0 bg-line" role="separator" />
+                        <MenuItem action={() => startMessageSelection(props.message.id)}>
+                          Select range
                         </MenuItem>
-                      </Show>
-                      <MenuItem danger action={remove}>
-                        <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete
-                      </MenuItem>
-                    </DropdownSurface>
-                  </span>
+                        <Show when={canMoveUp()}>
+                          <MenuItem action={() => move('up')}>Move up</MenuItem>
+                        </Show>
+                        <Show when={canMoveDown()}>
+                          <MenuItem action={() => move('down')}>Move down</MenuItem>
+                        </Show>
+                        <div class="h-px my-1 mx-0 bg-line" role="separator" />
+                        <Show
+                          when={
+                            imageBehavior()?.canDeleteSwipe?.(props.message) ||
+                            siblings().length > 1
+                          }
+                        >
+                          <MenuItem danger action={removeSwipe}>
+                            <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete swipe
+                          </MenuItem>
+                        </Show>
+                        <MenuItem danger action={remove}>
+                          <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete
+                        </MenuItem>
+                      </DropdownSurface>
+                    </span>
+                  </Show>
                 </span>
               </Show>
+            </Show>
+            <Show when={view.renderPrompt && isAssistant()}>
+              <button
+                type="button"
+                class="text-xs h-control px-2 py-0"
+                title="Render this reply"
+                disabled={
+                  !['done', 'stopped'].includes(props.message.status) ||
+                  editing() ||
+                  !props.message.content.trim() ||
+                  view.promptSelectionDisabled?.()
+                }
+                onClick={() => view.renderPrompt?.(props.message)}
+              >
+                Render
+              </button>
             </Show>
           </span>
         </div>
@@ -661,6 +701,21 @@ export default function MessageNode(props: {
                   content={props.message.content}
                   streaming={streaming()}
                   conversationId={props.message.conversationId}
+                  renderPrompt={
+                    view.renderPrompt && isAssistant()
+                      ? (text) => view.renderPrompt?.(props.message, text)
+                      : undefined
+                  }
+                  selectedPromptText={
+                    view.selectedPrompt?.()?.messageId === props.message.id
+                      ? view.selectedPrompt?.()?.text
+                      : undefined
+                  }
+                  promptSelectionDisabled={
+                    view.promptSelectionDisabled?.() ||
+                    !['done', 'stopped'].includes(props.message.status)
+                  }
+                  showMediaMenu={!view.embedded}
                 />
               </div>
             )}

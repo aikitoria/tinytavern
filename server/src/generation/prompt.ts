@@ -1,4 +1,5 @@
 import type {
+  ConversationPromptContext,
   Character,
   Conversation,
   CustomTemplate,
@@ -62,6 +63,8 @@ function resolveTemplate(character: Character | null): CustomTemplate | null {
 
 /** Resolve the configured revision instruction without substituting another prompt. */
 export function resolveSteerTemplate(conversation: Conversation): string {
+  if (conversation.promptMode === 'media')
+    return 'Revise the previous prompt following this instruction: {{instruction}}. Return only the complete revised prompt.';
   const raw = resolveTemplate(getCharacter(conversation.characterId))?.steerTemplate ?? '';
   if (!raw.trim())
     throw new HttpError(
@@ -106,6 +109,8 @@ export function expandTemplate(template: string, vars: Record<string, string>): 
 
 export interface BuiltPrompt {
   messages: ChatMessage[];
+  /** Trace-only source IDs; never included in upstream message objects. */
+  messageIds?: number[][];
   /** Hidden reasoning seed for fresh generations. */
   reasoningPrefill: string | null;
   /** Visible content seed for fresh generations. */
@@ -119,12 +124,47 @@ export interface BuiltPrompt {
   userName: string;
 }
 
+/** Media histories are already authored for their task; never apply character/persona templates. */
+function buildContextMessages(context: ConversationPromptContext, history: Message[]): BuiltPrompt {
+  const messages: ChatMessage[] = context.messages.map((message) => ({ ...message }));
+  const sources = new Map<ChatMessage, number[]>();
+  for (const message of history) {
+    if (message.status === 'streaming' || message.role === 'tool') continue;
+    if (!message.content.trim() && !message.reasoning?.trim()) continue;
+    appendChatMessage(messages, {
+      role: message.role,
+      content: message.content,
+      ...(message.role === 'assistant' && message.reasoning
+        ? { reasoning_content: message.reasoning }
+        : {}),
+    });
+    const turn = messages.at(-1)!;
+    const ids = sources.get(turn) ?? [];
+    ids.push(message.id);
+    sources.set(turn, ids);
+  }
+  return {
+    messages,
+    messageIds: messages.map((message) => sources.get(message) ?? []),
+    reasoningPrefill: context.reasoningPrefill || null,
+    messagePrefill: context.messagePrefill || null,
+    namePrefill: null,
+    speakerHandoff: null,
+    charName: 'Assistant',
+    userName: 'You',
+  };
+}
+
 /** Build the system prompt and active-path history for the reply's stamped speakerName. */
 export function buildChatMessages(
   conversation: Conversation,
   history: Message[],
   speakerName: string | null = conversation.speakerName,
 ): BuiltPrompt {
+  const captured = stmt('SELECT prompt_context_json FROM conversations WHERE id = ?').get(
+    conversation.id,
+  )?.prompt_context_json;
+  if (captured) return buildContextMessages(JSON.parse(String(captured)), history);
   const character = getCharacter(conversation.characterId);
   const settings = getSettings();
   const template = resolveTemplate(character);
@@ -169,6 +209,7 @@ export function buildChatMessages(
   let previousSpeaker = charName;
 
   const messages: ChatMessage[] = [];
+  const sources = new Map<ChatMessage, number[]>();
   if (systemContent) appendChatMessage(messages, { role: 'system', content: systemContent });
   if (prologue) appendChatMessage(messages, { role: 'user', content: prologue });
   for (const msg of history) {
@@ -191,11 +232,18 @@ export function buildChatMessages(
       content,
       ...(reasoning ? { reasoning_content: msg.reasoning! } : {}),
     });
+    if (msg.role === 'assistant') {
+      const turn = messages.at(-1)!;
+      const ids = sources.get(turn);
+      if (ids) ids.push(msg.id);
+      else sources.set(turn, [msg.id]);
+    }
   }
 
   const currentSpeaker = speakerName?.trim() || charName;
   return {
     messages,
+    messageIds: messages.map((message) => sources.get(message) ?? []),
     reasoningPrefill: reasoningPrefill || null,
     messagePrefill: messagePrefill || null,
     namePrefill: prefixNames ? `${currentSpeaker}:` : null,

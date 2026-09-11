@@ -1,27 +1,13 @@
+import { useConversationView } from './ConversationContext.tsx';
 import { messagePrefillEnabled } from '@tinytavern/shared';
 import { faAnglesRight, faPaperPlane, faStop, faWrench } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { api } from '../../state/api.ts';
-import {
-  completeComposerDraft,
-  draftCompletionActive,
-  stopDraftCompletion,
-} from '../../state/draftCompletion.ts';
+
 import type { ComposerCommand } from '../../composerCommands.ts';
 import { mediaGenerationCommands, mediaFavoriteTools } from '../../images/imageGeneration.tsx';
-import {
-  activePath,
-  applyMediaJob,
-  deleteConversation,
-  navigateTree,
-  mediaJobsByMessage,
-  selectedConversation,
-  setEditRequestId,
-  state,
-  streamingMessage,
-  toast,
-} from '../../state/store.ts';
+import { applyMediaJob, deleteConversation, mediaJobsByMessage, toast } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
 import { mediaToolLinks, openMediaTool } from '../../media/navigation.ts';
@@ -29,59 +15,77 @@ import MobileSidebarButton from '../layout/MobileSidebarButton.tsx';
 
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
 
-const BUILTIN_COMMANDS: ComposerCommand[] = [
-  {
-    name: 'char',
-    params: '<name>',
-    description:
-      'Set the assistant speaker name for this conversation (empty resets to the character)',
-    run: async (args) => {
-      if (state.selectedId == null) throw new Error('no conversation selected');
-      await api.patchConversation(state.selectedId, state.tree, {
-        speakerName: args.trim() || null,
-      });
-    },
-  },
-  {
-    name: 'del',
-    params: '<count>',
-    description: 'Delete messages from the end, including their swipes and descendant branches',
-    run: async (args) => {
-      const count = Number(args.trim());
-      if (!Number.isSafeInteger(count) || count <= 0) {
-        throw new Error('Usage: /del <positive count>');
-      }
-      if (state.selectedId == null) throw new Error('no conversation selected');
-      return navigateTree(() => api.deleteTail(state.selectedId!, state.tree, { count }));
-    },
-  },
-  {
-    name: 'delchat',
-    params: '',
-    description: 'Delete the current chat',
-    run: async (args) => {
-      if (args.trim()) throw new Error('Usage: /delchat');
-      const id = state.selectedId;
-      if (id == null) throw new Error('no conversation selected');
-      await deleteConversation(id);
-    },
-  },
-];
-
-const COMMANDS: ComposerCommand[] = [...BUILTIN_COMMANDS, ...mediaGenerationCommands];
-
-// First-match dispatch silently shadows duplicate command names.
-{
-  const seen = new Set<string>();
-  for (const cmd of COMMANDS) {
-    if (seen.has(cmd.name)) {
-      console.error(`[composer] duplicate slash command /${cmd.name} — later registration is dead`);
-    }
-    seen.add(cmd.name);
-  }
-}
-
 export default function Composer(props: { text: string; onText: (text: string) => void }) {
+  const view = useConversationView();
+  const {
+    state,
+    activePath,
+    navigateTree,
+    selectedConversation,
+    setEditRequestId,
+    streamingMessage,
+    completeComposerDraft,
+    draftCompletionActive,
+    stopDraftCompletion,
+  } = view.session;
+
+  const BUILTIN_COMMANDS: ComposerCommand[] = [
+    {
+      name: 'char',
+      params: '<name>',
+      description:
+        'Set the assistant speaker name for this conversation (empty resets to the character)',
+      run: async (args) => {
+        if (state.selectedId == null) throw new Error('no conversation selected');
+        await api.patchConversation(state.selectedId, state.tree, {
+          speakerName: args.trim() || null,
+        });
+      },
+    },
+    {
+      name: 'del',
+      params: '<count>',
+      description: 'Delete messages from the end, including their swipes and descendant branches',
+      run: async (args) => {
+        const count = Number(args.trim());
+        if (!Number.isSafeInteger(count) || count <= 0) {
+          throw new Error('Usage: /del <positive count>');
+        }
+        if (state.selectedId == null) throw new Error('no conversation selected');
+        return navigateTree(() => api.deleteTail(state.selectedId!, state.tree, { count }));
+      },
+    },
+    {
+      name: 'delchat',
+      params: '',
+      description: 'Delete the current chat',
+      run: async (args) => {
+        if (args.trim()) throw new Error('Usage: /delchat');
+        const id = state.selectedId;
+        if (id == null) throw new Error('no conversation selected');
+        await deleteConversation(id);
+      },
+    },
+  ];
+
+  const COMMANDS: ComposerCommand[] = [
+    ...BUILTIN_COMMANDS.filter((command) => !view.embedded || command.name === 'del'),
+    ...(view.embedded ? [] : mediaGenerationCommands),
+  ];
+
+  // First-match dispatch silently shadows duplicate command names.
+  {
+    const seen = new Set<string>();
+    for (const cmd of COMMANDS) {
+      if (seen.has(cmd.name)) {
+        console.error(
+          `[composer] duplicate slash command /${cmd.name} — later registration is dead`,
+        );
+      }
+      seen.add(cmd.name);
+    }
+  }
+
   const text = () => props.text;
   const setText = (value: string) => props.onText(value);
   const [selIdx, setSelIdx] = createSignal(0);
@@ -89,7 +93,13 @@ export default function Composer(props: { text: string; onText: (text: string) =
   let area: HTMLTextAreaElement | undefined;
   let toolsButton: HTMLButtonElement | undefined;
 
-  onCleanup(stopDraftCompletion);
+  // A fresh identity also catches switching away and back before a send completes.
+  const conversationScope = createMemo(() => ({ id: state.selectedId }));
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+    stopDraftCompletion();
+  });
 
   // "/cha" -> completion menu; "/char args" -> parameter hint.
   const cmdQuery = () => {
@@ -160,11 +170,12 @@ export default function Composer(props: { text: string; onText: (text: string) =
     }
 
     if (streamingMessage() || draftCompletionActive()) return;
+    const scope = conversationScope();
     setText('');
     queueMicrotask(resize);
     const sent = await navigateTree(() => api.send(id, state.tree, { content }));
-    // Restore failed sends without clobbering text typed during the request.
-    if (!sent && !text()) {
+    // Restore only into the mounted conversation that sent it, preserving new typing.
+    if (!sent && !disposed && conversationScope() === scope && !text()) {
       setText(content);
       queueMicrotask(resize); // value bindings fire no input event, so re-grow manually
     }
@@ -274,7 +285,9 @@ export default function Composer(props: { text: string; onText: (text: string) =
       when={state.selectedId != null}
       fallback={
         <div class="composer my-3 mx-auto p-1 flex relative bg-panel items-end border border-solid border-control-line gap-chat-gap max-w-composer [&_textarea]:shadow-clear [&_textarea]:flex-1 [&_textarea]:w-auto [&_textarea]:min-w-0 [&_textarea]:max-h-50 [&_textarea]:resize-none [&_textarea]:overflow-y-hidden [&_textarea]:bg-clear [&_textarea]:border-clear [&_textarea]:leading-6 [&_input[type=search]]:shadow-clear [&_input[type=search]]:flex-1 [&_input[type=search]]:w-auto [&_input[type=search]]:min-w-0 [&_input[type=search]]:max-h-50 [&_input[type=search]]:resize-none [&_input[type=search]]:overflow-y-hidden [&_input[type=search]]:bg-clear [&_input[type=search]]:border-clear [&_input[type=search]]:leading-6 [&_textarea:focus]:outline-clear [&_input[type=search]:focus]:outline-clear [&:empty]:display-none small-touch:w-auto small-touch:max-w-none small-touch:shrink-0 small-touch:m-0 small-touch:bg-panel small-touch:border-clear small-touch:rounded-none small-touch:[&_textarea]:bg-raised small-touch:[&_input[type=search]]:bg-raised w-[calc(100%_-_var(--space-6)_-_var(--space-6))] rounded-[calc(var(--composer-button-size)_/_2_+_var(--composer-shell-inset))] [&_textarea]:rounded-[calc(var(--composer-button-size)_/_2)] [&_input[type=search]]:rounded-[calc(var(--composer-button-size)_/_2)] small-touch:p-[4px_calc(4px_+_env(safe-area-inset-right))_calc(4px_+_env(safe-area-inset-bottom))_calc(4px_+_env(safe-area-inset-left))]">
-          <MobileSidebarButton />
+          <Show when={!view.embedded}>
+            <MobileSidebarButton />
+          </Show>
         </div>
       }
     >
@@ -309,65 +322,69 @@ export default function Composer(props: { text: string; onText: (text: string) =
             </div>
           )}
         </Show>
-        <MobileSidebarButton />
-        <span class="tools-wrap">
-          <button
-            ref={toolsButton}
-            type="button"
-            class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn small-touch:text-base"
-            title="Tools"
-            aria-label="Composer tools"
-            aria-haspopup="menu"
-            aria-expanded={toolsOpen()}
-            classList={{ 'tools-btn-open': toolsOpen() }}
-            onClick={() => setToolsOpen(!toolsOpen())}
-          >
-            <FontAwesomeIcon icon={faWrench} size={17} />
-          </button>
-          <DropdownSurface
-            open={toolsOpen()}
-            anchor={() => toolsButton}
-            onClose={() => setToolsOpen(false)}
-            class="[&_button]:whitespace-nowrap"
-            role="menu"
-            ariaLabel="Composer tools"
-            placement="top"
-            align="start"
-            fitContentWidth
-            keyboardNavigation
-            autoFocus
-          >
-            <For each={mediaToolLinks()}>
-              {(tool) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={state.selectedId === null}
-                  onClick={() => {
-                    setToolsOpen(false);
-                    openMediaTool(tool.workflowId, { conversationId: state.selectedId });
-                  }}
-                >
-                  {tool.label}
-                </button>
-              )}
-            </For>
-            <For each={mediaFavoriteTools()}>
-              {(tool) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setToolsOpen(false);
-                    tool.run();
-                  }}
-                >
-                  <tool.icon /> {tool.label}
-                </button>
-              )}
-            </For>
-          </DropdownSurface>
-        </span>
+        <Show when={!view.embedded}>
+          <MobileSidebarButton />
+        </Show>
+        <Show when={!view.embedded}>
+          <span class="tools-wrap">
+            <button
+              ref={toolsButton}
+              type="button"
+              class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn small-touch:text-base"
+              title="Tools"
+              aria-label="Composer tools"
+              aria-haspopup="menu"
+              aria-expanded={toolsOpen()}
+              classList={{ 'tools-btn-open': toolsOpen() }}
+              onClick={() => setToolsOpen(!toolsOpen())}
+            >
+              <FontAwesomeIcon icon={faWrench} size={17} />
+            </button>
+            <DropdownSurface
+              open={toolsOpen()}
+              anchor={() => toolsButton}
+              onClose={() => setToolsOpen(false)}
+              class="[&_button]:whitespace-nowrap"
+              role="menu"
+              ariaLabel="Composer tools"
+              placement="top"
+              align="start"
+              fitContentWidth
+              keyboardNavigation
+              autoFocus
+            >
+              <For each={mediaToolLinks()}>
+                {(tool) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={state.selectedId === null}
+                    onClick={() => {
+                      setToolsOpen(false);
+                      openMediaTool(tool.workflowId, { conversationId: state.selectedId });
+                    }}
+                  >
+                    {tool.label}
+                  </button>
+                )}
+              </For>
+              <For each={mediaFavoriteTools()}>
+                {(tool) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      tool.run();
+                    }}
+                  >
+                    <tool.icon /> {tool.label}
+                  </button>
+                )}
+              </For>
+            </DropdownSurface>
+          </span>
+        </Show>
         <textarea
           ref={(element) => {
             area = element;
@@ -375,7 +392,9 @@ export default function Composer(props: { text: string; onText: (text: string) =
           }}
           class="composer-input"
           rows="1"
-          placeholder="Type a message or / for commands…"
+          placeholder={
+            view.embedded ? 'Describe what to change…' : 'Type a message or / for commands…'
+          }
           value={text()}
           readOnly={draftCompletionActive()}
           onInput={(e) => {

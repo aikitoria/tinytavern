@@ -535,11 +535,14 @@ test('ws lifecycle', async () => {
     startWs(): void;
     stopWs(): void;
     subscribe(conversationId: number | null): void;
+    watchConversation(owner: object, conversationId: number | null): void;
   }
   // A dynamic path excludes browser code from the server's DOM-free type graph;
   // client tsconfig checks it, and this test supplies runtime browser globals.
   const wsModulePath = '../../client/src/state/ws.ts';
-  const { configureWs, startWs, stopWs, subscribe } = (await import(wsModulePath)) as WsModule;
+  const { configureWs, startWs, stopWs, subscribe, watchConversation } = (await import(
+    wsModulePath
+  )) as WsModule;
   jest.useFakeTimers();
   const dispatch = (listeners: Map<string, Listener[]>, type: string, event = {}) => {
     for (const listener of listeners.get(type) ?? []) listener(event);
@@ -595,6 +598,16 @@ test('ws lifecycle', async () => {
     [{ sub: 42 }],
   );
 
+  const mediaOwner = {};
+  watchConversation(mediaOwner, 73);
+  assert.deepEqual(JSON.parse(third.sent.at(-1)!), { subs: [42, 73], resync: 73 });
+  const duplicateOwner = {};
+  watchConversation(duplicateOwner, 73);
+  assert.deepEqual(JSON.parse(third.sent.at(-1)!), { subs: [42, 73], resync: 73 });
+  watchConversation(mediaOwner, null);
+  assert.deepEqual(JSON.parse(third.sent.at(-1)!), { subs: [42, 73] });
+  watchConversation(duplicateOwner, null);
+  assert.deepEqual(JSON.parse(third.sent.at(-1)!), { sub: 42 });
   stopWs();
   dispatch(documentListeners, 'visibilitychange');
   jest.advanceTimersByTime(80);

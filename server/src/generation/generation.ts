@@ -5,7 +5,14 @@ import {
   reasoningPrefillEnabled,
 } from '@tinytavern/shared';
 import { publicMessage } from '../media/mediaUrls.ts';
-import type { Conversation, Endpoint, GenMeta, Message, PromptTrace } from '@tinytavern/shared';
+import type {
+  Conversation,
+  Endpoint,
+  GenMeta,
+  Message,
+  PromptTrace,
+  GenerationMetrics,
+} from '@tinytavern/shared';
 import { stmt, toEndpoint, toMessage, transaction } from '../db/db.ts';
 import { getMessage, getPathToMessage } from '../conversations/tree.ts';
 import { buildChatMessages } from './prompt.ts';
@@ -22,6 +29,7 @@ import {
 import type { CompletionOptions } from './completionConfig.ts';
 import { completionDataReader, startCompletionIdleWatchdog } from './completionStream.ts';
 import { mediaPromptBuffers } from '../media/mediaJobStore.ts';
+import { CompletionMetrics } from './completionMetrics.ts';
 
 interface ActiveGen {
   mid: number;
@@ -34,6 +42,9 @@ interface ActiveGen {
   meta: GenMeta;
   background: boolean;
   generationToken: number;
+  started: number;
+  metrics: GenerationMetrics;
+  attempt?: CompletionMetrics;
   /** Fixed upstream request (tool generations) instead of the chat history. */
   promptOverride?: BuiltPrompt;
   /** Immutable endpoint + prompt context reused by every upstream attempt. */
@@ -94,8 +105,11 @@ export function activePromptTrace(mid: number): PromptTrace | null {
   const { endpoint, built } = gen.requestContext;
   const prepared = prepareChatMessages(built, { ...endpoint, content: '', reasoning: '' });
   const messages = prepared.messages.slice(0, prepared.prefillMessageIndex ?? undefined);
+  const wireMessages = withEndpointSystemPrompt(endpoint, messages);
+  const offset = wireMessages.length - messages.length;
   return {
-    messages: withEndpointSystemPrompt(endpoint, messages),
+    messages: wireMessages,
+    messageIds: wireMessages.map((_, index) => built.messageIds?.[index - offset] ?? []),
     reasoningPrefill: null,
     messagePrefill: null,
     namePrefill: null,
@@ -145,6 +159,7 @@ export function mergeLiveBuffers(messages: Message[]): Message[] {
       content: gen.content,
       reasoning: gen.reasoning || m.reasoning,
       model: gen.model,
+      genMeta: structuredClone(gen.meta),
     };
   });
 }
@@ -152,6 +167,8 @@ export function mergeLiveBuffers(messages: Message[]): Message[] {
 function finalize(gen: ActiveGen, status: 'done' | 'error' | 'stopped'): void {
   // `continue` reuses message ids; late aborts must not touch a successor.
   if (active.get(gen.mid) !== gen) return;
+  gen.attempt?.finish(status);
+  gen.metrics.elapsedMs = performance.now() - gen.started;
   gen.content = gen.content.trim();
   gen.reasoning = gen.reasoning.trim();
   // Persist the body, terminal status, render flag, and revision in one commit.
@@ -241,6 +258,14 @@ export function startGeneration(
     stmt('UPDATE messages SET generation_token = ? WHERE id = ?').run(token, mid);
     return token;
   });
+  const metrics: GenerationMetrics = {
+    generationToken,
+    model: null,
+    continuation: resumeFrom != null,
+    speculative: options?.background ?? false,
+    attempts: [],
+  };
+  const previous = resumeFrom ? (getMessage(mid)?.genMeta?.generations ?? []) : [];
   const gen: ActiveGen = {
     mid,
     conversationId: conversation.id,
@@ -248,9 +273,11 @@ export function startGeneration(
     reasoning: resumeFrom?.reasoning ?? '',
     model: null,
     abort: new AbortController(),
-    meta: {},
+    meta: { generations: [...previous, metrics] },
     background: options?.background ?? false,
     generationToken,
+    started: performance.now(),
+    metrics,
     promptOverride: options?.prompt,
     onDone: options?.onDone,
     onError: options?.onError,
@@ -514,6 +541,7 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   const context = (gen.requestContext ??= snapshotRequestContext(conversation, gen));
   const { endpoint, built } = context;
   gen.model = endpoint.model;
+  gen.metrics.model = endpoint.model;
 
   // Seed fresh replies only; retries/resumes already carry the template in their buffers.
   if (!isResume || reasoningPrefillEnabled(endpoint)) {
@@ -556,29 +584,52 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
   let refusal = '';
   let receivedVisibleContent = false;
   let receivedReasoning = false;
-  const processData = completionDataReader((d, r, rejected) => {
-    const dOut = d ? passContent(d) : '';
-    if (!receivedVisibleContent && dOut.trim()) receivedVisibleContent = true;
-    refusal += rejected;
-    if (dOut) gen.content += dOut;
-    if (r) {
-      receivedReasoning = true;
-      gen.reasoning += r;
-    }
-    if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
-    broadcastConv(gen.conversationId, {
-      t: 'delta',
-      mid: gen.mid,
-      ...(dOut ? { d: dOut } : {}),
-      ...(r ? { r } : {}),
-    });
-  });
+  const attempt = new CompletionMetrics();
+  gen.attempt = attempt;
+  gen.metrics.attempts.push(attempt.data);
+  const publishMetrics = () => {
+    if (active.get(gen.mid) === gen)
+      broadcastConv(gen.conversationId, {
+        t: 'generationMetrics',
+        mid: gen.mid,
+        metrics: gen.metrics,
+      });
+  };
+  publishMetrics();
+  const processData = completionDataReader(
+    (d, r, rejected) => {
+      const dOut = d ? passContent(d) : '';
+      if (attempt.output(d, r, rejected, dOut)) publishMetrics();
+      if (!receivedVisibleContent && dOut.trim()) receivedVisibleContent = true;
+      refusal += rejected;
+      if (dOut) gen.content += dOut;
+      if (r) {
+        receivedReasoning = true;
+        gen.reasoning += r;
+      }
+      if (active.get(gen.mid) !== gen || (!dOut && !r)) return;
+      broadcastConv(gen.conversationId, {
+        t: 'delta',
+        mid: gen.mid,
+        ...(dOut ? { d: dOut } : {}),
+        ...(r ? { r } : {}),
+      });
+    },
+    (reason) => {
+      if (reason) attempt.data.finishReason = reason;
+    },
+    (usage) => {
+      Object.assign(attempt.data, usage);
+      publishMetrics();
+    },
+  );
   try {
     await readCompletion(
       endpoint,
       messages,
       {
         ...generationParameters(p),
+        stream_options: { include_usage: true },
         ...(prefilled && endpoint.prefillMode === 'vllm'
           ? { continue_final_message: true, add_generation_prompt: false }
           : {}),
@@ -595,14 +646,19 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
     if (holdback?.trim() && active.get(gen.mid) === gen) {
       const probe = holdback.trimStart();
       if (probe.toLowerCase() !== namePrefill!.toLowerCase()) {
+        attempt.visible();
         gen.content += holdback;
         broadcastConv(gen.conversationId, { t: 'delta', mid: gen.mid, d: holdback });
       }
     }
+    attempt.finish('error');
+    publishMetrics();
     throw err;
   }
   // A reply shorter than the name prefix may still be held back — flush it.
   if (holdback?.trim() && active.get(gen.mid) === gen) {
+    attempt.visible();
+    publishMetrics();
     receivedVisibleContent = true;
     gen.content += holdback;
     broadcastConv(gen.conversationId, { t: 'delta', mid: gen.mid, d: holdback });

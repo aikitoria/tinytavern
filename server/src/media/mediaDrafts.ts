@@ -77,7 +77,7 @@ export function selectMediaVariation(row: MediaJobRow, body: Record<string, unkn
 
 /** Keep the cancellation ledger and its input owners until the worker confirms completion. */
 export function cancelMediaVariation(row: MediaJobRow) {
-  if (row.draft_id && mediaJobActive(row.state)) {
+  if (row.draft_id && !mediaDraft(row.draft_id).conversationId && mediaJobActive(row.state)) {
     stmt(`UPDATE media_jobs SET configuration_json =
       json_set(COALESCE(configuration_json, '{}'), '$.discardOnCancel', json('true'))
       WHERE id = ?`).run(row.id);

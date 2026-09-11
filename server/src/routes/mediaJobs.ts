@@ -1,3 +1,8 @@
+import {
+  startMediaConversation,
+  restartMediaConversation,
+  migrateMediaConversation,
+} from '../media/mediaConversations.ts';
 import { route, HttpError, type Ctx } from '../http/router.ts';
 import { objectBody, positiveId } from '../http/validation.ts';
 import { stmt } from '../db/db.ts';
@@ -100,6 +105,9 @@ function mutateJob(
 }
 
 route.patch('/api/media/jobs/:id', mutateJob(editMediaJob));
+route.post('/api/media/jobs/:id/conversation', mutateJob(startMediaConversation));
+route.post('/api/media/jobs/:id/conversation/migrate', mutateJob(migrateMediaConversation));
+route.post('/api/media/jobs/:id/conversation/restart', mutateJob(restartMediaConversation));
 for (const action of ['prepare', 'render'] as const) {
   route.post(
     `/api/media/jobs/:id/${action}`,

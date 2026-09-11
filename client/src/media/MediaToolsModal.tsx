@@ -1,3 +1,6 @@
+import ConversationPane from '../components/chat/ConversationPane.tsx';
+import { createEmbeddedConversation } from '../state/embeddedConversation.ts';
+import type { Message } from '@tinytavern/shared';
 import { entityOptions, editReferencedEntity } from '../state/entityReferences.ts';
 import { newRequestId } from '@tinytavern/shared';
 import { canFillMediaInputs } from './automaticInputs.ts';
@@ -10,7 +13,9 @@ import { prepareTextareaResize } from '../textareaResize.ts';
 import {
   useDialogActive,
   useDialogMediaPreview,
+  useDialogMediaPromptSelection,
   useDialogNavigationGuard,
+  useDialogPage,
 } from '../state/dialogContext.ts';
 import { rememberMediaPage } from '../state/pageLocation.ts';
 import {
@@ -46,6 +51,7 @@ import {
   mediaJobActive,
   mediaPromptSettingsKey,
   workflowInputError,
+  resolveMediaPromptSelection,
   type MediaWorkflowValues,
   type GalleryItem,
   type MediaAsset,
@@ -117,7 +123,11 @@ function draftFromJob(job: MediaJob): ToolDraft {
 export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let videoPlayer: HTMLVideoElement | undefined;
   let promptArea: HTMLTextAreaElement | undefined;
-  const session = props.session;
+  // The mounted frame follows saved jobs/variations; launch props can be stale after hot reload.
+  const page = useDialogPage()().media;
+  const session = page
+    ? { ...props.session, ...page, previewJobId: page.previewJobId, assetId: page.assetId }
+    : props.session;
   const createRequestKey = session.requestKey ?? newRequestId();
   const [jobId, setJobId] = createSignal(session.jobId);
   const [draftId, setDraftId] = createSignal<number | null>(null);
@@ -511,6 +521,18 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       setVariationsLoaded(true);
     });
   };
+  const migrateSavedPrompt = async (incoming: MediaJob) => {
+    if (incoming.draft?.conversationId || !incoming.prompt.trim() || mediaJobActive(incoming.state))
+      return incoming;
+    const chat =
+      incoming.contextConversationId === state.tree.conversationId
+        ? state.tree
+        : state.conversations.find((item) => item.id === incoming.contextConversationId);
+    return api.migrateMediaConversation(incoming, {
+      expectedActiveLeafId: chat?.activeLeafId,
+      expectedMutationRevision: chat?.mutationRevision,
+    });
+  };
   const refreshOpenJob = () => {
     const id = jobId();
     if (id) {
@@ -521,7 +543,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       }
       void api
         .mediaJob(id)
-        .then((incoming) => {
+        .then(async (incoming) => {
+          if (jobId() === id) incoming = await migrateSavedPrompt(incoming);
           applyMediaJob(incoming);
           if (jobId() === id && !busy()) {
             loadJob(id, true);
@@ -605,7 +628,128 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     }
   };
 
-  const run = (action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval', autoRender = false) =>
+  const promptConversation = createEmbeddedConversation();
+  const promptSession = promptConversation.session;
+  const conversationId = () => review()?.conversationId ?? null;
+  const [conversationError, setConversationError] = createSignal('');
+  createEffect(() => {
+    const id = conversationId();
+    if (id == null) return;
+    let disposed = false;
+    setConversationError('');
+    void api
+      .conversation(id)
+      .then((conversation) => {
+        if (!disposed) promptConversation.select(conversation);
+      })
+      .catch((err: unknown) => {
+        if (!disposed) setConversationError(errorMessage(err));
+      });
+    onCleanup(() => {
+      disposed = true;
+    });
+  });
+  const currentPromptMessage = () =>
+    promptSession.activePath().findLast((message) => message.role === 'assistant');
+  const [chosenPrompt, setChosenPrompt] = useDialogMediaPromptSelection();
+  createEffect(() => {
+    if (chosenPrompt() !== undefined) return;
+    const current = job();
+    if (
+      !current ||
+      promptSession.state.tree.conversationId !== conversationId() ||
+      conversationId() == null
+    )
+      return;
+    const messageId = current.promptMessageId;
+    const message = messageId == null ? undefined : promptSession.state.tree.messages[messageId];
+    // Restore only the working job, once per dialog. Preview changes and hot reload must
+    // preserve explicit choices, including null (Use latest reply).
+    setChosenPrompt(
+      messageId == null
+        ? null
+        : {
+            messageId,
+            ...(message?.content === current.prompt ? {} : { text: current.prompt }),
+          },
+    );
+  });
+  const promptSource = createMemo(() => {
+    const selected = chosenPrompt();
+    if (selected === undefined) return null;
+    return resolveMediaPromptSelection(
+      promptSession.state.tree.messages,
+      selected ? [] : promptSession.activePath(),
+      selected,
+    );
+  });
+  const renderMessagePrompt = (message: Message, text?: string) => {
+    if (busy() || !['done', 'stopped'].includes(message.status)) return;
+    setChosenPrompt({ messageId: message.id, ...(text === undefined ? {} : { text }) });
+    return renderPrompt();
+  };
+  createEffect(() => {
+    const source = promptSource();
+    if (source?.valid) setDraft('prompt', source.text);
+  });
+  const startDiscussion = (restart = false) => {
+    const promptGuard = restart
+      ? {
+          expectedPromptLeafId: promptSession.state.tree.activeLeafId,
+          expectedPromptRevision: promptSession.state.tree.mutationRevision,
+        }
+      : {};
+    return perform(async () => {
+      const current = await saveDraft();
+      const chat =
+        current.contextConversationId === state.tree.conversationId
+          ? state.tree
+          : state.conversations.find((item) => item.id === current.contextConversationId);
+      const conversation = await (
+        restart ? api.restartMediaConversation : api.startMediaConversation
+      )(current, {
+        ...promptGuard,
+        expectedActiveLeafId: chat?.activeLeafId,
+        expectedMutationRevision: chat?.mutationRevision,
+      });
+      batch(() => {
+        if (restart) setChosenPrompt(null);
+        promptConversation.select(conversation, restart);
+        if (restart) setDraft('prompt', '');
+      });
+      applyMediaJob(await api.mediaJob(current.id));
+    });
+  };
+  const usePromptText = async (text: string): Promise<boolean> => {
+    if (conversationId() == null) {
+      setDraft('prompt', text);
+      return true;
+    }
+    const reply = currentPromptMessage();
+    if (!reply || reply.status === 'streaming') return false;
+    const saved = await promptSession.navigateTree(() =>
+      api.editBranch(reply.id, promptSession.state.tree, { content: text }),
+    );
+    if (saved) setChosenPrompt(null);
+    return saved;
+  };
+  const renderPrompt = () => {
+    const source = promptSource();
+    if (!source?.valid) return;
+    setDraft('prompt', source.text);
+    return run('render', false, {
+      id: source.message.id,
+      excerpt: source.selection.text,
+      leaf: promptSession.state.tree.activeLeafId,
+      revision: promptSession.state.tree.mutationRevision,
+    });
+  };
+
+  const run = (
+    action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval',
+    autoRender = false,
+    promptSelection?: { id: number; excerpt?: string; leaf: number | null; revision: number },
+  ) =>
     perform(
       async () => {
         const current =
@@ -623,6 +767,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         }
         const result = await api.mediaJobAction(current, action, {
           autoRender,
+          ...(promptSelection === undefined
+            ? {}
+            : {
+                promptMessageId: promptSelection.id,
+                promptExcerpt: promptSelection.excerpt,
+                expectedPromptLeafId: promptSelection.leaf,
+                expectedPromptRevision: promptSelection.revision,
+              }),
           expectedActiveLeafId: conversation?.activeLeafId,
           expectedMutationRevision: conversation?.mutationRevision,
         });
@@ -644,7 +796,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     if (!jobId()) return;
     const current = job();
     if (!current) return;
-    if (current.startedAt === null && current.state === 'draft') {
+    if (!current.draft?.conversationId && current.startedAt === null && current.state === 'draft') {
       await refreshVariations();
       const related = variations();
       if (related.every((item) => item.startedAt === null && item.state === 'draft')) {
@@ -728,6 +880,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       });
     });
     if (workflow && canFillFromContext() && jobId()) void fillFromContext();
+    else if (job()?.state === 'draft' && job()?.startedAt === null)
+      // Saved-job URLs restore from SQLite, so persist the choice even when no inputs need filling.
+      void perform(async () => {
+        await saveDraft();
+      });
   };
   const selectReferences = (items: GalleryItem[]) => {
     const destination = picker();
@@ -770,7 +927,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const rerun = () => {
     if (!job()) return;
     return perform(async () => {
-      const next = await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true });
+      const next = await migrateSavedPrompt(
+        await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true }),
+      );
       applyMediaJob(next);
       setJobId(next.id);
       loadJob(next.id);
@@ -888,7 +1047,17 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   <div class="form-stack w-full min-h-0 overflow-auto">
                     <pre class="whitespace-pre-wrap">{text()}</pre>
                     <button onClick={() => void copyResultText(text())}>Copy text</button>
-                    <button onClick={() => setDraft('prompt', text())}>Use as prompt</button>
+                    <button
+                      disabled={
+                        busy() ||
+                        (conversationId() != null &&
+                          (!currentPromptMessage() ||
+                            currentPromptMessage()?.status === 'streaming'))
+                      }
+                      onClick={() => void usePromptText(text())}
+                    >
+                      Use as prompt
+                    </button>
                   </div>
                 )}
               </Show>
@@ -1108,17 +1277,17 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       onChange={chooseWorkflow}
                     />
                   </div>
-                  <Show when={canFillFromContext()}>
-                    <button disabled={busy() || frozen()} onClick={() => void fillFromContext()}>
-                      Fill from context
-                    </button>
-                  </Show>
-                  <Show when={slots().length > 1 && uniformInputs() && bulkInputCapacity() > 0}>
-                    <button disabled={busy() || frozen()} onClick={() => setPicker('@all')}>
-                      Choose input {inputKind(slots()[0]!) === 'video' ? 'videos' : 'images'}
-                    </button>
-                  </Show>
                 </div>
+                <Show when={canFillFromContext()}>
+                  <button disabled={busy() || frozen()} onClick={() => void fillFromContext()}>
+                    Fill from context
+                  </button>
+                </Show>
+                <Show when={slots().length > 1 && uniformInputs() && bulkInputCapacity() > 0}>
+                  <button disabled={busy() || frozen()} onClick={() => setPicker('@all')}>
+                    Choose input {inputKind(slots()[0]!) === 'video' ? 'videos' : 'images'}
+                  </button>
+                </Show>
                 <For each={slots()}>
                   {(slot) => (
                     <div
@@ -1226,19 +1395,6 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </div>
                   )}
                 </For>
-                <Show when={hasPrompt() && !draft.avatarContext}>
-                  <div class={selectRowClass}>
-                    <label>Preset</label>
-                    <Select
-                      ariaLabel="Media prompt preset"
-                      value={selectedPromptId()}
-                      buttonLabel={draft.presetId ? undefined : defaultPromptLabel()}
-                      disabled={busy() || frozen()}
-                      options={promptOptions()}
-                      onChange={(value) => setDraft('presetId', value || null)}
-                    />
-                  </div>
-                </Show>
                 <Show when={workflowControls().controls.length > 0}>
                   <details
                     class="media-form-section media-render-settings"
@@ -1288,71 +1444,153 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   <p class="hint">Add a workflow in Settings → Media rendering.</p>
                 </Show>
                 <Show when={hasPrompt()}>
-                  <label for="media-instruction">Instruction</label>
-                  <textarea
-                    id="media-instruction"
-                    rows={3}
-                    value={draft.instruction}
-                    readOnly={busy() || frozen()}
-                    onInput={(event) => updateInstruction(event.currentTarget.value)}
-                  />
-                  <div class="grid grid-cols-2 narrow-panel:grid-cols-1 gap-3 [&>button]:min-w-0">
-                    <button
-                      disabled={
-                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                      }
-                      title={
-                        usesChatContext()
-                          ? 'Write a prompt from this chat’s active branch and your instruction'
-                          : 'Write a prompt from your instruction'
-                      }
-                      onClick={() => void run('prepare')}
-                    >
-                      Write prompt
-                    </button>
-                    <button
-                      disabled={
-                        busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                      }
-                      title="Write a new prompt from your instruction, then render it"
-                      onClick={() => void run('prepare', true)}
-                    >
-                      Write and render
-                    </button>
-                  </div>
-                  <div class="flex items-center gap-2 flex-wrap justify-between mt-2 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&_label]:m-0">
-                    <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
-                    <Show when={preparingPrompt()}>
-                      <PromptGenerationStatus active={paneActive()} content={currentPrompt()} />
-                    </Show>
+                  <div class={selectRowClass}>
+                    <span class="text-sm font-semibold">Prompt</span>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <Show when={!draft.avatarContext}>
+                        <div class="flex-1 min-w-0">
+                          <Select
+                            ariaLabel="Media prompt preset"
+                            value={selectedPromptId()}
+                            buttonLabel={draft.presetId ? undefined : defaultPromptLabel()}
+                            disabled={busy() || frozen()}
+                            options={promptOptions()}
+                            onChange={(value) => setDraft('presetId', value || null)}
+                          />
+                        </div>
+                      </Show>
+                      <Show when={conversationId()}>
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          title="Restart prompt conversation with current inputs and preset"
+                          aria-label="Restart prompt conversation"
+                          disabled={
+                            busy() ||
+                            frozen() ||
+                            Boolean(workflowError()) ||
+                            !selectedWorkflow() ||
+                            promptSession.state.treeNavigationPending ||
+                            promptSession.state.tree.conversationId !== conversationId()
+                          }
+                          onClick={() => startDiscussion(true)}
+                        >
+                          <FontAwesomeIcon icon={faRotateRight} size={14} />
+                        </button>
+                      </Show>
+                    </div>
                   </div>
                   <Show
-                    when={thinking()}
+                    when={conversationId() != null}
                     fallback={
-                      <textarea
-                        id="media-prompt"
-                        onPointerDown={prepareTextareaResize}
-                        ref={promptArea}
-                        onScroll={promptScroll.onScroll}
-                        rows={8}
-                        value={currentPrompt()}
-                        readOnly={busy() || frozen()}
-                        onInput={(event) => setDraft('prompt', event.currentTarget.value)}
-                      />
+                      <>
+                        <label for="media-instruction">Instruction</label>
+                        <textarea
+                          id="media-instruction"
+                          rows={3}
+                          value={draft.instruction}
+                          readOnly={busy() || frozen()}
+                          onInput={(event) => updateInstruction(event.currentTarget.value)}
+                        />
+                        <div class="grid grid-cols-2 narrow-panel:grid-cols-1 gap-3 [&>button]:min-w-0">
+                          <button
+                            disabled={
+                              busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                            }
+                            title={
+                              usesChatContext()
+                                ? 'Write a prompt from this chat’s active branch and your instruction'
+                                : 'Write a prompt from your instruction'
+                            }
+                            onClick={() => void startDiscussion()}
+                          >
+                            Start prompt conversation
+                          </button>
+                          <button
+                            disabled={
+                              busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
+                            }
+                            title="Write a new prompt from your instruction, then render it"
+                            onClick={() => void run('prepare', true)}
+                          >
+                            Write and render
+                          </button>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap justify-between mt-2 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&_label]:m-0">
+                          <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
+                          <Show when={preparingPrompt()}>
+                            <PromptGenerationStatus
+                              active={paneActive()}
+                              content={currentPrompt()}
+                            />
+                          </Show>
+                        </div>
+                        <Show
+                          when={thinking()}
+                          fallback={
+                            <textarea
+                              id="media-prompt"
+                              onPointerDown={prepareTextareaResize}
+                              ref={promptArea}
+                              onScroll={promptScroll.onScroll}
+                              rows={8}
+                              value={currentPrompt()}
+                              readOnly={busy() || frozen()}
+                              onInput={(event) => setDraft('prompt', event.currentTarget.value)}
+                            />
+                          }
+                        >
+                          <div class="media-prompt-thinking p-3 border border-solid border-control-line bg-thinking flex rounded-sm [&_.prompt-generation-status]:flex-1 [&_.prompt-generation-status]:min-h-0 [&_.prompt-generation-reasoning]:flex-1 [&_.prompt-generation-reasoning]:min-h-0 [&_.prompt-generation-reasoning]:max-h-none [&_.prompt-generation-reasoning]:p-0 [&_.prompt-generation-reasoning]:border-clear [&_.prompt-generation-reasoning]:bg-clear h-[11rem]">
+                            <PromptGenerationStatus
+                              active={paneActive()}
+                              content=""
+                              showStatus={false}
+                              reasoning={job()?.reasoning}
+                            />
+                          </div>
+                        </Show>
+                      </>
                     }
                   >
-                    <div class="media-prompt-thinking p-3 border border-solid border-control-line bg-thinking flex rounded-sm [&_.prompt-generation-status]:flex-1 [&_.prompt-generation-status]:min-h-0 [&_.prompt-generation-reasoning]:flex-1 [&_.prompt-generation-reasoning]:min-h-0 [&_.prompt-generation-reasoning]:max-h-none [&_.prompt-generation-reasoning]:p-0 [&_.prompt-generation-reasoning]:border-clear [&_.prompt-generation-reasoning]:bg-clear h-[11rem]">
-                      <PromptGenerationStatus
-                        active={paneActive()}
-                        content=""
-                        showStatus={false}
-                        reasoning={job()?.reasoning}
-                      />
+                    <div class="media-prompt-conversation">
+                      <Show when={conversationError()}>
+                        <p class="notice notice-error">{conversationError()}</p>
+                      </Show>
+                      <Show
+                        when={promptSession.state.tree.conversationId === conversationId()}
+                        fallback={<p class="hint">Loading prompt conversation…</p>}
+                      >
+                        <ConversationPane
+                          session={promptSession}
+                          active={paneActive}
+                          embedded
+                          showViewControls={false}
+                          showAvatarRail={false}
+                          showMessageMenu={false}
+                          renderPrompt={renderMessagePrompt}
+                          selectedPrompt={() => promptSource()?.selection ?? null}
+                          promptSelectionDisabled={busy}
+                        />
+                      </Show>
                     </div>
                   </Show>
                 </Show>
               </div>
               <div class="py-2 px-3 border-t border-t-solid border-t-subtle flex flex-col flex-none gap-2 bg-panel mobile:sticky mobile:bottom-0 mobile:z-2 mobile:pb-[max(var(--space-2),_env(safe-area-inset-bottom))]">
+                <Show when={conversationId() && chosenPrompt()}>
+                  <div class="flex items-center justify-between gap-2 text-xs text-dim">
+                    <span aria-live="polite">
+                      {!promptSource()?.valid
+                        ? 'Selected prompt unavailable — select a completed prompt'
+                        : chosenPrompt()!.text === undefined
+                          ? 'Using selected reply'
+                          : 'Using selected code block'}
+                    </span>
+                    <button class="text-xs" disabled={busy()} onClick={() => setChosenPrompt(null)}>
+                      Use latest reply
+                    </button>
+                  </div>
+                </Show>
                 <Show when={candidates().length > 0}>
                   <p class="text-xs text-dim m-0" aria-label="Variation queue" role="status">
                     {completedCount()} / {candidates().length} variations complete
@@ -1399,13 +1637,18 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       }
                       disabled={
                         busy() ||
-                        (hasPrompt() && !draft.prompt.trim()) ||
+                        (hasPrompt() &&
+                          (!draft.prompt.trim() ||
+                            (conversationId() != null && !promptSource()?.valid))) ||
                         !selectedWorkflow() ||
                         Boolean(workflowError())
                       }
-                      onClick={() => void run('render')}
+                      onClick={() => {
+                        if (conversationId()) renderPrompt();
+                        else void run('render');
+                      }}
                     >
-                      Generate
+                      Render
                     </button>
                   </Show>
                   <Show when={active()}>
@@ -1478,14 +1721,24 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
             workflow={details().workflow}
             disabled={busy() || frozen()}
             onCopy={(text) => void copyResultText(text)}
-            onUseInstruction={() => {
-              updateInstruction(details().instruction);
-              setResultDetails(null);
-            }}
-            onUsePrompt={() => {
-              setDraft('prompt', details().prompt);
-              setResultDetails(null);
-            }}
+            onUseInstruction={
+              conversationId() == null
+                ? () => {
+                    updateInstruction(details().instruction);
+                    setResultDetails(null);
+                  }
+                : undefined
+            }
+            onUsePrompt={
+              conversationId() != null &&
+              (!currentPromptMessage() || currentPromptMessage()?.status === 'streaming')
+                ? undefined
+                : () => {
+                    void usePromptText(details().prompt).then((used) => {
+                      if (used) setResultDetails(null);
+                    });
+                  }
+            }
             onClose={() => setResultDetails(null)}
           />
         )}

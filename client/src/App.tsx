@@ -2,30 +2,26 @@ import { dialogStack } from './state/dialogStack.ts';
 import { DialogContext } from './state/dialogContext.ts';
 import { For, Show, Switch, Match, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { installUiBack, registerUiBack } from './state/uiBack.ts';
-import { booting, state, setState, streamingMessage } from './state/store.ts';
+import {
+  booting,
+  state,
+  setState,
+  streamingMessage,
+  mainConversationSession,
+} from './state/store.ts';
 import Sidebar from './components/layout/Sidebar.tsx';
 import Header from './components/layout/Header.tsx';
-import ChatView from './components/chat/ChatView.tsx';
-import Composer from './components/chat/Composer.tsx';
-import MapSearch from './components/tree/MapSearch.tsx';
+import ConversationPane from './components/chat/ConversationPane.tsx';
 import SettingsModal from './components/settings/SettingsModal.tsx';
 import ConversationSettings from './components/chat/ConversationSettings.tsx';
 import PasswordGate from './components/layout/PasswordGate.tsx';
 import ConfirmDialogHost from './components/ui/ConfirmDialogHost.tsx';
 import { authPhase } from './state/auth.ts';
-import {
-  clearMessageSelection,
-  messageSelection,
-  messageSelectionActive,
-  selectedMessageRange,
-} from './state/messageSelection.ts';
-import MessageSelectionBar from './components/chat/MessageSelectionBar.tsx';
 import GalleryModal from './components/gallery/GalleryModal.tsx';
 import MediaToolsModal from './media/MediaToolsModal.tsx';
 import MediaJobsModal from './media/MediaJobsModal.tsx';
 
 export default function App() {
-  const [composerText, setComposerText] = createSignal('');
   const workspaceCovered = () =>
     dialogStack
       .frames()
@@ -41,9 +37,6 @@ export default function App() {
   const [bootGone, setBootGone] = createSignal(false);
   createEffect(() => {
     if (!booting()) setTimeout(() => setBootGone(true), 350);
-  });
-  createEffect(() => {
-    if (messageSelection() && !selectedMessageRange()) clearMessageSelection();
   });
   createEffect(() => {
     document.title = streamingMessage() ? '● TinyTavern' : 'TinyTavern';
@@ -78,20 +71,11 @@ export default function App() {
         </Show>
         <main class="main bg-canvas flex flex-col flex-1 min-w-0 relative">
           <Header />
-          <ChatView active={!workspaceCovered()} pendingMessage={composerText()} />
-          <Show
-            when={state.viewMode === 'map'}
-            fallback={
-              <Show
-                when={messageSelectionActive()}
-                fallback={<Composer text={composerText()} onText={setComposerText} />}
-              >
-                <MessageSelectionBar />
-              </Show>
-            }
-          >
-            <MapSearch />
-          </Show>
+          <ConversationPane
+            session={mainConversationSession}
+            active={() => !workspaceCovered() && state.modal === null}
+            showViewControls={false}
+          />
         </main>
         <For each={dialogStack.frames()}>
           {(frame) => {

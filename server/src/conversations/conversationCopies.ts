@@ -1,6 +1,7 @@
 import type { Conversation, Message } from '@tinytavern/shared';
 import { stmt, transaction } from '../db/db.ts';
 import { copyImage, deleteImageFiles } from '../media/images.ts';
+import { HttpError } from '../http/router.ts';
 
 export interface MessageRow {
   gen_meta_json: string | null;
@@ -68,6 +69,8 @@ export function copyConversation(
   suffix: string,
   copyMessages: (conversationId: number, written: string[]) => void,
 ): number {
+  if (source.promptMode === 'media')
+    throw new HttpError(409, 'Media conversations belong to their draft and cannot be copied');
   const title =
     source.title.length + suffix.length > 60
       ? `${source.title.slice(0, 60 - suffix.length - 1)}…${suffix}`

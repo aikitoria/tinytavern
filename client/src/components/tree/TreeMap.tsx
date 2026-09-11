@@ -1,3 +1,4 @@
+import { useConversationView } from '../chat/ConversationContext.tsx';
 import { createPanZoom } from '../../panZoom.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
@@ -14,17 +15,10 @@ import {
 } from 'solid-js';
 import type { Message } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
-import { activePath, childrenByParent, navigateTree, setState, state } from '../../state/store.ts';
+
 import MessageNode from '../chat/MessageNode.tsx';
 import { highlightMapSearch } from './mapSearchHighlight.ts';
-import {
-  snippet,
-  mapSearchQuery,
-  matchesMapSearch,
-  setMapSearchResults,
-  mapSearchTarget,
-  setMapSearchTarget,
-} from './mapSearch.ts';
+import { snippet } from './mapSearch.ts';
 
 // Fixed card slots keep layout independent of content and zoom.
 const CARD_W = 640;
@@ -62,6 +56,20 @@ interface Edge {
 }
 
 export default function TreeMap(props: { active?: boolean }) {
+  const conversationView = useConversationView();
+  const {
+    state,
+    setState,
+    activePath,
+    childrenByParent,
+    navigateTree,
+    mapSearchQuery,
+    matchesMapSearch,
+    setMapSearchResults,
+    mapSearchTarget,
+    setMapSearchTarget,
+  } = conversationView.session;
+
   let root!: HTMLDivElement;
   let content!: HTMLDivElement;
   let edgesCanvas!: HTMLCanvasElement;
@@ -356,7 +364,8 @@ export default function TreeMap(props: { active?: boolean }) {
     void activate(message).then((ok) => {
       if (ok) {
         setState('viewMode', 'chat');
-        writePageLocation({ ...readPageLocation(), viewMode: undefined });
+        if (!conversationView.embedded)
+          writePageLocation({ ...readPageLocation(), viewMode: undefined });
       }
     });
   };
@@ -575,7 +584,12 @@ export default function TreeMap(props: { active?: boolean }) {
     }),
   );
 
-  highlightMapSearch(() => content, mapSearchQuery);
+  highlightMapSearch(
+    () => content,
+    mapSearchQuery,
+    mapSearchTarget,
+    () => props.active !== false,
+  );
 
   let resizeObserver: ResizeObserver | undefined;
   onMount(() => {

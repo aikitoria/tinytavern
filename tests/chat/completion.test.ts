@@ -302,6 +302,12 @@ databaseCase('generation stream', async () => {
     assert.equal(getMessage(retryId)!.status, 'done');
     assert.equal(getMessage(retryId)!.content, 'Happy', 'Held prefix survives the idle retry once');
     assert.equal(getMessage(retryId)!.reasoning, 'Global\nTemplate reasoning');
+    const retryMetrics = getMessage(retryId)!.genMeta!.generations![0]!;
+    assert.deepEqual(
+      retryMetrics.attempts.map((attempt) => attempt.status),
+      ['error', 'done'],
+    );
+    assert.equal(retryMetrics.attempts[0]!.completionTokens, undefined);
     assert.deepEqual(prompt.messages, [{ role: 'user', content: 'Hello' }]);
 
     stmt('UPDATE endpoints SET allow_message_prefill = 0 WHERE id = ?').run(endpointId);
@@ -408,7 +414,8 @@ databaseCase('generation persistence', async () => {
   };
   const streams: ReturnType<typeof controlledStream>[] = [];
   const originalFetch = globalThis.fetch;
-  mockFetch(() => {
+  mockFetch((_, init) => {
+    assert.deepEqual(JSON.parse(String(init!.body)).stream_options, { include_usage: true });
     const stream = controlledStream();
     streams.push(stream);
     return new Response(stream.body);
@@ -433,9 +440,17 @@ databaseCase('generation persistence', async () => {
     assert.equal(getMessage(mid)!.content, '');
     assert.equal(getMessage(mid)!.reasoning, null);
     assert.equal(getMessage(mid)!.model, null);
+    assert.equal(getMessage(mid)!.genMeta, null, 'Metrics stay in memory until finalization');
+    const liveMetrics = mergeLiveBuffers([getMessage(mid)!])[0]!.genMeta!.generations![0]!;
+    assert.equal(liveMetrics.speculative, true);
+    assert.equal(liveMetrics.attempts[0]!.elapsedMs, undefined);
+    assert(liveMetrics.attempts[0]!.firstReasoningMs != null);
     assert.equal(mergeLiveBuffers([getMessage(mid)!])[0]!.content, ' First');
     const revision = getConversationRevision(cid);
     append(stream, ' reply ', ' more ');
+    stream.write(
+      'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":80},"completion_tokens_details":{"reasoning_tokens":7,"text_tokens":5}}}\n\n',
+    );
     stream.close();
     await flush();
     assert.equal(getMessage(mid)!.content, 'First reply');
@@ -444,6 +459,17 @@ databaseCase('generation persistence', async () => {
     assert.equal(getMessage(mid)!.status, 'done');
     assert.equal(getMessage(mid)!.imagePending, true);
     assert.equal(getConversationRevision(cid), revision + 1);
+    const completedMetrics = getMessage(mid)!.genMeta!.generations![0]!;
+    assert.equal(completedMetrics.attempts[0]!.completionTokens, 12);
+    assert.equal(completedMetrics.attempts[0]!.cachedTokens, 80);
+    assert.equal(completedMetrics.attempts[0]!.textTokens, 5);
+    assert.equal(completedMetrics.attempts[0]!.status, 'done');
+    assert(completedMetrics.elapsedMs != null);
+    assert.equal(
+      liveMetrics.attempts[0]!.completionTokens,
+      undefined,
+      'Snapshots own their metrics',
+    );
 
     stmt("UPDATE messages SET status = 'streaming' WHERE id = ?").run(mid);
     const old = begin(mid, { content: 'First reply', reasoning: 'Think more' });
@@ -454,6 +480,12 @@ databaseCase('generation persistence', async () => {
     assert.equal(getMessage(mid)!.content, 'First reply continued');
     assert.equal(getMessage(mid)!.status, 'stopped');
     assert.equal(getMessage(mid)!.imagePending, false);
+    const stoppedMetrics = getMessage(mid)!.genMeta!.generations!;
+    assert.equal(stoppedMetrics.length, 2);
+    assert.deepEqual(stoppedMetrics[0], completedMetrics);
+    assert.equal(stoppedMetrics[1]!.continuation, true);
+    assert.equal(stoppedMetrics[1]!.attempts[0]!.status, 'stopped');
+    assert.equal(stoppedMetrics[1]!.attempts[0]!.completionTokens, undefined);
     stmt("UPDATE messages SET status = 'streaming' WHERE id = ?").run(mid);
     const next = begin(mid, { content: 'First reply continued', reasoning: 'Think more' });
     append(old, ' stale');
@@ -467,6 +499,10 @@ databaseCase('generation persistence', async () => {
     next.close();
     await flush();
     assert.equal(getMessage(mid)!.content, 'First reply continued successor');
+    const successorMetrics = getMessage(mid)!.genMeta!.generations!;
+    assert.equal(successorMetrics.length, 3);
+    assert.deepEqual(successorMetrics.slice(0, 2), stoppedMetrics);
+    assert.equal(successorMetrics[2]!.attempts[0]!.status, 'done');
 
     const failed = message();
     const failingStream = begin(failed);
@@ -478,6 +514,7 @@ databaseCase('generation persistence', async () => {
     assert.equal(getMessage(failed)!.content, 'Partial');
     assert.equal(getMessage(failed)!.reasoning, 'Reason');
     assert.equal(getMessage(failed)!.imagePending, false);
+    assert.equal(getMessage(failed)!.genMeta!.generations![0]!.attempts[0]!.status, 'error');
 
     const deleted = message();
     const deletedStream = begin(deleted);
@@ -501,6 +538,7 @@ databaseCase('generation persistence', async () => {
     for (const { id, controller, role } of pending) {
       assert.equal(getMessage(id)!.content, role);
       assert.equal(getMessage(id)!.status, 'stopped');
+      assert.equal(getMessage(id)!.genMeta!.generations![0]!.attempts[0]!.status, 'stopped');
       controller.close();
     }
     await flush();

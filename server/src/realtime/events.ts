@@ -3,6 +3,7 @@ import type { ClientCommand, InvalidateEntity, ServerEvent } from '@tinytavern/s
 
 export interface SocketState {
   sub: number | null;
+  subscriptions?: Set<number>;
   closed: boolean;
 }
 export type ClientSocket = ServerWebSocket<SocketState>;
@@ -47,7 +48,9 @@ function removeClient(ws: ClientSocket): void {
   ws.data.closed = true;
   clients.delete(ws);
   ws.unsubscribe(GLOBAL_TOPIC);
-  if (ws.data.sub !== null) unsubscribe(ws, ws.data.sub);
+  for (const id of ws.data.subscriptions ?? (ws.data.sub === null ? [] : [ws.data.sub]))
+    unsubscribe(ws, id);
+  ws.data.subscriptions?.clear();
   ws.data.sub = null;
 }
 
@@ -70,19 +73,29 @@ export const websocket: WebSocketHandler<SocketState> = {
     } catch {
       return;
     }
-    if (parsed == null || typeof parsed !== 'object' || !('sub' in parsed)) return;
+    if (parsed == null || typeof parsed !== 'object') return;
     const cmd = parsed as ClientCommand;
-    if (cmd.sub !== null && (!Number.isSafeInteger(cmd.sub) || cmd.sub <= 0)) return;
-    if (ws.data.sub !== cmd.sub) {
-      const previous = ws.data.sub;
-      ws.data.sub = cmd.sub;
-      if (previous !== null) unsubscribe(ws, previous);
-      if (cmd.sub !== null) {
-        subscriberCounts.set(cmd.sub, (subscriberCounts.get(cmd.sub) ?? 0) + 1);
-        ws.subscribe(topic(cmd.sub));
+    const ids =
+      'subs' in cmd ? cmd.subs : 'sub' in cmd ? (cmd.sub === null ? [] : [cmd.sub]) : null;
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 32 ||
+      ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    )
+      return;
+    const next = new Set(ids);
+    const previous = ws.data.subscriptions ?? new Set(ws.data.sub === null ? [] : [ws.data.sub]);
+    for (const id of previous) if (!next.has(id)) unsubscribe(ws, id);
+    ws.data.subscriptions = next;
+    ws.data.sub = ids[0] ?? null;
+    for (const id of next) {
+      if (!previous.has(id)) {
+        subscriberCounts.set(id, (subscriberCounts.get(id) ?? 0) + 1);
+        ws.subscribe(topic(id));
       }
+      if (!previous.has(id) || 'sub' in cmd || ('resync' in cmd && cmd.resync === id))
+        onSubscribe?.(ws, id);
     }
-    if (cmd.sub !== null) onSubscribe?.(ws, cmd.sub);
   },
   close: removeClient,
 };

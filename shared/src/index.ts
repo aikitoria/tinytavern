@@ -1,8 +1,11 @@
 export * from './entityFolders.ts';
+export * from './generationMetrics.ts';
+import type { GenerationMetrics } from './generationMetrics.ts';
 import type { EntityFolderTopic, EntityFolder } from './entityFolders.ts';
 export * from './settingsSections.ts';
 export { readSseData } from './sse.ts';
 export * from './media.ts';
+export * from './mediaPromptSelection.ts';
 export { DEFAULT_MEDIA_CHAT_PRESETS } from './imagePrompts.ts';
 import { DEFAULT_MEDIA_CHAT_PRESETS } from './imagePrompts.ts';
 export * from './settingsTransfer.ts';
@@ -38,6 +41,8 @@ export interface GenParams {
 }
 
 export interface GenMeta {
+  /** One entry per generation/continuation, with retries measured separately. */
+  generations?: GenerationMetrics[];
   error?: string;
   /** Image render failure (the text generation itself succeeded). */
   imageError?: string;
@@ -89,7 +94,15 @@ export interface GalleryItem {
   updatedAt: number;
 }
 
+export interface ConversationPromptContext {
+  messages: import('./promptMessages.ts').PromptMessage[];
+  reasoningPrefill: string;
+  messagePrefill: string;
+}
+
 export interface Conversation {
+  /** Media workspaces use their captured prompt context instead of chat templates. */
+  promptMode?: 'chat' | 'media';
   id: number;
   title: string;
   characterId: number | null;
@@ -355,6 +368,7 @@ export type ServerEvent =
       messages: Message[];
     }
   | { t: 'delta'; mid: number; d?: string; r?: string }
+  | { t: 'generationMetrics'; mid: number; metrics: GenerationMetrics }
   | {
       t: 'final';
       conversationId: number;
@@ -362,6 +376,6 @@ export type ServerEvent =
       message: Message;
     };
 
-export type ClientCommand = { sub: number | null };
+export type ClientCommand = { sub: number | null } | { subs: number[]; resync?: number };
 
 export { newRequestId, nextCollectionId } from './numericIds.ts';

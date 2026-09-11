@@ -428,6 +428,8 @@ route.post('/api/messages/:id/branch-conversation', ({ params }) => {
   return getConversation(newId);
 });
 
+route.get('/api/conversations/:id', ({ params }) => getConversation(positiveId(params.id)));
+
 route.get('/api/conversations/:id/tree', ({ params }) => {
   const id = positiveId(params.id);
   getConversation(id);
@@ -474,8 +476,11 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
     : undefined;
   const endpoint = endpointRow ? toEndpoint(endpointRow) : null;
   const prefillDisabled = endpoint ? !messagePrefillEnabled(endpoint) : false;
+  const messages = endpoint ? withEndpointSystemPrompt(endpoint, built.messages) : built.messages;
+  const offset = messages.length - built.messages.length;
   return {
-    messages: endpoint ? withEndpointSystemPrompt(endpoint, built.messages) : built.messages,
+    messages,
+    messageIds: messages.map((_, index) => built.messageIds?.[index - offset] ?? []),
     reasoningPrefill: endpoint
       ? endpointReasoningPrefill(endpoint, built.reasoningPrefill) || null
       : built.reasoningPrefill,
@@ -498,9 +503,9 @@ route.get('/api/search', ({ req }) => {
 
   // Titles: the query is a literal, not a pattern — escape LIKE wildcards.
   const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
-  const titleRows = stmt("SELECT * FROM conversations WHERE title LIKE ? ESCAPE '\\'").all(
-    like,
-  ) as Record<string, unknown>[];
+  const titleRows = stmt(
+    "SELECT * FROM conversations WHERE prompt_context_json IS NULL AND title LIKE ? ESCAPE '\\'",
+  ).all(like) as Record<string, unknown>[];
 
   // Treat tokens as literal phrases; prefix-match the last for search-as-you-type.
   const tokens = q.split(/\s+/).filter(Boolean);
@@ -514,7 +519,7 @@ route.get('/api/search', ({ req }) => {
          FROM messages_fts
          JOIN messages m ON m.id = messages_fts.rowid
          JOIN conversations c ON c.id = m.conversation_id
-         WHERE messages_fts MATCH ?`,
+         WHERE messages_fts MATCH ? AND c.prompt_context_json IS NULL`,
       ).all(ftsQuery) as Record<string, unknown>[])
     : [];
   const contentIds = new Set(contentRows.map((row) => row.id as number));

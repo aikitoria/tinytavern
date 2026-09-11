@@ -82,7 +82,11 @@ export default function Sidebar() {
   // Remove stale search entries after deletes/renames elsewhere.
   createEffect(
     on(
-      () => state.conversations.map((c) => `${c.id}:${c.title}`).join('\n'),
+      () =>
+        state.conversations
+          .filter((c) => c.promptMode !== 'media')
+          .map((c) => `${c.id}:${c.title}`)
+          .join('\n'),
       () => {
         const q = query().trim();
         if (q && results()) runSearch(q);
@@ -146,6 +150,7 @@ export default function Sidebar() {
     const byKey = new Map<string, ConvGroup>();
     const groups: ConvGroup[] = [];
     for (const conv of state.conversations) {
+      if (conv.promptMode === 'media') continue;
       const character = characterOf(conv.characterId) ?? null;
       const key = character ? String(character.id) : 'none';
       let group = byKey.get(key);
@@ -385,7 +390,11 @@ export default function Sidebar() {
           fallback={
             <Show
               when={state.groupByCharacter}
-              fallback={<For each={state.conversations}>{(conv) => <ConvItem conv={conv} />}</For>}
+              fallback={
+                <For each={state.conversations.filter((c) => c.promptMode !== 'media')}>
+                  {(conv) => <ConvItem conv={conv} />}
+                </For>
+              }
             >
               <For each={convGroups()}>
                 {(group) => (

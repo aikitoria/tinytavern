@@ -1,13 +1,21 @@
+import { useConversationView } from './ConversationContext.tsx';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
 import { faCopy } from '@fortawesome/free-regular-svg-icons';
 import { For, Show, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
 import { preparePromptTrace } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
-import { state, streamingMessage, toast } from '../../state/store.ts';
+import { toast } from '../../state/store.ts';
 import { errorMessage } from '../../util.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
+import GenerationPerformance from './GenerationPerformance.tsx';
 
-function TraceMessage(props: { role: string; label?: string; content: string }) {
+function TraceMessage(props: {
+  role: string;
+  label?: string;
+  content: string;
+  messageIds?: number[];
+}) {
+  const { state } = useConversationView().session;
   const [copied, setCopied] = createSignal(false);
   let resetTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
@@ -48,11 +56,19 @@ function TraceMessage(props: { role: string; label?: string; content: string }) 
       <pre class="trace-content text-prose whitespace-pre-wrap wrap-break-word p-0 font-code text-caption font-normal m-0 mt-1">
         {props.content}
       </pre>
+      <For each={props.messageIds}>
+        {(id) => (
+          <GenerationPerformance generations={state.tree.messages[id]?.genMeta?.generations} />
+        )}
+      </For>
     </section>
   );
 }
 
 export default function TraceView(props: { pendingMessage: string }) {
+  const view = useConversationView();
+  const { state, streamingMessage } = view.session;
+
   const [trace] = createResource(
     () => ({
       id: state.selectedId,
@@ -124,6 +140,7 @@ export default function TraceView(props: { pendingMessage: string }) {
                           : 'assistant reasoning'
                       }
                       content={msg.reasoning_content!}
+                      messageIds={!msg.content ? trace()?.messageIds?.[index()] : undefined}
                     />
                   </Show>
                   <Show when={msg.content || !msg.reasoning_content}>
@@ -137,6 +154,7 @@ export default function TraceView(props: { pendingMessage: string }) {
                             : undefined
                       }
                       content={msg.content}
+                      messageIds={trace()?.messageIds?.[index()]}
                     />
                   </Show>
                 </div>
@@ -156,6 +174,7 @@ export default function TraceView(props: { pendingMessage: string }) {
                     role={message().role}
                     label={`${message().role} (live)`}
                     content={liveContent()}
+                    messageIds={[message().id]}
                   />
                 </div>
               )}

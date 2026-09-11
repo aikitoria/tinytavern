@@ -119,7 +119,11 @@ export function mediaToolLinks() {
 }
 
 export function restorePage(page: PageLocation): void {
-  const chatId = state.conversations.some((chat) => chat.id === page.chatId) ? page.chatId : null;
+  const chatId = state.conversations.some(
+    (chat) => chat.id === page.chatId && chat.promptMode !== 'media',
+  )
+    ? page.chatId
+    : null;
   const restored = { ...page, chatId, stack: page.stack?.map((pane) => ({ ...pane, chatId })) };
   batch(() =>
     applyPageLocation(restored, () => {

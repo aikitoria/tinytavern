@@ -166,6 +166,7 @@ export interface MediaResultDetails {
 }
 
 export interface MediaDraft {
+  conversationId?: number | null;
   id: number;
   revision: number;
   state: 'open' | 'accepted' | 'discarding';
@@ -260,6 +261,7 @@ export function mergeMediaProgress(
 }
 
 export interface MediaJob {
+  promptMessageId?: number | null;
   avatarContext?: MediaAvatarContext | null;
   /** Captured render associations, or current input/chat associations before capture. */
   characterIds: number[];

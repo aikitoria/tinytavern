@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { mock, test } from 'bun:test';
 import { createRoot, untrack } from 'solid-js';
 import {
+  type Conversation,
   type MediaAsset,
   type MediaJob,
   type MediaJobDraft,
   type MediaWorkflow,
+  type Message,
 } from '@tinytavern/shared';
 import {
   orderedMediaInputs,
@@ -63,6 +65,8 @@ test('media drafts retain edits across settings, generation and ordered job snap
     cancelAnimationFrame: { configurable: true, value: () => {} },
   });
   type Control = {
+    renderPrompt?: (message: Message, text?: string) => void;
+    session?: { state: { selectedId: number | null; tree: { conversationId: number | null } } };
     disabled?: boolean;
     readOnly?: boolean;
     onChange?: (value: string) => void;
@@ -81,12 +85,22 @@ test('media drafts retain edits across settings, generation and ordered job snap
         props.title ??
         (typeof props.children === 'string' ? props.children : undefined);
       if (typeof key === 'string') controls.set(key, props as Control);
+      if (props.children === 'Render') controls.set('render-media', props as Control);
       if (props.controls && props.values) controls.set('workflow-values', props as Control);
+      if (props.embedded && props.session) controls.set('prompt-conversation', props as Control);
       return null;
     },
   }));
   const storePath = '../../client/src/state/store.ts';
-  const { state, setState, applyMediaJob, openDialog } = await import(storePath);
+  const {
+    state,
+    setState,
+    applyMediaJob,
+    openDialog,
+    handleServerEvent,
+    selectConversation,
+    restoreConversationSelection,
+  } = await import(storePath);
   const apiPath = '../../client/src/state/api.ts';
   const { api } = await import(apiPath);
   const stackPath = '../../client/src/state/dialogStack.ts';
@@ -94,11 +108,10 @@ test('media drafts retain edits across settings, generation and ordered job snap
   const contextPath = '../../client/src/state/dialogContext.ts';
   const { DialogContext } = await import(contextPath);
   const locationPath = '../../client/src/state/pageLocation.ts';
-  const { parsePageLocation, formatPageLocation, navigatePageWithGuards } = await import(
-    locationPath
-  );
+  const { parsePageLocation, formatPageLocation, navigatePageWithGuards, rememberMediaPage } =
+    await import(locationPath);
   const mediaPath = '../../client/src/media/navigation.ts';
-  const { openMediaTool } = await import(mediaPath);
+  const { openMediaTool, restorePage } = await import(mediaPath);
   const componentPath = '../../client/src/media/MediaToolsModal.tsx';
   const { default: MediaToolsModal } = await import(componentPath);
   const workflow = (id: string): MediaWorkflow => ({
@@ -174,6 +187,9 @@ test('media drafts retain edits across settings, generation and ordered job snap
     rerunMediaJob: api.rerunMediaJob,
     acceptMediaVariation: api.acceptMediaVariation,
     discardMediaDraft: api.discardMediaDraft,
+    conversation: api.conversation,
+    restartMediaConversation: api.restartMediaConversation,
+    migrateMediaConversation: api.migrateMediaConversation,
   };
   const keys: string[] = [];
   const created = new Map<string, MediaJob>();
@@ -182,6 +198,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
   }
   let nextCreatedId = 100;
   let submitted: Partial<MediaJobDraft> | undefined;
+  let actionOptions: { promptMessageId?: number; promptExcerpt?: string } | undefined;
   let finishAction!: (job: MediaJob) => void;
   const nextAction = () =>
     new Promise<MediaJob>((resolve) => {
@@ -204,8 +221,14 @@ test('media drafts retain edits across settings, generation and ordered job snap
     submitted = structuredClone(draft);
     return { ...job, ...draft, revision: job.revision + 1 } as MediaJob;
   };
+  api.migrateMediaConversation = async (job: MediaJob) => job;
   api.mediaVariations = async () => [];
-  api.mediaJobAction = async (job: MediaJob) => {
+  api.mediaJobAction = async (
+    job: MediaJob,
+    _action: string,
+    options: { promptMessageId?: number; promptExcerpt?: string },
+  ) => {
+    actionOptions = options;
     finishAction(job);
     return { ...job, revision: job.revision + 1, state: 'ready' };
   };
@@ -246,6 +269,11 @@ test('media drafts retain edits across settings, generation and ordered job snap
     );
     dispose = mount();
     controls.get('Saved media workflow')!.onChange!('b');
+    assert.equal(
+      parsePageLocation(location.hash).media!.workflowId,
+      'b',
+      'A new editor keeps its workflow in the reload URL before creating a job',
+    );
     controls.get('media-instruction')!.onInput!({
       currentTarget: { value: 'Animate the selected image' },
     });
@@ -328,7 +356,12 @@ test('media drafts retain edits across settings, generation and ordered job snap
         inputs: (values.inputs ?? []).map((input) => ({ ...input, prompt: '' })),
       });
     };
-    api.mediaJobAction = async (job: MediaJob) => {
+    api.mediaJobAction = async (
+      job: MediaJob,
+      _action: string,
+      options: { promptMessageId?: number; promptExcerpt?: string },
+    ) => {
+      actionOptions = options;
       finishAction(job);
       return { ...job, revision: job.revision + 1, state: 'queued', submitted: true };
     };
@@ -498,6 +531,68 @@ test('media drafts retain edits across settings, generation and ordered job snap
     await Promise.resolve();
     dispose();
 
+    setState('settings', 'mediaRendering', 'workflows', [a, b]);
+    const legacy = makeJob(449, { prompt: 'Saved full prompt' });
+    applyMediaJob(legacy);
+    let migrated = false;
+    api.migrateMediaConversation = async (job: MediaJob) => {
+      assert.equal(job.id, legacy.id);
+      assert.equal(job.prompt, 'Saved full prompt');
+      migrated = true;
+      return { ...job, revision: job.revision + 1, draft: { ...job.draft!, conversationId: 776 } };
+    };
+    api.conversation = async (id: number) =>
+      ({ id, title: 'Migrated prompts', promptMode: 'media' }) as Conversation;
+    dialogStack.restore(parsePageLocation('#+/media/job/449'));
+    location.hash = '#+/media/job/449';
+    dispose = mount();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    assert.ok(migrated, 'Opening a saved prompt automatically imports its discussion');
+    assert.equal(state.mediaJobs[449]!.draft!.conversationId, 776);
+    assert.equal(controls.get('prompt-conversation')!.session!.state.selectedId, 776);
+    dispose();
+    api.migrateMediaConversation = async (job: MediaJob) => job;
+
+    const unstarted = makeJob(450);
+    applyMediaJob(unstarted);
+    dialogStack.restore(parsePageLocation('#+/media/job/450'));
+    location.hash = '#+/media/job/450';
+    dispose = mount();
+    controls.get('Saved media workflow')!.onChange!('a');
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      state.mediaJobs[450]!.workflowId,
+      'a',
+      'Changing an existing unstarted draft saves its workflow before starting a conversation',
+    );
+    const reloadPage = parsePageLocation(location.hash);
+    const persisted = JSON.parse(JSON.stringify(state.mediaJobs[450])) as MediaJob;
+    dispose();
+    setState('mediaJobs', 450, undefined!);
+    api.mediaJob = async () => persisted;
+    dialogStack.restore(parsePageLocation('#'));
+    dialogStack.restore(reloadPage);
+    dispose = mount();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      state.mediaJobs[450]!.startedAt,
+      null,
+      'Saving the selection starts no generation',
+    );
+    const afterReload = nextAction();
+    controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
+    assert.equal(
+      (await afterReload).workflowId,
+      'a',
+      'The reopened editor uses the saved workflow',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    dispose();
+    api.mediaJob = async (id: number) => state.mediaJobs[id];
+
     const textResult = makeJob(500, {
       state: 'succeeded',
       textResult: 'Text to add to chat',
@@ -536,6 +631,230 @@ test('media drafts retain edits across settings, generation and ordered job snap
     controls.get('Add to chat')!.onClick!();
     assert.equal(acceptanceCount, 1, 'A saved text variation cannot be added twice');
     dispose();
+
+    const launchJob = makeJob(460);
+    const pendingJob = makeJob(461, {
+      state: 'ready',
+      startedAt: 1,
+      prompt: 'Saved pending prompt',
+      draft: { ...launchJob.draft!, revision: 2, conversationId: 777 },
+    });
+    applyMediaJob(launchJob);
+    applyMediaJob(pendingJob);
+    api.conversation = async (id: number) => ({
+      id,
+      title: 'Prompt conversation',
+      promptMode: 'media',
+      characterId: null,
+      personaId: null,
+      endpointId: null,
+      speakerName: null,
+      scenarioOverride: null,
+      activeLeafId: null,
+      mutationRevision: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const conversations = [...state.conversations];
+    setState('conversations', [...conversations, await api.conversation(777)]);
+    selectConversation(777);
+    assert.equal(state.selectedId, null, 'Media conversations cannot open in the main chat');
+    location.hash = '#777';
+    restoreConversationSelection();
+    assert.equal(state.selectedId, null, 'Initial URL restoration excludes media conversations');
+    assert.equal(parsePageLocation(location.hash).chatId, null);
+    restorePage(parsePageLocation(`#777+/media/job/${pendingJob.id}`));
+    assert.equal(state.selectedId, null, 'History navigation excludes media conversations');
+    assert.equal(parsePageLocation(location.hash).chatId, null);
+    assert.equal(
+      dialogStack.top()!.page.media!.jobId,
+      pendingJob.id,
+      'The media panel remains accessible',
+    );
+    setState('conversations', conversations);
+    for (const launchId of [undefined, launchJob.id]) {
+      dialogStack.restore(parsePageLocation('#'));
+      location.hash = '#';
+      openMediaTool('a', { jobId: launchId });
+      const frame = dialogStack.top()!;
+      dispose = mount();
+      rememberMediaPage({ ...frame.page.media!, jobId: pendingJob.id });
+      dispose();
+      // Hot reload remounts the component inside the retained frame, with its original props.
+      assert.equal(frame.media!.jobId, launchId ?? null);
+      dispose = mount();
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(
+        parsePageLocation(location.hash).media!.jobId,
+        pendingJob.id,
+        'Hot reload keeps the current pending job instead of restoring the launch job',
+      );
+      const session = controls.get('prompt-conversation')!.session!;
+      assert.equal(session.state.selectedId, 777, 'The remounted panel reopens its saved thread');
+      const reply = {
+        id: 7770,
+        conversationId: 777,
+        parentId: null,
+        activeChildId: 7771,
+        role: 'assistant',
+        status: 'done',
+        content: 'Prompt:\n```text\nBlue sky\n```\nExplanation.',
+        reasoning: null,
+        model: null,
+        name: null,
+        genMeta: null,
+        generationKind: 'normal',
+        generationToken: null,
+        media: [],
+        activeImage: 0,
+        imagePending: false,
+        hasImageRender: false,
+        createdAt: 1,
+      } as Message;
+      const later = {
+        ...reply,
+        id: 7771,
+        parentId: reply.id,
+        activeChildId: null,
+        content: 'Later reply',
+      };
+      const tree = {
+        t: 'tree',
+        conversationId: 777,
+        messages: [reply, later],
+        activeLeafId: later.id,
+        mutationRevision: 1,
+      } as const;
+      handleServerEvent(tree);
+      assert.equal(
+        session.state.tree.conversationId,
+        777,
+        'The remounted thread receives its tree',
+      );
+      const directRender = nextAction();
+      controls.get('prompt-conversation')!.renderPrompt!(reply, 'Blue sky');
+      assert.equal((await directRender).prompt, 'Blue sky', 'The reply action renders directly');
+      assert.equal(actionOptions?.promptMessageId, reply.id);
+      assert.equal(actionOptions?.promptExcerpt, 'Blue sky');
+      await Promise.resolve();
+      await Promise.resolve();
+      dispose();
+      dispose = mount();
+      await Promise.resolve();
+      await Promise.resolve();
+      handleServerEvent(tree);
+      const selectedRender = nextAction();
+      controls.get('render-media')!.onClick!();
+      assert.equal((await selectedRender).prompt, 'Blue sky');
+      assert.equal(actionOptions?.promptMessageId, reply.id);
+      assert.equal(
+        actionOptions?.promptExcerpt,
+        'Blue sky',
+        'The selected excerpt survives remount and reaches Generate',
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      if (launchId === undefined) {
+        api.restartMediaConversation = async (job: MediaJob, body: Record<string, unknown>) => {
+          assert.equal(body.expectedPromptLeafId, later.id);
+          assert.equal(body.expectedPromptRevision, tree.mutationRevision);
+          applyMediaJob({ ...job, revision: job.revision + 1, prompt: '' });
+          return api.conversation(777);
+        };
+        await controls.get('Restart prompt conversation')!.onClick!();
+        assert.equal(frame.mediaPromptSelection(), null, 'Restart clears the selected old reply');
+        assert.equal(
+          controls.get('prompt-conversation')!.session!.state.tree.conversationId,
+          null,
+          'Restart discards the local tree and resubscribes even when the conversation ID is unchanged',
+        );
+      }
+      dispose();
+    }
+
+    const savedReply = {
+      id: 7780,
+      conversationId: 778,
+      parentId: null,
+      activeChildId: 7781,
+      role: 'assistant',
+      status: 'done',
+      content: 'Prompt:\n> ```text\n> Blue sky\n> Still camera\n> ```\nExplanation.',
+      reasoning: null,
+      model: null,
+      name: null,
+      genMeta: null,
+      generationKind: 'normal',
+      generationToken: null,
+      media: [],
+      activeImage: 0,
+      imagePending: false,
+      hasImageRender: false,
+      createdAt: 1,
+    } as Message;
+    const laterReply = {
+      ...savedReply,
+      id: 7781,
+      parentId: savedReply.id,
+      activeChildId: null,
+      content: 'Later reply',
+    };
+    const savedTree = {
+      t: 'tree',
+      conversationId: 778,
+      messages: [savedReply, laterReply],
+      activeLeafId: laterReply.id,
+      mutationRevision: 1,
+    } as const;
+    for (const excerpt of [undefined, 'Blue sky\nStill camera']) {
+      const saved = makeJob(480, {
+        state: 'succeeded',
+        submitted: true,
+        startedAt: 1,
+        prompt: excerpt ?? savedReply.content,
+        promptMessageId: savedReply.id,
+        draft: { ...makeJob(480).draft!, conversationId: 778 },
+      });
+      // A fresh frame has no memory of the earlier selection; the job may also need fetching.
+      dialogStack.restore(parsePageLocation('#'));
+      setState('mediaJobs', saved.id, undefined!);
+      api.mediaJob = async (id: number) => (id === saved.id ? saved : state.mediaJobs[id]);
+      dialogStack.restore(parsePageLocation('#+/media/job/480'));
+      location.hash = '#+/media/job/480';
+      dispose = mount();
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      handleServerEvent(savedTree);
+      const restoredRender = nextAction();
+      controls.get('render-media')!.onClick!();
+      assert.equal(
+        (await restoredRender).prompt,
+        saved.prompt,
+        'A cold reopen renders the saved prompt instead of the newer reply',
+      );
+      assert.equal(actionOptions?.promptMessageId, savedReply.id);
+      assert.equal(actionOptions?.promptExcerpt, excerpt);
+      await Promise.resolve();
+      await Promise.resolve();
+      controls.get('Use latest reply')!.onClick!();
+      dispose();
+      dispose = mount();
+      await Promise.resolve();
+      await Promise.resolve();
+      handleServerEvent(savedTree);
+      const latestRender = nextAction();
+      controls.get('render-media')!.onClick!();
+      assert.equal(
+        (await latestRender).prompt,
+        laterReply.content,
+        'An explicit Use latest reply choice survives hot reload',
+      );
+      assert.equal(actionOptions?.promptMessageId, laterReply.id);
+      await Promise.resolve();
+      await Promise.resolve();
+      dispose();
+    }
+    api.mediaJob = async (id: number) => state.mediaJobs[id];
 
     const avatarPath = '../../client/src/images/AvatarGenerateModal.tsx';
     const { default: AvatarGenerateModal } = await import(avatarPath);

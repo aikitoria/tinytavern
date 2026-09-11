@@ -16,12 +16,13 @@ import {
   mediaWorkflowError,
   compileMediaWorkflow,
   validateWorkflowValues,
+  isMediaPromptExcerpt,
   type MediaJobInput,
   type MediaJobInputSnapshot,
   type MediaWorkflow,
   type StandalonePromptTemplate,
 } from '@tinytavern/shared';
-import { stmt, toConversation, transaction } from '../db/db.ts';
+import { stmt, toConversation, transaction, deleteConversationRows } from '../db/db.ts';
 import { HttpError } from '../http/router.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { optionalNullableId, optionalNullableString, optionalString } from '../http/validation.ts';
@@ -30,14 +31,18 @@ import { requireExpectedActiveLeaf } from '../conversations/concurrency.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import { broadcast, invalidate } from '../realtime/events.ts';
 import { broadcastTree } from '../realtime/sync.ts';
-import { deleteImageFiles } from './images.ts';
+import { deleteImageFiles, collectConversationImages } from './images.ts';
 import {
   appendChatMessage,
   buildChatMessages,
   expandTemplate,
   type ChatMessage,
 } from '../generation/prompt.ts';
-import { hasActiveNonToolGeneration, resolveEndpoint } from '../generation/generation.ts';
+import {
+  hasActiveNonToolGeneration,
+  resolveEndpoint,
+  stopConversationGenerations,
+} from '../generation/generation.ts';
 import { discardSpeculativeSwipes } from '../generation/speculation.ts';
 import {
   mediaJobDto,
@@ -122,7 +127,7 @@ function parseInputs(
   });
 }
 
-function resolveJobConfiguration(
+export function resolveJobConfiguration(
   workflowId: string | null,
   configurationJson: string | null,
 ): { configuration: MediaJobConfiguration; workflow: MediaWorkflow; captured: boolean } | null {
@@ -506,8 +511,8 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
   );
 }
 
-/** Snapshot the exact text request without persisting endpoint credentials. */
-function prepareContext(
+/** Expand the media template independently of endpoint availability. */
+export function preparePromptContext(
   row: MediaJobRow,
   configuration: MediaJobConfiguration,
   workflow: MediaWorkflow,
@@ -585,14 +590,23 @@ function prepareContext(
     }
     messages.push({ role: 'user', content: capturedTemplate.userMessage });
   }
-  const endpoint = resolveEndpoint(conversation);
-  const { apiKey: _credential, ...capturedEndpoint } = endpoint;
   const capturedContext: MediaPromptContext = { messages, template: capturedTemplate };
   return {
     context_json: JSON.stringify(capturedContext),
-    endpoint_json: JSON.stringify(capturedEndpoint),
     preset_id: presetId ?? null,
   };
+}
+
+/** Snapshot the exact text request without persisting endpoint credentials. */
+export function prepareContext(
+  row: MediaJobRow,
+  configuration: MediaJobConfiguration,
+  workflow: MediaWorkflow,
+) {
+  const prepared = preparePromptContext(row, configuration, workflow);
+  const endpoint = resolveEndpoint(configuration.avatarContext ? null : conversationForJob(row));
+  const { apiKey: _credential, ...capturedEndpoint } = endpoint;
+  return { ...prepared, endpoint_json: JSON.stringify(capturedEndpoint) };
 }
 
 /** All branch checks and message creation happen before asynchronous execution. */
@@ -631,6 +645,33 @@ function attachToolMessage(row: MediaJobRow, body: JobBody, preparing: boolean):
 
 export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean) {
   requireEditable(row);
+  let promptMessageId: number | null = null;
+  if (!prepare && body.promptMessageId !== undefined) {
+    const draft = row.draft_id ? mediaDraft(row.draft_id) : null;
+    if (!draft?.conversationId || !Number.isSafeInteger(body.promptMessageId))
+      throw new HttpError(400, 'Invalid prompt message');
+    requireExpectedActiveLeaf(
+      draft.conversationId,
+      body.expectedPromptLeafId as number | null | undefined,
+      body.expectedPromptRevision as number | undefined,
+    );
+    const message = stmt('SELECT * FROM messages WHERE id = ? AND conversation_id = ?').get(
+      body.promptMessageId as number,
+      draft.conversationId,
+    );
+    if (
+      !message ||
+      message.role !== 'assistant' ||
+      !['done', 'stopped'].includes(String(message.status)) ||
+      !String(message.content).trim()
+    )
+      throw new HttpError(409, 'Choose a completed prompt reply');
+    promptMessageId = Number(message.id);
+    const excerpt = optionalString(body, 'promptExcerpt');
+    if (excerpt !== undefined && !isMediaPromptExcerpt(String(message.content), excerpt))
+      throw new HttpError(409, 'The selected prompt changed; select it again');
+    row = { ...row, prompt: excerpt ?? String(message.content) };
+  }
   const inputs = parseInputs(JSON.parse(row.inputs_json));
   const resolved = resolveJobConfiguration(row.workflow_id, row.configuration_json);
   if (!resolved) {
@@ -679,6 +720,8 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
           .all(row.message_id)
           .map((input) => String(input.path));
   transaction(() => {
+    if (!prepare)
+      stmt('UPDATE media_jobs SET prompt_message_id = ? WHERE id = ?').run(promptMessageId, row.id);
     const messageId = attachToolMessage(row, body, prepare);
     if (messageId !== null) {
       const recipeId = saveMediaRecipe(configuration, JSON.parse(row.inputs_json), row.prompt, {
@@ -817,7 +860,16 @@ export function deleteMediaJob(row: MediaJobRow): void {
     if (row.draft_id) {
       stmt('UPDATE media_drafts SET revision = revision + 1 WHERE id = ?').run(row.draft_id);
     }
+    const conversationId = row.draft_id ? mediaDraft(row.draft_id).conversationId : null;
     deleteMediaJobRecord(row.id);
+    if (
+      conversationId != null &&
+      !stmt('SELECT 1 FROM media_drafts WHERE conversation_id = ?').get(conversationId)
+    ) {
+      stopConversationGenerations(conversationId);
+      paths.push(...collectConversationImages(conversationId));
+      deleteConversationRows([conversationId]);
+    }
   });
   mediaLive.delete(row.id);
   deleteImageFiles(paths);

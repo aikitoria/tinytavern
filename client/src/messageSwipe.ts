@@ -1,20 +1,21 @@
 import type { Message } from '@tinytavern/shared';
-import { imageMessage } from './images/imageGeneration.tsx';
-import { streamingMessage, swipeToSibling } from './state/store.ts';
+import type { ConversationSession } from './state/conversationSession.ts';
+import { createImageMessage } from './images/imageGeneration.tsx';
 
-export function messageSupportsSwipe(message: Message): boolean {
-  return message.role === 'assistant' || message.role === 'user' || imageMessage.matches(message);
-}
-
-/** Forward swipes can stop an assistant stream and start its next sibling;
- * image messages handle their own alternatives. */
-export function swipeMessage(message: Message, dir: 1 | -1): boolean {
-  if (imageMessage.matches(message)) {
-    imageMessage.swipe(message, dir);
+export function createMessageSwipe(session: ConversationSession, active: () => boolean) {
+  const imageMessage = createImageMessage(session, active);
+  function messageSupportsSwipe(message: Message): boolean {
+    return message.role === 'assistant' || message.role === 'user' || imageMessage.matches(message);
+  }
+  function swipeMessage(message: Message, dir: 1 | -1): boolean {
+    if (imageMessage.matches(message)) {
+      imageMessage.swipe(message, dir);
+      return true;
+    }
+    if (message.role !== 'assistant' && message.role !== 'user') return false;
+    if (dir === -1 && (message.status === 'streaming' || session.streamingMessage())) return false;
+    void session.swipeToSibling(message, dir);
     return true;
   }
-  if (message.role !== 'assistant' && message.role !== 'user') return false;
-  if (dir === -1 && (message.status === 'streaming' || streamingMessage())) return false;
-  void swipeToSibling(message, dir);
-  return true;
+  return { imageMessage, messageSupportsSwipe, swipeMessage };
 }

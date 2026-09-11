@@ -245,6 +245,10 @@ export const api = {
     action: 'prepare' | 'render' | 'cancel' | 'retry-retrieval',
     options: {
       autoRender?: boolean;
+      promptMessageId?: number;
+      promptExcerpt?: string;
+      expectedPromptLeafId?: number | null;
+      expectedPromptRevision?: number;
       expectedActiveLeafId?: number | null;
       expectedMutationRevision?: number;
     } = {},
@@ -374,6 +378,25 @@ export const api = {
       },
       expectedRevision,
     ),
+  conversation: (id: number) => request<Conversation>('GET', `/api/conversations/${id}`),
+  startMediaConversation: (job: MediaJob, body: Record<string, unknown>) =>
+    request<Conversation>('POST', `/api/media/jobs/${job.id}/conversation`, {
+      ...body,
+      expectedRevision: job.revision,
+      expectedDraftRevision: job.draft?.revision,
+    }),
+  migrateMediaConversation: (job: MediaJob, body: Record<string, unknown>) =>
+    request<MediaJob>('POST', `/api/media/jobs/${job.id}/conversation/migrate`, {
+      ...body,
+      expectedRevision: job.revision,
+      expectedDraftRevision: job.draft?.revision,
+    }),
+  restartMediaConversation: (job: MediaJob, body: Record<string, unknown>) =>
+    request<Conversation>('POST', `/api/media/jobs/${job.id}/conversation/restart`, {
+      ...body,
+      expectedRevision: job.revision,
+      expectedDraftRevision: job.draft?.revision,
+    }),
   createConversation: (characterId: number | null) =>
     request<Conversation>('POST', '/api/conversations', { characterId }),
   patchConversation: mutation<Conversation, Partial<Conversation>>('conversations', '', 'PATCH'),

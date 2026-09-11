@@ -1,13 +1,16 @@
+import { useConversationView } from './ConversationContext.tsx';
 import { faArrowDown, faArrowUp, faXmark } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import { Show, createSignal } from 'solid-js';
 import { api } from '../../state/api.ts';
 import { confirmDelete } from '../../state/confirm.ts';
-import { clearMessageSelection, selectedMessageRange } from '../../state/messageSelection.ts';
-import { navigateTree, state } from '../../state/store.ts';
+
 import Modal from '../ui/Modal.tsx';
 
 export default function MessageSelectionBar() {
+  const view = useConversationView();
+  const { state, navigateTree, clearMessageSelection, selectedMessageRange } = view.session;
+
   const [moveOpen, setMoveOpen] = createSignal(false);
   const [targetPosition, setTargetPosition] = createSignal(1);
   const range = selectedMessageRange;

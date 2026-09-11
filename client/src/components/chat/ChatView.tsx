@@ -1,12 +1,17 @@
+import { useConversationView } from './ConversationContext.tsx';
 import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
-import { activePath, newConversation, selectedConversation, state } from '../../state/store.ts';
-import { swipeMessage } from '../../messageSwipe.ts';
+import { newConversation } from '../../state/store.ts';
+import { createMessageSwipe } from '../../messageSwipe.ts';
 import { createChatScroll } from '../../chatScroll.ts';
 import MessageNode from './MessageNode.tsx';
 import TraceView from './TraceView.tsx';
 import TreeMap from '../tree/TreeMap.tsx';
 
 export default function ChatView(props: { active?: boolean; pendingMessage?: string }) {
+  const view = useConversationView();
+  const { activePath, selectedConversation, state } = view.session;
+  const { swipeMessage } = createMessageSwipe(view.session, view.active);
+
   let scroller!: HTMLDivElement;
   let scroll!: ReturnType<typeof createChatScroll>;
   let lastTouchX = 0;
@@ -45,11 +50,18 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
   };
 
   const onKey = (event: KeyboardEvent) => {
+    if (!view.active() || props.active === false) return;
+    if (
+      view.embedded &&
+      event.target instanceof Element &&
+      !scroller.parentElement?.contains(event.target)
+    )
+      return;
     if (
       !event.defaultPrevented &&
       !event.metaKey &&
       !event.altKey &&
-      state.modal === null &&
+      view.active() &&
       state.viewMode !== 'map' &&
       event.target instanceof HTMLElement &&
       (event.target === document.body || scroller.contains(event.target)) &&
@@ -63,7 +75,7 @@ export default function ChatView(props: { active?: boolean; pendingMessage?: str
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.repeat) return;
     if (
-      state.modal !== null ||
+      !view.active() ||
       state.viewMode !== 'chat' ||
       state.selectedId == null ||
       state.treeNavigationPending

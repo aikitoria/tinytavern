@@ -44,6 +44,7 @@ export interface MediaPromptContext {
 }
 export type CapturedMediaEndpoint = Omit<Endpoint, 'apiKey'>;
 export interface MediaJobRow {
+  prompt_message_id: number | null;
   id: number;
   draft_id: number | null;
   recipe_id: number | null;
@@ -141,6 +142,7 @@ export function mediaDraft(id: number): MediaDraft {
   return {
     id,
     revision: Number(row.revision),
+    conversationId: row.conversation_id == null ? null : Number(row.conversation_id),
     state: row.state as MediaDraft['state'],
     selectedAssetId: row.selected_asset_id === null ? null : Number(row.selected_asset_id),
     savedAssetIds: stmt(`SELECT DISTINCT output.asset_id FROM media_jobs j
@@ -213,6 +215,7 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     characterIds: configuration?.characterIds ?? captureMediaCharacters(row, configuration ?? {}),
     workflowValues: configuration?.workflowValues ?? {},
     id: row.id,
+    promptMessageId: row.prompt_message_id,
     draft: row.draft_id === null ? null : mediaDraft(row.draft_id),
     revision: row.revision,
     workflowId: row.workflow_id,

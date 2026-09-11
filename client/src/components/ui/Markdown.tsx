@@ -53,6 +53,13 @@ const CODE_ACTIONS =
   '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button>' +
   '<button type="button" class="icon-btn code-more-btn" title="More code actions" aria-label="More code actions" aria-haspopup="menu" aria-expanded="false"></button>' +
   '</div>';
+const CODE_RENDER_ACTIONS =
+  '<div class="code-actions">' +
+  '<button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button>' +
+  '<button type="button" class="code-render-prompt-btn" title="Render this code block">Render</button>' +
+  '</div>';
+const CODE_COPY_ACTIONS =
+  '<div class="code-actions"><button type="button" class="icon-btn code-copy-btn" title="Copy code" aria-label="Copy code"></button></div>';
 const copyIconTemplates = new Map<IconDefinition, SVGSVGElement>();
 
 // Only trusted package data becomes SVG, after sanitizing the message HTML.
@@ -85,7 +92,7 @@ let hasCodeBlocks = false;
 // to avoid reparenting DOM each frame.
 markdownRenderer.code = (token) => {
   hasCodeBlocks = true;
-  return `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}${CODE_ACTIONS}</div>\n`;
+  return `<div class="code-block-wrap">${Renderer.prototype.code.call(markdownRenderer, token).replace(/\n$/, '')}</div>\n`;
 };
 markdownRenderer.html = (token) => {
   // Multiline HTML survives instruction filtering; decorate after sanitizing its nesting.
@@ -188,6 +195,10 @@ export default function Markdown(props: {
   content: string;
   streaming: boolean;
   conversationId?: number;
+  renderPrompt?: (text: string) => void;
+  selectedPromptText?: string;
+  promptSelectionDisabled?: boolean;
+  showMediaMenu?: boolean;
 }) {
   const [html, setHtml] = createSignal('');
   const [menuAnchor, setMenuAnchor] = createSignal<HTMLButtonElement>();
@@ -208,7 +219,17 @@ export default function Markdown(props: {
         wrap.className = 'code-block-wrap';
         pre.replaceWith(wrap);
         wrap.append(pre);
-        wrap.insertAdjacentHTML('beforeend', CODE_ACTIONS);
+      }
+      // Fenced blocks already have a wrapper; both paths need this view's actions.
+      if (!wrap.querySelector(':scope > .code-actions')) {
+        wrap.insertAdjacentHTML(
+          'beforeend',
+          props.renderPrompt
+            ? CODE_RENDER_ACTIONS
+            : props.showMediaMenu === false
+              ? CODE_COPY_ACTIONS
+              : CODE_ACTIONS,
+        );
       }
       const button = wrap.querySelector<HTMLButtonElement>(
         ':scope > .code-actions > .code-copy-btn:empty',
@@ -218,6 +239,13 @@ export default function Markdown(props: {
         ':scope > .code-actions > .code-more-btn:empty',
       );
       if (more) setCopyIcon(more, faEllipsis);
+      const use = wrap.querySelector<HTMLButtonElement>('.code-render-prompt-btn');
+      if (use) {
+        const text = (pre.querySelector('code')!.textContent ?? '').replace(/\n$/, '');
+        const selected = props.selectedPromptText === text;
+        use.disabled = props.streaming || props.promptSelectionDisabled === true || !text.trim();
+        wrap.classList.toggle('code-prompt-selected', selected);
+      }
     });
   };
 
@@ -278,6 +306,13 @@ export default function Markdown(props: {
 
   const codeAction = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
+    const use = event.target.closest<HTMLButtonElement>('.code-render-prompt-btn');
+    if (use && container?.contains(use)) {
+      const code = use.closest('.code-block-wrap')?.querySelector('code');
+      if (code && !use.disabled && !props.streaming && !props.promptSelectionDisabled)
+        props.renderPrompt?.((code.textContent ?? '').replace(/\n$/, ''));
+      return;
+    }
     const button = event.target.closest<HTMLButtonElement>('.code-more-btn');
     if (!button || !container?.contains(button)) {
       void copyCode(event);
@@ -293,6 +328,13 @@ export default function Markdown(props: {
       setMenuAnchor(button);
     }
   };
+
+  createEffect(() => {
+    void props.selectedPromptText;
+    void props.promptSelectionDisabled;
+    void props.streaming;
+    if (props.renderPrompt) queueMicrotask(decorateCodeBlocks);
+  });
 
   createEffect(() => {
     void props.content; // track

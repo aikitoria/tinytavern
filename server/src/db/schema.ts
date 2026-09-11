@@ -1,5 +1,5 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 83;
+export const SCHEMA_VERSION = 84;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
@@ -101,7 +101,8 @@ CREATE TABLE conversations (
   speaker_name TEXT,
   mutation_revision INTEGER NOT NULL DEFAULT 0,
   scenario_override TEXT,
-  auto_title_pending INTEGER NOT NULL DEFAULT 0
+  auto_title_pending INTEGER NOT NULL DEFAULT 0,
+  prompt_context_json TEXT
 );
 
 CREATE TABLE messages (
@@ -212,6 +213,7 @@ CREATE TABLE media_owners (
 );
 
 CREATE TABLE media_jobs (
+  prompt_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'draft',
@@ -261,6 +263,7 @@ CREATE TABLE media_remote_files (
 );
 
 CREATE TABLE media_drafts (
+  conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open', 'accepted', 'discarding')),
@@ -315,6 +318,9 @@ CREATE INDEX media_jobs_active ON media_jobs(updated_at, id)
   WHERE state NOT IN ('draft', 'ready', 'succeeded', 'failed', 'cancelled');
 CREATE INDEX media_jobs_history ON media_jobs(created_at DESC, id DESC);
 CREATE INDEX media_jobs_state_deadline ON media_jobs(state, retention_deadline);
+CREATE UNIQUE INDEX media_drafts_conversation ON media_drafts(conversation_id) WHERE conversation_id IS NOT NULL;
+CREATE INDEX media_jobs_prompt_message ON media_jobs(prompt_message_id) WHERE prompt_message_id IS NOT NULL;
+
 CREATE INDEX media_jobs_conversation ON media_jobs(context_conversation_id) WHERE context_conversation_id IS NOT NULL;
 CREATE INDEX media_drafts_asset ON media_drafts(selected_asset_id) WHERE selected_asset_id IS NOT NULL;
 

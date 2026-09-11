@@ -1,3 +1,4 @@
+import type { ConversationSession } from '../state/conversationSession.ts';
 import SettingsSection from '../components/settings/SettingsSection.tsx';
 import SettingsTransferButtons from '../components/settings/SettingsTransferButtons.tsx';
 import {
@@ -35,7 +36,6 @@ import {
 import type { ComposerCommand } from '../composerCommands.ts';
 import { api } from '../state/api.ts';
 import {
-  activePath,
   applyMediaJob,
   mediaJobsByMessage,
   navigateTree,
@@ -389,364 +389,373 @@ export function ImageGenerationSettingsFields(props: {
   );
 }
 
-const imageSwipeBusy = new Set<number>();
+export function createImageMessage(session: ConversationSession, active: () => boolean) {
+  const imageSwipeBusy = new Set<number>();
 
-const imageOnActivePath = (message: Message) =>
-  activePath().some((active) => active.id === message.id);
+  const imageOnActivePath = (message: Message) =>
+    session.activePath().some((active) => active.id === message.id);
 
-const selectedImageAsset = (message: Message) =>
-  message.media[Math.min(message.activeImage, message.media.length - 1)];
+  const selectedImageAsset = (message: Message) =>
+    message.media[Math.min(message.activeImage, message.media.length - 1)];
 
-const canRenderImage = (message: Message) =>
-  !state.treeNavigationPending &&
-  imageOnActivePath(message) &&
-  !message.imagePending &&
-  !message.media.some((asset) => asset.kind === 'video') &&
-  (message.hasImageRender ||
-    selectedImageAsset(message)?.recipeId != null ||
-    (!message.media.some((asset) => asset.recipeId !== null) && activeImageRenderConfig() != null));
+  const canRenderImage = (message: Message) =>
+    !session.state.treeNavigationPending &&
+    imageOnActivePath(message) &&
+    !message.imagePending &&
+    !message.media.some((asset) => asset.kind === 'video') &&
+    (message.hasImageRender ||
+      selectedImageAsset(message)?.recipeId != null ||
+      (!message.media.some((asset) => asset.recipeId !== null) &&
+        activeImageRenderConfig() != null));
 
-/** Shared by header buttons and ChatView's Left/Right shortcut. */
-async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
-  const job = mediaJobsByMessage().get(message.id);
-  if (message.status === 'streaming' && job) {
-    if (dir === 1) {
-      try {
-        applyMediaJob(await api.mediaJobAction(job, 'cancel'));
-      } catch (err) {
-        toast(errorMessage(err));
+  /** Shared by header buttons and ChatView's Left/Right shortcut. */
+  async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
+    const job = mediaJobsByMessage().get(message.id);
+    if (message.status === 'streaming' && job) {
+      if (dir === 1) {
+        try {
+          applyMediaJob(await api.mediaJobAction(job, 'cancel'));
+        } catch (err) {
+          toast(errorMessage(err));
+        }
       }
-    }
-    return;
-  }
-  // Swiping forward skips this prompt; stopping clears imagePending to prevent a partial render.
-  if (message.status === 'streaming') {
-    if (
-      dir !== 1 ||
-      message.generationToken == null ||
-      imageSwipeBusy.has(message.id) ||
-      state.treeNavigationPending
-    )
       return;
-    imageSwipeBusy.add(message.id);
-    try {
-      await api.stopGeneration(message.id, message.generationToken);
-    } catch (err) {
-      toast(errorMessage(err));
-    } finally {
-      imageSwipeBusy.delete(message.id);
     }
-    return;
-  }
-  const activeImage = Math.min(message.activeImage, message.media.length - 1);
-  const index = activeImage + dir;
-  if (index < 0 || imageSwipeBusy.has(message.id) || state.treeNavigationPending) return;
-  imageSwipeBusy.add(message.id);
-  try {
-    if (index >= message.media.length) {
-      if (!canRenderImage(message)) return;
-      await navigateTree(() =>
-        api.renderImage(
-          message.id,
-          state.tree,
-          message.hasImageRender || selectedImageAsset(message)?.recipeId
-            ? undefined
-            : activeImageRenderConfig(),
-        ),
-      );
-    } else {
-      if (!imageOnActivePath(message)) return;
-      await navigateTree(() => api.setActiveImage(message.id, state.tree, { index }));
-    }
-  } finally {
-    imageSwipeBusy.delete(message.id);
-  }
-}
-
-export const imageMessage = {
-  matches: (message: Message) =>
-    message.role === 'tool' &&
-    (message.media.length > 0 ||
-      message.imagePending ||
-      message.hasImageRender ||
-      message.name === 'Image prompt' ||
-      message.name === 'Media prompt'),
-  currentImageConfig: (message: Message) =>
-    message.hasImageRender || selectedImageAsset(message)?.recipeId
-      ? undefined
-      : activeImageRenderConfig(),
-  swipe: (message: Message, dir: 1 | -1) => {
-    void swipeImage(message, dir);
-  },
-  canDeleteSwipe: (message: Message) =>
-    message.media.length > 1 && !message.imagePending && imageOnActivePath(message),
-  deleteSwipe: (message: Message) =>
-    api.deleteImage(message.id, state.tree, {
-      index: Math.min(message.activeImage, message.media.length - 1),
-    }),
-  create: (message: () => Message, ctx: { streaming: () => boolean; inMap?: () => boolean }) => {
-    const [showPrompt, setShowPrompt] = createSignal(false);
-    const [viewerOpen, setViewerOpen] = createSignal(false);
-    const [savingToGallery, setSavingToGallery] = createSignal(false);
-    const media = () => message().media;
-    const activeImage = () => Math.min(message().activeImage, media().length - 1);
-    const currentAsset = () => media()[activeImage()];
-    const currentImage = () => currentAsset()?.url;
-    const currentVideo = () => (currentAsset()?.kind === 'video' ? currentAsset() : undefined);
-    const mediaJob = () => mediaJobsByMessage().get(message().id);
-    const renderProgress = () => mediaJob()?.progress;
-    const livePreview = () => (message().imagePending ? renderProgress()?.preview : undefined);
-    const liveVideo = createMemo(() => {
-      const preview = message().imagePending ? renderProgress()?.videoPreview : undefined;
-      return preview && Object.values(preview.frames).some(Boolean) ? preview : undefined;
-    });
-    const displayedImage = () => (currentVideo() ? currentVideo()?.thumbnail : currentImage());
-    // Collapse the prompt on the first preview to keep the render in focus.
-    const promptCollapsed = () =>
-      media().length > 0 || livePreview() != null || liveVideo() != null;
-    const onActivePath = () => activePath().some((active) => active.id === message().id);
-    const canRender = () => canRenderImage(message());
-    const savedItem = () => {
-      const image = currentImage();
-      return image
-        ? state.gallery.find(
-            (item) => item.sourceMessageId === message().id && item.sourceImage === image,
-          )
-        : undefined;
-    };
-    const saveToGallery = async () => {
-      if (savedItem()) {
-        openModal('gallery');
+    // Swiping forward skips this prompt; stopping clears imagePending to prevent a partial render.
+    if (message.status === 'streaming') {
+      if (
+        dir !== 1 ||
+        message.generationToken == null ||
+        imageSwipeBusy.has(message.id) ||
+        session.state.treeNavigationPending
+      )
         return;
-      }
-      if (!currentImage() || savingToGallery()) return;
-      setSavingToGallery(true);
+      imageSwipeBusy.add(message.id);
       try {
-        const result = await api.saveGalleryImage(message().id, activeImage());
-        if (result.created) toast('Saved image to gallery.', 'success');
-        else openModal('gallery');
+        await api.stopGeneration(message.id, message.generationToken);
       } catch (err) {
         toast(errorMessage(err));
       } finally {
-        setSavingToGallery(false);
+        imageSwipeBusy.delete(message.id);
       }
-    };
+      return;
+    }
+    const activeImage = Math.min(message.activeImage, message.media.length - 1);
+    const index = activeImage + dir;
+    if (index < 0 || imageSwipeBusy.has(message.id) || session.state.treeNavigationPending) return;
+    imageSwipeBusy.add(message.id);
+    try {
+      if (index >= message.media.length) {
+        if (!canRenderImage(message)) return;
+        await session.navigateTree(() =>
+          api.renderImage(
+            message.id,
+            session.state.tree,
+            message.hasImageRender || selectedImageAsset(message)?.recipeId
+              ? undefined
+              : activeImageRenderConfig(),
+          ),
+        );
+      } else {
+        if (!imageOnActivePath(message)) return;
+        await session.navigateTree(() =>
+          api.setActiveImage(message.id, session.state.tree, { index }),
+        );
+      }
+    } finally {
+      imageSwipeBusy.delete(message.id);
+    }
+  }
 
-    const Header = () => (
-      <>
-        <PromptGenerationStatus active={ctx.streaming()} content={message().content} />
-        <Show when={promptCollapsed()}>
-          <button
-            class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
-            classList={{ 'icon-btn-active': showPrompt() }}
-            title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
-            aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
-            aria-expanded={showPrompt()}
-            onClick={() => setShowPrompt(!showPrompt())}
-          >
-            <FontAwesomeIcon icon={faFileLines} size={15} />
-          </button>
-        </Show>
-      </>
-    );
+  const imageMessage = {
+    matches: (message: Message) =>
+      message.role === 'tool' &&
+      (message.media.length > 0 ||
+        message.imagePending ||
+        message.hasImageRender ||
+        message.name === 'Image prompt' ||
+        message.name === 'Media prompt'),
+    currentImageConfig: (message: Message) =>
+      message.hasImageRender || selectedImageAsset(message)?.recipeId
+        ? undefined
+        : activeImageRenderConfig(),
+    swipe: (message: Message, dir: 1 | -1) => {
+      void swipeImage(message, dir);
+    },
+    canDeleteSwipe: (message: Message) =>
+      message.media.length > 1 && !message.imagePending && imageOnActivePath(message),
+    deleteSwipe: (message: Message) =>
+      api.deleteImage(message.id, session.state.tree, {
+        index: Math.min(message.activeImage, message.media.length - 1),
+      }),
+    create: (message: () => Message, ctx: { streaming: () => boolean; inMap?: () => boolean }) => {
+      const [showPrompt, setShowPrompt] = createSignal(false);
+      const [viewerOpen, setViewerOpen] = createSignal(false);
+      const [savingToGallery, setSavingToGallery] = createSignal(false);
+      const media = () => message().media;
+      const activeImage = () => Math.min(message().activeImage, media().length - 1);
+      const currentAsset = () => media()[activeImage()];
+      const currentImage = () => currentAsset()?.url;
+      const currentVideo = () => (currentAsset()?.kind === 'video' ? currentAsset() : undefined);
+      const mediaJob = () => mediaJobsByMessage().get(message().id);
+      const renderProgress = () => mediaJob()?.progress;
+      const livePreview = () => (message().imagePending ? renderProgress()?.preview : undefined);
+      const liveVideo = createMemo(() => {
+        const preview = message().imagePending ? renderProgress()?.videoPreview : undefined;
+        return preview && Object.values(preview.frames).some(Boolean) ? preview : undefined;
+      });
+      const displayedImage = () => (currentVideo() ? currentVideo()?.thumbnail : currentImage());
+      // Collapse the prompt on the first preview to keep the render in focus.
+      const promptCollapsed = () =>
+        media().length > 0 || livePreview() != null || liveVideo() != null;
+      const onActivePath = () => session.activePath().some((active) => active.id === message().id);
+      const canRender = () => canRenderImage(message());
+      const savedItem = () => {
+        const image = currentImage();
+        return image
+          ? state.gallery.find(
+              (item) => item.sourceMessageId === message().id && item.sourceImage === image,
+            )
+          : undefined;
+      };
+      const saveToGallery = async () => {
+        if (savedItem()) {
+          openModal('gallery');
+          return;
+        }
+        if (!currentImage() || savingToGallery()) return;
+        setSavingToGallery(true);
+        try {
+          const result = await api.saveGalleryImage(message().id, activeImage());
+          if (result.created) toast('Saved image to gallery.', 'success');
+          else openModal('gallery');
+        } catch (err) {
+          toast(errorMessage(err));
+        } finally {
+          setSavingToGallery(false);
+        }
+      };
 
-    const HeaderTools = () => (
-      <>
-        <Show when={mediaJob()}>
-          {(job) => (
+      const Header = () => (
+        <>
+          <PromptGenerationStatus active={ctx.streaming()} content={message().content} />
+          <Show when={promptCollapsed()}>
+            <button
+              class="icon-btn [&.icon-btn]:w-auto [&.icon-btn]:min-w-0 [&.icon-btn]:cursor-pointer [&.icon-btn]:gap-1 [&>svg]:flex-none [&.icon-btn]:px-[3px]"
+              classList={{ 'icon-btn-active': showPrompt() }}
+              title={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
+              aria-label={showPrompt() ? 'Hide image prompt' : 'Show image prompt'}
+              aria-expanded={showPrompt()}
+              onClick={() => setShowPrompt(!showPrompt())}
+            >
+              <FontAwesomeIcon icon={faFileLines} size={15} />
+            </button>
+          </Show>
+        </>
+      );
+
+      const HeaderTools = () => (
+        <>
+          <Show when={mediaJob()}>
+            {(job) => (
+              <button
+                class="icon-btn"
+                title="Open media job"
+                aria-label="Open media job"
+                onClick={() =>
+                  openMediaTool(job().workflowId, {
+                    jobId: job().id,
+                    conversationId: job().contextConversationId,
+                  })
+                }
+              >
+                <FontAwesomeIcon icon={faArrowUpRightFromSquare} size={12} />
+              </button>
+            )}
+          </Show>
+          <Show when={currentVideo()?.recipeId}>
             <button
               class="icon-btn"
-              title="Open media job"
-              aria-label="Open media job"
-              onClick={() =>
-                openMediaTool(job().workflowId, {
-                  jobId: job().id,
-                  conversationId: job().contextConversationId,
-                })
-              }
-            >
-              <FontAwesomeIcon icon={faArrowUpRightFromSquare} size={12} />
-            </button>
-          )}
-        </Show>
-        <Show when={currentVideo()?.recipeId}>
-          <button
-            class="icon-btn"
-            title="Rerun media"
-            aria-label="Rerun media"
-            onClick={() => {
-              void openMediaRerun(currentAsset()!, message().conversationId).catch((err: unknown) =>
-                toast(errorMessage(err)),
-              );
-            }}
-          >
-            <FontAwesomeIcon icon={faRotateRight} size={12} />
-          </button>
-        </Show>
-        <Show when={message().imagePending && !ctx.streaming()}>
-          <span class="msg-image-pending inline-flex items-center gap-2 whitespace-nowrap text-dim text-caption tabular-nums [&_.img-progress]:w-16">
-            <FontAwesomeIcon
-              icon={faSpinner}
-              size={10}
-              class="spinner inline-block flex-none origin-center size-2.5"
-            />
-            <SamplerProgress
-              progress={renderProgress()}
-              stepsLabel="Step"
-              fallback={<span>Rendering…</span>}
-            />
-          </span>
-        </Show>
-        <Show when={media().length > 0}>
-          <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
-            <Show when={currentAsset()}>
-              {(asset) => (
-                <MediaActions compact asset={asset()} conversationId={message().conversationId} />
-              )}
-            </Show>
-            <button
-              class="icon-btn gallery-save-btn"
-              classList={{ 'icon-btn-active': savedItem() != null }}
-              title={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
-              aria-label={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
-              disabled={savingToGallery()}
-              onClick={() => void saveToGallery()}
-            >
-              <FontAwesomeIcon icon={savedItem() != null ? faImagesSolid : faImages} />
-            </button>
-          </span>
-          <span class="branch-nav gap-0 inline-flex items-center text-dim text-caption touch:[&_.icon-btn]:opacity-0 touch:[&_.icon-btn]:pointer-events-none touch:[&_.icon-btn]:w-5 touch:[&_.icon-btn]:min-w-5 touch:[&_.icon-btn]:h-7 [&_.icon-btn]:w-4.5 [&_.icon-btn]:min-w-4.5 [&_.icon-btn]:h-6 [&_.icon-btn]:text-sm [&_.icon-btn]:opacity-0 [&_.icon-btn]:pointer-events-none [&:focus-within_.icon-btn]:opacity-100 [&:focus-within_.icon-btn]:pointer-events-auto [&:focus-within_.branch-count]:opacity-100 [&:focus-within_.branch-count]:pointer-events-auto">
-            <button
-              class="icon-btn"
-              title="Previous image"
-              aria-label="Previous image"
-              disabled={state.treeNavigationPending || !onActivePath() || activeImage() <= 0}
-              onClick={() => void swipeImage(message(), -1)}
-            >
-              <FontAwesomeIcon icon={faChevronLeft} size={12} />
-            </button>
-            <span
-              class="branch-count px-0.5 min-w-0 whitespace-nowrap text-center touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none"
-              aria-label={`Image ${activeImage() + 1} of ${media().length}`}
-            >
-              {activeImage() + 1}/{media().length}
-            </span>
-            <button
-              class="icon-btn"
-              disabled={
-                state.treeNavigationPending ||
-                !onActivePath() ||
-                (activeImage() >= media().length - 1 && !canRender())
-              }
-              title={
-                activeImage() >= media().length - 1
-                  ? 'Generate another image (same prompt, new seed)'
-                  : 'Next image'
-              }
-              aria-label={
-                activeImage() >= media().length - 1
-                  ? 'Generate another image with a new seed'
-                  : 'Next image'
-              }
-              onClick={() => void swipeImage(message(), 1)}
-            >
-              <FontAwesomeIcon icon={faChevronRight} size={12} />
-            </button>
-          </span>
-        </Show>
-      </>
-    );
-
-    const Body = () => (
-      <>
-        <Show when={message().content && (!promptCollapsed() || showPrompt())}>
-          <div class="msg-content">
-            <Markdown
-              content={message().content}
-              streaming={ctx.streaming()}
-              conversationId={message().conversationId}
-            />
-          </div>
-        </Show>
-        <Switch>
-          <Match when={liveVideo()}>
-            {(preview) => (
-              <div class="msg-image msg-image-live [&>canvas]:max-h-none">
-                <Show
-                  when={!ctx.inMap?.()}
-                  fallback={
-                    <img
-                      class="block w-full"
-                      src={Object.values(preview().frames).find(Boolean)!}
-                      alt="Video rendering preview"
-                      decoding="async"
-                    />
-                  }
-                >
-                  <VideoPreview preview={preview()} active={state.modal === null} />
-                </Show>
-              </div>
-            )}
-          </Match>
-          <Match when={livePreview()}>
-            {(src) => (
-              <img
-                class="msg-image msg-image-live block w-full"
-                src={src()}
-                alt="Image rendering preview"
-                decoding="async"
-              />
-            )}
-          </Match>
-          <Match when={!ctx.inMap?.() && currentVideo()}>
-            {(asset) => (
-              <MediaPlayer
-                asset={asset()}
-                class="msg-image block cursor-zoom-in w-full"
-                active={state.modal === null}
-              />
-            )}
-          </Match>
-          <Match when={displayedImage()}>
-            <CrossfadeImage
-              class="msg-image block cursor-zoom-in w-full"
-              src={displayedImage()!}
-              alt="Generated image"
-              wrapperClass="msg-image-crossfade w-full"
+              title="Rerun media"
+              aria-label="Rerun media"
               onClick={() => {
-                if (!currentVideo() && !ctx.inMap?.()) setViewerOpen(true);
+                void openMediaRerun(currentAsset()!, message().conversationId).catch(
+                  (err: unknown) => toast(errorMessage(err)),
+                );
               }}
-            />
-            <Show when={viewerOpen()}>
-              <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
-            </Show>
-          </Match>
-        </Switch>
-        <Show when={message().genMeta?.imageError && !message().imagePending}>
-          <div class="text-danger border border-solid border-danger py-2 px-3 mt-2 text-sm rounded-sm">
-            Image render failed: {message().genMeta!.imageError}{' '}
-            <Show when={canRender()}>
-              <button onClick={() => void swipeImage(message(), 1)}>Retry</button>
-            </Show>
-          </div>
-        </Show>
-      </>
-    );
+            >
+              <FontAwesomeIcon icon={faRotateRight} size={12} />
+            </button>
+          </Show>
+          <Show when={message().imagePending && !ctx.streaming()}>
+            <span class="msg-image-pending inline-flex items-center gap-2 whitespace-nowrap text-dim text-caption tabular-nums [&_.img-progress]:w-16">
+              <FontAwesomeIcon
+                icon={faSpinner}
+                size={10}
+                class="spinner inline-block flex-none origin-center size-2.5"
+              />
+              <SamplerProgress
+                progress={renderProgress()}
+                stepsLabel="Step"
+                fallback={<span>Rendering…</span>}
+              />
+            </span>
+          </Show>
+          <Show when={media().length > 0}>
+            <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
+              <Show when={currentAsset()}>
+                {(asset) => (
+                  <MediaActions compact asset={asset()} conversationId={message().conversationId} />
+                )}
+              </Show>
+              <button
+                class="icon-btn gallery-save-btn"
+                classList={{ 'icon-btn-active': savedItem() != null }}
+                title={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+                aria-label={savedItem() ? 'Open saved image in gallery' : 'Save image to gallery'}
+                disabled={savingToGallery()}
+                onClick={() => void saveToGallery()}
+              >
+                <FontAwesomeIcon icon={savedItem() != null ? faImagesSolid : faImages} />
+              </button>
+            </span>
+            <span class="branch-nav gap-0 inline-flex items-center text-dim text-caption touch:[&_.icon-btn]:opacity-0 touch:[&_.icon-btn]:pointer-events-none touch:[&_.icon-btn]:w-5 touch:[&_.icon-btn]:min-w-5 touch:[&_.icon-btn]:h-7 [&_.icon-btn]:w-4.5 [&_.icon-btn]:min-w-4.5 [&_.icon-btn]:h-6 [&_.icon-btn]:text-sm [&_.icon-btn]:opacity-0 [&_.icon-btn]:pointer-events-none [&:focus-within_.icon-btn]:opacity-100 [&:focus-within_.icon-btn]:pointer-events-auto [&:focus-within_.branch-count]:opacity-100 [&:focus-within_.branch-count]:pointer-events-auto">
+              <button
+                class="icon-btn"
+                title="Previous image"
+                aria-label="Previous image"
+                disabled={
+                  session.state.treeNavigationPending || !onActivePath() || activeImage() <= 0
+                }
+                onClick={() => void swipeImage(message(), -1)}
+              >
+                <FontAwesomeIcon icon={faChevronLeft} size={12} />
+              </button>
+              <span
+                class="branch-count px-0.5 min-w-0 whitespace-nowrap text-center touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none"
+                aria-label={`Image ${activeImage() + 1} of ${media().length}`}
+              >
+                {activeImage() + 1}/{media().length}
+              </span>
+              <button
+                class="icon-btn"
+                disabled={
+                  session.state.treeNavigationPending ||
+                  !onActivePath() ||
+                  (activeImage() >= media().length - 1 && !canRender())
+                }
+                title={
+                  activeImage() >= media().length - 1
+                    ? 'Generate another image (same prompt, new seed)'
+                    : 'Next image'
+                }
+                aria-label={
+                  activeImage() >= media().length - 1
+                    ? 'Generate another image with a new seed'
+                    : 'Next image'
+                }
+                onClick={() => void swipeImage(message(), 1)}
+              >
+                <FontAwesomeIcon icon={faChevronRight} size={12} />
+              </button>
+            </span>
+          </Show>
+        </>
+      );
 
-    return {
-      RailIcon: () => <FontAwesomeIcon icon={faImage} size={16} />,
-      Header,
-      HeaderTools,
-      Body,
-      hideName: true,
-      fullBleed: () =>
-        displayedImage() != null ||
-        currentVideo() != null ||
-        livePreview() != null ||
-        liveVideo() != null,
-    };
-  },
-};
+      const Body = () => (
+        <>
+          <Show when={message().content && (!promptCollapsed() || showPrompt())}>
+            <div class="msg-content">
+              <Markdown
+                content={message().content}
+                streaming={ctx.streaming()}
+                conversationId={message().conversationId}
+              />
+            </div>
+          </Show>
+          <Switch>
+            <Match when={liveVideo()}>
+              {(preview) => (
+                <div class="msg-image msg-image-live [&>canvas]:max-h-none">
+                  <Show
+                    when={!ctx.inMap?.()}
+                    fallback={
+                      <img
+                        class="block w-full"
+                        src={Object.values(preview().frames).find(Boolean)!}
+                        alt="Video rendering preview"
+                        decoding="async"
+                      />
+                    }
+                  >
+                    <VideoPreview preview={preview()} active={active()} />
+                  </Show>
+                </div>
+              )}
+            </Match>
+            <Match when={livePreview()}>
+              {(src) => (
+                <img
+                  class="msg-image msg-image-live block w-full"
+                  src={src()}
+                  alt="Image rendering preview"
+                  decoding="async"
+                />
+              )}
+            </Match>
+            <Match when={!ctx.inMap?.() && currentVideo()}>
+              {(asset) => (
+                <MediaPlayer
+                  asset={asset()}
+                  class="msg-image block cursor-zoom-in w-full"
+                  active={active()}
+                />
+              )}
+            </Match>
+            <Match when={displayedImage()}>
+              <CrossfadeImage
+                class="msg-image block cursor-zoom-in w-full"
+                src={displayedImage()!}
+                alt="Generated image"
+                wrapperClass="msg-image-crossfade w-full"
+                onClick={() => {
+                  if (!currentVideo() && !ctx.inMap?.()) setViewerOpen(true);
+                }}
+              />
+              <Show when={viewerOpen()}>
+                <ImageViewer src={currentImage()!} onClose={() => setViewerOpen(false)} />
+              </Show>
+            </Match>
+          </Switch>
+          <Show when={message().genMeta?.imageError && !message().imagePending}>
+            <div class="text-danger border border-solid border-danger py-2 px-3 mt-2 text-sm rounded-sm">
+              Image render failed: {message().genMeta!.imageError}{' '}
+              <Show when={canRender()}>
+                <button onClick={() => void swipeImage(message(), 1)}>Retry</button>
+              </Show>
+            </div>
+          </Show>
+        </>
+      );
+
+      return {
+        RailIcon: () => <FontAwesomeIcon icon={faImage} size={16} />,
+        Header,
+        HeaderTools,
+        Body,
+        hideName: true,
+        fullBleed: () =>
+          displayedImage() != null ||
+          currentVideo() != null ||
+          livePreview() != null ||
+          liveVideo() != null,
+      };
+    },
+  };
+
+  return imageMessage;
+}
 
 export const mediaGenerationCommands: ComposerCommand[] = [
   {

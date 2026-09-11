@@ -1,4 +1,4 @@
-import { newRequestId, type MediaJob } from '@tinytavern/shared';
+import { newRequestId, type MediaJob, type MediaPromptSelection } from '@tinytavern/shared';
 import { createSignal, type Accessor } from 'solid-js';
 import type { RestoredMediaInputs } from '../media/restoreInputs.ts';
 import type { MediaToolSession } from '../media/navigation.ts';
@@ -11,6 +11,9 @@ export interface DialogFrame {
   readonly media?: MediaToolSession;
   readonly mediaPreview: Accessor<{ jobId: number; assetId?: number } | undefined>;
   selectMediaPreview(selection: { jobId: number; assetId?: number }): void;
+  // undefined means a fresh editor has not restored its persisted selection yet.
+  readonly mediaPromptSelection: Accessor<MediaPromptSelection | null | undefined>;
+  selectMediaPrompt(selection: MediaPromptSelection | null): void;
 }
 
 let nextFrameId = 0;
@@ -26,11 +29,14 @@ function createFrame(
   const id = nextDialogId();
   const media = page.media;
   const [mediaPreview, selectMediaPreview] = createSignal<{ jobId: number; assetId?: number }>();
+  const [mediaPromptSelection, selectMediaPrompt] = createSignal<MediaPromptSelection | null>();
   return {
     id,
     page,
     mediaPreview,
     selectMediaPreview,
+    mediaPromptSelection,
+    selectMediaPrompt,
     media:
       session ??
       (media

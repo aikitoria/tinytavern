@@ -2,6 +2,19 @@ import type { ClientCommand, ServerEvent } from '@tinytavern/shared';
 
 let sock: WebSocket | null = null;
 let currentSub: number | null = null;
+const extraSubscriptions = new Map<object, number>();
+function sendSubscriptions(resync?: number): void {
+  if (!extraSubscriptions.size) {
+    send({ sub: currentSub });
+    return;
+  }
+  send({
+    subs: [
+      ...new Set([...(currentSub === null ? [] : [currentSub]), ...extraSubscriptions.values()]),
+    ],
+    resync,
+  });
+}
 let retryDelay = 500;
 let started = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,7 +73,8 @@ function connect(): void {
     onStatus?.(true);
     // Resync: state may have changed while disconnected.
     onOpen?.();
-    if (currentSub != null) send({ sub: currentSub });
+    // Reconnect restores every mounted session; server subscriptions start empty.
+    if (currentSub !== null || extraSubscriptions.size) sendSubscriptions();
   };
   ws.onmessage = (event) => {
     if (sock !== ws) return;
@@ -149,5 +163,12 @@ function send(cmd: ClientCommand): void {
 
 export function subscribe(conversationId: number | null): void {
   currentSub = conversationId;
-  send({ sub: conversationId });
+  sendSubscriptions(conversationId ?? undefined);
+}
+
+/** Independent view ownership, sharing one socket and deduplicated server subscriptions. */
+export function watchConversation(owner: object, id: number | null): void {
+  if (id === null) extraSubscriptions.delete(owner);
+  else extraSubscriptions.set(owner, id);
+  sendSubscriptions(id ?? undefined);
 }

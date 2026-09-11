@@ -177,6 +177,8 @@ export function exportPortableConversation(conversationId: number): PortableConv
     Record<string, unknown> | undefined;
   if (!convRow) throw new HttpError(404, `conversation ${conversationId} not found`);
   const conv = toConversation(convRow);
+  if (conv.promptMode === 'media')
+    throw new HttpError(409, 'Media conversations belong to their draft and cannot be exported');
   const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
     conversationId,
   ) as unknown as MessageRow[];
@@ -324,6 +326,8 @@ function parsePortableConversation(raw: unknown): {
   if (root.version !== VERSION)
     throw new HttpError(400, `unsupported export version: ${String(root.version)}`);
   const sourceConversation = object(root.conversation, 'conversation');
+  if (sourceConversation.promptContext != null)
+    throw new HttpError(400, 'Media conversations cannot be imported independently of their draft');
   const title = string(sourceConversation.title, 'conversation.title');
   const conversation: TransferConversation = {
     title,

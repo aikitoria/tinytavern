@@ -150,6 +150,22 @@ databaseCase('chat prompt', async () => {
   const history = historyRows.map((fields) => getMessage(messageFixture(conversationId, fields))!);
   const savedHistory = structuredClone(history);
   const historical = buildChatMessages(conversation, history);
+  const attributed = buildChatMessages(conversation, [
+    { ...history[1]!, id: 101, content: 'Repeated reply' },
+    { ...history[1]!, id: 102, content: 'Repeated reply' },
+    { ...history[1]!, id: 103, role: 'tool', content: 'Hidden tool' },
+    { ...history[1]!, id: 104, status: 'streaming', content: 'In progress' },
+    { ...history[1]!, id: 105, content: '' },
+    { ...history[0]!, id: 106, role: 'system', content: 'Moved to the front' },
+    { ...history[0]!, id: 107, content: 'Next' },
+    { ...history[1]!, id: 108, content: '', reasoning: 'Reasoning only' },
+  ]);
+  assert.deepEqual(attributed.messageIds, [[], [101, 102], [], [108]]);
+  assert.equal(attributed.messages[1]!.content, 'Repeated reply\n\nRepeated reply');
+  assert(
+    attributed.messages.every((message) => !('messageIds' in message)),
+    'Source IDs stay out of upstream message objects',
+  );
   assert.deepEqual(
     historical.messages.map(({ role, content }) => [role, content]),
     [

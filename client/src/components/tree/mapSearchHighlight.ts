@@ -1,16 +1,29 @@
 import { createEffect, onCleanup } from 'solid-js';
-import { mapSearchTarget } from './mapSearch.ts';
 
 const HIGHLIGHT_NAME = 'map-search-text';
+let sharedHighlight: Highlight | undefined;
+let highlightOwners = 0;
 const TEXT_SCOPES = '.msg-name, .md, .treemap-mini-snippet';
 
 /** Paint rendered text without altering Markdown, syntax highlighting, or Solid-owned nodes. */
-export function highlightMapSearch(root: () => HTMLElement, query: () => string): void {
+export function highlightMapSearch(
+  root: () => HTMLElement,
+  query: () => string,
+  mapSearchTarget: () => { messageId: number } | null,
+  active: () => boolean,
+): void {
   createEffect(() => {
     const text = query().trim();
-    if (!text || !globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
+    if (!active() || !text || !globalThis.CSS?.highlights || typeof Highlight === 'undefined')
+      return;
     const container = root();
-    const highlight = new Highlight();
+    const highlight = (sharedHighlight ??= new Highlight());
+    highlightOwners++;
+    const ranges = new Set<Range>();
+    const clearRanges = () => {
+      for (const range of ranges) highlight.delete(range);
+      ranges.clear();
+    };
     const pattern = new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
     const revealed = new WeakSet<Element>();
     let frame = 0;
@@ -18,7 +31,7 @@ export function highlightMapSearch(root: () => HTMLElement, query: () => string)
 
     const update = () => {
       frame = 0;
-      highlight.clear();
+      clearRanges();
       for (const card of container.querySelectorAll<HTMLElement>('.treemap-search-match')) {
         let first: Range | undefined;
         for (const scope of card.querySelectorAll(TEXT_SCOPES)) {
@@ -47,6 +60,7 @@ export function highlightMapSearch(root: () => HTMLElement, query: () => string)
             range.setStart(startNode.node, match.index - startNode.start);
             range.setEnd(endNode.node, end - endNode.start);
             highlight.add(range);
+            ranges.add(range);
             first ??= range;
           }
         }
@@ -82,7 +96,11 @@ export function highlightMapSearch(root: () => HTMLElement, query: () => string)
     onCleanup(() => {
       observer.disconnect();
       cancelAnimationFrame(frame);
-      if (CSS.highlights.get(HIGHLIGHT_NAME) === highlight) CSS.highlights.delete(HIGHLIGHT_NAME);
+      clearRanges();
+      if (--highlightOwners === 0) {
+        CSS.highlights.delete(HIGHLIGHT_NAME);
+        sharedHighlight = undefined;
+      }
     });
   });
 }

@@ -140,6 +140,14 @@ migrate(83, () => {
     )`).run();
 });
 
+migrate(84, () => {
+  db.exec(`ALTER TABLE conversations ADD COLUMN prompt_context_json TEXT;
+    ALTER TABLE media_drafts ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL;
+    ALTER TABLE media_jobs ADD COLUMN prompt_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL;
+    CREATE UNIQUE INDEX media_drafts_conversation ON media_drafts(conversation_id) WHERE conversation_id IS NOT NULL;
+    CREATE INDEX media_jobs_prompt_message ON media_jobs(prompt_message_id) WHERE prompt_message_id IS NOT NULL;`);
+});
+
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
 // Speculative placeholders are disposable; do not expose them as broken swipe choices.
 deleteMessageSubtrees(
@@ -313,6 +321,7 @@ export function toGalleryItem(r: Row): GalleryItem {
 
 export function toConversation(r: Row): Conversation {
   return {
+    promptMode: r.prompt_context_json ? 'media' : 'chat',
     id: r.id as number,
     title: r.title as string,
     characterId: r.character_id as number | null,

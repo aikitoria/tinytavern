@@ -33,6 +33,8 @@ export function reasoningPrefillEnabled(options: PrefillCapabilities): boolean {
 /** Server-resolved history and seeds; the browser adds only its unsent composer text. */
 export interface PromptTrace extends ChatPrompt, PrefillCapabilities {
   userMessagePrefix: string;
+  /** Source assistant IDs per upstream turn; adjacent assistant messages may be merged. */
+  messageIds?: number[][];
   /** The captured request history; reply buffers arrive through the existing tree stream. */
   stream?: { messageId: number; generationToken: number; namePrefix: string };
 }

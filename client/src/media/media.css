@@ -75,3 +75,121 @@
   object-fit: contain;
   opacity: 0;
 }
+
+/* Embed the shared conversation using the media form's dimensions and field styling. */
+.media-tool-fields > .media-prompt-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 0 18rem;
+  min-height: 18rem;
+  overflow: hidden;
+}
+
+.media-prompt-conversation .conversation-pane {
+  gap: var(--space-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.media-prompt-conversation .chat {
+  min-height: 0;
+  border: 1px solid var(--border-control-surface);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  scrollbar-gutter: auto;
+}
+
+.media-prompt-conversation .chat-inner {
+  width: 100%;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.media-prompt-conversation .chat:not(.chat-map) .msg > .msg-body {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.media-prompt-conversation .chat:not(.chat-map) .msg + .msg {
+  border-top: 1px solid var(--border-control-surface);
+  padding-top: var(--space-3);
+}
+
+.media-prompt-conversation .md :is(pre, .code-block-wrap) {
+  border-color: var(--border-subtle);
+}
+
+.media-prompt-conversation .md .code-prompt-selected {
+  border-color: var(--accent);
+}
+
+.media-prompt-conversation .md .code-actions > :not(.code-render-prompt-btn) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.media-prompt-conversation .md .code-block-wrap:is(:hover, :focus-within) .code-actions > button,
+.media-prompt-conversation .msg.touched .code-actions > button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.media-prompt-conversation .md .code-render-prompt-btn {
+  font-size: 12px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+}
+
+.media-prompt-conversation .md .code-block-wrap:has(.code-render-prompt-btn) pre {
+  padding-top: calc(var(--control-height) + var(--space-3));
+  padding-right: var(--space-3);
+}
+
+.media-prompt-conversation .msg .msg-name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.media-prompt-conversation .msg.msg-prompt-selected .msg-name {
+  color: var(--accent);
+}
+
+.media-prompt-conversation .md {
+  color: var(--text-field);
+}
+
+.media-prompt-conversation .composer {
+  --composer-button-size: var(--control-height);
+  flex: none;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-1);
+  width: 100%;
+  max-width: none;
+  background: var(--bg);
+  border: 1px solid var(--border-control-surface);
+  border-radius: var(--radius-control);
+}
+
+.media-prompt-conversation .composer:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.media-prompt-conversation .composer .composer-input {
+  min-height: 0;
+  padding: var(--control-pad-y) var(--space-2);
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 0;
+  background: transparent;
+  resize: none;
+}
+
+.media-prompt-conversation .composer .send-btn {
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  transform: none;
+}

@@ -31,11 +31,18 @@ test('application HTTP and WebSocket contracts', async () => {
   let held: ServerResponse | undefined;
   let hold = true;
   let upstreamStatus = 200;
-  const completionRequests: { messages: PromptMessage[]; stream: boolean }[] = [];
+  const completionRequests: {
+    messages: PromptMessage[];
+    stream: boolean;
+    stream_options?: { include_usage: boolean };
+  }[] = [];
   const delta = (res: ServerResponse, content: string) =>
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
   const finish = (res: ServerResponse) => {
     delta(res, 'world');
+    res.write(
+      'data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":10},"completion_tokens_details":{"reasoning_tokens":0,"text_tokens":4}}}\n\n',
+    );
     res.end('data: [DONE]\n\n');
   };
   const upstream = createServer(async (req, res) => {
@@ -454,14 +461,31 @@ test('application HTTP and WebSocket contracts', async () => {
         finish(held);
         held = undefined;
         hold = false;
-        await viewer.wait(
+        const final = await viewer.wait(
           (event) => event.t === 'final' && event.message.id === sent.assistantMessageId,
         );
+        assert(final.t === 'final');
+        const metrics = final.message.genMeta!.generations![0]!;
+        assert.equal(metrics.attempts[0]!.completionTokens, 4);
+        assert.equal(metrics.attempts[0]!.textTokens, 4);
+        assert.equal(metrics.attempts[0]!.cachedTokens, 10);
+        assert(metrics.attempts[0]!.lastTokenMs! >= metrics.attempts[0]!.firstTokenMs!);
+        const savedMessage = (await tree(chat.id)).messages.find(
+          (message) => message.id === sent.assistantMessageId,
+        )!;
+        assert.deepEqual(savedMessage.genMeta!.generations![0], metrics);
         const completedTrace = await request<PromptTrace>(
           'GET',
           `/api/conversations/${chat.id}/trace`,
         );
         assert.equal(completedTrace.stream, undefined);
+        const replyIndex = completedTrace.messageIds!.findIndex((ids) =>
+          ids.includes(sent.assistantMessageId),
+        );
+        assert(replyIndex >= 0, 'Completed replies retain their metric attribution in the trace');
+        assert.equal(completedTrace.messages[replyIndex]!.role, 'assistant');
+        assert(completedTrace.messages[replyIndex]!.content.includes('world'));
+        assert.equal(completedTrace.messageIds!.length, completedTrace.messages.length);
         assert.equal(completedTrace.speakerHandoff, null, 'The same speaker needs no new handoff');
         assert.equal(
           completedTrace.messages
@@ -472,6 +496,7 @@ test('application HTTP and WebSocket contracts', async () => {
           'The historical speaker change remains after completion without accumulating copies',
         );
         const actual = completionRequests.slice(start).find((entry) => entry.stream)!;
+        assert.deepEqual(actual.stream_options, { include_usage: true });
         assert.deepEqual(
           preview.messages,
           actual.messages,
@@ -647,6 +672,255 @@ test('application HTTP and WebSocket contracts', async () => {
           mediaRendering: previous.mediaRendering,
         });
         await comfy.stop();
+      }
+    },
+  );
+
+  await step(
+    'embedded media conversations share socket transport and use their own prompt template',
+    async () => {
+      const previous = await request<Settings>('GET', '/api/settings');
+      const previousHold = hold;
+      hold = false;
+      const workflow = {
+        id: 'prompt-discussion',
+        name: 'Prompt discussion',
+        inputBindings: {},
+        textOutputNodeId: null,
+        json: '{"input":{"class_type":"LoadImage","inputs":{"image":"fixture.png"},"_meta":{"title":"Reference [image:input1]"}},"1":{"inputs":{"prompt":"{{prompt}}","seed":0,"image":["input",0]}}}',
+        standalonePromptPresetId: 'discussion',
+      };
+      try {
+        await request('PUT', '/api/settings', {
+          expectedRevision: previous.revision,
+          mediaRendering: {
+            ...previous.mediaRendering,
+            workflows: [...previous.mediaRendering.workflows, workflow],
+          },
+          mediaStandalonePrompts: {
+            folders: [],
+            defaultPresetId: null,
+            presets: [
+              {
+                id: 'discussion',
+                name: 'Discussion',
+                systemPrompt: 'MEDIA SYSTEM ONLY',
+                userMessage: 'Media task: {{instruction}}\nReference: {{input1_prompt}}',
+                reasoningPrefill: '',
+                messagePrefill: '',
+              },
+              {
+                id: 'restart-discussion',
+                name: 'Restart discussion',
+                systemPrompt: 'RESTART SYSTEM',
+                userMessage: 'Fresh task: {{instruction}}\nReference: {{input1_prompt}}',
+                reasoningPrefill: '',
+                messagePrefill: '',
+              },
+            ],
+          },
+        });
+        const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+        const uploadReference = async (prompt: string) => {
+          const response = await fetch(base + '/api/gallery/upload', {
+            method: 'POST',
+            body: makePlaceholderPng(),
+          });
+          assert.equal(response.status, 200);
+          const item = (await response.json()) as { id: number; media: { id: number } };
+          await request('PATCH', `/api/gallery/${item.id}`, { prompt, expectedPrompt: '' });
+          return item;
+        };
+        const firstReference = await uploadReference('Original reference');
+        const nextReference = await uploadReference('Changed reference');
+        let job = await request<MediaJob>('POST', '/api/media/jobs', {
+          requestKey: newRequestId(),
+          workflowId: workflow.id,
+          instruction: 'Move the camera',
+          inputs: [{ slot: 'input1', assetId: firstReference.media.id }],
+          prompt: 'Original media prompt',
+          reviewBeforeSave: true,
+        });
+        await request(
+          'POST',
+          `/api/media/jobs/${job.id}/conversation`,
+          { expectedRevision: job.revision, expectedDraftRevision: -1 },
+          409,
+        );
+        const beforeMigration = completionRequests.length;
+        job = await request<MediaJob>('POST', `/api/media/jobs/${job.id}/conversation/migrate`, {
+          expectedRevision: job.revision,
+          expectedDraftRevision: job.draft!.revision,
+        });
+        const media = await request<import('@tinytavern/shared').Conversation>(
+          'GET',
+          `/api/conversations/${job.draft!.conversationId}`,
+        );
+        assert.equal(
+          completionRequests.length,
+          beforeMigration,
+          'Importing the saved reply makes no model request',
+        );
+        assert.equal(media.promptMode, 'media');
+        for (const query of [media.title, 'Original media prompt']) {
+          const results = await request<{ conversation: { id: number } }[]>(
+            'GET',
+            `/api/search?q=${encodeURIComponent(query)}`,
+          );
+          assert(
+            !results.some((result) => result.conversation.id === media.id),
+            'Global search excludes media titles and message bodies',
+          );
+        }
+        await request('POST', `/api/conversations/${media.id}/duplicate`, undefined, 409);
+        await request(
+          'POST',
+          `/api/messages/${media.activeLeafId}/branch-conversation`,
+          undefined,
+          409,
+        );
+        await request('GET', `/api/conversations/${media.id}/export`, undefined, 409);
+        const portable = await request<{ conversation: object }>(
+          'GET',
+          `/api/conversations/${conv.id}/export`,
+        );
+        await request(
+          'POST',
+          '/api/conversations/import',
+          {
+            ...portable,
+            conversation: {
+              ...portable.conversation,
+              promptContext: { messages: [], reasoningPrefill: '', messagePrefill: '' },
+            },
+          },
+          400,
+        );
+        job = await request<MediaJob>('GET', `/api/media/jobs/${job.id}`);
+        assert.equal(job.draft!.conversationId, media.id);
+        assert.equal(
+          (
+            await request<import('@tinytavern/shared').Conversation>(
+              'GET',
+              `/api/conversations/${media.id}`,
+            )
+          ).id,
+          media.id,
+        );
+        const viewer = await connect();
+        viewer.socket.send(JSON.stringify({ subs: [conv.id, media.id] }));
+        await viewer.wait((event) => event.t === 'tree' && event.conversationId === conv.id);
+        await viewer.wait((event) => event.t === 'tree' && event.conversationId === media.id);
+        const before = completionRequests.length;
+        const sent = await request<{ assistantMessageId: number }>(
+          'POST',
+          `/api/conversations/${media.id}/messages`,
+          { ...guard(await tree(media.id)), content: 'Keep the head still' },
+        );
+        await viewer.wait(
+          (event) => event.t === 'final' && event.message.id === sent.assistantMessageId,
+        );
+        const contents = completionRequests[before]!.messages.map((message) => message.content);
+        assert.deepEqual(contents, [
+          'MEDIA SYSTEM ONLY',
+          'Media task: Move the camera\nReference: Original reference',
+          'Original media prompt',
+          'Keep the head still',
+        ]);
+        const snapshot = await tree(media.id);
+        const reply = snapshot.messages.find((message) => message.id === sent.assistantMessageId)!;
+        await request('POST', `/api/messages/${reply.id}/advance`, guard(snapshot));
+        const switched = await viewer.wait(
+          (event) =>
+            event.t === 'treePatch' &&
+            event.conversationId === media.id &&
+            event.activeLeafId !== reply.id &&
+            event.mutationRevision > snapshot.mutationRevision,
+        );
+        assert.equal(switched.t, 'treePatch');
+        const current = await tree(media.id);
+        await viewer.wait(
+          (event) => event.t === 'final' && event.message.id === current.activeLeafId,
+        );
+        assert.equal(
+          current.messages.filter((message) => message.parentId === reply.parentId).length,
+          2,
+        );
+        job = await request<MediaJob>('GET', `/api/media/jobs/${job.id}`);
+        job = await request<MediaJob>('PATCH', `/api/media/jobs/${job.id}`, {
+          expectedRevision: job.revision,
+          instruction: 'Use the new image',
+          presetId: 'restart-discussion',
+          inputs: [{ slot: 'input1', assetId: nextReference.media.id }],
+        });
+        const beforeRestart = await tree(media.id);
+        const restartGuard = {
+          expectedRevision: job.revision,
+          expectedDraftRevision: job.draft!.revision,
+          expectedPromptLeafId: beforeRestart.activeLeafId,
+          expectedPromptRevision: beforeRestart.mutationRevision,
+        };
+        await request(
+          'POST',
+          `/api/media/jobs/${job.id}/conversation/restart`,
+          {
+            ...restartGuard,
+            expectedPromptRevision: 0,
+          },
+          409,
+        );
+        assert.deepEqual((await tree(media.id)).messages, beforeRestart.messages);
+        const restartedRequest = completionRequests.length;
+        const restarted = await request<import('@tinytavern/shared').Conversation>(
+          'POST',
+          `/api/media/jobs/${job.id}/conversation/restart`,
+          restartGuard,
+        );
+        assert.equal(
+          restarted.id,
+          media.id,
+          'Restart retains the draft’s durable conversation identity',
+        );
+        await viewer.wait(
+          (event) => event.t === 'final' && event.message.id === restarted.activeLeafId,
+        );
+        const restartedTree = await tree(media.id);
+        assert.equal(
+          restartedTree.messages.length,
+          2,
+          'Restart replaces every old swipe and followup',
+        );
+        assert(
+          restartedTree.messages.every(
+            (message) => !beforeRestart.messages.some((old) => old.id === message.id),
+          ),
+        );
+        assert.deepEqual(
+          completionRequests[restartedRequest]!.messages.map((message) => message.content),
+          ['RESTART SYSTEM', 'Fresh task: Use the new image\nReference: Changed reference'],
+        );
+        assert.equal((await request<MediaJob>('GET', `/api/media/jobs/${job.id}`)).prompt, '');
+        const eventStart = viewer.events.length;
+        viewer.socket.send(JSON.stringify({ subs: [conv.id], resync: conv.id }));
+        await viewer.wait(
+          (event) =>
+            viewer.events.indexOf(event) >= eventStart &&
+            event.t === 'tree' &&
+            event.conversationId === conv.id,
+        );
+        job = await request<MediaJob>('GET', `/api/media/jobs/${job.id}`);
+        await request('DELETE', `/api/media/jobs/${job.id}?expectedRevision=${job.revision}`);
+        await request('GET', `/api/conversations/${media.id}`, undefined, 404);
+        await request('DELETE', `/api/gallery/${firstReference.id}`, undefined, 204);
+        await request('DELETE', `/api/gallery/${nextReference.id}`, undefined, 204);
+      } finally {
+        hold = previousHold;
+        const current = await request<Settings>('GET', '/api/settings');
+        await request('PUT', '/api/settings', {
+          expectedRevision: current.revision,
+          mediaRendering: previous.mediaRendering,
+          mediaStandalonePrompts: previous.mediaStandalonePrompts,
+        });
       }
     },
   );
