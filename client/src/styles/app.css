@@ -307,6 +307,7 @@
 }
 
 .composer-input {
+  font-size: 15px;
   overflow-x: hidden;
 }
 
@@ -503,6 +504,7 @@
   select,
   textarea,
   textarea.mono,
+  .composer-input,
   .macro-overlay {
     font-size: 16px;
   }
