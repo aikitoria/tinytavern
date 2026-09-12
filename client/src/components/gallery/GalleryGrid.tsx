@@ -117,7 +117,6 @@ function GalleryTile(props: {
         tabIndex={props.tabStop ? 0 : -1}
         aria-label={`${props.selecting ? (props.selected ? 'Deselect' : 'Select') : 'View'} ${kind()} ${props.cell.index + 1} of ${props.count}: ${props.cell.item.characterName}`}
         aria-pressed={props.selecting ? props.selected : undefined}
-        title={props.cell.item.prompt.slice(0, 240)}
         onFocus={props.onFocus}
         onClick={props.onClick}
       >
