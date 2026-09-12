@@ -181,6 +181,7 @@
 .media-prompt-conversation .composer .composer-input {
   min-height: 0;
   padding: var(--control-pad-y) var(--space-2);
+  font-size: 13px;
   line-height: 1.5;
   border-radius: 0;
   background: transparent;
