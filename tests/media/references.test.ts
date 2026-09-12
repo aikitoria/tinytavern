@@ -1,4 +1,5 @@
-import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
+import { attachImages } from '../support/fixtures.ts';
+import { getSettings, putSettings } from '../support/settings.ts';
 import { testApi } from '../support/http.ts';
 import { renderMediaFixture } from '../support/media.ts';
 import { conversationFixture, insertFixture } from '../support/fixtures.ts';
@@ -20,12 +21,10 @@ test('media source images', async () => {
   const signingKey = join(process.env.DATA_DIR!, 'source-test-key');
   writeFileSync(signingKey, '11'.repeat(32));
   process.env.MEDIA_SIGNING_KEY_FILE = signingKey;
-  const { stmt, IMAGES_DIR, mediaAssetForPath, invalidateMediaAsset } =
-    await import('../../server/src/db/db.ts');
+  const { stmt, IMAGES_DIR, mediaAssetForPath, invalidateMediaAsset } = await import('../../server/src/db/db.ts');
   const { saveImage, sweepOrphanedImages } = await import('../../server/src/media/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-  const { saveMediaRecipe, getMediaRecipe } =
-    await import('../../server/src/media/mediaRecipes.ts');
+  const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/media/mediaRecipes.ts');
   const { updateMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
   const { finishMediaJob } = await import('../../server/src/media/mediaJobResults.ts');
   await import('../../server/src/routes/mediaJobs.ts');
@@ -87,10 +86,7 @@ test('media source images', async () => {
       { instruction: 'Original instruction', seed: index === 0 ? 0 : undefined },
     );
     const path = saveImage('.webm', videoBytes);
-    stmt('UPDATE media_assets SET recipe_id = ?, width = 32, height = 24 WHERE path = ?').run(
-      recipeId,
-      path,
-    );
+    stmt('UPDATE media_assets SET recipe_id = ?, width = 32, height = 24 WHERE path = ?').run(recipeId, path);
     invalidateMediaAsset(path);
     return { asset: mediaAssetForPath(path)!, galleryId: gallery(path) };
   });
@@ -100,39 +96,28 @@ test('media source images', async () => {
     const { appendMessage } = await import('../../server/src/conversations/tree.ts');
     conversationFixture({ id: 1, title: 'Video chat' });
     const message = appendMessage(1, 'tool', 'Saved prompt', null);
-    stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(
-      JSON.stringify([results[0]!.asset.url]),
-      message.id,
-    );
+    attachImages(message.id, [results[0]!.asset.url]);
     const savedVideo = (await request('POST', '/api/gallery', { messageId: message.id })) as {
       item: GalleryItem;
       created: boolean;
     };
     assert.equal(savedVideo.item.media?.kind, 'video');
-    assert.equal(savedVideo.item.imageWidth, 32);
-    assert.equal(savedVideo.item.imageHeight, 24);
-    assert.equal(savedVideo.item.media?.width, savedVideo.item.imageWidth);
-    assert.equal(savedVideo.item.media?.height, savedVideo.item.imageHeight);
+    assert.equal(savedVideo.item.media.width, 32);
+    assert.equal(savedVideo.item.media.height, 24);
     const savedAgain = (await request('POST', '/api/gallery', { messageId: message.id })) as {
       item: GalleryItem;
       created: boolean;
     };
     assert.equal(savedAgain.created, false);
-    assert.equal(savedAgain.item.imageHeight, 24);
+    assert.equal(savedAgain.item.media.height, 24);
     await request('DELETE', `/api/gallery/${savedVideo.item.id}`);
     stmt('DELETE FROM conversations WHERE id = 1').run();
 
     assert.deepEqual(await request('GET', `/api/media/assets/${firstAsset.id}/inputs`), []);
     const jobsBeforeDetails = stmt('SELECT COUNT(*) AS n FROM media_jobs').get()!.n;
     for (const [index, result] of results.entries()) {
-      stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run(
-        'Edited gallery annotation',
-        result.galleryId,
-      );
-      const details = (await request(
-        'GET',
-        `/api/media/assets/${result.asset.id}/details`,
-      )) as MediaResultDetails;
+      stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('Edited gallery annotation', result.galleryId);
+      const details = (await request('GET', `/api/media/assets/${result.asset.id}/details`)) as MediaResultDetails;
       assert.deepEqual(
         details,
         {
@@ -145,10 +130,7 @@ test('media source images', async () => {
         },
         'Details use the original recipe, without leaking server configuration or using edited gallery text',
       );
-      const inputs = (await request(
-        'GET',
-        `/api/media/assets/${result.asset.id}/inputs`,
-      )) as MediaAssetInput[];
+      const inputs = (await request('GET', `/api/media/assets/${result.asset.id}/inputs`)) as MediaAssetInput[];
       assert.deepEqual(
         inputs.map(({ slot, asset }) => ({ slot, assetId: asset!.id })),
         savedInputs[index]!.map(({ slot, assetId }) => ({ slot, assetId })),
@@ -175,10 +157,7 @@ test('media source images', async () => {
       requestKey: testRequestKey('idle-input-owner'),
     })) as MediaJob;
     await request('DELETE', `/api/gallery/${firstGallery}`);
-    const partial = (await request(
-      'GET',
-      `/api/media/assets/${results[1]!.asset.id}/inputs`,
-    )) as MediaAssetInput[];
+    const partial = (await request('GET', `/api/media/assets/${results[1]!.asset.id}/inputs`)) as MediaAssetInput[];
     assert.deepEqual(
       partial.map(({ slot, asset }) => ({ slot, assetId: asset?.id ?? null })),
       [
@@ -188,22 +167,14 @@ test('media source images', async () => {
       ],
     );
     await request('POST', '/api/gallery/bulk-delete', { ids: [referenceGallery] });
-    assert(
-      existsSync(join(IMAGES_DIR, basename(first))),
-      'A running job can finish reading its input',
-    );
-    assert(
-      !existsSync(join(IMAGES_DIR, basename(reference))),
-      'Idle jobs and recipes do not retain deleted inputs',
-    );
+    assert(existsSync(join(IMAGES_DIR, basename(first))), 'A running job can finish reading its input');
+    assert(!existsSync(join(IMAGES_DIR, basename(reference))), 'Idle jobs and recipes do not retain deleted inputs');
     const lateRecipe = saveMediaRecipe(
       { comfyUrl: 'http://127.0.0.1:1', workflowId: workflows[0]!.id, timeoutSeconds: 60 },
       savedInputs[0]!,
       'Result completed after source deletion',
     );
-    assert.deepEqual(getMediaRecipe(lateRecipe).inputs, [
-      { slot: 'input1', assetId: null, prompt: '' },
-    ]);
+    assert.deepEqual(getMediaRecipe(lateRecipe).inputs, [{ slot: 'input1', assetId: null, prompt: '' }]);
     stmt('DELETE FROM media_recipes WHERE id = ?').run(lateRecipe);
     finishMediaJob(activeJob.id, 'failed', 'Test finished');
     await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -213,10 +184,7 @@ test('media source images', async () => {
     );
     sweepOrphanedImages();
     for (const [index, result] of results.entries()) {
-      const inputs = (await request(
-        'GET',
-        `/api/media/assets/${result.asset.id}/inputs`,
-      )) as MediaAssetInput[];
+      const inputs = (await request('GET', `/api/media/assets/${result.asset.id}/inputs`)) as MediaAssetInput[];
       assert.deepEqual(
         inputs,
         savedInputs[index]!.map(({ slot }) => ({ slot, asset: null })),
@@ -242,10 +210,7 @@ test('media source images', async () => {
       'Deleted inputs remain deleted after removing generated results',
     );
     assert(!existsSync(join(IMAGES_DIR, basename(reference))));
-    assert.equal(
-      (await fetch(`${base}/api/media/assets/${results[0]!.asset.id}/inputs`)).status,
-      404,
-    );
+    assert.equal((await fetch(`${base}/api/media/assets/${results[0]!.asset.id}/inputs`)).status, 404);
     assert.equal((await fetch(`${base}/api/media/assets/invalid/inputs`)).status, 400);
     assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
   } finally {

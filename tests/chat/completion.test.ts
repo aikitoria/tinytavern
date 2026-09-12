@@ -5,9 +5,8 @@ import { databaseCase } from '../support/database.ts';
 
 databaseCase('server completion', async () => {
   const { stmt } = await import('../../server/src/db/db.ts');
-  const { chatCompletionOnce, streamChatCompletion } =
-    await import('../../server/src/generation/generation.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { chatCompletionOnce, streamChatCompletion } = await import('../../server/src/generation/generation.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'test',
     base_url: 'https://upstream.invalid/v1///',
@@ -40,10 +39,7 @@ databaseCase('server completion', async () => {
         `data: null\ndata: malformed\n${upstreamFrame({ content: 'hé' })}${upstreamFrame({ content: '🦊' }).trimEnd()}`,
       );
     const deltas: string[] = [];
-    assert.equal(
-      await streamChatCompletion(null, messages, 71, (text) => deltas.push(text)),
-      'hé🦊',
-    );
+    assert.equal(await streamChatCompletion(null, messages, 71, (text) => deltas.push(text)), 'hé🦊');
     assert.deepEqual(deltas, ['hé', '🦊']);
     assert.deepEqual(wire, { model: 'test-model', messages, stream: true, max_tokens: 71 });
 
@@ -52,10 +48,7 @@ databaseCase('server completion', async () => {
       ['data: [DONE]\n\n', null],
       ['data: {"choices":[{"finish_reason":"stop"}]}\n\n', null],
       ['data: {"choices":[{"finish_reason":"length"}]}\n\n', /truncated by the token limit/],
-      [
-        'data: {"choices":[{"finish_reason":"content_filter"}]}\n\n',
-        /ended before a complete reply/,
-      ],
+      ['data: {"choices":[{"finish_reason":"content_filter"}]}\n\n', /ended before a complete reply/],
     ] as const) {
       reply = () => new Response(upstreamFrame({ content: 'Prompt' }) + finish);
       const complete = streamChatCompletion(null, messages, 71, () => {}, undefined, {
@@ -77,14 +70,7 @@ databaseCase('server completion', async () => {
       messagePrefill: 'Seed: ',
     };
     assert.equal(
-      await streamChatCompletion(
-        null,
-        messages,
-        71,
-        (text) => seeded.push(text),
-        undefined,
-        options,
-      ),
+      await streamChatCompletion(null, messages, 71, (text) => seeded.push(text), undefined, options),
       'Seed: hé🦊',
     );
     assert.deepEqual(seeded, ['Seed: ', 'hé', '🦊']);
@@ -100,12 +86,7 @@ databaseCase('server completion', async () => {
     });
 
     stmt(`UPDATE endpoints SET system_prompt_prefix = ?, system_prompt_suffix = ?,
-      reasoning_prefill_prefix = ? WHERE id = ?`).run(
-      'Prefix\n',
-      '\nSuffix',
-      'Global\n',
-      endpointId,
-    );
+      reasoning_prefill_prefix = ? WHERE id = ?`).run('Prefix\n', '\nSuffix', 'Global\n', endpointId);
     reply = () => Response.json({ choices: [{ message: { content: 'one shot' } }] });
     assert.equal(await chatCompletionOnce(null, messages, 23), 'one shot');
     assert.deepEqual(wire.messages, [
@@ -115,10 +96,7 @@ databaseCase('server completion', async () => {
     ]);
     const withSystem = [{ role: 'system' as const, content: 'Task system' }, ...messages];
     reply = () => new Response(upstreamFrame({ content: 'Prompt' }));
-    assert.equal(
-      await streamChatCompletion(null, withSystem, 71, () => {}, undefined, options),
-      'Seed: Prompt',
-    );
+    assert.equal(await streamChatCompletion(null, withSystem, 71, () => {}, undefined, options), 'Seed: Prompt');
     assert.deepEqual(wire.messages, [
       { role: 'system', content: 'Prefix\nTask system\nSuffix' },
       ...messages,
@@ -137,14 +115,7 @@ databaseCase('server completion', async () => {
         diagnosis,
       );
       await assert.rejects(
-        streamChatCompletion(
-          null,
-          messages,
-          71,
-          () => assert.fail('No generated content to emit'),
-          undefined,
-          options,
-        ),
+        streamChatCompletion(null, messages, 71, () => assert.fail('No generated content to emit'), undefined, options),
         diagnosis,
       );
     }
@@ -180,7 +151,7 @@ databaseCase('generation stream', async () => {
   const { startGeneration, stopAllGenerations, mergeLiveBuffers } =
     await import('../../server/src/generation/generation.ts');
   const { getMessage } = await import('../../server/src/conversations/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'Test',
     base_url: 'http://test.invalid',
@@ -223,11 +194,7 @@ databaseCase('generation stream', async () => {
       active.stream.write(': heartbeat\n\n');
       await flush();
     }
-    assert.equal(
-      timers.mock.calls.length,
-      timerCount,
-      'Network chunks do not allocate idle timers',
-    );
+    assert.equal(timers.mock.calls.length, timerCount, 'Network chunks do not allocate idle timers');
     active.stream.write('data: null\ndata: malformed\n');
     active.stream.write(upstreamFrame({ content: 42, reasoning_content: {} }));
     for (const content of [' H', 'a', 'l', ':', ' Hello']) {
@@ -252,12 +219,7 @@ databaseCase('generation stream', async () => {
     assert(!active.signal.aborted, 'Finalization clears the idle watchdog');
 
     stmt(`UPDATE endpoints SET system_prompt_prefix = ?, system_prompt_suffix = ?,
-      reasoning_prefill_prefix = ? WHERE id = ?`).run(
-      'Prefix\n',
-      '\nSuffix',
-      'Global\n',
-      endpointId,
-    );
+      reasoning_prefill_prefix = ? WHERE id = ?`).run('Prefix\n', '\nSuffix', 'Global\n', endpointId);
     const retryPrompt = { ...prompt, reasoningPrefill: 'Template reasoning' };
     const retryId = message();
     startGeneration(conversation, retryId, undefined, { prompt: retryPrompt });
@@ -286,11 +248,7 @@ databaseCase('generation stream', async () => {
     await flush();
     const retry = requests.at(-1)!;
     assert.notEqual(retry, stalled);
-    assert.deepEqual(
-      retry.messages[0],
-      stalled.messages[0],
-      'Retries retain the captured endpoint additions',
-    );
+    assert.deepEqual(retry.messages[0], stalled.messages[0], 'Retries retain the captured endpoint additions');
     assert.deepEqual(retry.messages.at(-1), {
       role: 'assistant',
       content: 'Hal: Ha',
@@ -324,15 +282,12 @@ databaseCase('generation stream', async () => {
     assert.equal(getMessage(reasoningOnlyId)!.content, 'Partial reply');
     jest.advanceTimersByTime(1000);
     await flush();
-    assert.strictEqual(
-      requests.at(-1),
-      reasoningOnly,
-      'Reasoning prefills cannot resume visible content',
-    );
+    assert.strictEqual(requests.at(-1), reasoningOnly, 'Reasoning prefills cannot resume visible content');
 
-    stmt(
-      'UPDATE endpoints SET allow_message_prefill = 1, reasoning_prefill_prefix = ? WHERE id = ?',
-    ).run('', endpointId);
+    stmt('UPDATE endpoints SET allow_message_prefill = 1, reasoning_prefill_prefix = ? WHERE id = ?').run(
+      '',
+      endpointId,
+    );
     for (const [delta, error] of [
       [{ refusal: 'Cannot answer this request' }, /The model refused: Cannot answer this request/],
       [{ content: '   ' }, /empty reply/],
@@ -351,8 +306,7 @@ databaseCase('generation stream', async () => {
       assert.equal(getMessage(id)!.status, 'error');
       assert.match(getMessage(id)!.genMeta?.error ?? '', error);
       assert.equal(getMessage(id)!.content, 'Seed:');
-      if ('reasoning_content' in delta)
-        assert.equal(getMessage(id)!.reasoning, delta.reasoning_content);
+      if ('reasoning_content' in delta) assert.equal(getMessage(id)!.reasoning, delta.reasoning_content);
     }
 
     // A request that stalls before returning response headers has the same deadline.
@@ -391,9 +345,8 @@ databaseCase('generation persistence', async () => {
   const { startGeneration, stopGeneration, stopAllGenerations, mergeLiveBuffers } =
     await import('../../server/src/generation/generation.ts');
   const { getMessage } = await import('../../server/src/conversations/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const { getConversationRevision } =
-    await import('../../server/src/conversations/conversationRevision.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
+  const { getConversationRevision } = await import('../../server/src/conversations/conversationRevision.ts');
   const endpointId = insertFixture('endpoints', {
     name: 'test',
     base_url: 'https://upstream.invalid/v1',
@@ -465,11 +418,7 @@ databaseCase('generation persistence', async () => {
     assert.equal(completedMetrics.attempts[0]!.textTokens, 5);
     assert.equal(completedMetrics.attempts[0]!.status, 'done');
     assert(completedMetrics.elapsedMs != null);
-    assert.equal(
-      liveMetrics.attempts[0]!.completionTokens,
-      undefined,
-      'Snapshots own their metrics',
-    );
+    assert.equal(liveMetrics.attempts[0]!.completionTokens, undefined, 'Snapshots own their metrics');
 
     stmt("UPDATE messages SET status = 'streaming' WHERE id = ?").run(mid);
     const old = begin(mid, { content: 'First reply', reasoning: 'Think more' });
@@ -492,10 +441,7 @@ databaseCase('generation persistence', async () => {
     old.close();
     append(next, ' successor');
     await flush();
-    assert.equal(
-      mergeLiveBuffers([getMessage(mid)!])[0]!.content,
-      'First reply continued successor',
-    );
+    assert.equal(mergeLiveBuffers([getMessage(mid)!])[0]!.content, 'First reply continued successor');
     next.close();
     await flush();
     assert.equal(getMessage(mid)!.content, 'First reply continued successor');
@@ -613,12 +559,7 @@ databaseCase('prompt reasoning', async () => {
         { d: 'A bright scene' },
       ]);
       mockFetch(
-        () =>
-          new Response(
-            [...events, { done: true }]
-              .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-              .join(''),
-          ),
+        () => new Response([...events, { done: true }].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')),
       );
       let displayedReasoning = '';
       let visiblePrompt = '';
@@ -640,10 +581,7 @@ databaseCase('prompt reasoning', async () => {
       assert.equal(visiblePrompt, prompt);
       assert.equal(displayedReasoning, '');
     }
-    mockFetch(
-      () =>
-        new Response(upstreamFrame({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n'),
-    );
+    mockFetch(() => new Response(upstreamFrame({ reasoning_content: 'No final prompt' }) + 'data: [DONE]\n\n'));
     let onlyReasoning = '';
     await assert.rejects(
       streamEndpointCompletion(

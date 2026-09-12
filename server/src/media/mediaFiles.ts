@@ -121,11 +121,7 @@ async function readVideoMetadata(path: string, signal: AbortSignal, uploaded: bo
     try {
       const header = Buffer.alloc(12);
       const { bytesRead } = await file.read(header, 0, header.length, 0);
-      if (
-        bytesRead < 12 ||
-        header.toString('ascii', 4, 8) !== 'ftyp' ||
-        header.toString('ascii', 8, 12) === 'qt  '
-      )
+      if (bytesRead < 12 || header.toString('ascii', 4, 8) !== 'ftyp' || header.toString('ascii', 8, 12) === 'qt  ')
         throw invalid();
     } finally {
       await file.close();

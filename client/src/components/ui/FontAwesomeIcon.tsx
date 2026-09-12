@@ -2,11 +2,7 @@ import { For } from 'solid-js';
 import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
 
 /** Render packaged icon data directly; no Font Awesome runtime or external requests. */
-export default function FontAwesomeIcon(props: {
-  icon: IconDefinition;
-  size?: number;
-  class?: string;
-}) {
+export default function FontAwesomeIcon(props: { icon: IconDefinition; size?: number; class?: string }) {
   const paths = () => {
     const path = props.icon.icon[4];
     return typeof path === 'string' ? [path] : path;

@@ -13,9 +13,7 @@ export type MediaKind = 'image' | 'video';
 export type MediaInputSlot = string;
 export type MediaInputContext = 'standalone' | 'chat' | 'avatar';
 export type MediaInputSource = `selected:${number}` | 'character-avatar' | 'persona-avatar';
-export type MediaInputBindings = Partial<
-  Record<MediaInputContext, Record<string, MediaInputSource>>
->;
+export type MediaInputBindings = Partial<Record<MediaInputContext, Record<string, MediaInputSource>>>;
 
 export interface MediaWorkflow {
   folderId?: string | null;
@@ -42,12 +40,12 @@ export interface MediaFavorite extends MediaWorkflowShortcut {
   presetId: string;
 }
 
-export type MediaCollectionFolder<K extends string> = { id: string; name: string } & Record<
-  K,
-  string[]
->;
-export type MediaWorkflowFolder = MediaCollectionFolder<'workflowIds'>;
-export type MediaPromptFolder = MediaCollectionFolder<'presetIds'>;
+export interface MediaCollectionFolder {
+  id: string;
+  name: string;
+}
+export type MediaWorkflowFolder = MediaCollectionFolder;
+export type MediaPromptFolder = MediaCollectionFolder;
 
 export interface MediaRenderingSettings {
   folders: MediaWorkflowFolder[];
@@ -68,8 +66,7 @@ interface MediaPromptIdentity {
   name: string;
 }
 
-export type MediaPromptPreset = MediaPromptIdentity &
-  (StandalonePromptTemplate | { chatPrompt: string });
+export type MediaPromptPreset = MediaPromptIdentity & (StandalonePromptTemplate | { chatPrompt: string });
 
 /** Maximum number of saved presets in each media prompt library. */
 export const MAX_MEDIA_PRESETS = 4096;
@@ -111,9 +108,7 @@ export const DEFAULT_MEDIA_PROMPTS: MediaPromptSettings = {
 };
 
 export function mediaInputSlots(workflow: Pick<MediaWorkflow, 'json'>): MediaInputSlot[] {
-  return workflow.json.trim()
-    ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => input.name)
-    : [];
+  return workflow.json.trim() ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => input.name) : [];
 }
 
 export function defaultChatMediaPrompt(): string {
@@ -248,10 +243,7 @@ export interface MediaProgress {
 }
 
 /** Merge indexed frame updates without retaining frames from a previous sampler. */
-export function mergeMediaProgress(
-  current: MediaProgress | undefined,
-  update: MediaProgress,
-): MediaProgress {
+export function mergeMediaProgress(current: MediaProgress | undefined, update: MediaProgress): MediaProgress {
   const next = { ...current, ...update };
   if (update.videoPreview) {
     const frames =
@@ -309,13 +301,7 @@ export interface MediaJob {
 }
 
 export function mediaJobActive(state: MediaJobState): boolean {
-  return (
-    state !== 'draft' &&
-    state !== 'ready' &&
-    state !== 'succeeded' &&
-    state !== 'failed' &&
-    state !== 'cancelled'
-  );
+  return state !== 'draft' && state !== 'ready' && state !== 'succeeded' && state !== 'failed' && state !== 'cancelled';
 }
 
 export type WorkflowValues = { prompt: string; seed: number; job_id: string } & Record<
@@ -357,10 +343,7 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
   const slots = new Set<string>();
   const graph = JSON.parse(json, (_key, value: JsonValue) =>
     typeof value === 'string'
-      ? value.replace(
-          /\{\{([a-z_0-9]+)\}\}/gi,
-          (_, key: string) => `${MARKER}${key.toLowerCase()}\u001f`,
-        )
+      ? value.replace(/\{\{([a-z_0-9]+)\}\}/gi, (_, key: string) => `${MARKER}${key.toLowerCase()}\u001f`)
       : value,
   ) as JsonValue;
   if (!graph || typeof graph !== 'object' || Array.isArray(graph))
@@ -410,9 +393,7 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
             : 'image'
           : ['value', 'text', 'string'].find((key) => typeof inputs[key] === 'string'));
       if (!field || typeof inputs[field] !== 'string')
-        throw new Error(
-          `Workflow node ${nodeId}: bind a literal string field, or specify field=... in the title`,
-        );
+        throw new Error(`Workflow node ${nodeId}: bind a literal string field, or specify field=... in the title`);
       inputs[field] = `${MARKER}${slot}\u001f`;
       if (match[3]) {
         bindKind(slot, kind);
@@ -445,9 +426,7 @@ export function compileMediaWorkflow(json: string): CompiledMediaWorkflow {
       for (const match of value.matchAll(/\u001fTT:([a-z_0-9]+)\u001f/g)) {
         const name = match[1]!;
         if (!SYSTEM_SLOTS.has(name) && !NUMBERED_MEDIA_INPUT.test(name))
-          throw new Error(
-            `Unknown workflow macro {{${name}}}; use input1 through input64 for media bindings`,
-          );
+          throw new Error(`Unknown workflow macro {{${name}}}; use input1 through input64 for media bindings`);
         slots.add(name);
       }
     } else if (value && typeof value === 'object') {

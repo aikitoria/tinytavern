@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
-import {
-  isMediaPromptExcerpt,
-  resolveMediaPromptSelection,
-  type Message,
-} from '@tinytavern/shared';
+import { isMediaPromptExcerpt, resolveMediaPromptSelection, type Message } from '@tinytavern/shared';
 
 test('explicit media prompt selection survives followups and refuses missing or changed excerpts', () => {
   const first = { id: 1, role: 'assistant', status: 'done', content: 'First prompt' } as Message;
@@ -24,30 +20,18 @@ test('explicit media prompt selection survives followups and refuses missing or 
   const selected = { messageId: 2, text: 'Blue sky\nStill camera' };
   const code = resolveMediaPromptSelection(messages, path, selected)!;
   assert.equal(code.valid, true);
-  assert.equal(
-    code.text,
-    selected.text,
-    'Only code contents are used, without fences or commentary',
-  );
+  assert.equal(code.text, selected.text, 'Only code contents are used, without fences or commentary');
   assert.equal(
     resolveMediaPromptSelection({ 1: first }, [first], selected),
     null,
     'Deletion cannot silently substitute another prompt',
   );
   assert.equal(
-    resolveMediaPromptSelection(
-      { ...messages, 2: { ...latest, content: 'Different prompt' } },
-      path,
-      selected,
-    )?.valid,
+    resolveMediaPromptSelection({ ...messages, 2: { ...latest, content: 'Different prompt' } }, path, selected)?.valid,
     false,
   );
   assert.equal(
-    resolveMediaPromptSelection(
-      { ...messages, 2: { ...latest, status: 'streaming' } },
-      path,
-      selected,
-    )?.valid,
+    resolveMediaPromptSelection({ ...messages, 2: { ...latest, status: 'streaming' } }, path, selected)?.valid,
     false,
   );
   assert(isMediaPromptExcerpt('    Blue sky\r\n    Still camera\r\n', selected.text));
@@ -67,10 +51,7 @@ test('quoted fenced prompts preserve code content while removing Markdown contai
         'Explanation.',
       ].join('\n');
       const message = { id: 1, role: 'assistant', status: 'done', content } as Message;
-      assert.equal(
-        resolveMediaPromptSelection({ 1: message }, [message], { messageId: 1, text })?.valid,
-        true,
-      );
+      assert.equal(resolveMediaPromptSelection({ 1: message }, [message], { messageId: 1, text })?.valid, true);
       assert(
         !isMediaPromptExcerpt(content, 'Blue sky\nHigher clouds'),
         'Literal quote characters inside code are not discarded',

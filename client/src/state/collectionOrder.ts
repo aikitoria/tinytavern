@@ -6,11 +6,7 @@ export function collectionByName<T extends { name: string }>(items: readonly T[]
 }
 
 /** Preserve item identities while moving a saved entry one position in its explicit order. */
-export function moveCollectionItem<T extends { id: string }>(
-  items: T[],
-  id: string,
-  direction: -1 | 1,
-): T[] {
+export function moveCollectionItem<T extends { id: string }>(items: T[], id: string, direction: -1 | 1): T[] {
   const index = items.findIndex((item) => item.id === id);
   const target = index + direction;
   if (index < 0 || target < 0 || target >= items.length) return items;

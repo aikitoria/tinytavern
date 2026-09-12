@@ -50,16 +50,9 @@ test('page location', async () => {
     '#71+/gallery/35?sort=newest+/media/create-video/8?mode=first-frame',
     '#71+/gallery/35?sort=newest+/media/create-video/8?mode=references&context=71',
   ]) {
-    assert.equal(
-      formatPageLocation(parsePageLocation(old)),
-      '#71+/gallery/35?sort=newest+/media/job/8',
-    );
+    assert.equal(formatPageLocation(parsePageLocation(old)), '#71+/gallery/35?sort=newest+/media/job/8');
   }
-  for (const hash of [
-    '#71/jobs',
-    '#71/media/image?jobs=1',
-    '#71/media/video/job-id?jobs=1&context=71',
-  ]) {
+  for (const hash of ['#71/jobs', '#71/media/image?jobs=1', '#71/media/video/job-id?jobs=1&context=71']) {
     const page = parsePageLocation(hash);
     assert.equal(page.modal, 'media-jobs');
     assert.equal(page.media, undefined, 'Legacy Jobs links cannot restore a media editor');
@@ -68,9 +61,7 @@ test('page location', async () => {
   const legacyJobs = '#71/media/image?jobs=1&return=%2371%2Fgallery%2F35';
   assert.equal(
     formatPageLocation(
-      parsePageLocation(
-        '#70+/gallery/123+/settings/generation-settings+/settings/workflows/example?detail=1',
-      ),
+      parsePageLocation('#70+/gallery/123+/settings/generation-settings+/settings/workflows/example?detail=1'),
     ),
     '#70+/gallery/123+/settings/workflows/example?detail=1',
     'Old nested settings URLs restore only the last requested editor',
@@ -78,19 +69,11 @@ test('page location', async () => {
   assert.equal(formatPageLocation(parsePageLocation(legacyJobs)), '#71+/gallery/35+/jobs');
   const media = parsePageLocation('#70/media/video/123?return=%2370%2Fgallery%2F123');
   assert.equal(media.chatId, 70);
-  assert.equal(
-    media.media.contextConversationId,
-    null,
-    'The background chat is separate from generation context',
-  );
+  assert.equal(media.media.contextConversationId, null, 'The background chat is separate from generation context');
   assert.equal(pageStack(media)[1].modal, 'gallery');
   assert.equal(pageStack(media)[1].galleryId, 123);
   assert.equal(formatPageLocation(media), '#70+/gallery/123+/media/job/123');
-  assert.equal(
-    parsePageLocation('#+/gallery').chatId,
-    null,
-    'An explicit gallery URL can have no background chat',
-  );
+  assert.equal(parsePageLocation('#+/gallery').chatId, null, 'An explicit gallery URL can have no background chat');
   for (const asset of ['0', '-1', 'NaN', '1.5']) {
     assert.equal(
       formatPageLocation(parsePageLocation('#71+/media/job/1?asset=' + asset)),
@@ -135,13 +118,8 @@ test('page location', async () => {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: browser });
   Object.defineProperty(globalThis, 'location', { value: location });
   Object.defineProperty(globalThis, 'history', { value: history });
-  const {
-    installPageNavigation,
-    writePageLocation,
-    applyPageLocation,
-    guardPageNavigation,
-    returnToPageLocation,
-  } = await import(modulePath);
+  const { installPageNavigation, writePageLocation, applyPageLocation, guardPageNavigation, returnToPageLocation } =
+    await import(modulePath);
   let rendered = '#70';
   let restoreDialogs: ((page: unknown) => void) | undefined;
   installPageNavigation((page: unknown) => {
@@ -324,10 +302,7 @@ test('page location', async () => {
   navigatePageWithGuards(parsePageLocation('#70+/media/job/1'), () => {
     returnedAfterSave = true;
   });
-  assert(
-    returnedAfterSave,
-    'Saving a child variation must still finish the return to the existing pane',
-  );
+  assert(returnedAfterSave, 'Saving a child variation must still finish the return to the existing pane');
   stopSaveGuard();
   dialogStack.restore(parsePageLocation('#70'));
 
@@ -402,11 +377,7 @@ test('page location', async () => {
   assert.equal(dialogStack.frames().length, 2);
   assert.equal(dialogStack.frames()[0], retainedGallery);
   editReferencedEntity('workflows', 'example');
-  assert.equal(
-    dialogStack.top(),
-    workflowEditor,
-    'Looking up the current entity retains its open draft',
-  );
+  assert.equal(dialogStack.top(), workflowEditor, 'Looking up the current entity retains its open draft');
   openModal('settings');
   assert.equal(dialogStack.top(), workflowEditor, 'The settings button also reuses the panel');
   openMediaTool('example');
@@ -466,9 +437,7 @@ test('dialog stack', async () => {
   const locationModule = '../../client/src/state/pageLocation.ts';
   const layersModule = '../../client/src/state/dialogLayers.ts';
   const { createDialogStack } = await import(stackModule);
-  const { parsePageLocation, formatPageLocation, pageStack, paneLocation } = await import(
-    locationModule
-  );
+  const { parsePageLocation, formatPageLocation, pageStack, paneLocation } = await import(locationModule);
   const { createDialogLayers } = await import(layersModule);
 
   const stack = createDialogStack();
@@ -531,11 +500,7 @@ test('dialog stack', async () => {
   assert.equal(restored.frames()[1]!.media!.jobId, 1);
   assert.equal(restored.frames()[2]!.media, undefined, 'Restored Jobs has no editor session');
   assert.equal(restored.frames()[3]!.media!.jobId, 2);
-  assert.equal(
-    restored.frames()[1]!.media!.prompt,
-    '',
-    'Reload reconstructs panes, not unsaved form text',
-  );
+  assert.equal(restored.frames()[1]!.media!.prompt, '', 'Reload reconstructs panes, not unsaved form text');
   assert.equal(pageStack(parsePageLocation(snapshot))[0]!.chatId, 71);
   restored.pop();
   restored.pop();
@@ -605,20 +570,14 @@ test('dialog stack', async () => {
     assert.equal(restoreMediaInputs(parsePageLocation(hash), galleryItems, {}), undefined, hash);
   }
   assert.deepEqual(
-    restoreMediaInputs(
-      parsePageLocation('#71+/gallery/36+/media/generate?workflow=animate'),
-      galleryItems,
-      {},
-    ),
+    restoreMediaInputs(parsePageLocation('#71+/gallery/36+/media/generate?workflow=animate'), galleryItems, {}),
     { inputs: [], assets: [video] },
   );
   const sourceJobs = {
     6: { outputs: [otherImage], draft: { id: 4, selectedAssetId: 12 } },
     7: { outputs: [], draft: { id: 4, selectedAssetId: 12 } },
   };
-  const nestedSource = parsePageLocation(
-    '#71+/gallery/35+/media/job/7+/jobs+/media/generate?workflow=animate',
-  );
+  const nestedSource = parsePageLocation('#71+/gallery/35+/media/job/7+/jobs+/media/generate?workflow=animate');
   assert.equal(
     restoreMediaInputs(nestedSource, galleryItems, sourceJobs).assets[0].id,
     12,
@@ -630,11 +589,9 @@ test('dialog stack', async () => {
     'Unavailable ancestor jobs can fall back to a suitable gallery image',
   );
   assert.equal(
-    restoreMediaInputs(
-      parsePageLocation('#71+/media/job/6?asset=11+/media/generate?workflow=animate'),
-      galleryItems,
-      { 6: { outputs: [image, otherImage], draft: { id: 4, selectedAssetId: 12 } } },
-    ).assets[0].id,
+    restoreMediaInputs(parsePageLocation('#71+/media/job/6?asset=11+/media/generate?workflow=animate'), galleryItems, {
+      6: { outputs: [image, otherImage], draft: { id: 4, selectedAssetId: 12 } },
+    }).assets[0].id,
     11,
     'A nested editor restores the result in its parent URL ahead of shared draft selection',
   );
@@ -649,11 +606,7 @@ test('dialog stack', async () => {
     2: { draft: { id: 2 } },
   };
   assert.equal(stack.findJob(1, {}), existingEditor, 'Job identity works before history DTOs load');
-  assert.equal(
-    stack.findJob(11, reviewJobs),
-    existingEditor,
-    'A grouped variation returns to its existing editor',
-  );
+  assert.equal(stack.findJob(11, reviewJobs), existingEditor, 'A grouped variation returns to its existing editor');
   assert.equal(stack.findJob(2, reviewJobs), undefined, 'Different jobs open independently');
   const originalPage = existingEditor.page;
   const selectedPage = stack.remember({
@@ -716,9 +669,7 @@ test('ui back', async () => {
     return event.defaultPrevented;
   }
   function back(expected: boolean, pointer = true, auxiliary = true) {
-    const events = pointer
-      ? ['pointerdown', 'mousedown', 'pointerup', 'mouseup']
-      : ['mousedown', 'mouseup'];
+    const events = pointer ? ['pointerdown', 'mousedown', 'pointerup', 'mouseup'] : ['mousedown', 'mouseup'];
     if (auxiliary) events.push('auxclick');
     for (const event of events) assert.equal(mouse(event), expected, event);
   }
@@ -758,21 +709,13 @@ test('ui back', async () => {
   back(true, false, false);
   layer('next mouse-only menu');
   back(true, false);
-  assert.equal(
-    actions.at(-1),
-    'next mouse-only menu',
-    'Missing auxclick does not retain old actions',
-  );
+  assert.equal(actions.at(-1), 'next mouse-only menu', 'Missing auxclick does not retain old actions');
 
   layer('pointer-only menu');
   assert(mouse('pointerdown'));
   assert(mouse('pointerup'));
   assert(mouse('auxclick'));
-  assert.equal(
-    actions.at(-1),
-    'pointer-only menu',
-    'Cancelled pointerdown can suppress mouse events',
-  );
+  assert.equal(actions.at(-1), 'pointer-only menu', 'Cancelled pointerdown can suppress mouse events');
 
   layer('unchanged');
   for (const button of [0, 1, 2, 4]) {
@@ -800,13 +743,7 @@ test('ui back', async () => {
     return event.defaultPrevented;
   }
   for (let i = 0; i < 5; i++) assert(escape());
-  assert.deepEqual(actions.slice(previousActions), [
-    'dropdown',
-    'picker',
-    'job',
-    'jobs',
-    'gallery details',
-  ]);
+  assert.deepEqual(actions.slice(previousActions), ['dropdown', 'picker', 'job', 'jobs', 'gallery details']);
   assert(!escape(), 'Escape reaches inline editors when no dialog can close');
   stopUi();
 });

@@ -30,14 +30,9 @@ import { DEFAULT_SETTINGS, mediaJobActive, mergeMediaProgress } from '@tinytaver
 import { api } from './api.ts';
 import { refreshWs, subscribe } from './ws.ts';
 import { isCurrentSettingsRevision, SuccessfulFetchSequence, upsertById } from './sync.ts';
-import {
-  createConversationSession,
-  type ConversationSession,
-  type ConversationState,
-} from './conversationSession.ts';
+import { createConversationSession, type ConversationSession, type ConversationState } from './conversationSession.ts';
 
-export type ModalKind =
-  'settings' | 'conversation' | 'gallery' | 'media-tools' | 'media-jobs' | null;
+export type ModalKind = 'settings' | 'conversation' | 'gallery' | 'media-tools' | 'media-jobs' | null;
 
 const GROUP_BY_CHARACTER_KEY = 'tinytavern.groupByCharacter';
 
@@ -221,11 +216,7 @@ const fetchSeq = new SuccessfulFetchSequence<InvalidateEntity>();
 const locallyDeletingConversationIds = new Set<number>();
 let locallyDeletingAllConversations = false;
 
-function loader<T>(
-  entity: InvalidateEntity,
-  fetch: () => Promise<T>,
-  apply: (data: T) => void,
-): () => Promise<void> {
+function loader<T>(entity: InvalidateEntity, fetch: () => Promise<T>, apply: (data: T) => void): () => Promise<void> {
   return async () => {
     const seq = fetchSeq.start(entity);
     const data = await fetch();
@@ -296,18 +287,10 @@ const loaders: Record<InvalidateEntity, () => Promise<void>> = {
       setGalleryFoldersLoaded(true);
     });
   }),
-  presets: loader('presets', api.presets.list, (data) =>
-    setState('presets', reconcile(data, { key: 'id' })),
-  ),
-  templates: loader('templates', api.templates.list, (data) =>
-    setState('templates', reconcile(data, { key: 'id' })),
-  ),
-  personas: loader('personas', api.personas.list, (data) =>
-    setState('personas', reconcile(data, { key: 'id' })),
-  ),
-  endpoints: loader('endpoints', api.endpoints.list, (data) =>
-    setState('endpoints', reconcile(data, { key: 'id' })),
-  ),
+  presets: loader('presets', api.presets.list, (data) => setState('presets', reconcile(data, { key: 'id' }))),
+  templates: loader('templates', api.templates.list, (data) => setState('templates', reconcile(data, { key: 'id' }))),
+  personas: loader('personas', api.personas.list, (data) => setState('personas', reconcile(data, { key: 'id' }))),
+  endpoints: loader('endpoints', api.endpoints.list, (data) => setState('endpoints', reconcile(data, { key: 'id' }))),
   settings: loader('settings', api.settings, (data) => {
     if (isCurrentSettingsRevision(state.settings.revision, data.revision)) {
       setState('settings', data);
@@ -373,18 +356,12 @@ export async function refreshMediaJobs(): Promise<void> {
       mediaJobActive(current.state) ||
       (recent.length === 100 &&
         oldest &&
-        (current.createdAt < oldest.createdAt ||
-          (current.createdAt === oldest.createdAt && current.id < oldest.id)))
+        (current.createdAt < oldest.createdAt || (current.createdAt === oldest.createdAt && current.id < oldest.id)))
     )
       jobs[current.id] = current;
   }
   for (const job of recent) {
-    if (
-      mediaJobActive(job.state) &&
-      activeJobSnapshotSequence > began &&
-      !activeJobSnapshot.has(job.id)
-    )
-      continue;
+    if (mediaJobActive(job.state) && activeJobSnapshotSequence > began && !activeJobSnapshot.has(job.id)) continue;
     applyThumbnails(job.assets);
     applyThumbnails(job.outputs);
     if (!deletedMediaJobs.has(job.id)) jobs[job.id] = job;
@@ -475,23 +452,12 @@ export function handleServerEvent(ev: ServerEvent): void {
       if (job && mediaJobActive(job.state)) {
         mediaJobEvents.set(ev.id, ++mediaEventSequence);
         batch(() => {
-          setState(
-            'mediaJobs',
-            ev.id,
-            'progress',
-            reconcile(mergeMediaProgress(job.progress, ev.progress)),
-          );
+          setState('mediaJobs', ev.id, 'progress', reconcile(mergeMediaProgress(job.progress, ev.progress)));
           if (ev.reasoning !== undefined) {
             setState('mediaJobs', ev.id, 'reasoning', ev.reasoning);
             for (const session of conversationSessions)
               if (job.messageId !== null && session.state.tree.messages[job.messageId]) {
-                session.setState(
-                  'tree',
-                  'messages',
-                  job.messageId,
-                  'reasoning',
-                  ev.reasoning || null,
-                );
+                session.setState('tree', 'messages', job.messageId, 'reasoning', ev.reasoning || null);
               }
           }
           if (ev.prompt !== undefined) {
@@ -511,18 +477,13 @@ export function handleServerEvent(ev: ServerEvent): void {
       loaders[ev.entity]().catch(console.error);
       break;
     default:
-      if (ev.t === 'tree' || ev.t === 'treePatch')
-        for (const message of ev.messages) applyThumbnails(message.media);
+      if (ev.t === 'tree' || ev.t === 'treePatch') for (const message of ev.messages) applyThumbnails(message.media);
       for (const session of conversationSessions) session.handleEvent(ev);
   }
 }
 
 export function selectConversation(id: number | null): void {
-  if (
-    state.conversations.some(
-      (conversation) => conversation.id === id && conversation.promptMode === 'media',
-    )
-  )
+  if (state.conversations.some((conversation) => conversation.id === id && conversation.promptMode === 'media'))
     id = null;
   if (id === state.selectedId) {
     setState('sidebarOpen', false); // mobile: still dismiss the sidebar
@@ -616,9 +577,7 @@ export async function branchConversation(messageId: number): Promise<void> {
 export function restoreConversationSelection(): void {
   selectionRestored = true;
   const exists = (id: number) =>
-    state.conversations.some(
-      (conversation) => conversation.id === id && conversation.promptMode !== 'media',
-    );
+    state.conversations.some((conversation) => conversation.id === id && conversation.promptMode !== 'media');
   const page = readPageLocation();
   const hashId = page.chatId;
   let storedId = 0;
@@ -630,12 +589,7 @@ export function restoreConversationSelection(): void {
   let id: number | null = null;
   if (hashId !== null && exists(hashId)) {
     id = hashId;
-  } else if (
-    !location.hash.includes('/') &&
-    Number.isInteger(storedId) &&
-    storedId > 0 &&
-    exists(storedId)
-  ) {
+  } else if (!location.hash.includes('/') && Number.isInteger(storedId) && storedId > 0 && exists(storedId)) {
     id = storedId;
   }
   selectConversation(id);
@@ -649,8 +603,7 @@ export function openDialog(
   if (page.modal === 'settings') {
     const existing = dialogStack.frames().find((frame) => frame.page.modal === 'settings');
     if (existing) {
-      const target =
-        page.settingsTab === undefined ? existing.page : { ...page, stack: existing.page.stack };
+      const target = page.settingsTab === undefined ? existing.page : { ...page, stack: existing.page.stack };
       navigatePageWithGuards(target, () =>
         batch(() => {
           dialogStack.restore(target);
@@ -723,7 +676,5 @@ export function toggleGroupByCharacter(): void {
 export const booting = globalMemo(
   () =>
     !state.booted ||
-    (!initialTreeLoaded() &&
-      state.selectedId != null &&
-      state.tree.conversationId !== state.selectedId),
+    (!initialTreeLoaded() && state.selectedId != null && state.tree.conversationId !== state.selectedId),
 );

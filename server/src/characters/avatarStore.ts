@@ -22,11 +22,7 @@ function nextAvatarVersion(kind: AvatarKind, id: number): number {
   const table = kind === 'character' ? 'characters' : 'personas';
   const avatar = stmt(`SELECT avatar FROM ${table} WHERE id = ?`).get(id)?.avatar;
   const previous = typeof avatar === 'string' ? Number(avatar.match(/\?v=(\d+)$/)?.[1]) : 0;
-  lastVersion = Math.max(
-    Date.now(),
-    lastVersion + 1,
-    Number.isSafeInteger(previous) ? previous + 1 : 0,
-  );
+  lastVersion = Math.max(Date.now(), lastVersion + 1, Number.isSafeInteger(previous) ? previous + 1 : 0);
   return lastVersion;
 }
 
@@ -60,10 +56,7 @@ export function deleteObsoleteAvatarFiles(kind: AvatarKind, id: number, keepExt 
 export function copyAvatarFiles(kind: AvatarKind, fromId: number, toId: number): string | null {
   for (const ext of IMAGE_EXTS) {
     try {
-      copyFileSync(
-        join(AVATAR_DIR, `${kind}-${fromId}.${ext}`),
-        join(AVATAR_DIR, `${kind}-${toId}.${ext}`),
-      );
+      copyFileSync(join(AVATAR_DIR, `${kind}-${fromId}.${ext}`), join(AVATAR_DIR, `${kind}-${toId}.${ext}`));
       return `/avatars/${kind}-${toId}.${ext}?v=${nextAvatarVersion(kind, toId)}`;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;

@@ -1,3 +1,4 @@
+import { createSettingsSnapshotLoader } from './settingsSnapshot.ts';
 import { ENTITY_FOLDERS, type FolderEntity, type EntityFolder } from '@tinytavern/shared';
 import {
   DEFAULT_SETTINGS,
@@ -21,6 +22,7 @@ import type {
   Preset,
   PromptTrace,
   Settings,
+  SettingsSnapshot,
   Template,
 } from '@tinytavern/shared';
 import { readSseData } from '@tinytavern/shared';
@@ -45,20 +47,12 @@ export function setAuthenticationRequiredHandler(handler: () => void): void {
   onAuthenticationRequired = handler;
 }
 
-async function request<T>(
-  method: string,
-  url: string,
-  body?: unknown,
-  options?: RequestOptions,
-): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown, options?: RequestOptions): Promise<T> {
   const hasRawBody = options?.rawBody !== undefined;
   const hasJsonBody = body !== undefined;
   const res = await fetch(url, {
     method,
-    headers:
-      hasRawBody || hasJsonBody
-        ? { 'content-type': options?.contentType ?? 'application/json' }
-        : {},
+    headers: hasRawBody || hasJsonBody ? { 'content-type': options?.contentType ?? 'application/json' } : {},
     body: hasRawBody ? options.rawBody : hasJsonBody ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -104,12 +98,10 @@ function mutation<T, B extends object | undefined = undefined>(
   const base = `/api/${resource}/`;
   const tail = suffix ? `/${suffix}` : '';
   return ((id: number, expected: MutationState, body?: B) =>
-    mutationRequest<T>(
-      method,
-      `${base}${id}${tail}`,
-      expected,
-      body ? { ...body } : undefined,
-    )) as GuardedMutation<T, B>;
+    mutationRequest<T>(method, `${base}${id}${tail}`, expected, body ? { ...body } : undefined)) as GuardedMutation<
+    T,
+    B
+  >;
 }
 
 type ContentBody = { content: string };
@@ -170,8 +162,7 @@ function resource<T>(name: string, preparePatch: (data: Partial<T>) => unknown =
   return {
     list: () => request<T[]>('GET', url),
     create: (data: Partial<T>) => request<T>('POST', url, data),
-    patch: (id: number, data: Partial<T>) =>
-      request<T>('PATCH', `${url}/${id}`, preparePatch(data)),
+    patch: (id: number, data: Partial<T>) => request<T>('PATCH', `${url}/${id}`, preparePatch(data)),
     remove: (id: number) => request<void>('DELETE', `${url}/${id}`),
   };
 }
@@ -184,8 +175,7 @@ function entity<T>(name: string, preparePatch?: (data: Partial<T>) => unknown) {
 function avatarEntity<T>(name: string) {
   return {
     ...entity<T>(name),
-    useAvatarAsset: (id: number, assetId: number) =>
-      request<T>('POST', `/api/${name}/${id}/avatar`, { assetId }),
+    useAvatarAsset: (id: number, assetId: number) => request<T>('POST', `/api/${name}/${id}/avatar`, { assetId }),
     uploadAvatar: (id: number, file: File) =>
       request<T>('PUT', `/api/${name}/${id}/avatar`, undefined, {
         rawBody: file,
@@ -193,6 +183,16 @@ function avatarEntity<T>(name: string) {
       }),
     deleteAvatar: (id: number) => request<T>('DELETE', `/api/${name}/${id}/avatar`),
   };
+}
+
+const settingsSnapshot = createSettingsSnapshotLoader((query) =>
+  request<SettingsSnapshot>('GET', `/api/settings/snapshot?${query}`),
+);
+
+function saveSettings(data: Record<string, unknown>, expectedRevision: number) {
+  return settingsSnapshot((query) =>
+    request<SettingsSnapshot>('PUT', `/api/settings?${query}`, { ...data, expectedRevision }),
+  );
 }
 
 export const api = {
@@ -203,10 +203,7 @@ export const api = {
     body?: Record<string, unknown>,
   ) => request<T>(method, `/api/${table}${id == null ? '' : `/${id}`}`, body),
   exportEntityPage: (type: TransferEntity) =>
-    request<{ document: SettingsTransferDocument; snapshot: string }>(
-      'GET',
-      `/api/${type}/settings-export`,
-    ),
+    request<{ document: SettingsTransferDocument; snapshot: string }>('GET', `/api/${type}/settings-export`),
   exportEntityRecord: (type: TransferEntity, id: number) =>
     request<Record<string, unknown>>('GET', `/api/${type}/${id}/settings-export`),
   importEntityPage: (type: TransferEntity, data: unknown, expectedSnapshot: string) =>
@@ -219,13 +216,7 @@ export const api = {
     return request<MediaJob[]>('GET', `/api/media/jobs${query}`);
   },
   mediaJob: (id: number) => request<MediaJob>('GET', `/api/media/jobs/${id}`),
-  runMediaFavorite: (
-    id: string,
-    conversationId: number,
-    tree: MutationState,
-    requestKey: string,
-    instruction = '',
-  ) =>
+  runMediaFavorite: (id: string, conversationId: number, tree: MutationState, requestKey: string, instruction = '') =>
     request<MediaJob>('POST', `/api/media/favorites/${encodeURIComponent(id)}/run`, {
       contextConversationId: conversationId,
       requestKey,
@@ -235,8 +226,7 @@ export const api = {
     }),
   createMediaJob: (draft: MediaJobDraft, requestKey: string) =>
     request<MediaJob>('POST', '/api/media/jobs', { ...draft, requestKey }),
-  mediaAssetInputs: (assetId: number) =>
-    request<MediaAssetInput[]>('GET', `/api/media/assets/${assetId}/inputs`),
+  mediaAssetInputs: (assetId: number) => request<MediaAssetInput[]>('GET', `/api/media/assets/${assetId}/inputs`),
   mediaAssetResultDetails: (assetId: number) =>
     request<MediaResultDetails>('GET', `/api/media/assets/${assetId}/details`),
   rerunMediaAsset: (assetId: number, requestKey: string, options: Partial<MediaJobDraft> = {}) =>
@@ -262,6 +252,7 @@ export const api = {
     request<MediaJob>('POST', `/api/media/jobs/${job.id}/${action}`, {
       ...options,
       expectedRevision: job.revision,
+      expectedDraftRevision: job.draft?.revision,
     }),
   mediaVariations: (jobId: number, draftId?: number | null) =>
     request<MediaJob[]>(
@@ -274,12 +265,7 @@ export const api = {
       expectedDraftRevision,
       expectedRevision: job.revision,
     }),
-  acceptMediaVariation: (
-    job: MediaJob,
-    assetId: number | null,
-    expectedDraftRevision: number,
-    tree: MutationState,
-  ) =>
+  acceptMediaVariation: (job: MediaJob, assetId: number | null, expectedDraftRevision: number, tree: MutationState) =>
     request<MediaJob>('POST', `/api/media/jobs/${job.id}/accept`, {
       assetId,
       expectedDraftRevision,
@@ -299,20 +285,16 @@ export const api = {
       expectedRevision: job.revision,
       requestKey,
     }),
-  deleteMediaJob: (job: MediaJob) =>
-    request('DELETE', `/api/media/jobs/${job.id}?expectedRevision=${job.revision}`),
-  authStatus: () =>
-    request<{ required: boolean; authenticated: boolean }>('GET', '/api/auth/status'),
-  login: (password: string) =>
-    request<{ authenticated: boolean }>('POST', '/api/auth/login', { password }),
+  deleteMediaJob: (job: MediaJob) => request('DELETE', `/api/media/jobs/${job.id}?expectedRevision=${job.revision}`),
+  authStatus: () => request<{ required: boolean; authenticated: boolean }>('GET', '/api/auth/status'),
+  login: (password: string) => request<{ authenticated: boolean }>('POST', '/api/auth/login', { password }),
   logout: () => request<{ authenticated: boolean }>('POST', '/api/auth/logout'),
 
   conversations: () => request<Conversation[]>('GET', '/api/conversations'),
   gallery: () => request<GalleryItem[]>('GET', '/api/gallery'),
   uploadGalleryMedia: (file: File, characterId: number | null, folderId?: number | null) => {
     const query = new URLSearchParams();
-    if (folderId !== undefined)
-      query.set('folderId', folderId === null ? 'root' : String(folderId));
+    if (folderId !== undefined) query.set('folderId', folderId === null ? 'root' : String(folderId));
     if (characterId != null) query.set('characterId', String(characterId));
     return request<GalleryItem>('POST', `/api/gallery/upload?${query}`, undefined, {
       rawBody: file,
@@ -351,8 +333,7 @@ export const api = {
       if (payload.d !== undefined) prompt += payload.d;
       if (payload.done) completed = true;
     });
-    if (!completed || !prompt.trim())
-      throw new ApiError(502, 'Prompt generation ended without a result');
+    if (!completed || !prompt.trim()) throw new ApiError(502, 'Prompt generation ended without a result');
     return prompt;
   },
   updateGalleryItem: (
@@ -367,8 +348,7 @@ export const api = {
       expectedFolderId: expected.folderId,
     }),
   deleteGalleryItem: (id: number) => request<void>('DELETE', `/api/gallery/${id}`),
-  deleteGalleryItems: (ids: number[]) =>
-    request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
+  deleteGalleryItems: (ids: number[]) => request<{ deleted: number }>('POST', '/api/gallery/bulk-delete', { ids }),
   moveGalleryItems: (items: Pick<GalleryItem, 'id' | 'folderId'>[], folderId: number | null) =>
     request<{ moved: number }>('POST', '/api/gallery/move', {
       items: items.map((item) => ({ id: item.id, expectedFolderId: item.folderId })),
@@ -377,22 +357,17 @@ export const api = {
   deleteAllConversations: () => request<{ deleted: number }>('DELETE', '/api/conversations'),
   deleteAllCharacters: () => request<{ deleted: number }>('DELETE', '/api/characters'),
   resetSettings: (expectedRevision: number): Promise<Settings> =>
-    api.putSettings(
-      {
-        ...DEFAULT_SETTINGS,
-        imageGeneration: { ...DEFAULT_SETTINGS.imageGeneration, promptPresets: {} },
-      },
+    request<Settings>('POST', '/api/settings/import', {
+      ...DEFAULT_SETTINGS,
+      imageGeneration: { ...DEFAULT_SETTINGS.imageGeneration, promptPresets: {} },
       expectedRevision,
-    ),
+    }),
+  importMediaSettings: (data: Partial<Settings>, expectedRevision: number) =>
+    request<Settings>('POST', '/api/settings/import', { ...data, expectedRevision }),
+  saveMediaSettings: saveSettings,
   conversation: (id: number) => request<Conversation>('GET', `/api/conversations/${id}`),
   startMediaConversation: (job: MediaJob, body: Record<string, unknown>) =>
     request<Conversation>('POST', `/api/media/jobs/${job.id}/conversation`, {
-      ...body,
-      expectedRevision: job.revision,
-      expectedDraftRevision: job.draft?.revision,
-    }),
-  migrateMediaConversation: (job: MediaJob, body: Record<string, unknown>) =>
-    request<MediaJob>('POST', `/api/media/jobs/${job.id}/conversation/migrate`, {
       ...body,
       expectedRevision: job.revision,
       expectedDraftRevision: job.draft?.revision,
@@ -407,20 +382,13 @@ export const api = {
     request<Conversation>('POST', '/api/conversations', { characterId }),
   patchConversation: mutation<Conversation, Partial<Conversation>>('conversations', '', 'PATCH'),
   deleteConversation: mutation<void>('conversations', '', 'DELETE'),
-  duplicateConversation: (id: number) =>
-    request<Conversation>('POST', `/api/conversations/${id}/duplicate`),
+  duplicateConversation: (id: number) => request<Conversation>('POST', `/api/conversations/${id}/duplicate`),
   branchConversation: (messageId: number) =>
     request<Conversation>('POST', `/api/messages/${messageId}/branch-conversation`),
   search: (q: string) =>
-    request<{ conversation: Conversation; snippet: string | null }[]>(
-      'GET',
-      `/api/search?q=${encodeURIComponent(q)}`,
-    ),
+    request<{ conversation: Conversation; snippet: string | null }[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
   trace: (id: number) => request<PromptTrace>('GET', `/api/conversations/${id}/trace`),
-  send: mutation<{ userMessageId: number; assistantMessageId: number }, ContentBody>(
-    'conversations',
-    'messages',
-  ),
+  send: mutation<{ userMessageId: number; assistantMessageId: number }, ContentBody>('conversations', 'messages'),
   deleteTail: mutation<ActiveLeafResult & { deletedSiblingRoots: number }, { count: number }>(
     'conversations',
     'delete-tail',
@@ -430,45 +398,24 @@ export const api = {
     { prompt: string; label: string; image?: MediaImageConfig }
   >('conversations', 'tool'),
   moveMessage: mutation<ActiveLeafResult, { direction: 'up' | 'down' }>('messages', 'move'),
-  moveMessageRange: (
-    messageIds: number[],
-    direction: 'up' | 'down',
-    steps: number,
-    expected: MutationState,
-  ) =>
-    mutationRequest<{ activeLeafId: number | null; movedSteps: number }>(
-      'POST',
-      '/api/message-ranges/move',
-      expected,
-      {
-        messageIds,
-        direction,
-        steps,
-      },
-    ),
+  moveMessageRange: (messageIds: number[], direction: 'up' | 'down', steps: number, expected: MutationState) =>
+    mutationRequest<{ activeLeafId: number | null; movedSteps: number }>('POST', '/api/message-ranges/move', expected, {
+      messageIds,
+      direction,
+      steps,
+    }),
   deleteMessageRange: (messageIds: number[], expected: MutationState) =>
-    mutationRequest<{ activeLeafId: number | null }>(
-      'POST',
-      '/api/message-ranges/delete',
-      expected,
-      {
-        messageIds,
-      },
-    ),
+    mutationRequest<{ activeLeafId: number | null }>('POST', '/api/message-ranges/delete', expected, {
+      messageIds,
+    }),
   duplicateMessage: mutation<{ messageId: number; activeLeafId: number }>('messages', 'duplicate'),
-  renderImage: mutation<{ rendering: boolean }, MediaImageConfig | undefined>(
-    'messages',
-    'render-image',
-  ),
+  renderImage: mutation<{ rendering: boolean }, MediaImageConfig | undefined>('messages', 'render-image'),
   setActiveImage: mutation<void, ImageIndexBody>('messages', 'active-image'),
   deleteImage: mutation<Message, ImageIndexBody>('messages', 'delete-image'),
   editMessage: mutation<unknown, ContentBody>('messages', '', 'PATCH'),
   editBranch: mutation<{ messageId: number }, ContentBody>('messages', 'edit-branch'),
   activate: mutation<{ activeLeafId: number }>('messages', 'activate'),
-  advance: mutation<{ activeLeafId: number; assistantMessageId: number | null }>(
-    'messages',
-    'advance',
-  ),
+  advance: mutation<{ activeLeafId: number; assistantMessageId: number | null }>('messages', 'advance'),
   regenerate: mutation<
     { activeLeafId: number; assistantMessageId: number },
     { instruction: string; image?: MediaImageConfig }
@@ -490,10 +437,7 @@ export const api = {
       }),
   },
   entityFolders: Object.fromEntries(
-    Object.entries(ENTITY_FOLDERS).map(([entity, { path }]) => [
-      entity,
-      resource<EntityFolder>(path),
-    ]),
+    Object.entries(ENTITY_FOLDERS).map(([entity, { path }]) => [entity, resource<EntityFolder>(path)]),
   ) as Record<FolderEntity, ReturnType<typeof resource<EntityFolder>>>,
   templates: entity<Template>('templates'),
   presets: entity<Preset>('presets'),
@@ -513,15 +457,8 @@ export const api = {
     models: (id: number) => request<string[]>('GET', `/api/endpoints/${id}/models`),
   },
 
-  settings: () => request<Settings>('GET', '/api/settings'),
-  putSettings: (
-    settings: Partial<Settings>,
-    expectedRevision: number,
-    accessPassword?: string | null,
-  ) =>
-    request<Settings>('PUT', '/api/settings', {
-      ...settings,
-      expectedRevision,
-      ...(accessPassword === undefined ? {} : { accessPassword }),
-    }),
+  settings: async () => (await settingsSnapshot()).settings,
+  putSettings: async (settings: Partial<Settings>, expectedRevision: number, accessPassword?: string | null) =>
+    (await saveSettings({ ...settings, ...(accessPassword === undefined ? {} : { accessPassword }) }, expectedRevision))
+      .settings,
 };

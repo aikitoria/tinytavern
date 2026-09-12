@@ -14,13 +14,7 @@ export * from './entityFields.ts';
 export * from './promptMessages.ts';
 import type { Character } from './entityFields.ts';
 import { DEFAULT_MEDIA_RENDERING, DEFAULT_MEDIA_PROMPTS } from './media.ts';
-import type {
-  MediaAsset,
-  MediaRenderingSettings,
-  MediaPromptSettings,
-  MediaJob,
-  MediaFavorite,
-} from './media.ts';
+import type { MediaAsset, MediaRenderingSettings, MediaPromptSettings, MediaJob, MediaFavorite } from './media.ts';
 
 /** 'tool' messages are tool output shown in the chat but excluded from prompt history. */
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
@@ -88,10 +82,7 @@ export interface GalleryItem {
   /** Original message image path, used only to recognize an already-saved swipe. */
   sourceImage: string | null;
   prompt: string;
-  image: string;
-  imageWidth: number | null;
-  imageHeight: number | null;
-  media?: MediaAsset;
+  media: MediaAsset;
   createdAt: number;
   updatedAt: number;
 }
@@ -123,9 +114,7 @@ export interface Conversation {
 }
 
 /** UI lists use Character.name; chat speakers and character macros use this name. */
-export function characterChatName(
-  character: Pick<Character, 'name' | 'chatName'> | null | undefined,
-): string {
+export function characterChatName(character: Pick<Character, 'name' | 'chatName'> | null | undefined): string {
   return character?.chatName?.trim() || character?.name || 'Assistant';
 }
 
@@ -140,7 +129,7 @@ export interface ImageGenerationSettings {
   promptPresets?: Record<
     string,
     {
-      presets: { id?: string; name: string; prompt: string; context?: string }[];
+      presets: { id?: string; revision?: number; name: string; prompt: string; context?: string }[];
       active: string;
       activeId?: string | null;
     }
@@ -181,8 +170,7 @@ export interface Settings {
 }
 
 /** {{system}} resolves the preset/custom prompt; empty slots omit their {{#if}} blocks. */
-export const DEFAULT_SYSTEM_PROMPT =
-  'You are {{char}}, a helpful assistant. Answer accurately and concisely.';
+export const DEFAULT_SYSTEM_PROMPT = 'You are {{char}}, a helpful assistant. Answer accurately and concisely.';
 
 export const DEFAULT_PROMPT_TEMPLATE = `{{system}}
 
@@ -244,8 +232,7 @@ export const DEFAULT_AVATAR_CONTEXT =
 export const DEFAULT_CHAT_IMAGE_REVISION_CONTEXT =
   '<system_instruction>\nThe next assistant message is the original image-generation prompt to revise.\n</system_instruction>';
 
-export const DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL =
-  '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>';
+export const DEFAULT_CHAT_IMAGE_REVISION_ORIGINAL = '<original_image_prompt>\n{{prompt}}\n</original_image_prompt>';
 
 /** Substitute supplied values once, leaving macro-like text inside user content untouched. */
 export function expandPromptSlots(template: string, values: Record<string, string>): string {
@@ -275,8 +262,7 @@ export const DEFAULT_IMAGE_PROMPT_REVISION: StandalonePromptTemplate = {
 };
 
 export function imageRevisionTemplateError(template: string): string | null {
-  if (!/\{\{instruction\}\}/i.test(template))
-    return 'Include {{instruction}} in the revision template.';
+  if (!/\{\{instruction\}\}/i.test(template)) return 'Include {{instruction}} in the revision template.';
   return null;
 }
 
@@ -382,3 +368,4 @@ export type ServerEvent =
 export type ClientCommand = { sub: number | null } | { subs: number[]; resync?: number };
 
 export { newRequestId, nextCollectionId } from './numericIds.ts';
+export * from './mediaSettingsChanges.ts';

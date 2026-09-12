@@ -2,12 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import { createRoot } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import {
-  DEFAULT_SETTINGS,
-  type Conversation,
-  type Message,
-  type ServerEvent,
-} from '@tinytavern/shared';
+import { DEFAULT_SETTINGS, type Conversation, type Message, type ServerEvent } from '@tinytavern/shared';
 
 // Import dynamically so the server test type graph does not pull in browser-only API types.
 test('conversation sessions isolate tree streams, edits, selections, swipes and map navigation', async () => {
@@ -112,8 +107,7 @@ test('conversation sessions isolate tree streams, edits, selections, swipes and 
     });
     main.handleEvent(snapshot);
     embedded.handleEvent(snapshot);
-    for (const session of [main, embedded])
-      session.handleEvent({ t: 'delta', mid: 21, d: ' revision' });
+    for (const session of [main, embedded]) session.handleEvent({ t: 'delta', mid: 21, d: ' revision' });
     assert.equal(main.state.tree.messages[21], undefined);
     assert.equal(embedded.state.tree.messages[21].content, 'Prompt revision');
     main.startMessageSelection(10);
@@ -329,11 +323,7 @@ test('two views of one conversation own their messages and append each streamed 
       broadcast({ t: 'delta', mid: id, d: ' chunk', r: 'reasoning' });
       for (const [index, session] of sessions.entries()) {
         const actual = session.state.tree.messages[id];
-        assert.strictEqual(
-          actual,
-          identities[index],
-          'Updates retain each view’s message identity',
-        );
+        assert.strictEqual(actual, identities[index], 'Updates retain each view’s message identity');
         assert.equal(actual.content, content + ' chunk');
         assert.equal(actual.reasoning, 'reasoning');
         assert.equal(actual.genMeta.generations.length, 1);

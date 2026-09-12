@@ -23,8 +23,7 @@ export function objectBody(body: unknown): JsonObject {
 
 export function positiveId(value: string | undefined, label = 'id'): number {
   const id = Number(value);
-  if (!Number.isSafeInteger(id) || id <= 0)
-    throw new HttpError(400, `${label} must be a positive integer`);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new HttpError(400, `${label} must be a positive integer`);
   return id;
 }
 

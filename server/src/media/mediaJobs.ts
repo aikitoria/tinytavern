@@ -1,3 +1,4 @@
+import { seedMediaPromptConversation } from '../db/mediaPromptSeed.ts';
 import { requireMediaWorkflow } from './mediaWorkflows.ts';
 import { fillAutomaticMediaInputs } from './mediaInputs.ts';
 import { avatarPrompt, parseAvatarContext } from './mediaAvatarPrompt.ts';
@@ -24,7 +25,7 @@ import {
 } from '@tinytavern/shared';
 import { stmt, toConversation, transaction, deleteConversationRows } from '../db/db.ts';
 import { HttpError } from '../http/router.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettings, getSettingsPreferences } from '../settings/settingsStore.ts';
 import { optionalNullableId, optionalNullableString, optionalString } from '../http/validation.ts';
 import { appendMessage, getActivePath, markMessageDirty } from '../conversations/tree.ts';
 import { requireExpectedActiveLeaf } from '../conversations/concurrency.ts';
@@ -32,17 +33,8 @@ import { bumpConversationRevision } from '../conversations/conversationRevision.
 import { broadcast, invalidate } from '../realtime/events.ts';
 import { broadcastTree } from '../realtime/sync.ts';
 import { deleteImageFiles, collectConversationImages } from './images.ts';
-import {
-  appendChatMessage,
-  buildChatMessages,
-  expandTemplate,
-  type ChatMessage,
-} from '../generation/prompt.ts';
-import {
-  hasActiveNonToolGeneration,
-  resolveEndpoint,
-  stopConversationGenerations,
-} from '../generation/generation.ts';
+import { appendChatMessage, buildChatMessages, expandTemplate, type ChatMessage } from '../generation/prompt.ts';
+import { hasActiveNonToolGeneration, resolveEndpoint, stopConversationGenerations } from '../generation/generation.ts';
 import { discardSpeculativeSwipes } from '../generation/speculation.ts';
 import {
   mediaJobDto,
@@ -68,9 +60,7 @@ function conversationForJob(row: MediaJobRow) {
   if (row.context_conversation_id === null) {
     return null;
   }
-  const conversation = stmt('SELECT * FROM conversations WHERE id = ?').get(
-    row.context_conversation_id,
-  );
+  const conversation = stmt('SELECT * FROM conversations WHERE id = ?').get(row.context_conversation_id);
   if (!conversation) {
     throw new HttpError(409, 'The source conversation was deleted');
   }
@@ -94,10 +84,7 @@ function parseInputs(
     const slot = input.slot;
     const knownSlot = typeof slot === 'string' && NUMBERED_MEDIA_INPUT.test(slot);
     if (!knownSlot || slots.has(slot as string)) {
-      throw new HttpError(
-        400,
-        'Each media input needs a distinct slot from input1 through input64',
-      );
+      throw new HttpError(400, 'Each media input needs a distinct slot from input1 through input64');
     }
     if (!Number.isSafeInteger(input.assetId) || (input.assetId as number) <= 0) {
       throw new HttpError(400, 'Invalid reference asset ID');
@@ -120,8 +107,8 @@ function parseInputs(
         slot: slot as MediaJobInput['slot'],
         assetId: input.assetId as number,
         prompt:
-          previous.find((saved) => saved.slot === slot && saved.assetId === input.assetId)
-            ?.prompt ?? String(asset.prompt ?? ''),
+          previous.find((saved) => saved.slot === slot && saved.assetId === input.assetId)?.prompt ??
+          String(asset.prompt ?? ''),
       },
     ];
   });
@@ -133,9 +120,7 @@ export function resolveJobConfiguration(
 ): { configuration: MediaJobConfiguration; workflow: MediaWorkflow; captured: boolean } | null {
   const settings = getSettings().mediaRendering;
   const selectedId = workflowId ?? settings.defaultWorkflowId;
-  const snapshot: MediaJobConfiguration | null = configurationJson
-    ? JSON.parse(configurationJson)
-    : null;
+  const snapshot: MediaJobConfiguration | null = configurationJson ? JSON.parse(configurationJson) : null;
   const workflow = settings.workflows.find((item) => item.id === selectedId);
   if (!workflow) return null;
   const captured = snapshot?.workflowId === selectedId;
@@ -185,12 +170,7 @@ function draftConfiguration(
 ): string | null {
   if (seedOverride != null && (!Number.isSafeInteger(seedOverride) || (seedOverride as number) < 0))
     throw new HttpError(400, 'Seed must be a whole number from 0 to 9007199254740991');
-  if (
-    values === undefined &&
-    avatarContext === undefined &&
-    seedOverride === undefined &&
-    configurationJson === null
-  )
+  if (values === undefined && avatarContext === undefined && seedOverride === undefined && configurationJson === null)
     return null;
   const resolved = resolveJobConfiguration(workflowId, configurationJson);
   if (values === undefined && avatarContext === undefined && seedOverride === undefined)
@@ -207,9 +187,7 @@ function draftConfiguration(
       values === undefined ? (resolved.configuration.workflowValues ?? {}) : values,
     );
     const avatar =
-      avatarContext === undefined
-        ? resolved.configuration.avatarContext
-        : parseAvatarContext(avatarContext);
+      avatarContext === undefined ? resolved.configuration.avatarContext : parseAvatarContext(avatarContext);
     if (avatar && resolved.workflow.textOutputNodeId !== null)
       throw new HttpError(400, 'Avatar workflows must produce images');
     return JSON.stringify({
@@ -272,13 +250,8 @@ export function createMediaJob(
   );
   const requestedConversation = optionalNullableId(body, 'contextConversationId');
   const conversationId =
-    requestedConversation === undefined
-      ? (source?.context_conversation_id ?? null)
-      : requestedConversation;
-  if (
-    conversationId !== null &&
-    !stmt('SELECT id FROM conversations WHERE id = ?').get(conversationId)
-  ) {
+    requestedConversation === undefined ? (source?.context_conversation_id ?? null) : requestedConversation;
+  if (conversationId !== null && !stmt('SELECT id FROM conversations WHERE id = ?').get(conversationId)) {
     throw new HttpError(404, 'Conversation not found');
   }
   const destination = body.destination ?? source?.destination ?? 'gallery';
@@ -296,28 +269,17 @@ export function createMediaJob(
         ? source.gallery_folder_id
         : (requestedFolder ?? null)
       : null;
-  if (
-    galleryFolderId !== null &&
-    !stmt('SELECT id FROM gallery_folders WHERE id = ?').get(galleryFolderId)
-  )
+  if (galleryFolderId !== null && !stmt('SELECT id FROM gallery_folders WHERE id = ?').get(galleryFolderId))
     throw new HttpError(400, 'The destination folder no longer exists');
   const requestedWorkflow = optionalNullableString(body, 'workflowId');
-  const workflowId =
-    requestedWorkflow === undefined ? (source?.workflow_id ?? null) : requestedWorkflow;
+  const workflowId = requestedWorkflow === undefined ? (source?.workflow_id ?? null) : requestedWorkflow;
   if (workflowId !== null) requireMediaWorkflow(workflowId);
   const requestedPreset = optionalNullableString(body, 'presetId');
   const sourceUsesChatPreset = source?.chat_preset_id != null;
   const samePromptScope = sourceUsesChatPreset === (conversationId !== null);
   const inheritedPreset = samePromptScope ? (source?.preset_id ?? null) : null;
-  const presetId = resolvePresetReference(
-    requestedPreset,
-    inheritedPreset,
-    conversationId !== null,
-  );
-  const instruction = validateText(
-    optionalString(body, 'instruction') ?? source?.instruction ?? '',
-    'Instruction',
-  );
+  const presetId = resolvePresetReference(requestedPreset, inheritedPreset, conversationId !== null);
+  const instruction = validateText(optionalString(body, 'instruction') ?? source?.instruction ?? '', 'Instruction');
   const prompt = validateText(optionalString(body, 'prompt') ?? source?.prompt ?? '', 'Prompt');
   configurationJson = draftConfiguration(
     workflowId,
@@ -363,21 +325,41 @@ export function createMediaJob(
           galleryFolderId,
         ).lastInsertRowid,
       );
-      const resolved =
-        body.fillInputs === undefined
-          ? null
-          : resolveJobConfiguration(workflowId, configurationJson);
+      if (source && draftId === source.draft_id && prompt === source.prompt && source.prompt_message_id !== null) {
+        stmt('UPDATE media_jobs SET prompt_message_id = ? WHERE id = ?').run(source.prompt_message_id, id);
+      }
+      const resolved = body.fillInputs === undefined ? null : resolveJobConfiguration(workflowId, configurationJson);
       const filled = resolved
-        ? fillAutomaticMediaInputs(
-            resolved.workflow,
-            inputs,
-            body.fillInputs,
-            conversationId,
-            copiedPaths,
-            parseInputs,
-          )
+        ? fillAutomaticMediaInputs(resolved.workflow, inputs, body.fillInputs, conversationId, copiedPaths, parseInputs)
         : inputs;
       pinMediaInputs(id, filled);
+      if (draftId !== null && prompt.trim() && sourceDraft?.conversationId == null) {
+        const current = requireMediaJob(id);
+        const resolved = resolveJobConfiguration(workflowId, configurationJson);
+        const inheritsPrompt =
+          source &&
+          body.inputs === undefined &&
+          body.instruction === undefined &&
+          body.workflowId === undefined &&
+          body.presetId === undefined;
+        let captured = null;
+        if (inheritsPrompt && source.context_json) {
+          captured = JSON.parse(source.context_json);
+        } else if (resolved) {
+          const prepared = preparePromptContext(current, resolved.configuration, resolved.workflow);
+          captured = JSON.parse(prepared.context_json);
+        }
+        const capturedEndpoint = inheritsPrompt && source.endpoint_json ? JSON.parse(source.endpoint_json).id : null;
+        seedMediaPromptConversation({
+          jobId: id,
+          draftId,
+          workflowName: resolved?.workflow.name ?? 'Media',
+          endpointId: capturedEndpoint ?? getSettingsPreferences().activeEndpointId,
+          captured,
+          instruction,
+          prompt,
+        });
+      }
     });
   } catch (err) {
     deleteImageFiles(copiedPaths);
@@ -393,19 +375,14 @@ export function runMediaFavorite(favoriteId: string, body: JobBody) {
   const favorite = settings.mediaFavorites.find((item) => item.id === favoriteId);
   if (!favorite) throw new HttpError(404, 'Media favorite not found');
   const preset = settings.mediaChatPrompts.presets.find((item) => item.id === favorite.presetId);
-  const workflow = settings.mediaRendering.workflows.find(
-    (item) => item.id === favorite.workflowId,
-  );
+  const workflow = settings.mediaRendering.workflows.find((item) => item.id === favorite.workflowId);
   if (!preset || !('chatPrompt' in preset) || !workflow || workflow.textOutputNodeId !== null)
     throw new HttpError(400, 'The favorite prompt or workflow is unavailable');
   const invalid = mediaWorkflowError(workflow);
   if (invalid) throw new HttpError(400, invalid);
   const compiled = compileMediaWorkflow(workflow.json);
   if (compiled.mediaInputs.length || !compiled.slots.has('prompt'))
-    throw new HttpError(
-      400,
-      'Favorites require a prompt and no media inputs; use the full generator',
-    );
+    throw new HttpError(400, 'Favorites require a prompt and no media inputs; use the full generator');
   const conversationId = optionalNullableId(body, 'contextConversationId');
   if (conversationId == null) throw new HttpError(400, 'Choose a conversation');
   return transaction(() => {
@@ -452,17 +429,12 @@ function resolvePresetReference(
 
 export function editMediaJob(row: MediaJobRow, body: JobBody) {
   requireEditable(row);
-  const inputs =
-    body.inputs === undefined ? null : parseInputs(body.inputs, JSON.parse(row.inputs_json));
+  const inputs = body.inputs === undefined ? null : parseInputs(body.inputs, JSON.parse(row.inputs_json));
   const requestedWorkflow = optionalNullableString(body, 'workflowId');
   const workflowId = requestedWorkflow === undefined ? row.workflow_id : requestedWorkflow;
   const sameWorkflow = workflowId === row.workflow_id;
   const requestedPreset = optionalNullableString(body, 'presetId');
-  const presetId = resolvePresetReference(
-    requestedPreset,
-    row.preset_id,
-    row.context_conversation_id !== null,
-  );
+  const presetId = resolvePresetReference(requestedPreset, row.preset_id, row.context_conversation_id !== null);
   const configurationJson = draftConfiguration(
     workflowId,
     sameWorkflow ? row.configuration_json : null,
@@ -483,10 +455,7 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
       updateMediaJob(row.id, {
         workflow_id: workflowId,
         preset_id: presetId,
-        instruction: validateText(
-          optionalString(body, 'instruction') ?? row.instruction,
-          'Instruction',
-        ),
+        instruction: validateText(optionalString(body, 'instruction') ?? row.instruction, 'Instruction'),
         prompt: validateText(optionalString(body, 'prompt') ?? row.prompt, 'Prompt'),
         state: 'draft',
         error: null,
@@ -494,10 +463,7 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
         context_json: null,
         endpoint_json: null,
       });
-      const resolved =
-        body.fillInputs === undefined
-          ? null
-          : resolveJobConfiguration(workflowId, configurationJson);
+      const resolved = body.fillInputs === undefined ? null : resolveJobConfiguration(workflowId, configurationJson);
       const filled = resolved
         ? fillAutomaticMediaInputs(
             resolved.workflow,
@@ -548,9 +514,7 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
       workflowId: configuration.workflowId,
       prompt: recipe.prompt,
       instruction: recipe.instruction,
-      inputs: recipe.inputs.filter(
-        (input): input is MediaJobInputSnapshot => input.assetId !== null,
-      ),
+      inputs: recipe.inputs.filter((input): input is MediaJobInputSnapshot => input.assetId !== null),
       ...body,
     },
     undefined,
@@ -560,11 +524,7 @@ export function createMediaJobFromRecipe(recipeId: number, body: JobBody, charac
 }
 
 /** Expand the media template independently of endpoint availability. */
-export function preparePromptContext(
-  row: MediaJobRow,
-  configuration: MediaJobConfiguration,
-  workflow: MediaWorkflow,
-) {
+export function preparePromptContext(row: MediaJobRow, configuration: MediaJobConfiguration, workflow: MediaWorkflow) {
   const { avatarContext } = configuration;
   const settings = getSettings();
   const conversation = avatarContext ? null : conversationForJob(row);
@@ -584,15 +544,7 @@ export function preparePromptContext(
     else template = preset;
   }
 
-  if (conversation && hasActiveNonToolGeneration(conversation.id)) {
-    throw new HttpError(
-      409,
-      'Wait for the current chat reply to finish before preparing a media prompt',
-    );
-  }
-  const context = conversation
-    ? buildChatMessages(conversation, getActivePath(conversation.id))
-    : null;
+  const context = conversation ? buildChatMessages(conversation, getActivePath(conversation.id)) : null;
   const values: Record<string, string> = {
     instruction: row.instruction,
     no_instruction: row.instruction.trim() ? '' : '1',
@@ -646,13 +598,13 @@ export function preparePromptContext(
 }
 
 /** Snapshot the exact text request without persisting endpoint credentials. */
-export function prepareContext(
-  row: MediaJobRow,
-  configuration: MediaJobConfiguration,
-  workflow: MediaWorkflow,
-) {
+export function prepareContext(row: MediaJobRow, configuration: MediaJobConfiguration, workflow: MediaWorkflow) {
+  const conversation = configuration.avatarContext ? null : conversationForJob(row);
+  if (conversation && hasActiveNonToolGeneration(conversation.id)) {
+    throw new HttpError(409, 'Wait for the current chat reply to finish before preparing a media prompt');
+  }
   const prepared = preparePromptContext(row, configuration, workflow);
-  const endpoint = resolveEndpoint(configuration.avatarContext ? null : conversationForJob(row));
+  const endpoint = resolveEndpoint(conversation);
   const { apiKey: _credential, ...capturedEndpoint } = endpoint;
   return { ...prepared, endpoint_json: JSON.stringify(capturedEndpoint) };
 }
@@ -738,10 +690,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
     const selected = inputs.find((selected) => selected.slot === input.name)!;
     const asset = stmt('SELECT kind FROM media_assets WHERE id = ?').get(selected.assetId);
     if (asset?.kind !== input.kind)
-      throw new HttpError(
-        400,
-        `${input.label} requires ${input.kind === 'video' ? 'a video' : 'an image'}`,
-      );
+      throw new HttpError(400, `${input.label} requires ${input.kind === 'video' ? 'a video' : 'an image'}`);
   }
   if (prepare && !compiled.slots.has('prompt')) {
     throw new HttpError(400, 'This workflow has no prompt input; run it directly');
@@ -773,8 +722,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
           .all(row.message_id)
           .map((input) => String(input.path));
   transaction(() => {
-    if (!prepare)
-      stmt('UPDATE media_jobs SET prompt_message_id = ? WHERE id = ?').run(promptMessageId, row.id);
+    if (!prepare) stmt('UPDATE media_jobs SET prompt_message_id = ? WHERE id = ?').run(promptMessageId, row.id);
     const messageId = attachToolMessage(row, body, prepare);
     if (messageId !== null) {
       const recipeId = saveMediaRecipe(configuration, JSON.parse(row.inputs_json), row.prompt, {
@@ -795,10 +743,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
       result_text: null,
       auto_render: body.autoRender === true ? 1 : 0,
       started_at: now,
-      deadline:
-        prepare || configuration.timeoutSeconds === 0
-          ? null
-          : now + configuration.timeoutSeconds * 1000,
+      deadline: prepare || configuration.timeoutSeconds === 0 ? null : now + configuration.timeoutSeconds * 1000,
       seed: configuration.seedOverride ?? Math.floor(Math.random() * 0xffff_ffff),
     });
     syncMediaJobMessage(requireMediaJob(row.id));
@@ -815,19 +760,15 @@ export function syncMediaJobMessage(row: MediaJobRow): void {
   if (row.message_id === null) {
     return;
   }
-  const message = stmt(
-    'SELECT conversation_id, content, status, gen_meta_json FROM messages WHERE id = ?',
-  ).get(row.message_id);
+  const message = stmt('SELECT conversation_id, content, status, gen_meta_json FROM messages WHERE id = ?').get(
+    row.message_id,
+  );
   if (!message) {
     return;
   }
   const conversationId = Number(message.conversation_id);
   if (row.state !== 'preparing') {
-    stmt('UPDATE media_recipes SET prompt = ? WHERE id = ? AND prompt <> ?').run(
-      row.prompt,
-      row.recipe_id,
-      row.prompt,
-    );
+    stmt('UPDATE media_recipes SET prompt = ? WHERE id = ? AND prompt <> ?').run(row.prompt, row.recipe_id, row.prompt);
   }
   const meta = message.gen_meta_json ? JSON.parse(String(message.gen_meta_json)) : {};
   if (row.error) {
@@ -835,8 +776,7 @@ export function syncMediaJobMessage(row: MediaJobRow): void {
   } else {
     delete meta.imageError;
   }
-  const status =
-    row.state === 'preparing' ? 'streaming' : row.state === 'failed' ? 'error' : 'done';
+  const status = row.state === 'preparing' ? 'streaming' : row.state === 'failed' ? 'error' : 'done';
   const renderOnly =
     row.configuration_json !== null &&
     (JSON.parse(row.configuration_json) as MediaJobConfiguration).messageRenderOnly === true;
@@ -885,8 +825,7 @@ export function retryMediaRetrieval(row: MediaJobRow) {
   const next = updateMediaJob(row.id, {
     state: 'downloading',
     error: null,
-    deadline:
-      configuration.timeoutSeconds === 0 ? null : Date.now() + configuration.timeoutSeconds * 1000,
+    deadline: configuration.timeoutSeconds === 0 ? null : Date.now() + configuration.timeoutSeconds * 1000,
   });
   publishMediaJob(row.id);
   return mediaJobDto(next);
@@ -915,10 +854,7 @@ export function deleteMediaJob(row: MediaJobRow): void {
     }
     const conversationId = row.draft_id ? mediaDraft(row.draft_id).conversationId : null;
     deleteMediaJobRecord(row.id);
-    if (
-      conversationId != null &&
-      !stmt('SELECT 1 FROM media_drafts WHERE conversation_id = ?').get(conversationId)
-    ) {
+    if (conversationId != null && !stmt('SELECT 1 FROM media_drafts WHERE conversation_id = ?').get(conversationId)) {
       stopConversationGenerations(conversationId);
       paths.push(...collectConversationImages(conversationId));
       deleteConversationRows([conversationId]);
@@ -936,9 +872,6 @@ export function deleteMediaJob(row: MediaJobRow): void {
 }
 
 export function touchMediaConversation(id: number): void {
-  stmt('UPDATE conversations SET updated_at = MAX(updated_at + 1, ?) WHERE id = ?').run(
-    Date.now(),
-    id,
-  );
+  stmt('UPDATE conversations SET updated_at = MAX(updated_at + 1, ?) WHERE id = ?').run(Date.now(), id);
   invalidate('conversations');
 }

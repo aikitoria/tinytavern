@@ -6,8 +6,7 @@ import { createMediaComparison, type ComparisonResult } from './mediaComparison.
 import { createComparisonPlayback, type ComparisonPlaybackState } from './comparisonPlayback.ts';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 
-const clock = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, '0')}`;
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, '0')}`;
 
 export default function MediaComparison(props: {
   results: ComparisonResult[];
@@ -36,8 +35,7 @@ export default function MediaComparison(props: {
   createEffect(() => {
     if (props.results.length < 2) props.onClose();
   });
-  const hasVideo = () =>
-    selection.reference()?.asset.kind === 'video' || selection.candidate()?.asset.kind === 'video';
+  const hasVideo = () => selection.reference()?.asset.kind === 'video' || selection.candidate()?.asset.kind === 'video';
   const differences = createMemo(() => {
     const left = selection.reference();
     const right = selection.candidate();
@@ -64,10 +62,7 @@ export default function MediaComparison(props: {
   const Side = (side: { slot: 0 | 1 }) => {
     const result = () => (side.slot === 0 ? selection.reference() : selection.candidate());
     return (
-      <section
-        class="media-comparison-side"
-        aria-label={side.slot === 0 ? 'Pinned reference' : 'Comparison candidate'}
-      >
+      <section class="media-comparison-side" aria-label={side.slot === 0 ? 'Pinned reference' : 'Comparison candidate'}>
         <Show when={result()}>
           {(item) => (
             <>
@@ -99,9 +94,7 @@ export default function MediaComparison(props: {
                   {(_id) => (
                     <Show
                       when={item().asset.kind === 'video'}
-                      fallback={
-                        <img src={item().asset.url} alt={`Variation ${item().variation}`} />
-                      }
+                      fallback={<img src={item().asset.url} alt={`Variation ${item().variation}`} />}
                     >
                       <MediaPlayer
                         asset={item().asset}
@@ -139,11 +132,7 @@ export default function MediaComparison(props: {
         <Side slot={1} />
       </div>
       <div class="media-comparison-controls">
-        <div
-          class="flex items-center justify-center gap-2 flex-wrap"
-          role="group"
-          aria-label="Comparison navigation"
-        >
+        <div class="flex items-center justify-center gap-2 flex-wrap" role="group" aria-label="Comparison navigation">
           <button
             aria-label="Previous comparison candidate"
             disabled={props.busy || selection.index() <= 0}
@@ -187,9 +176,7 @@ export default function MediaComparison(props: {
               {clock(playback().time)} / {clock(playback().duration)}
             </span>
           </div>
-          <p class="hint text-center m-0">
-            Muted playback · shared timeline ends with the shorter video
-          </p>
+          <p class="hint text-center m-0">Muted playback · shared timeline ends with the shorter video</p>
           <Show when={playback().error}>
             <p class="notice notice-error" role="alert">
               {playback().error}

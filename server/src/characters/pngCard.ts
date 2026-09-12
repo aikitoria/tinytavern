@@ -28,9 +28,7 @@ function boundedText(payload: Buffer, compressed: boolean): string {
   if (payload.length > (compressed ? MAX_COMPRESSED_METADATA : MAX_DECOMPRESSED_METADATA)) {
     throw new Error('Character card metadata is too large');
   }
-  const decoded = compressed
-    ? inflateSync(payload, { maxOutputLength: MAX_DECOMPRESSED_METADATA })
-    : payload;
+  const decoded = compressed ? inflateSync(payload, { maxOutputLength: MAX_DECOMPRESSED_METADATA }) : payload;
   if (decoded.length > MAX_DECOMPRESSED_METADATA) {
     throw new Error('Character card metadata is too large');
   }
@@ -55,8 +53,7 @@ function extractTextChunks(png: Buffer): Map<string, string> {
       const nul = data.indexOf(0);
       if (nul > 0) {
         const keyword = data.toString('latin1', 0, nul);
-        if (relevantKeyword(keyword))
-          chunks.set(keyword, boundedText(data.subarray(nul + 1), false));
+        if (relevantKeyword(keyword)) chunks.set(keyword, boundedText(data.subarray(nul + 1), false));
       }
     } else if (type === 'iTXt') {
       const nul = data.indexOf(0);
@@ -106,10 +103,7 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function optionalCardString(
-  data: Record<string, unknown>,
-  key: keyof CardData,
-): string | undefined {
+function optionalCardString(data: Record<string, unknown>, key: keyof CardData): string | undefined {
   const value = data[key];
   if (value === undefined) return undefined;
   if (typeof value !== 'string') throw new Error(`Character card ${key} must be a string`);

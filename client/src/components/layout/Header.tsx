@@ -37,11 +37,7 @@ export default function Header() {
 
   const contextValue = (field: ContextField) => {
     const pending = pendingContext();
-    if (
-      pending &&
-      pending.conversationId === selectedConversation()?.id &&
-      pending.field === field
-    ) {
+    if (pending && pending.conversationId === selectedConversation()?.id && pending.field === field) {
       return pending.value;
     }
     return selectedConversation()?.[field] ?? null;
@@ -64,22 +60,16 @@ export default function Header() {
     if (conv[field] === value) return;
     setPendingContext({ conversationId: conv.id, field, value });
     try {
-      const updated = await api.patchConversation(
-        conv.id,
-        state.tree.conversationId === conv.id ? state.tree : conv,
-        { [field]: value },
-      );
+      const updated = await api.patchConversation(conv.id, state.tree.conversationId === conv.id ? state.tree : conv, {
+        [field]: value,
+      });
       setState('conversations', (conversations) =>
-        conversations.map((conversation) =>
-          conversation.id === updated.id ? updated : conversation,
-        ),
+        conversations.map((conversation) => (conversation.id === updated.id ? updated : conversation)),
       );
     } catch (err) {
       toast(errorMessage(err));
     } finally {
-      setPendingContext((pending) =>
-        pending?.conversationId === conv.id && pending.field === field ? null : pending,
-      );
+      setPendingContext((pending) => (pending?.conversationId === conv.id && pending.field === field ? null : pending));
     }
   };
 
@@ -179,13 +169,11 @@ export default function Header() {
                       value: '',
                       edit:
                         state.settings.activeEndpointId != null
-                          ? () =>
-                              editReferencedEntity('endpoints', state.settings.activeEndpointId!)
+                          ? () => editReferencedEntity('endpoints', state.settings.activeEndpointId!)
                           : undefined,
                       label: `Global default · ${
-                        state.endpoints.find(
-                          (endpoint) => endpoint.id === state.settings.activeEndpointId,
-                        )?.name ?? 'none selected'
+                        state.endpoints.find((endpoint) => endpoint.id === state.settings.activeEndpointId)?.name ??
+                        'none selected'
                       }`,
                     },
                     ...entityOptions('endpoints', state.endpoints),
@@ -196,19 +184,14 @@ export default function Header() {
                   value={String(contextValue('personaId') ?? '')}
                   buttonLabel={personasEnabled() ? (contextPersona()?.name ?? 'None') : 'Off'}
                   ariaLabel={
-                    personasEnabled()
-                      ? 'Conversation persona'
-                      : 'Conversation persona: off for the current template'
+                    personasEnabled() ? 'Conversation persona' : 'Conversation persona: off for the current template'
                   }
                   disabled={pendingContext() != null || !personasEnabled()}
                   menuMinWidth={220}
                   menuClass="[&_.menu-check]:ml-auto [&_.menu-check]:text-accent"
                   showCheck
                   onChange={(value) => void updateContext('personaId', value)}
-                  options={[
-                    { value: '', label: 'No persona' },
-                    ...entityOptions('personas', state.personas),
-                  ]}
+                  options={[{ value: '', label: 'No persona' }, ...entityOptions('personas', state.personas)]}
                 />
               </div>
             </div>
@@ -229,9 +212,7 @@ export default function Header() {
         <button
           type="button"
           class="icon-btn header-jobs-btn w-auto gap-1 px-1"
-          title={
-            activeMediaJobCount() ? `Media jobs (${activeMediaJobCount()} running)` : 'Media jobs'
-          }
+          title={activeMediaJobCount() ? `Media jobs (${activeMediaJobCount()} running)` : 'Media jobs'}
           aria-label="Media jobs"
           onClick={() => {
             closeSidebar();

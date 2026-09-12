@@ -10,13 +10,7 @@ import {
 } from 'node:fs';
 import { basename, join, extname } from 'node:path';
 import { crc32 } from 'node:zlib';
-import {
-  IMAGES_DIR,
-  stmt,
-  invalidateMediaAsset,
-  mediaAssetForPath,
-  transaction,
-} from '../db/db.ts';
+import { IMAGES_DIR, stmt, invalidateMediaAsset, mediaAssetForPath, transaction } from '../db/db.ts';
 import { imageFileDimensions } from './imageDimensions.ts';
 
 /**
@@ -44,12 +38,7 @@ function isValidPng(data: Buffer): boolean {
       return false;
     }
     if (chunks === 0) {
-      if (
-        type !== 'IHDR' ||
-        length !== 13 ||
-        data.readUInt32BE(off + 8) === 0 ||
-        data.readUInt32BE(off + 12) === 0
-      ) {
+      if (type !== 'IHDR' || length !== 13 || data.readUInt32BE(off + 8) === 0 || data.readUInt32BE(off + 12) === 0) {
         return false;
       }
     } else if (type === 'IHDR') {
@@ -125,12 +114,7 @@ function isValidWebp(data: Buffer): boolean {
     const end = off + 8 + length;
     if (!Number.isSafeInteger(end) || end > data.length) return false;
     if (type === 'VP8 ') {
-      if (
-        length < 10 ||
-        data[off + 11] !== 0x9d ||
-        data[off + 12] !== 0x01 ||
-        data[off + 13] !== 0x2a
-      ) {
+      if (length < 10 || data[off + 11] !== 0x9d || data[off + 12] !== 0x01 || data[off + 13] !== 0x2a) {
         return false;
       }
       hasImageData = true;
@@ -169,8 +153,7 @@ export function savedImageDimensions(imagePath: string) {
  * Committed reservations advance AUTOINCREMENT even if later released; exclusive creation
  * protects file names left by an outer transaction that rolled back its reservation. */
 export function reserveMediaFile(extension: string): { id: number; path: string } {
-  if (!/^\.(png|jpe?g|webp|webm|mp4|part)$/.test(extension))
-    throw new Error('Invalid media extension');
+  if (!/^\.(png|jpe?g|webp|webm|mp4|part)$/.test(extension)) throw new Error('Invalid media extension');
   return stmt(`INSERT INTO media_assets(path, created_at)
     VALUES ('/images/media-' || (COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'), 0) + 1) || ?, ?)
     RETURNING id, path`).get(extension, Date.now()) as { id: number; path: string };
@@ -294,11 +277,10 @@ export function deleteImageFiles(imagePaths: string[]): void {
         !stmt('SELECT 1 FROM media_assets WHERE recipe_id = ? LIMIT 1').get(asset.recipeId) &&
         !stmt('SELECT 1 FROM messages WHERE render_recipe_id = ? LIMIT 1').get(asset.recipeId)
       ) {
-        const inputs =
-          stmt(`SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
+        const inputs = stmt(`SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
           WHERE o.owner_type = 'recipe' AND o.owner_id = ?`).all(asset.recipeId) as {
-            path: string;
-          }[];
+          path: string;
+        }[];
         stmt('DELETE FROM media_recipes WHERE id = ?').run(asset.recipeId);
         pending.push(...inputs.map((input) => input.path));
       }
@@ -314,9 +296,7 @@ export function deleteImageFiles(imagePaths: string[]): void {
 }
 
 export function collectMessageImages(messageId: number): string[] {
-  const rows = stmt('SELECT image FROM message_media_files WHERE message_id = ?').all(
-    messageId,
-  ) as { image: string }[];
+  const rows = stmt('SELECT image FROM message_media_files WHERE message_id = ?').all(messageId) as { image: string }[];
   return rows.map((row) => row.image);
 }
 
@@ -334,10 +314,7 @@ export function collectSubtreeImages(messageId: number): string[] {
 }
 
 /** Collects every child subtree of `parentId`, matching delete-tail scope. */
-export function collectSiblingSubtreeImages(
-  conversationId: number,
-  parentId: number | null,
-): string[] {
+export function collectSiblingSubtreeImages(conversationId: number, parentId: number | null): string[] {
   const rows = stmt(
     `WITH RECURSIVE doomed(id) AS (
        SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ?

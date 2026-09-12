@@ -6,13 +6,7 @@ import MobileSidebarButton from '../layout/MobileSidebarButton.tsx';
 
 export default function MapSearch() {
   const view = useConversationView();
-  const {
-    mapSearchQuery,
-    setMapSearchQuery,
-    mapSearchResults,
-    mapSearchTarget,
-    navigateMapSearch,
-  } = view.session;
+  const { mapSearchQuery, setMapSearchQuery, mapSearchResults, mapSearchTarget, navigateMapSearch } = view.session;
   const query = mapSearchQuery;
   const setQuery = setMapSearchQuery;
 

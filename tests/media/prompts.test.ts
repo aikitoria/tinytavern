@@ -1,3 +1,4 @@
+import { galleryFixture } from '../support/fixtures.ts';
 import { insertFixture, conversationFixture, messageFixture } from '../support/fixtures.ts';
 import { mockFetch, controlledStream, upstreamFrame } from '../support/streams.ts';
 import { testRequestKey } from '../support/requestKey.ts';
@@ -19,13 +20,11 @@ test('media prompts', async () => {
   const { stmt, toConversation } = await import('../../server/src/db/db.ts');
   const { buildToolPrompt } = await import('../../server/src/generation/prompt.ts');
   const { getActivePath } = await import('../../server/src/conversations/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { createMediaJob, editMediaJob, startMediaJob, cancelMediaJob, runMediaFavorite } =
     await import('../../server/src/media/mediaJobs.ts');
-  const { requireMediaJob, mediaLive, mediaJobDto } =
-    await import('../../server/src/media/mediaJobStore.ts');
-  const { initMediaWorker, stopMediaWorker, tickMediaWorker } =
-    await import('../../server/src/media/mediaWorker.ts');
+  const { requireMediaJob, mediaLive, mediaJobDto } = await import('../../server/src/media/mediaJobStore.ts');
+  const { initMediaWorker, stopMediaWorker, tickMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
   const { treeSnapshot } = await import('../../server/src/realtime/sync.ts');
 
   const endpointId = insertFixture('endpoints', {
@@ -161,14 +160,13 @@ test('media prompts', async () => {
     const favorite = {
       id: 'quick',
       name: 'Quick scene',
-      presetId: getSettings().mediaChatPrompts.presets.find((item) => item.name === 'Formatted')!
-        .id,
+      presetId: getSettings().mediaChatPrompts.presets.find((item) => item.name === 'Formatted')!.id,
       workflowId: workflow.id,
     };
     putSettings({ ...getSettings(), mediaFavorites: [favorite] });
-    const favoriteBefore = stmt(
-      'SELECT active_leaf_id,mutation_revision FROM conversations WHERE id=?',
-    ).get(favoriteChat)!;
+    const favoriteBefore = stmt('SELECT active_leaf_id,mutation_revision FROM conversations WHERE id=?').get(
+      favoriteChat,
+    )!;
     const favoriteBody = {
       requestKey: testRequestKey('favorite'),
       contextConversationId: favoriteChat,
@@ -181,11 +179,7 @@ test('media prompts', async () => {
     assert.equal(quick.state, 'preparing');
     assert.equal(requireMediaJob(quick.id).auto_render, 1);
     const quickContext = JSON.parse(requireMediaJob(quick.id).context_json!);
-    assert(
-      quickContext.messages.some((message: { content: string }) =>
-        message.content.includes('Favorite context'),
-      ),
-    );
+    assert(quickContext.messages.some((message: { content: string }) => message.content.includes('Favorite context')));
     assert(quickContext.messages.at(-1).content.includes('Chat video formatting'));
     assert.equal(
       runMediaFavorite(favorite.id, favoriteBody).id,
@@ -220,11 +214,7 @@ test('media prompts', async () => {
       contextConversationId: conversationId,
       destination: 'chat',
     });
-    startMediaJob(
-      requireMediaJob(job.id),
-      { expectedActiveLeafId: assistantId, expectedMutationRevision: 0 },
-      true,
-    );
+    startMediaJob(requireMediaJob(job.id), { expectedActiveLeafId: assistantId, expectedMutationRevision: 0 }, true);
     const captured = requireMediaJob(job.id);
     assert.equal(captured.deadline, null, 'Comfy timeout does not run during prompt preparation');
     assert.deepEqual(
@@ -257,10 +247,7 @@ test('media prompts', async () => {
       ),
       'The wire composes captured endpoint additions with the original structured chat prefix',
     );
-    assert.equal(
-      messages[0]!.content,
-      'Endpoint prefix\nOriginal chat system context\nEndpoint suffix',
-    );
+    assert.equal(messages[0]!.content, 'Endpoint prefix\nOriginal chat system context\nEndpoint suffix');
     assert(messages[1]!.content.includes('A sunset by the lake'));
     assert.equal(messages[2]!.reasoning_content, 'Original assistant reasoning');
     assert(messages[3]!.content.includes('Use literal {{context}} in the title'));
@@ -271,10 +258,7 @@ test('media prompts', async () => {
       reasoning_content: 'Endpoint reasoning\nChat reasoning',
     });
     assert.equal(ready.prompt, 'A camera glides across the lake');
-    assert.equal(
-      stmt('SELECT content FROM messages WHERE id = ?').get(ready.message_id!)!.content,
-      ready.prompt,
-    );
+    assert.equal(stmt('SELECT content FROM messages WHERE id = ?').get(ready.message_id!)!.content, ready.prompt);
     assert.equal(ready.submission_id, null, 'Preparation alone never submits to Comfy');
 
     const replacementWorkflow = {
@@ -293,9 +277,7 @@ test('media prompts', async () => {
     editMediaJob(requireMediaJob(job.id), { workflowId: replacementWorkflow.id });
     startMediaJob(requireMediaJob(job.id), {}, true);
     const revised = await waitFor(job.id, 'ready');
-    const recipe = stmt('SELECT configuration_json, prompt FROM media_recipes WHERE id = ?').get(
-      job.id,
-    )!;
+    const recipe = stmt('SELECT configuration_json, prompt FROM media_recipes WHERE id = ?').get(job.id)!;
     assert.equal(
       JSON.parse(String(recipe.configuration_json)).workflowId,
       replacementWorkflow.id,
@@ -321,11 +303,7 @@ test('media prompts', async () => {
     assert(!JSON.stringify(galleryMessages).includes('Original chat system context'));
     assert.match(failed.error!, /truncated/);
     assert.equal(failed.prompt, 'Scene: A camera glides across the lake');
-    assert.equal(
-      failed.submission_id,
-      null,
-      'Truncated prompts cannot trigger automatic rendering',
-    );
+    assert.equal(failed.submission_id, null, 'Truncated prompts cannot trigger automatic rendering');
 
     holdStream = true;
     const interrupted = createMediaJob({
@@ -335,9 +313,9 @@ test('media prompts', async () => {
       contextConversationId: conversationId,
       destination: 'chat',
     });
-    const conversation = stmt(
-      'SELECT active_leaf_id, mutation_revision FROM conversations WHERE id = ?',
-    ).get(conversationId)!;
+    const conversation = stmt('SELECT active_leaf_id, mutation_revision FROM conversations WHERE id = ?').get(
+      conversationId,
+    )!;
     startMediaJob(
       requireMediaJob(interrupted.id),
       {
@@ -353,14 +331,8 @@ test('media prompts', async () => {
       await sleep(10);
     }
     const streaming = requireMediaJob(interrupted.id);
-    const liveMessage = treeSnapshot(conversationId).messages.find(
-      (message) => message.id === streaming.message_id,
-    )!;
-    assert.equal(
-      liveMessage.content,
-      'A camera glides across the lake',
-      'Resync includes the live prompt buffer',
-    );
+    const liveMessage = treeSnapshot(conversationId).messages.find((message) => message.id === streaming.message_id)!;
+    assert.equal(liveMessage.content, 'A camera glides across the lake', 'Resync includes the live prompt buffer');
     assert.equal(
       stmt('SELECT content FROM messages WHERE id = ?').get(streaming.message_id!)!.content,
       '',
@@ -452,9 +424,7 @@ test('media prompts', async () => {
         ],
       },
     });
-    const portrait = getSettings().mediaChatPrompts.presets.find(
-      (preset) => preset.name === 'My portrait',
-    )!;
+    const portrait = getSettings().mediaChatPrompts.presets.find((preset) => preset.name === 'My portrait')!;
     const prepareImage = async (
       key: string,
       context: number | null,
@@ -496,16 +466,9 @@ test('media prompts', async () => {
       1,
       'Conditional chat presets retain one instruction wrapper',
     );
-    const blankInstruction = await prepareImage(
-      'chat-image-blank',
-      conversationId,
-      undefined,
-      '   ',
-    );
+    const blankInstruction = await prepareImage('chat-image-blank', conversationId, undefined, '   ');
     assert(
-      JSON.parse(blankInstruction.context_json!)
-        .messages.at(-1)
-        .content.includes('My character style'),
+      JSON.parse(blankInstruction.context_json!).messages.at(-1).content.includes('My character style'),
       'An empty or whitespace-only instruction uses the preset without instruction',
     );
     const standalone = await prepareImage('gallery-image-default', null);
@@ -535,11 +498,8 @@ test('media prompts', async () => {
         'Chat and gallery preset selections cannot cross modes',
       );
     }
-    stmt(`INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at)
-    VALUES ('Test', 'Source description', '/images/prompt-source.png', 1, 1)`).run();
-    const sourceId = Number(
-      stmt("SELECT id FROM media_assets WHERE path = '/images/prompt-source.png'").get()!.id,
-    );
+    galleryFixture('/images/prompt-source.png', { prompt: 'Source description' });
+    const sourceId = Number(stmt("SELECT id FROM media_assets WHERE path = '/images/prompt-source.png'").get()!.id);
     const edit = createMediaJob({
       requestKey: testRequestKey('edit-with-chat-destination'),
       contextConversationId: conversationId,
@@ -565,9 +525,7 @@ test('media prompts', async () => {
       'Switching from chat image creation to references keeps the exact chat prefix and uses the active reference prompt',
     );
     assert.equal(JSON.parse(editReady.context_json!).template.reasoningPrefill, 'Chat reasoning');
-    assert(
-      getSettings().mediaChatPrompts.presets.some((preset) => preset.name === 'Reference style'),
-    );
+    assert(getSettings().mediaChatPrompts.presets.some((preset) => preset.name === 'Reference style'));
     const standaloneEdit = createMediaJob({
       requestKey: testRequestKey('edit-with-gallery-destination'),
       workflowId: editWorkflow.id,
@@ -601,9 +559,7 @@ test('media prompts', async () => {
       destination: 'chat',
       instruction: 'Camera movement',
     });
-    const chat = stmt(
-      'SELECT active_leaf_id, mutation_revision FROM conversations WHERE id = ?',
-    ).get(conversationId)!;
+    const chat = stmt('SELECT active_leaf_id, mutation_revision FROM conversations WHERE id = ?').get(conversationId)!;
     startMediaJob(
       requireMediaJob(thinking.id),
       {
@@ -629,9 +585,7 @@ test('media prompts', async () => {
     );
     assert.equal(thinkingSnapshot.prompt, '');
     assert.equal(
-      treeSnapshot(conversationId).messages.find(
-        (message) => message.id === thinkingRow.message_id,
-      )!.reasoning,
+      treeSnapshot(conversationId).messages.find((message) => message.id === thinkingRow.message_id)!.reasoning,
       thinkingSnapshot.reasoning,
       'Chat resync includes media prompt reasoning',
     );
@@ -642,25 +596,16 @@ test('media prompts', async () => {
     );
     releaseContent!();
     await sleep(20);
+    assert.equal(mediaJobDto(requireMediaJob(thinking.id)).reasoning, '', 'The first prompt delta clears reasoning');
     assert.equal(
-      mediaJobDto(requireMediaJob(thinking.id)).reasoning,
-      '',
-      'The first prompt delta clears reasoning',
-    );
-    assert.equal(
-      treeSnapshot(conversationId).messages.find(
-        (message) => message.id === thinkingRow.message_id,
-      )!.reasoning,
+      treeSnapshot(conversationId).messages.find((message) => message.id === thinkingRow.message_id)!.reasoning,
       null,
     );
     releaseCompletion!();
     const thought = await waitFor(thinking.id, 'ready');
     assert.equal(mediaJobDto(thought).reasoning, undefined);
     assert.equal(thought.prompt, 'A camera glides across the lake');
-    assert.equal(
-      stmt('SELECT reasoning FROM messages WHERE id = ?').get(thinkingRow.message_id!)!.reasoning,
-      null,
-    );
+    assert.equal(stmt('SELECT reasoning FROM messages WHERE id = ?').get(thinkingRow.message_id!)!.reasoning, null);
   } finally {
     stopMediaWorker();
     await sleep(30);

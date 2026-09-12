@@ -31,8 +31,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
       await request('PATCH', `/api/${type}/${item.id}`, { folderId: 999999 }, 400);
       await request('PATCH', `/api/${type}/${item.id}`, { folderId: null });
       assert.equal(
-        stmt('SELECT mutation_revision FROM conversations WHERE id=?').get(conversation)!
-          .mutation_revision,
+        stmt('SELECT mutation_revision FROM conversations WHERE id=?').get(conversation)!.mutation_revision,
         0,
         'Organizing folders does not invalidate chat generations',
       );
@@ -72,10 +71,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
     await request('DELETE', `/api/gallery/${repeated.id}`, undefined, 204);
     await request('DELETE', `/api/gallery/${root.id}`, undefined, 204);
     const owners = stmt("SELECT * FROM media_owners WHERE owner_type = 'gallery'").all();
-    const move = (
-      folderId: number | null,
-      expected: Pick<GalleryItem, 'id' | 'folderId'>[] = images,
-    ) => ({
+    const move = (folderId: number | null, expected: Pick<GalleryItem, 'id' | 'folderId'>[] = images) => ({
       folderId,
       items: expected.map((item) => ({ id: item.id, expectedFolderId: item.folderId })),
     });
@@ -83,23 +79,9 @@ test('entity folders preserve contents and transfer by name with atomic imports'
     await request('POST', '/api/gallery/move', move(destination.id));
     const moved = await request('GET', '/api/gallery');
     assert(moved.every((item: { folderId: number }) => item.folderId === destination.id));
-    await request(
-      'POST',
-      '/api/gallery/move',
-      move(null, [moved[0], { ...moved[1], folderId: null }]),
-      409,
-    );
-    assert.deepEqual(
-      await request('GET', '/api/gallery'),
-      moved,
-      'A stale bulk move changes nothing',
-    );
-    await request(
-      'POST',
-      '/api/gallery/move',
-      move(null, [moved[0], { id: 999999, folderId: null }]),
-      404,
-    );
+    await request('POST', '/api/gallery/move', move(null, [moved[0], { ...moved[1], folderId: null }]), 409);
+    assert.deepEqual(await request('GET', '/api/gallery'), moved, 'A stale bulk move changes nothing');
+    await request('POST', '/api/gallery/move', move(null, [moved[0], { id: 999999, folderId: null }]), 404);
     const detail = moved[0];
     const details = {
       prompt: 'Filed and edited together',
@@ -134,8 +116,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
       400,
     );
     assert.equal(
-      (await request('GET', '/api/gallery')).find((item: GalleryItem) => item.id === detail.id)
-        .prompt,
+      (await request('GET', '/api/gallery')).find((item: GalleryItem) => item.id === detail.id).prompt,
       edited.prompt,
     );
     await request('PATCH', `/api/gallery-folders/${destination.id}`, { name: 'Selected' });
@@ -156,8 +137,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
     });
     const exported = await request('GET', '/api/presets/settings-export');
     assert.equal(
-      exported.document.data.items.find((item: { name: string }) => item.name === preset.name)
-        .folderId,
+      exported.document.data.items.find((item: { name: string }) => item.name === preset.name).folderId,
       'Portable',
     );
     await request('PATCH', `/api/preset-folders/${folder.id}`, { name: 'Changed' });
@@ -176,10 +156,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
     });
     const folders = await request('GET', '/api/preset-folders');
     const restored = imported.find((item: { id: number }) => item.id === preset.id);
-    assert.equal(
-      restored.folderId,
-      folders.find((item: { name: string }) => item.name === 'Portable').id,
-    );
+    assert.equal(restored.folderId, folders.find((item: { name: string }) => item.name === 'Portable').id);
     assert.notEqual(restored.folderId, folder.id);
     assert(folders.some((item: { name: string }) => item.name === 'Empty'));
     const before = await request('GET', '/api/presets/settings-export');
@@ -199,10 +176,7 @@ test('entity folders preserve contents and transfer by name with atomic imports'
         },
         400,
       );
-      assert.equal(
-        (await request('GET', '/api/presets/settings-export')).snapshot,
-        before.snapshot,
-      );
+      assert.equal((await request('GET', '/api/presets/settings-export')).snapshot, before.snapshot);
     }
     assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
   } finally {

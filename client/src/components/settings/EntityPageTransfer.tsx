@@ -7,10 +7,7 @@ import SettingsTransferButtons from './SettingsTransferButtons.tsx';
 import Modal from '../ui/Modal.tsx';
 import { DEFAULT_TEXTAREA_ROWS } from '../forms/MacroTextarea.tsx';
 
-export default function EntityPageTransfer(props: {
-  type: TransferEntity;
-  onError: (message: string) => void;
-}) {
+export default function EntityPageTransfer(props: { type: TransferEntity; onError: (message: string) => void }) {
   const navigate = useSettingsNavigation();
   const [pending, setPending] = createSignal<{ data: string; snapshot: string }>();
   const [error, setError] = createSignal('');
@@ -59,8 +56,8 @@ export default function EntityPageTransfer(props: {
         >
           <div class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2">
             <p class="hint">
-              Matching names update existing items. New names create items. Read-only defaults
-              import as editable copies. Other items are kept.
+              Matching names update existing items. New names create items. Read-only defaults import as editable
+              copies. Other items are kept.
             </p>
             <label>Import contents</label>
             <textarea
@@ -68,9 +65,7 @@ export default function EntityPageTransfer(props: {
               rows={DEFAULT_TEXTAREA_ROWS}
               value={pending()!.data}
               disabled={saving()}
-              onInput={(event) =>
-                setPending((value) => value && { ...value, data: event.currentTarget.value })
-              }
+              onInput={(event) => setPending((value) => value && { ...value, data: event.currentTarget.value })}
             />
             <Show when={error()}>
               <p class="notice notice-error" role="alert">

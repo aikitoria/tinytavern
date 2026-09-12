@@ -1,8 +1,4 @@
-export default function EntityListSearch(props: {
-  noun: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
+export default function EntityListSearch(props: { noun: string; value: string; onChange: (value: string) => void }) {
   return (
     <div class="mb-2 [&_.search-input]:min-h-control">
       <input

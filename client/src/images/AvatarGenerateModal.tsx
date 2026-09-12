@@ -1,9 +1,4 @@
-import {
-  compileMediaWorkflow,
-  mediaJobActive,
-  newRequestId,
-  type MediaAsset,
-} from '@tinytavern/shared';
+import { compileMediaWorkflow, mediaJobActive, newRequestId, type MediaAsset } from '@tinytavern/shared';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { Show, createEffect, createSignal, onCleanup, onMount, on } from 'solid-js';
@@ -17,11 +12,7 @@ import CrossfadeImage from './CrossfadeImage.tsx';
 import SamplerProgress from './SamplerProgress.tsx';
 
 /** Render jobs retain previews until acceptance copies the asset directly to the avatar. */
-export default function AvatarGenerateModal(props: {
-  kind: 'character' | 'persona';
-  id: number;
-  onClose: () => void;
-}) {
+export default function AvatarGenerateModal(props: { kind: 'character' | 'persona'; id: number; onClose: () => void }) {
   const [text, setText] = createSignal('');
   const [submitting, setSubmitting] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
@@ -34,9 +25,7 @@ export default function AvatarGenerateModal(props: {
   const reasoning = () => job()?.reasoning ?? '';
   const hasPrompt = () => {
     const workflow =
-      state.settings.mediaRendering.workflows.find(
-        (workflow) => workflow.id === job()?.workflowId,
-      ) ?? image?.workflow;
+      state.settings.mediaRendering.workflows.find((workflow) => workflow.id === job()?.workflowId) ?? image?.workflow;
     return workflow ? compileMediaWorkflow(workflow.json).slots.has('prompt') : false;
   };
   const rendering = () => submitting() || (job() !== undefined && mediaJobActive(job()!.state));
@@ -83,9 +72,7 @@ export default function AvatarGenerateModal(props: {
   const render = async (prepare = false) => {
     const prompt = text().trim();
     if (!image || (!prepare && hasPrompt() && !prompt)) {
-      setError(
-        !image ? 'Select a workflow in Settings → Media rendering first.' : 'Write a prompt first.',
-      );
+      setError(!image ? 'Select a workflow in Settings → Media rendering first.' : 'Write a prompt first.');
       return;
     }
     setSubmitting(true);
@@ -120,8 +107,7 @@ export default function AvatarGenerateModal(props: {
       if (!disposed) setError(errorMessage(err));
     } finally {
       setSubmitting(false);
-      if (disposed && jobId())
-        void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
+      if (disposed && jobId()) void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
     }
   };
 
@@ -130,8 +116,7 @@ export default function AvatarGenerateModal(props: {
   onCleanup(() => {
     disposed = true;
     // Started drafts continue in the shared jobs list; Cancel explicitly discards them.
-    if (!submitting() && jobId())
-      void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
+    if (!submitting() && jobId()) void discard(jobId()!, !discardOnClose).catch((err) => toast(errorMessage(err)));
   });
 
   const save = async () => {
@@ -140,10 +125,7 @@ export default function AvatarGenerateModal(props: {
     setSaving(true);
     setError('');
     try {
-      await api[props.kind === 'character' ? 'characters' : 'personas'].useAvatarAsset(
-        props.id,
-        asset.id,
-      );
+      await api[props.kind === 'character' ? 'characters' : 'personas'].useAvatarAsset(props.id, asset.id);
       discardOnClose = true;
       props.onClose();
     } catch (err) {

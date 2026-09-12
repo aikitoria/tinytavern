@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'bun:test';
 import { createRoot, createSignal } from 'solid-js';
-import { DEFAULT_SETTINGS, type Settings } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS, type Settings, type MediaSettingsChange } from '@tinytavern/shared';
 import type { SettingsSectionActions } from '../../client/src/state/settingsSubmission.ts';
 
 test('generation sections share validation, revision guards and edits made during saving', async () => {
   const clone = <T>(value: T): T => structuredClone(value);
   const [settings, setSettings] = createSignal(clone(DEFAULT_SETTINGS));
   let guard!: SettingsSectionActions;
-  let request: Partial<Settings> | undefined;
+  let request: (Partial<Settings> & { mediaChanges: MediaSettingsChange[] }) | undefined;
   let resolve!: (value: Settings) => void;
   let submittedRevision = -1;
   mock.module('../../client/src/state/store.ts', () => ({
@@ -21,13 +21,13 @@ test('generation sections share validation, revision guards and edits made durin
   }));
   mock.module('../../client/src/state/api.ts', () => ({
     api: {
-      putSettings: (value: Partial<Settings>, revision: number) => {
+      saveMediaSettings: (value: Partial<Settings> & { mediaChanges: MediaSettingsChange[] }, revision: number) => {
         request = clone(value);
         submittedRevision = revision;
         if (revision !== settings().revision)
           return Promise.reject(Object.assign(new Error('Settings changed'), { status: 409 }));
-        return new Promise<Settings>((done) => {
-          resolve = done;
+        return new Promise<{ settings: Settings; assigned: {} }>((done) => {
+          resolve = (settings) => done({ settings, assigned: {} });
         });
       },
     },
@@ -80,9 +80,7 @@ test('generation sections share validation, revision guards and edits made durin
       ...current,
       jobTimeoutSeconds: 120,
     }));
-    form.setFavorites(() => [
-      { id: 'favorite', name: 'Portrait', presetId: 'prompt', workflowId: 'workflow' },
-    ]);
+    form.setFavorites(() => [{ id: 'favorite', name: 'Portrait', presetId: 'prompt', workflowId: 'workflow' }]);
     fields = { ...fields, promptRevisionTemplate: 'Before saving: {{instruction}}' };
     // A section import enters the same draft without dropping edits in another section.
     form.writeDraft({
@@ -120,7 +118,7 @@ test('generation sections share validation, revision guards and edits made durin
     invalid = false;
     form.setDraft((current: Settings['mediaRendering']) => ({
       ...current,
-      workflows: current.workflows.map((item) => ({
+      workflows: current.workflows.map((item: import('@tinytavern/shared').MediaWorkflow) => ({
         ...item,
         name: 'Renamed by generation import',
       })),
@@ -128,17 +126,18 @@ test('generation sections share validation, revision guards and edits made durin
     const saving = guard.save();
     assert.equal(request!.mediaRendering!.jobTimeoutSeconds, 120);
     assert.equal(request!.mediaRendering!.comfyUrl, 'http://imported');
-    assert.equal(request!.mediaFavorites![0]!.name, 'Portrait');
+    assert.equal(request!.mediaChanges.find((change) => change.table === 'media_favorites')!.fields!.name, 'Portrait');
     assert.equal(request!.imageGeneration!.promptRevisionTemplate, fields.promptRevisionTemplate);
     assert.equal(submittedRevision, settings().revision);
+    const submitted = clone(form.readDraft());
     fields = { ...fields, promptRevisionTemplate: 'Edited during save: {{instruction}}' };
     resolve({
       ...settings(),
-      ...request,
+      ...submitted,
       revision: settings().revision + 1,
       mediaRendering: {
-        ...request!.mediaRendering!,
-        workflows: request!.mediaRendering!.workflows.map((item) => ({
+        ...submitted.mediaRendering,
+        workflows: submitted.mediaRendering.workflows.map((item: import('@tinytavern/shared').MediaWorkflow) => ({
           ...item,
           revision: 1,
           folderId: null,
@@ -153,7 +152,7 @@ test('generation sections share validation, revision guards and edits made durin
       revision: current.revision + 1,
       mediaRendering: {
         ...current.mediaRendering,
-        workflows: current.mediaRendering.workflows.map((item) => ({
+        workflows: current.mediaRendering.workflows.map((item: import('@tinytavern/shared').MediaWorkflow) => ({
           ...item,
           name: 'Renamed in child',
           revision: 2,

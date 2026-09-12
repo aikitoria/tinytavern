@@ -1,9 +1,6 @@
+import { mediaSettingsChanges } from '../../../state/mediaSettingsChanges.ts';
 import SettingsTransferButtons from '../SettingsTransferButtons.tsx';
-import {
-  exportGenerationSettings,
-  importGenerationSettings,
-  type Settings,
-} from '@tinytavern/shared';
+import { exportGenerationSettings, importGenerationSettings, type Settings } from '@tinytavern/shared';
 import SettingsActions from '../SettingsActions.tsx';
 import { Show, createMemo, createSignal, onMount } from 'solid-js';
 import { unwrap } from 'solid-js/store';
@@ -52,7 +49,13 @@ export function mediaSettingsDraft() {
       imageFields?.validate();
       return readDraft();
     },
-    submit: (value, revision) => api.putSettings(value, revision),
+    submit: async (value, revision) => {
+      const result = await api.saveMediaSettings(
+        mediaSettingsChanges({ ...state.settings, ...baseline() }, { ...state.settings, ...value }),
+        revision,
+      );
+      return { ...result.settings, assigned: result.assigned };
+    },
     rebase: () => {
       const latest = snapshot();
       const merged = mergeRemoteDraft(remoteBase, readDraft(), latest, true);
@@ -65,8 +68,9 @@ export function mediaSettingsDraft() {
     },
     accepted: (value, next) => {
       const accepted = snapshot(next);
-      const current = reconcileMediaDraft(readDraft(), value, accepted);
-      applySettings(next);
+      const current = reconcileMediaDraft(readDraft(), value, accepted, next.assigned);
+      const { assigned, ...settings } = next;
+      applySettings(settings);
       remoteBase = accepted;
       writeDraft(current);
       setBaseline(accepted);
@@ -83,12 +87,10 @@ export function mediaSettingsDraft() {
   const { saving, save, discard } = submission;
   useSettingsGuard(submission);
   onMount(discard);
-  const setRendering = (
-    change: (current: Settings['mediaRendering']) => Settings['mediaRendering'],
-  ) => setDraft((current) => ({ ...current, mediaRendering: change(current.mediaRendering) }));
-  const setFavorites = (
-    change: (current: Settings['mediaFavorites']) => Settings['mediaFavorites'],
-  ) => setDraft((current) => ({ ...current, mediaFavorites: change(current.mediaFavorites) }));
+  const setRendering = (change: (current: Settings['mediaRendering']) => Settings['mediaRendering']) =>
+    setDraft((current) => ({ ...current, mediaRendering: change(current.mediaRendering) }));
+  const setFavorites = (change: (current: Settings['mediaFavorites']) => Settings['mediaFavorites']) =>
+    setDraft((current) => ({ ...current, mediaFavorites: change(current.mediaFavorites) }));
   const Actions = () => (
     <>
       <Show when={error()}>

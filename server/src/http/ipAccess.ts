@@ -1,8 +1,7 @@
 import { behindCaddy, isTrustedProxy } from './proxy.ts';
 import { BlockList, isIP } from 'node:net';
 
-export const DEFAULT_IP_ALLOWLIST =
-  '127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10';
+export const DEFAULT_IP_ALLOWLIST = '127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10';
 
 /** Strips IPv6 zone ids ("fe80::1%eth0") and unwraps v4-mapped addresses. */
 export function normalizeAddress(address: string): string {
@@ -61,10 +60,7 @@ export function requestIp(req: Request, remoteAddress?: string): string | null {
 }
 
 export function isRequestIpAllowed(req: Request, remoteAddress?: string): boolean {
-  return (
-    (!behindCaddy || isTrustedProxy(req)) &&
-    allowlist.isAllowed(requestIp(req, remoteAddress) ?? undefined)
-  );
+  return (!behindCaddy || isTrustedProxy(req)) && allowlist.isAllowed(requestIp(req, remoteAddress) ?? undefined);
 }
 
 function requestHostMatchesOrigin(host: string | null, origin: URL): boolean {
@@ -73,8 +69,7 @@ function requestHostMatchesOrigin(host: string | null, origin: URL): boolean {
   const originHost = origin.host.toLowerCase();
   if (requestHost === originHost) return true;
   // URL.host omits a protocol's default port while HTTP Host may include it.
-  const defaultPort =
-    origin.protocol === 'https:' ? '443' : origin.protocol === 'http:' ? '80' : '';
+  const defaultPort = origin.protocol === 'https:' ? '443' : origin.protocol === 'http:' ? '80' : '';
   return defaultPort !== '' && requestHost === `${originHost}:${defaultPort}`;
 }
 

@@ -14,9 +14,7 @@ export default function MediaCharacterPicker(props: {
 }) {
   const [open, setOpen] = createSignal(false);
   const options = createMemo(() => {
-    const characters = new Map(
-      state.characters.map((character) => [String(character.id), character]),
-    );
+    const characters = new Map(state.characters.map((character) => [String(character.id), character]));
     return entityOptions('characters', state.characters).map((option) => ({
       ...option,
       character: characters.get(option.value)!,

@@ -51,10 +51,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
   /** Actions for existing entities, before Delete. */
   extraActions?: JSX.Element;
   /** Supplies folder persistence for characters and media settings collections. */
-  folderBrowser?: Pick<
-    ReturnType<typeof createFolderBrowser>,
-    'NewButton' | 'Search' | 'List' | 'Dialog'
-  >;
+  folderBrowser?: Pick<ReturnType<typeof createFolderBrowser>, 'NewButton' | 'Search' | 'List' | 'Dialog'>;
   /** Entity currently in use, independent of editor selection. */
   activeId?: T['id'] | null;
   readOnly?: boolean;
@@ -98,10 +95,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
   };
   const sectionDraft = {
     get schema() {
-      return (
-        props.sectionSchema ??
-        entitySettingsSchema(props.sectionType ?? props.transferType ?? 'presets')
-      );
+      return props.sectionSchema ?? entitySettingsSchema(props.sectionType ?? props.transferType ?? 'presets');
     },
     read: editor.draftData,
     identity: editor.identity,
@@ -199,9 +193,7 @@ export default function EntityEditorPane<T extends { id: number | string; name: 
                             exportData={async () => {
                               return exportEntityDraft(type(), await exportDraft());
                             }}
-                            importData={(data) =>
-                              editor.importData(importEntityDraft(type(), data), props.readOnly)
-                            }
+                            importData={(data) => editor.importData(importEntityDraft(type(), data), props.readOnly)}
                           />
                         )}
                       </Show>

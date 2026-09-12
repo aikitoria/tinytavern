@@ -29,8 +29,7 @@ test('settings transfer', async () => {
   requireTestIsolation();
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
   assert.throws(
-    () =>
-      transferData(transferDocument('page:mediaChatPrompts', {}), 'page:mediaStandalonePrompts'),
+    () => transferData(transferDocument('page:mediaChatPrompts', {}), 'page:mediaStandalonePrompts'),
     /not/,
   );
   assert.equal(namedItem([{ name: 'Style' }, { name: 'STYLE' }], 'style'), undefined);
@@ -59,10 +58,7 @@ test('settings transfer', async () => {
     presets: [{ name: 'Reference style', prompt: '{{instruction}}: {{input1_prompt}}' }],
     active: 'Reference style',
   };
-  assert.throws(
-    () => parseImageGenerationSettings({ promptPresets: { references } }),
-    /media prompt library/,
-  );
+  assert.throws(() => parseImageGenerationSettings({ promptPresets: { references } }), /media prompt library/);
   for (const presets of [
     [{ ...portrait, context: ' ' }],
     [{ ...portrait, name: 'Default' }],
@@ -95,6 +91,7 @@ test('settings transfer', async () => {
     defaultPresetId: 'gallery-local',
   };
   const workflow: MediaWorkflow = {
+    folderId: 'folder-local',
     id: 'local-workflow',
     name: 'Fast',
     inputBindings: {},
@@ -106,7 +103,7 @@ test('settings transfer', async () => {
   settings.mediaRendering = {
     ...settings.mediaRendering,
     workflows: [workflow],
-    folders: [{ id: 'folder-local', name: 'Images', workflowIds: [workflow.id] }],
+    folders: [{ id: 'folder-local', name: 'Images' }],
     defaultWorkflowId: workflow.id,
   };
   const exported = exportRendering(settings);
@@ -159,7 +156,7 @@ test('settings transfer', async () => {
   );
   const otherInstallation = clone(settings);
   otherInstallation.mediaRendering.workflows[0]!.id = 'remote-workflow';
-  otherInstallation.mediaRendering.folders[0]!.workflowIds = ['remote-workflow'];
+  otherInstallation.mediaRendering.workflows[0]!.folderId = otherInstallation.mediaRendering.folders[0]!.id;
   otherInstallation.mediaRendering.defaultWorkflowId = 'remote-workflow';
   otherInstallation.mediaChatPrompts.presets[0]!.id = 'remote-preset';
   const copiedGeneration = importGenerationSettings(generationFile, otherInstallation);
@@ -172,11 +169,7 @@ test('settings transfer', async () => {
       (item) => item.workflowId === 'remote-workflow' && item.presetId === 'remote-preset',
     ),
   );
-  assert(
-    copiedGeneration.mediaRendering.shortcuts.every(
-      (item) => item.workflowId === 'remote-workflow',
-    ),
-  );
+  assert(copiedGeneration.mediaRendering.shortcuts.every((item) => item.workflowId === 'remote-workflow'));
   const legacyGeneration = importGenerationSettings(exportRendering(settings), ordered);
   assert.deepEqual(legacyGeneration.imageGeneration, ordered.imageGeneration);
   assert.deepEqual(legacyGeneration.mediaFavorites, ordered.mediaFavorites);
@@ -205,16 +198,12 @@ test('settings transfer', async () => {
   const library = exportWorkflowLibrary(settings);
   const destination = clone(settings);
   destination.mediaRendering.workflows[0]!.id = 'destination-workflow';
-  destination.mediaRendering.folders = [
-    { id: 'destination-folder', name: 'Images', workflowIds: [] },
-  ];
+  destination.mediaRendering.folders = [{ id: 'destination-folder', name: 'Images' }];
   const transferred = importWorkflowLibrary(library, destination);
   assert.equal(transferred.workflows[0]!.id, 'destination-workflow');
-  assert.deepEqual(transferred.folders, [
-    { id: 'destination-folder', name: 'Images', workflowIds: ['destination-workflow'] },
-  ]);
+  assert.deepEqual(transferred.folders, [{ id: 'destination-folder', name: 'Images' }]);
   const rootImport = importWorkflowLibrary({ ...library, folders: [] }, settings);
-  assert.deepEqual(rootImport.folders[0]!.workflowIds, []);
+  assert.deepEqual(rootImport.workflows[0]!.folderId, null);
   assert.deepEqual(
     importWorkflowLibrary({ workflows: library.workflows }, settings).folders,
     settings.mediaRendering.folders,
@@ -229,8 +218,8 @@ test('settings transfer', async () => {
   ])
     assert.throws(() => importWorkflowLibrary({ ...library, folders }, settings));
   assert.deepEqual(
-    settings.mediaRendering.folders[0]!.workflowIds,
-    [workflow.id],
+    settings.mediaRendering.workflows[0]!.folderId,
+    'folder-local',
     'Import validation never mutates source settings',
   );
   const unmatched = clone(exported);
@@ -243,29 +232,24 @@ test('settings transfer', async () => {
     [settings.mediaStandalonePrompts, false],
   ] as const) {
     const presetId = collection.presets[0]!.id;
-    collection.folders = [{ id: 'local-prompt-folder', name: 'Favorites', presetIds: [presetId] }];
+    collection.presets[0]!.folderId = 'local-prompt-folder';
+    collection.folders = [{ id: 'local-prompt-folder', name: 'Favorites' }];
     const portable = exportPromptCollection(collection);
     assert(!JSON.stringify(portable).includes(presetId));
     assert(!JSON.stringify(portable).includes('local-prompt-folder'));
     const destination = {
       ...collection,
       presets: [{ ...collection.presets[0]!, id: 'destination' }],
-      folders: [{ id: 'destination-folder', name: 'Favorites', presetIds: [] }],
+      folders: [{ id: 'destination-folder', name: 'Favorites' }],
       defaultPresetId: 'destination',
     };
     const imported = importPromptCollection(portable, destination, isChat);
-    assert.deepEqual(imported.folders, [
-      { id: 'destination-folder', name: 'Favorites', presetIds: ['destination'] },
-    ]);
+    assert.deepEqual(imported.folders, [{ id: 'destination-folder', name: 'Favorites' }]);
     assert.equal(imported.defaultPresetId, 'destination');
     assert.throws(() =>
-      importPromptCollection(
-        { ...portable, folders: [{ name: 'Broken', presets: ['Missing'] }] },
-        collection,
-        isChat,
-      ),
+      importPromptCollection({ ...portable, folders: [{ name: 'Broken', presets: ['Missing'] }] }, collection, isChat),
     );
-    assert.deepEqual(collection.folders[0]!.presetIds, [presetId]);
+    assert.deepEqual(collection.presets[0]!.folderId, 'local-prompt-folder');
   }
   const promptFile = exportPromptCollection(settings.mediaChatPrompts);
   promptFile.presets[0] = { ...promptFile.presets[0]!, chatPrompt: 'Imported chat instructions' };
@@ -283,15 +267,13 @@ test('settings transfer', async () => {
   await import('../../server/src/routes/endpoints.ts');
   await import('../../server/src/routes/characters.ts');
   await import('../../server/src/routes/settings.ts');
-  const { makePlaceholderPng, parseCharacterCard } =
-    await import('../../server/src/characters/pngCard.ts');
+  const { makePlaceholderPng, parseCharacterCard } = await import('../../server/src/characters/pngCard.ts');
   const { readAvatarFile } = await import('../../server/src/characters/avatarStore.ts');
   const { server, base, request: send } = await testApi();
-  const request = (method: string, path: string, body?: unknown, status = 200) =>
-    send(method, path, body, status);
+  const request = (method: string, path: string, body?: unknown, status = 200) => send(method, path, body, status);
   try {
     const original = getSettings();
-    let saved = await request('PUT', '/api/settings', {
+    let saved = await request('POST', '/api/settings/import', {
       expectedRevision: original.revision,
       mediaChatPrompts: settings.mediaChatPrompts,
       mediaStandalonePrompts: settings.mediaStandalonePrompts,
@@ -303,25 +285,24 @@ test('settings transfer', async () => {
     const avatarId = saved.imageGeneration.promptPresets.avatar.presets[0].id;
     assert.match(avatarId, /^[1-9][0-9]*$/);
     assert.deepEqual(
-      saved.imageGeneration.promptPresets.avatar.presets.map(
-        ({ id, folderId, revision, ...preset }: any) => preset,
-      ),
+      saved.imageGeneration.promptPresets.avatar.presets.map(({ id, folderId, revision, ...preset }: any) => preset),
       imageSet.presets,
     );
     assert.equal(saved.imageGeneration.promptPresets.avatar.activeId, avatarId);
-    assert.deepEqual(
-      getSettings().imageGeneration.promptPresets?.avatar,
-      saved.imageGeneration.promptPresets.avatar,
-    );
+    assert.deepEqual(getSettings().imageGeneration.promptPresets?.avatar, saved.imageGeneration.promptPresets.avatar);
     settings.mediaRendering = saved.mediaRendering;
     settings.mediaChatPrompts = saved.mediaChatPrompts;
     settings.mediaStandalonePrompts = saved.mediaStandalonePrompts;
     Object.assign(workflow, saved.mediaRendering.workflows[0]);
     for (const key of ['mediaChatPrompts', 'mediaStandalonePrompts'] as const) {
       const before = saved[key];
-      saved = await request('PUT', '/api/settings', {
+      saved = await request('POST', '/api/settings/import', {
         expectedRevision: saved.revision,
-        [key]: { ...before, folders: [] },
+        [key]: {
+          ...before,
+          folders: [],
+          presets: before.presets.map((preset: any) => ({ ...preset, folderId: null })),
+        },
       });
       assert.deepEqual(
         saved[key].presets.map(({ folderId, revision, ...item }: any) => item),
@@ -334,13 +315,13 @@ test('settings transfer', async () => {
         settings.mediaRendering.workflows,
         'Folder changes preserve workflow references',
       );
-      saved = await request('PUT', '/api/settings', {
+      saved = await request('POST', '/api/settings/import', {
         expectedRevision: saved.revision,
         [key]: before,
       });
       settings[key] = saved[key];
     }
-    saved = await request('PUT', '/api/settings', {
+    saved = await request('POST', '/api/settings/import', {
       expectedRevision: saved.revision,
       mediaChatPrompts: importPromptCollection(promptFile, saved.mediaChatPrompts, true),
     });
@@ -350,8 +331,8 @@ test('settings transfer', async () => {
       settings.mediaStandalonePrompts.presets[0]!.id,
     );
     await request(
-      'PUT',
-      '/api/settings',
+      'POST',
+      '/api/settings/import',
       { expectedRevision: saved.revision, mediaChatPrompts: settings.mediaStandalonePrompts },
       400,
     );
@@ -362,16 +343,14 @@ test('settings transfer', async () => {
       presetId: saved.mediaChatPrompts.presets[0].id,
       workflowId: workflow.id,
     };
-    saved = await request('PUT', '/api/settings', {
+    saved = await request('POST', '/api/settings/import', {
       expectedRevision: saved.revision,
       mediaFavorites: [favorite],
     });
     favorite.id = saved.mediaFavorites[0].id;
     const { exportMediaFavorites, importMediaFavorites } = await import('@tinytavern/shared');
     const portableFavorites = exportMediaFavorites(getSettings());
-    assert.deepEqual(portableFavorites, [
-      { name: 'Favorite', promptPreset: 'Cinematic', workflow: 'Fast' },
-    ]);
+    assert.deepEqual(portableFavorites, [{ name: 'Favorite', promptPreset: 'Cinematic', workflow: 'Fast' }]);
     assert.deepEqual(importMediaFavorites(portableFavorites, getSettings()), [favorite]);
     const withInput = {
       ...workflow,
@@ -380,8 +359,8 @@ test('settings transfer', async () => {
         ',"load":{"class_type":"LoadImage","inputs":{"image":"sample.png"},"_meta":{"title":"Input 1 [image:input1]"}}}',
     };
     await request(
-      'PUT',
-      '/api/settings',
+      'POST',
+      '/api/settings/import',
       {
         expectedRevision: saved.revision,
         mediaRendering: { ...settings.mediaRendering, workflows: [withInput] },
@@ -393,7 +372,7 @@ test('settings transfer', async () => {
       workflow.json,
       'Favorite input restrictions reject the whole settings mutation',
     );
-    saved = await request('PUT', '/api/settings', {
+    saved = await request('POST', '/api/settings/import', {
       expectedRevision: saved.revision,
       mediaChatPrompts: { folders: [], presets: [], defaultPresetId: null },
     });
@@ -434,9 +413,7 @@ test('settings transfer', async () => {
       400,
     );
     assert.equal(Number(stmt('SELECT count(*) AS n FROM templates').get()!.n), count);
-    const protectedTemplate = (await request('GET', '/api/templates')).find(
-      (item: any) => item.readOnly,
-    );
+    const protectedTemplate = (await request('GET', '/api/templates')).find((item: any) => item.readOnly);
     const copies = await request('POST', '/api/templates/settings-import', {
       document: transferDocument('page:templates', {
         items: [
@@ -470,10 +447,7 @@ test('settings transfer', async () => {
     });
     assert.deepEqual(readAvatarFile('persona', personas[0].id), avatar);
     const personaPage = await request('GET', '/api/personas/settings-export');
-    assert.equal(
-      personaPage.document.data.items[0].avatarData,
-      `data:image/png;base64,${avatar.toString('base64')}`,
-    );
+    assert.equal(personaPage.document.data.items[0].avatarData, `data:image/png;base64,${avatar.toString('base64')}`);
 
     const endpoint = await request('POST', '/api/endpoints', {
       name: 'Portable endpoint',
@@ -493,10 +467,7 @@ test('settings transfer', async () => {
       expectedSnapshot: endpoints.snapshot,
       document: endpoints.document,
     });
-    assert.equal(
-      stmt('SELECT api_key FROM endpoints WHERE id = ?').get(endpoint.id)!.api_key,
-      'private-credential',
-    );
+    assert.equal(stmt('SELECT api_key FROM endpoints WHERE id = ?').get(endpoint.id)!.api_key, 'private-credential');
     const [endpointCopy] = await request('POST', '/api/endpoints/settings-import', {
       targetId: null,
       document: transferDocument('entity:endpoints', {
@@ -517,7 +488,7 @@ test('settings transfer', async () => {
       baseUrl: endpoint.baseUrl,
       systemPromptPrefix: 'Case-distinct endpoint',
     });
-    await request('PUT', '/api/settings', {
+    await request('POST', '/api/settings/import', {
       expectedRevision: getSettings().revision,
       activeEndpointId: repeatedEndpoint.id,
     });
@@ -552,9 +523,7 @@ test('settings transfer', async () => {
       templateId: template.id,
       disableBackgroundSwipeGeneration: true,
     });
-    const png = Buffer.from(
-      await (await fetch(`${base}/api/characters/${character.id}/card`)).arrayBuffer(),
-    );
+    const png = Buffer.from(await (await fetch(`${base}/api/characters/${character.id}/card`)).arrayBuffer());
     const card = parseCharacterCard(png);
     assert(JSON.stringify(card.raw).includes('Linked prompt'));
     const cardResponse = await fetch(`${base}/api/characters/import-card`, {

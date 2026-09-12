@@ -9,12 +9,7 @@ import { errorMessage } from '../../util.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import GenerationPerformance from './GenerationPerformance.tsx';
 
-function TraceMessage(props: {
-  role: string;
-  label?: string;
-  content: string;
-  messageIds?: number[];
-}) {
+function TraceMessage(props: { role: string; label?: string; content: string; messageIds?: number[] }) {
   const { state } = useConversationView().session;
   const [copied, setCopied] = createSignal(false);
   let resetTimer: ReturnType<typeof setTimeout> | undefined;
@@ -57,9 +52,7 @@ function TraceMessage(props: {
         {props.content}
       </pre>
       <For each={props.messageIds}>
-        {(id) => (
-          <GenerationPerformance generations={state.tree.messages[id]?.genMeta?.generations} />
-        )}
+        {(id) => <GenerationPerformance generations={state.tree.messages[id]?.genMeta?.generations} />}
       </For>
     </section>
   );
@@ -102,10 +95,7 @@ export default function TraceView(props: { pendingMessage: string }) {
       <Show
         when={prepared()}
         fallback={
-          <p
-            class={trace.error ? 'notice notice-error' : 'hint'}
-            role={trace.error ? 'alert' : undefined}
-          >
+          <p class={trace.error ? 'notice notice-error' : 'hint'} role={trace.error ? 'alert' : undefined}>
             {trace.error ? `Could not load prompt trace: ${errorMessage(trace.error)}` : 'Loading…'}
           </p>
         }
@@ -124,9 +114,7 @@ export default function TraceView(props: { pendingMessage: string }) {
               {t().messages.length === 1 ? 'message' : 'messages'}
             </p>
             <Show when={isCommand()}>
-              <p class="hint">
-                Slash commands run separate actions; this trace previews a normal chat reply.
-              </p>
+              <p class="hint">Slash commands run separate actions; this trace previews a normal chat reply.</p>
             </Show>
             <For each={t().messages}>
               {(msg, index) => (
@@ -135,9 +123,7 @@ export default function TraceView(props: { pendingMessage: string }) {
                     <TraceMessage
                       role="assistant"
                       label={
-                        index() === t().prefillMessageIndex
-                          ? 'assistant reasoning (prefill)'
-                          : 'assistant reasoning'
+                        index() === t().prefillMessageIndex ? 'assistant reasoning (prefill)' : 'assistant reasoning'
                       }
                       content={msg.reasoning_content!}
                       messageIds={!msg.content ? trace()?.messageIds?.[index()] : undefined}
@@ -180,9 +166,7 @@ export default function TraceView(props: { pendingMessage: string }) {
               )}
             </Show>
             <Show when={trace()?.stream && props.pendingMessage.trim()}>
-              <p class="hint">
-                Your pending message will appear in the next request after this reply finishes.
-              </p>
+              <p class="hint">Your pending message will appear in the next request after this reply finishes.</p>
             </Show>
           </>
         )}

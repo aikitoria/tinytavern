@@ -8,9 +8,7 @@ test('sse', async () => {
   const encoder = new TextEncoder();
   // Split at every byte boundary, including within UTF-8 code points and CRLF.
   // Ignore comments/metadata and retain an unterminated final data line.
-  const bytes = encoder.encode(
-    ': keepalive\r\nevent: token\r\ndata: hé🦊\r\n\r\ndata:\n  data: tail',
-  );
+  const bytes = encoder.encode(': keepalive\r\nevent: token\r\ndata: hé🦊\r\n\r\ndata:\n  data: tail');
   for (let boundary = 0; boundary <= bytes.length; boundary++) {
     const body = streamBody([bytes.subarray(0, boundary), bytes.subarray(boundary)]);
     const seen: string[] = [];
@@ -91,11 +89,7 @@ test('server response', async () => {
     },
     () => finished++,
   );
-  assert.deepEqual(await frames(success), [
-    { d: 'immediate' },
-    { d: 'flushed suffix' },
-    { done: true },
-  ]);
+  assert.deepEqual(await frames(success), [{ d: 'immediate' }, { d: 'flushed suffix' }, { done: true }]);
   assert.equal(finished, 1);
   const stale = streamResponse(new Request('http://test'), async (send) => {
     send({ d: 'draft' });
@@ -105,22 +99,17 @@ test('server response', async () => {
   for (const alreadyClosed of [false, true]) {
     const abort = new AbortController();
     if (alreadyClosed) abort.abort();
-    const response = streamResponse(
-      new Request('http://test', { signal: abort.signal }),
-      async (send, signal) => {
-        if (!alreadyClosed) abort.abort();
-        assert(signal.aborted);
-        send({ d: 'late output' });
-        throw new Error('aborted');
-      },
-    );
+    const response = streamResponse(new Request('http://test', { signal: abort.signal }), async (send, signal) => {
+      if (!alreadyClosed) abort.abort();
+      assert(signal.aborted);
+      send({ d: 'late output' });
+      throw new Error('aborted');
+    });
     assert.deepEqual(await frames(response), []);
   }
   let cancelled!: Promise<void>;
   const response = streamResponse(new Request('http://test'), async (_send, signal) => {
-    cancelled = new Promise((resolve) =>
-      signal.addEventListener('abort', () => resolve(), { once: true }),
-    );
+    cancelled = new Promise((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     await cancelled;
   });
   await response.body!.cancel();
@@ -143,17 +132,10 @@ test('video preview', async () => {
     nodeId: 'sampler',
     image: `data:image/jpeg;base64,${previewJpeg.toString('base64')}`,
   });
-  assert.equal(
-    parsePreviewFrame(packet),
-    null,
-    'VHS packets must not be treated as ordinary JPEG previews',
-  );
+  assert.equal(parsePreviewFrame(packet), null, 'VHS packets must not be treated as ordinary JPEG previews');
   assert.equal(parseVideoPreviewFrame(packet.subarray(0, 32)), null);
   assert.equal(parseVideoPreviewFrame(videoPreviewFrame(512)), null);
-  assert.equal(
-    parseVideoPreviewFrame(videoPreviewFrame(0, 'sampler', Buffer.from('not a jpeg'))),
-    null,
-  );
+  assert.equal(parseVideoPreviewFrame(videoPreviewFrame(0, 'sampler', Buffer.from('not a jpeg'))), null);
   for (const offset of [0, 4, 8, 16]) {
     const invalid = Buffer.from(packet);
     invalid[offset] = 99;
@@ -187,19 +169,11 @@ test('video preview', async () => {
     videoPreview: { ...progress.videoPreview!, frames: { 0: null } },
   });
   assert.deepEqual(Object.keys(progress.videoPreview!.frames), ['2']);
-  assert.deepEqual(
-    Object.keys(snapshot.videoPreview!.frames),
-    ['0', '2'],
-    'Merging does not mutate snapshots',
-  );
+  assert.deepEqual(Object.keys(snapshot.videoPreview!.frames), ['0', '2'], 'Merging does not mutate snapshots');
   const previousSequence = progress.videoPreview!.sequence;
   progress = mergeMediaProgress(progress, { videoPreview: clip.accept(videoPreviewFrame(0))! });
   assert.notEqual(progress.videoPreview!.sequence, previousSequence);
-  assert.deepEqual(
-    Object.keys(progress.videoPreview!.frames),
-    ['0'],
-    'Denoise updates never inherit old frame slots',
-  );
+  assert.deepEqual(Object.keys(progress.videoPreview!.frames), ['0'], 'Denoise updates never inherit old frame slots');
   const resumed = ComfyVideoPreview.restore(clip.metadata, progress.videoPreview!.sequence);
   progress = mergeMediaProgress(progress, { videoPreview: resumed.accept(videoPreviewFrame(1))! });
   assert.deepEqual(
@@ -217,11 +191,7 @@ test('video preview', async () => {
   assert(nested.accept(videoPreviewFrame(1, longNode)), 'VHS truncates node IDs in binary frames');
 
   // Complete sequences larger than the former 16 MiB base64 limit must retain every slot.
-  const largeJpeg = Buffer.concat([
-    previewJpeg.subarray(0, -2),
-    Buffer.alloc(1024 * 1024),
-    previewJpeg.subarray(-2),
-  ]);
+  const largeJpeg = Buffer.concat([previewJpeg.subarray(0, -2), Buffer.alloc(1024 * 1024), previewJpeg.subarray(-2)]);
   const largeClip = ComfyVideoPreview.fromEvent({ id: 'sampler', length: 16, rate: 6 }, 'sampler')!;
   let cached: MediaProgress = {};
   for (let index = 0; index < 16; index++) {
@@ -231,21 +201,14 @@ test('video preview', async () => {
   }
   assert.equal(Object.keys(cached.videoPreview!.frames).length, 16);
   assert(Object.values(cached.videoPreview!.frames).every(Boolean));
-  assert(
-    Object.values(cached.videoPreview!.frames).reduce((sum, frame) => sum + frame!.length, 0) >
-      16 * 1024 * 1024,
-  );
+  assert(Object.values(cached.videoPreview!.frames).reduce((sum, frame) => sum + frame!.length, 0) > 16 * 1024 * 1024);
   const restored = ComfyVideoPreview.restore(cached.videoPreview!, cached.videoPreview!.sequence);
   assert.equal(restored.metadata.id, largeClip.metadata.id);
   assert(!('frames' in restored.metadata), 'Metadata does not pin obsolete frame strings');
   cached = mergeMediaProgress(cached, {
     videoPreview: restored.accept(videoPreviewFrame(0, 'sampler', largeJpeg))!,
   });
-  assert.deepEqual(
-    Object.keys(cached.videoPreview!.frames),
-    ['0'],
-    'A new sequence releases the previous cache',
-  );
+  assert.deepEqual(Object.keys(cached.videoPreview!.frames), ['0'], 'A new sequence releases the previous cache');
 });
 
 test('image dimensions', async () => {
@@ -253,8 +216,7 @@ test('image dimensions', async () => {
 
   const { join } = await import('node:path');
 
-  const { imageDimensions, imageFileDimensions } =
-    await import('../../server/src/media/imageDimensions.ts');
+  const { imageDimensions, imageFileDimensions } = await import('../../server/src/media/imageDimensions.ts');
 
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -267,11 +229,7 @@ test('image dimensions', async () => {
     assert(size && size.width > 0 && size.height > 0);
     const path = join(process.env.DATA_DIR!, `format-${index}`);
     writeFileSync(path, data);
-    assert.deepEqual(
-      imageFileDimensions(path),
-      size,
-      'File header reads agree with buffer inspection',
-    );
+    assert.deepEqual(imageFileDimensions(path), size, 'File header reads agree with buffer inspection');
   }
   assert.deepEqual(imageDimensions(png), { width: 1, height: 1 });
   assert.deepEqual(imageDimensions(webp), { width: 1, height: 1 });
@@ -290,10 +248,8 @@ test('image dimensions', async () => {
     exif.writeUInt16BE(34, 2);
     exif.write('Exif\0\0', 4, 'latin1');
     exif.write(little ? 'II' : 'MM', 10);
-    const u16 = (v: number, at: number) =>
-      little ? exif.writeUInt16LE(v, at) : exif.writeUInt16BE(v, at);
-    const u32 = (v: number, at: number) =>
-      little ? exif.writeUInt32LE(v, at) : exif.writeUInt32BE(v, at);
+    const u16 = (v: number, at: number) => (little ? exif.writeUInt16LE(v, at) : exif.writeUInt16BE(v, at));
+    const u32 = (v: number, at: number) => (little ? exif.writeUInt32LE(v, at) : exif.writeUInt32BE(v, at));
     u16(42, 12);
     u32(8, 14);
     u16(1, 18);

@@ -45,10 +45,7 @@ export function isMediaPromptExcerpt(content: string, excerpt: string): boolean 
     }
     const text = line.slice(offset);
     const closing = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(text)?.[1];
-    if (
-      depth !== fence.depth ||
-      (closing?.[0] === fence.marker && closing.length >= fence.length)
-    ) {
+    if (depth !== fence.depth || (closing?.[0] === fence.marker && closing.length >= fence.length)) {
       if (normalize(code.join('\n')).includes(wanted)) return true;
       fence = null;
     } else code.push(text);
@@ -61,9 +58,7 @@ export function resolveMediaPromptSelection(
   activePath: readonly Message[],
   selected: MediaPromptSelection | null,
 ) {
-  const message = selected
-    ? messages[selected.messageId]
-    : activePath.findLast((item) => item.role === 'assistant');
+  const message = selected ? messages[selected.messageId] : activePath.findLast((item) => item.role === 'assistant');
   if (!message) return null;
   const selection = selected ?? { messageId: message.id };
   const text = selection.text ?? message.content;

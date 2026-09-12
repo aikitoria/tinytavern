@@ -1,14 +1,6 @@
 import { faCheck, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
-import {
-  For,
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  createUniqueId,
-  type JSX,
-} from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId, type JSX } from 'solid-js';
 import DropdownSurface from './DropdownSurface.tsx';
 import ReferenceEditButton from './ReferenceEditButton.tsx';
 
@@ -150,9 +142,7 @@ export default function Select(props: {
             ? options().length - 1
             : (highlighted() + dir + options().length) % options().length;
       setHighlighted(next);
-      menu
-        ?.querySelector<HTMLElement>(`[id="select-option-${id}-${next}"]`)
-        ?.scrollIntoView({ block: 'nearest' });
+      menu?.querySelector<HTMLElement>(`[id="select-option-${id}-${next}"]`)?.scrollIntoView({ block: 'nearest' });
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       const option = options()[highlighted()];
@@ -258,9 +248,7 @@ export default function Select(props: {
                   <span classList={{ 'pl-3': !!option.group }}>{option.label}</span>
                   <Show when={props.showCheck}>
                     <span class="menu-check" aria-hidden="true">
-                      {option.value === current() ? (
-                        <FontAwesomeIcon icon={faCheck} size={12} />
-                      ) : null}
+                      {option.value === current() ? <FontAwesomeIcon icon={faCheck} size={12} /> : null}
                     </span>
                   </Show>
                 </button>

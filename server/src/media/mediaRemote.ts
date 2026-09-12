@@ -77,12 +77,7 @@ export function comfyOutputFiles(value: unknown): ComfyFile[] {
 }
 
 /** Persist before an upload, or immediately upon observing job output metadata. */
-export function ownRemoteFile(
-  jobId: number,
-  endpoint: string,
-  file: ComfyFile,
-  purpose: string,
-): RemoteFileRow {
+export function ownRemoteFile(jobId: number, endpoint: string, file: ComfyFile, purpose: string): RemoteFileRow {
   stmt(`INSERT INTO media_remote_files(job_id, endpoint, filename, subfolder, type, purpose)
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(job_id, endpoint, filename, subfolder, type) DO NOTHING`).run(
     jobId,
@@ -98,14 +93,13 @@ export function ownRemoteFile(
 }
 
 export function releaseRemoteFiles(jobId: number, delayMs = 0): void {
-  stmt(
-    "UPDATE media_remote_files SET state = 'pending', retry_at = ? WHERE job_id = ? AND state = 'owned'",
-  ).run(Date.now() + delayMs, jobId);
+  stmt("UPDATE media_remote_files SET state = 'pending', retry_at = ? WHERE job_id = ? AND state = 'owned'").run(
+    Date.now() + delayMs,
+    jobId,
+  );
 }
 export function releaseRemoteFile(id: number): void {
-  stmt(
-    "UPDATE media_remote_files SET state = 'pending', retry_at = 0 WHERE id = ? AND state = 'owned'",
-  ).run(id);
+  stmt("UPDATE media_remote_files SET state = 'pending', retry_at = 0 WHERE id = ? AND state = 'owned'").run(id);
 }
 
 const cleaning = new Set<number>();

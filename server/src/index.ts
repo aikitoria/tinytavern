@@ -15,12 +15,7 @@ import {
 } from './realtime/events.ts';
 import { sendTreeTo } from './realtime/sync.ts';
 import { cancelBackgroundSwipe, prepareActiveSwipe } from './generation/speculation.ts';
-import {
-  configuredIpAllowlist,
-  isRequestIpAllowed,
-  isRequestOriginAllowed,
-  requestIp,
-} from './http/ipAccess.ts';
+import { configuredIpAllowlist, isRequestIpAllowed, isRequestOriginAllowed, requestIp } from './http/ipAccess.ts';
 import { isRequestAuthenticated } from './http/auth.ts';
 import { sweepOrphanedImages } from './media/images.ts';
 import { initMediaWorker, stopMediaWorker } from './media/mediaWorker.ts';
@@ -85,12 +80,7 @@ async function mediaResponse(req: Request, path: string, image: boolean): Promis
         start = Number(range[1]);
         if (range[2]) end = Math.min(end, Number(range[2]));
       } else start = Math.max(0, info.size - Number(range[2]));
-      if (
-        !Number.isSafeInteger(start) ||
-        !Number.isSafeInteger(end) ||
-        start > end ||
-        start >= info.size
-      ) {
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= info.size) {
         headers.set('content-range', `bytes */${info.size}`);
         return new Response(null, { status: 416, headers });
       }
@@ -104,8 +94,7 @@ async function mediaResponse(req: Request, path: string, image: boolean): Promis
       headers,
     });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT')
-      console.error('[media] file read failed:', err);
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[media] file read failed:', err);
     return new Response(null, { status: 404 });
   }
 }
@@ -160,15 +149,13 @@ const server = Bun.serve({
       }
       return apiError(404, 'not found');
     }
-    if (!isRequestIpAllowed(req, server.requestIP(req)?.address))
-      return apiError(403, 'IP address is not allowed');
+    if (!isRequestIpAllowed(req, server.requestIP(req)?.address)) return apiError(403, 'IP address is not allowed');
     if (caddyEnabled) return new Response(null, { status: 404 });
     const image = pathname.startsWith('/images/');
     const avatar = pathname.startsWith('/avatars/');
     if (image || avatar) {
       if (!isRequestAuthenticated(req)) return new Response(null, { status: 401 });
-      if (image && !MIME[extname(pathname).toLowerCase()])
-        return new Response(null, { status: 404 });
+      if (image && !MIME[extname(pathname).toLowerCase()]) return new Response(null, { status: 404 });
       const path = safeJoin(image ? IMAGES_DIR : AVATAR_DIR, pathname.slice(image ? 8 : 9));
       if (path) return mediaResponse(req, path, image);
     }

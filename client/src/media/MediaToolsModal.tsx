@@ -1,3 +1,4 @@
+import { createMediaSession } from './mediaSession.ts';
 import ConversationPane from '../components/chat/ConversationPane.tsx';
 import { createEmbeddedConversation } from '../state/embeddedConversation.ts';
 import type { Message } from '@tinytavern/shared';
@@ -5,12 +6,10 @@ import { entityOptions, editReferencedEntity } from '../state/entityReferences.t
 import { newRequestId } from '@tinytavern/shared';
 import { canFillMediaInputs } from './automaticInputs.ts';
 import { orderedMediaInputs, reconcileMediaInputSelection } from './inputSelection.ts';
-import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import MediaResultDetails from './MediaResultDetails.tsx';
 import MediaComparison from './MediaComparison.tsx';
 import { comparisonKey, type ComparisonResult } from './mediaComparison.ts';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
-import { createStreamScroll } from '../streamScroll.ts';
 import { prepareTextareaResize } from '../textareaResize.ts';
 import {
   useDialogActive,
@@ -20,18 +19,8 @@ import {
   useDialogPage,
 } from '../state/dialogContext.ts';
 import { rememberMediaPage } from '../state/pageLocation.ts';
-import {
-  For,
-  Show,
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onMount,
-  onCleanup,
-} from 'solid-js';
-import { createStore, reconcile } from 'solid-js/store';
+import { For, Show, batch, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import {
   faArrowLeft,
   faArrowUp,
@@ -54,29 +43,19 @@ import {
   mediaPromptSettingsKey,
   workflowInputError,
   resolveMediaPromptSelection,
-  type MediaWorkflowValues,
   type GalleryItem,
   type MediaAsset,
   type MediaJob,
-  type MediaJobDraft,
   type MediaJobInput,
 } from '@tinytavern/shared';
 import Modal from '../components/ui/Modal.tsx';
 import ImageViewer from '../components/ui/ImageViewer.tsx';
 import Select from '../components/ui/Select.tsx';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
-import PromptGenerationStatus from './PromptGenerationStatus.tsx';
 import GalleryModal from '../components/gallery/GalleryModal.tsx';
 import MediaJobStatus from './MediaJobStatus.tsx';
-import { api, ApiError } from '../state/api.ts';
-import {
-  applyMediaJob,
-  galleryFoldersLoaded,
-  handleServerEvent,
-  mediaJobWasDeleted,
-  state,
-  toast,
-} from '../state/store.ts';
+import { api } from '../state/api.ts';
+import { applyMediaJob, handleServerEvent, state, toast } from '../state/store.ts';
 import { download, errorMessage } from '../util.ts';
 import { leaveMediaTool, openMediaJobs, type MediaToolSession } from './navigation.ts';
 import MediaPlayer from './MediaPlayer.tsx';
@@ -84,11 +63,7 @@ import VideoFullscreenButton from './VideoFullscreenButton.tsx';
 import VideoPreview from './VideoPreview.tsx';
 import MediaActions from './MediaActions.tsx';
 import WorkflowInputs from './WorkflowInputs.tsx';
-import {
-  createMediaWorkflowControls,
-  imageWorkflowDefaults,
-  mediaWorkflowView,
-} from './workflowDefaults.ts';
+import { createMediaWorkflowControls, imageWorkflowDefaults, mediaWorkflowView } from './workflowDefaults.ts';
 import {
   groupMediaJobs,
   mediaVariations,
@@ -100,66 +75,49 @@ import {
 const selectRowClass =
   'items-center grid min-w-0 gap-y-2 gap-x-3 [&>label]:text-sm [&>label]:font-semibold [&>label]:text-foreground [&>label]:m-0 [&>*]:min-w-0 narrow-panel:grid-cols-1 narrow-panel:gap-1 grid-cols-2';
 
-interface ToolDraft extends MediaJobDraft {
-  workflowValues: MediaWorkflowValues;
-  instruction: string;
-  prompt: string;
-  inputs: MediaJobInput[];
-}
-
-function draftFromJob(job: MediaJob): ToolDraft {
-  return {
-    seedOverride: job.seedOverride ?? null,
-    avatarContext: job.avatarContext ?? null,
-    workflowValues: { ...job.workflowValues },
-    reviewBeforeSave: true,
-    workflowId: job.workflowId,
-    presetId: job.presetId,
-    instruction: job.instruction,
-    prompt: job.prompt,
-    inputs: job.inputs.map(({ slot, assetId }) => ({ slot, assetId })),
-    contextConversationId: job.contextConversationId,
-    galleryFolderId: job.galleryFolderId ?? null,
-    destination: job.destination,
-  };
-}
-
 export default function MediaToolsModal(props: { session: MediaToolSession }) {
   let videoPlayer: HTMLVideoElement | undefined;
-  let promptArea: HTMLTextAreaElement | undefined;
   // The mounted frame follows saved jobs/variations; launch props can be stale after hot reload.
   const page = useDialogPage()().media;
   const session = page
     ? { ...props.session, ...page, previewJobId: page.previewJobId, assetId: page.assetId }
     : props.session;
-  const createRequestKey = session.requestKey ?? newRequestId();
-  const [jobId, setJobId] = createSignal(session.jobId);
-  const [draftId, setDraftId] = createSignal<number | null>(null);
-  const [variationsLoaded, setVariationsLoaded] = createSignal(false);
-  const [busy, setBusy] = createSignal(false);
-  const [error, setError] = createSignal('');
   const [renderSettingsOpen, setRenderSettingsOpen] = createSignal(false);
   const paneActive = useDialogActive();
+  const {
+    draft,
+    setDraft,
+    assets,
+    setAssets,
+    jobId,
+    setJobId,
+    job,
+    variations,
+    review,
+    reviewing,
+    runningJob,
+    active,
+    loadingJob,
+    frozen,
+    variationsLoaded,
+    busy,
+    error,
+    setError,
+    dirty,
+    loadJob,
+    refreshVariations,
+    saveDraft,
+    perform,
+  } = createMediaSession(session, {
+    workflowId: () => selectedWorkflow(),
+    presetId: () => selectedPromptId(),
+    workflowError: () => workflowError(),
+    clearPreview: () => setViewedVariation(null),
+  });
+  const inputForSlot = (slot: MediaJobInput['slot']) => draft.inputs.find((input) => input.slot === slot);
+
   const [fullSizeImage, setFullSizeImage] = createSignal<string | null>(null);
   const [picker, setPicker] = createSignal<MediaJobInput['slot'] | '@all' | null>(null);
-  const [assets, setAssets] = createStore<Record<number, MediaAsset>>(
-    Object.fromEntries(session.assets.map((asset) => [asset.id, asset])),
-  );
-  const [draft, setDraft] = createStore<ToolDraft>({
-    seedOverride: null,
-    workflowValues: {},
-    reviewBeforeSave: true,
-    workflowId: session.workflowId,
-    presetId: null,
-    instruction: '',
-    prompt: session.prompt ?? '',
-    inputs: session.inputs,
-    contextConversationId: session.contextConversationId,
-    galleryFolderId: session.galleryFolderId ?? null,
-    destination: session.destination,
-  });
-  let baseline = JSON.parse(JSON.stringify(draft)) as ToolDraft;
-  let variationRequestKey = newRequestId();
   createEffect(() => {
     if (!paneActive()) return;
     const selected = selectedVariation();
@@ -182,37 +140,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   );
   const chatTitle = () => contextConversation()?.title ?? 'Linked chat';
   const usesChatContext = () => draft.contextConversationId !== null;
-  const inputContext = () =>
-    draft.avatarContext ? 'avatar' : usesChatContext() ? 'chat' : 'standalone';
-  const job = () => (jobId() ? state.mediaJobs[jobId()!] : undefined);
-  const variations = createMemo(() => {
-    const current = job();
-    const id = current?.draft?.id ?? draftId();
-    if (!id) return current ? [current] : [];
-    return Object.values(state.mediaJobs)
-      .filter((item) => item.draft?.id === id)
-      .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
-  });
-  const review = createMemo(() => {
-    let latest = job()?.draft;
-    for (const item of variations()) {
-      if (item.draft && (!latest || item.draft.revision > latest.revision)) {
-        latest = item.draft;
-      }
-    }
-    return latest;
-  });
-  const reviewing = () => review()?.state === 'open';
-  const runningJob = () => variations().find((item) => mediaJobActive(item.state));
-  const active = () => runningJob() !== undefined;
-  const loadingJob = () => jobId() !== null && !job();
-  const frozen = () => loadingJob() || (!reviewing() && (active() || job()?.submitted === true));
-  const preview = () =>
-    selectedVariation()?.asset ? undefined : selectedVariation()?.job.progress?.preview;
+  const inputContext = () => (draft.avatarContext ? 'avatar' : usesChatContext() ? 'chat' : 'standalone');
+  const preview = () => (selectedVariation()?.asset ? undefined : selectedVariation()?.job.progress?.preview);
   const videoPreview = () => {
-    const video = selectedVariation()?.asset
-      ? undefined
-      : selectedVariation()?.job.progress?.videoPreview;
+    const video = selectedVariation()?.asset ? undefined : selectedVariation()?.job.progress?.videoPreview;
     return video && Object.values(video.frames).some(Boolean) ? video : undefined;
   };
   const candidates = createMemo(() => mediaVariations(variations()));
@@ -223,13 +154,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   );
   const [comparisonInitial, setComparisonInitial] = createSignal<string | null>(null);
   const comparing = () => comparisonInitial() !== null;
-  const completedCount = () =>
-    candidates().filter((item) => item.asset || item.job.textResult).length;
+  const completedCount = () => candidates().filter((item) => item.asset || item.job.textResult).length;
   const pendingCount = () => variations().filter((item) => mediaJobActive(item.state)).length;
   const queuedCount = () =>
-    variations().filter((item) =>
-      ['preparing', 'submitting', 'reconciling', 'queued'].includes(item.state),
-    ).length;
+    variations().filter((item) => ['preparing', 'submitting', 'reconciling', 'queued'].includes(item.state)).length;
   const [resultDetails, setResultDetails] = createSignal<{
     instruction: string;
     prompt: string;
@@ -239,13 +167,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const [viewedVariation, setViewedVariation] = createSignal<{
     jobId: number;
     assetId?: number;
-  } | null>(
-    session.jobId === null
-      ? null
-      : { jobId: session.previewJobId ?? session.jobId, assetId: session.assetId },
-  );
-  const selectedIndex = () =>
-    mediaVariationIndex(candidates(), viewedVariation(), review()?.selectedAssetId);
+  } | null>(session.jobId === null ? null : { jobId: session.previewJobId ?? session.jobId, assetId: session.assetId });
+  const selectedIndex = () => mediaVariationIndex(candidates(), viewedVariation(), review()?.selectedAssetId);
   const selectedVariation = () => candidates()[selectedIndex()];
   const requestedPreview = useDialogMediaPreview();
   createEffect(() => {
@@ -264,17 +187,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     undefined,
     { equals: (a, b) => a?.job === b?.job && a?.asset === b?.asset },
   );
-  const hasResults = () =>
-    Boolean(videoPreview() || preview() || selected() || selectedVariation()?.job.textResult);
+  const hasResults = () => Boolean(videoPreview() || preview() || selected() || selectedVariation()?.job.textResult);
   const sourcePreviewLabel = () => inputLabel(orderedInputs()[0]?.slot ?? 'input1');
-  const sourcePreview = () =>
-    orderedInputs()[0] ? assets[orderedInputs()[0]!.assetId] : session.assets[0];
+  const sourcePreview = () => (orderedInputs()[0] ? assets[orderedInputs()[0]!.assetId] : session.assets[0]);
   const title = () =>
-    loadingJob()
-      ? 'Loading media job…'
-      : usesChatContext()
-        ? 'Generate media from chat'
-        : 'Generate media';
+    loadingJob() ? 'Loading media job…' : usesChatContext() ? 'Generate media from chat' : 'Generate media';
   const workflows = () => state.settings.mediaRendering.workflows;
   const workflowView = createMemo(() =>
     mediaWorkflowView(
@@ -286,9 +203,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     ),
   );
   const workflowOptions = createMemo(() => {
-    const editable = new Set(
-      state.settings.mediaRendering.workflows.map((workflow) => workflow.id),
-    );
+    const editable = new Set(state.settings.mediaRendering.workflows.map((workflow) => workflow.id));
     return entityOptions('workflows', workflows()).map((option) =>
       editable.has(option.value) ? option : { ...option, edit: undefined },
     );
@@ -327,43 +242,31 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     () => new Set(state.gallery.flatMap((item) => (item.media ? [item.media.id] : []))),
   );
   const bulkInputCapacity = () =>
-    slots().length -
-    orderedInputs().filter((input) => !selectableAssetIds().has(input.assetId)).length;
+    slots().length - orderedInputs().filter((input) => !selectableAssetIds().has(input.assetId)).length;
   const canFillFromContext = createMemo(() => {
     const conversation = contextConversation();
     const personaId =
       draft.avatarContext?.kind === 'persona'
         ? draft.avatarContext.id
         : (conversation?.personaId ?? state.settings.defaultPersonaId);
-    const characterId =
-      draft.avatarContext?.kind === 'character'
-        ? draft.avatarContext.id
-        : conversation?.characterId;
-    return canFillMediaInputs(
-      slots(),
-      workflowView().workflow?.inputBindings[inputContext()] ?? {},
-      draft.inputs,
-      {
-        selectedAssets: session.assets,
-        inputKinds: inputKinds(),
-        characterAvatar: Boolean(state.characters.find((item) => item.id === characterId)?.avatar),
-        personaAvatar: Boolean(state.personas.find((item) => item.id === personaId)?.avatar),
-      },
-    );
+    const characterId = draft.avatarContext?.kind === 'character' ? draft.avatarContext.id : conversation?.characterId;
+    return canFillMediaInputs(slots(), workflowView().workflow?.inputBindings[inputContext()] ?? {}, draft.inputs, {
+      selectedAssets: session.assets,
+      inputKinds: inputKinds(),
+      characterAvatar: Boolean(state.characters.find((item) => item.id === characterId)?.avatar),
+      personaAvatar: Boolean(state.personas.find((item) => item.id === personaId)?.avatar),
+    });
   });
   const hasPrompt = () => workflowInterface()?.slots.has('prompt') ?? false;
   const inputLabel = (slot: string) =>
-    workflowInterface()?.mediaInputs.find((input) => input.name === slot)?.label ??
-    mediaInputLabel(slot);
+    workflowInterface()?.mediaInputs.find((input) => input.name === slot)?.label ?? mediaInputLabel(slot);
   const fillSelectedInputs = (inputs: MediaJobInput[], workflow = workflowView().workflow) => {
     if (!workflow) return inputs;
     const next = [...inputs];
     const bindings = workflow.inputBindings[inputContext()] ?? {};
     let kinds: Map<string, MediaAsset['kind']>;
     try {
-      kinds = new Map(
-        compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]),
-      );
+      kinds = new Map(compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]));
     } catch {
       return inputs;
     }
@@ -382,9 +285,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           setDraft(
             'inputs',
             fillSelectedInputs(
-              draft.inputs.filter(
-                (input) => inputKinds().get(input.slot) === assets[input.assetId]?.kind,
-              ),
+              draft.inputs.filter((input) => inputKinds().get(input.slot) === assets[input.assetId]?.kind),
             ),
           );
       },
@@ -396,10 +297,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       return 'Seed must be a whole number from 0 to 9007199254740991';
     if (workflowControls().error) return workflowControls().error;
     for (const control of workflowControls().controls) {
-      const error = workflowInputError(
-        control,
-        workflowView().values[control.key] ?? control.value,
-      );
+      const error = workflowInputError(control, workflowView().values[control.key] ?? control.value);
       if (error) return error;
     }
     return '';
@@ -439,212 +337,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     {
       value: '',
       label: 'Workflow default',
-      edit: () =>
-        editReferencedEntity(
-          mediaPromptSettingsKey(usesChatContext()),
-          defaultPromptId() ?? 'default',
-        ),
+      edit: () => editReferencedEntity(mediaPromptSettingsKey(usesChatContext()), defaultPromptId() ?? 'default'),
     },
     ...entityOptions(mediaPromptSettingsKey(usesChatContext()), mediaPrompts().presets),
   ];
-  const preparingPrompt = () => job()?.state === 'preparing' && draft.prompt === baseline.prompt;
-  const currentPrompt = () => draft.prompt;
-  const thinking = () => preparingPrompt() && !currentPrompt();
-  const promptScroll = createStreamScroll(
-    () => promptArea,
-    requestAnimationFrame,
-    cancelAnimationFrame,
-  );
-  createEffect(() => {
-    currentPrompt();
-    promptScroll.update(
-      preparingPrompt() ? job()!.id : null,
-      paneActive() && picker() === null && !thinking(),
-    );
-  });
-  onCleanup(promptScroll.dispose);
-  const dirty = () => !sameValue(draft, baseline);
-  const inputForSlot = (slot: MediaJobInput['slot']) =>
-    draft.inputs.find((input) => input.slot === slot);
-
-  // Read only the accepted store snapshot. A late HTTP response may already have
-  // been superseded by a socket update or a deletion.
-  const loadJob = (id: number, preserveEdits = false) => {
-    const incoming = state.mediaJobs[id];
-    if (!incoming) return;
-    batch(() => {
-      setDraftId(incoming.draft?.id ?? null);
-      const next = draftFromJob(incoming);
-      const values = preserveEdits
-        ? mergeRemoteDraft({ ...baseline }, { ...draft }, { ...next }, true).draft
-        : next;
-      // A submitted variation owns its snapshot; edits here describe the next one.
-      baseline = next;
-      setDraft(values);
-      setDraft('workflowValues', reconcile(values.workflowValues));
-      for (const asset of incoming.assets) {
-        setAssets(asset.id, asset);
-      }
-    });
-  };
-  let knownJobId: number | null = null;
-  const recoverRemovedJob = (id: number) => {
-    if (jobId() !== id || knownJobId !== id) return;
-    const remaining = variations().at(-1);
-    // Cancellation can delete the editor's anchor. Keep its working values while repointing it.
-    if (remaining) baseline = draftFromJob(remaining);
-    batch(() => {
-      if (!remaining) {
-        setDraftId(null);
-        setViewedVariation(null);
-      }
-      setJobId(remaining?.id ?? null);
-    });
-  };
-  createEffect(() => {
-    const current = job();
-    if (current) {
-      knownJobId = current.id;
-      setDraftId(current.draft?.id ?? null);
-      return;
-    }
-    const id = jobId();
-    if (id !== null && mediaJobWasDeleted(id)) recoverRemovedJob(id);
-  });
-  const jobRefreshError = async (id: number, err: unknown) => {
-    if (jobId() !== id) return;
-    if (err instanceof ApiError && err.status === 404 && knownJobId === id) {
-      try {
-        // The deleted anchor may have been the only cached job when the socket disconnected.
-        await refreshVariations();
-      } catch (refreshError) {
-        if (jobId() === id) setError(errorMessage(refreshError));
-        return;
-      }
-      if (jobId() !== id) return;
-      handleServerEvent({ t: 'mediaJobDeleted', id });
-      recoverRemovedJob(id);
-    } else {
-      setError(errorMessage(err));
-    }
-  };
-  const refreshVariations = async () => {
-    if (!jobId()) {
-      return;
-    }
-    const incoming = await api.mediaVariations(jobId()!, draftId());
-    batch(() => {
-      for (const item of incoming) applyMediaJob(item);
-      setVariationsLoaded(true);
-    });
-  };
-  const migrateSavedPrompt = async (incoming: MediaJob) => {
-    if (incoming.draft?.conversationId || !incoming.prompt.trim() || mediaJobActive(incoming.state))
-      return incoming;
-    const chat =
-      incoming.contextConversationId === state.tree.conversationId
-        ? state.tree
-        : state.conversations.find((item) => item.id === incoming.contextConversationId);
-    return api.migrateMediaConversation(incoming, {
-      expectedActiveLeafId: chat?.activeLeafId,
-      expectedMutationRevision: chat?.mutationRevision,
-    });
-  };
-  const refreshOpenJob = () => {
-    const id = jobId();
-    if (id) {
-      void refreshVariations().catch((err: unknown) => jobRefreshError(id, err));
-      const existing = state.mediaJobs[id];
-      if (existing && !busy()) {
-        loadJob(id, true);
-      }
-      void api
-        .mediaJob(id)
-        .then(async (incoming) => {
-          if (jobId() === id) incoming = await migrateSavedPrompt(incoming);
-          applyMediaJob(incoming);
-          if (jobId() === id && !busy()) {
-            loadJob(id, true);
-          }
-        })
-        .catch((err: unknown) => jobRefreshError(id, err));
-    }
-  };
-  onMount(refreshOpenJob);
-  createEffect(
-    on(
-      () => state.connected,
-      (connected) => {
-        if (connected) refreshOpenJob();
-      },
-      { defer: true },
-    ),
-  );
-  createEffect(
-    on(
-      () => [job()?.revision, job()?.prompt, busy()],
-      () => {
-        const incoming = job();
-        if (incoming && !busy()) {
-          loadJob(incoming.id, true);
-        }
-      },
-    ),
-  );
-
-  const saveDraft = async (queue = false): Promise<MediaJob> => {
-    if (workflowError()) throw new Error(workflowError());
-    const current = job();
-    if (jobId() && !current) {
-      throw new Error('The job is unavailable. Reopen it from the jobs list.');
-    }
-    const fork =
-      current &&
-      (current.submitted ||
-        mediaJobActive(current.state) ||
-        (queue && !['draft', 'ready'].includes(current.state)));
-    if (current && ((!queue && frozen()) || (!fork && !dirty()))) {
-      return current;
-    }
-    const values = JSON.parse(JSON.stringify(draft)) as ToolDraft;
-    if (
-      galleryFoldersLoaded() &&
-      values.galleryFolderId != null &&
-      !state.galleryFolders.some((folder) => folder.id === values.galleryFolderId)
-    )
-      values.galleryFolderId = null;
-    values.workflowId = selectedWorkflow() || null;
-    values.presetId = selectedPromptId() || null;
-    const saved = fork
-      ? await api.rerunMediaJob(current, variationRequestKey, values)
-      : current
-        ? await api.editMediaJob(current, values)
-        : await api.createMediaJob(values, createRequestKey);
-    variationRequestKey = newRequestId();
-    batch(() => {
-      applyMediaJob(saved);
-      setJobId(saved.id);
-      loadJob(saved.id);
-    });
-    const accepted = state.mediaJobs[saved.id];
-    if (!accepted) throw new Error('This job was deleted while saving.');
-    return accepted;
-  };
-
-  const perform = async (action: () => Promise<void>, recover?: () => void | Promise<unknown>) => {
-    if (busy()) return;
-    setBusy(true);
-    setError('');
-    try {
-      await action();
-    } catch (err) {
-      setError(errorMessage(err));
-      await Promise.resolve(recover?.()).catch(() => {});
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const promptConversation = createEmbeddedConversation();
   const promptSession = promptConversation.session;
   const conversationId = () => review()?.conversationId ?? null;
@@ -666,18 +362,12 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       disposed = true;
     });
   });
-  const currentPromptMessage = () =>
-    promptSession.activePath().findLast((message) => message.role === 'assistant');
+  const currentPromptMessage = () => promptSession.activePath().findLast((message) => message.role === 'assistant');
   const [chosenPrompt, setChosenPrompt] = useDialogMediaPromptSelection();
   createEffect(() => {
     if (chosenPrompt() !== undefined) return;
     const current = job();
-    if (
-      !current ||
-      promptSession.state.tree.conversationId !== conversationId() ||
-      conversationId() == null
-    )
-      return;
+    if (!current || promptSession.state.tree.conversationId !== conversationId() || conversationId() == null) return;
     const messageId = current.promptMessageId;
     const message = messageId == null ? undefined : promptSession.state.tree.messages[messageId];
     // Restore only the working job, once per dialog. Preview changes and hot reload must
@@ -722,9 +412,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
         current.contextConversationId === state.tree.conversationId
           ? state.tree
           : state.conversations.find((item) => item.id === current.contextConversationId);
-      const conversation = await (
-        restart ? api.restartMediaConversation : api.startMediaConversation
-      )(current, {
+      const conversation = await (restart ? api.restartMediaConversation : api.startMediaConversation)(current, {
         ...promptGuard,
         expectedActiveLeafId: chat?.activeLeafId,
         expectedMutationRevision: chat?.mutationRevision,
@@ -774,7 +462,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
             ? cancelTarget()!
             : action === 'retry-retrieval'
               ? job()!
-              : await saveDraft(action === 'render' && reviewing());
+              : await saveDraft(action === 'render' && reviewing(), action === 'prepare');
         const conversation =
           current.contextConversationId === state.tree.conversationId
             ? state.tree
@@ -878,9 +566,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     let allowed = new Map<string, MediaAsset['kind']>();
     try {
       allowed = new Map(
-        workflow
-          ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind])
-          : [],
+        workflow ? compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]) : [],
       );
     } catch {
       /* The workflow error is displayed by its editor. */
@@ -944,9 +630,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const rerun = () => {
     if (!job()) return;
     return perform(async () => {
-      const next = await migrateSavedPrompt(
-        await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true }),
-      );
+      const next = await api.rerunMediaJob(job()!, newRequestId(), { reviewBeforeSave: true });
       applyMediaJob(next);
       setJobId(next.id);
       loadJob(next.id);
@@ -965,8 +649,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   const acceptableVariation = () => {
     const variation = selectedVariation();
     return variation?.job.state === 'succeeded' &&
-      (variation.asset ||
-        (variation.job.textResult !== null && variation.job.destination === 'chat'))
+      (variation.asset || (variation.job.textResult !== null && variation.job.destination === 'chat'))
       ? variation
       : undefined;
   };
@@ -979,8 +662,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   };
   const selectedSaved = () => variationSaved(acceptableVariation());
   const hasSavedResults = () =>
-    savedAssetIds().length > 0 ||
-    variations().some((item) => item.textResult !== null && item.messageId !== null);
+    savedAssetIds().length > 0 || variations().some((item) => item.textResult !== null && item.messageId !== null);
   const copyResultText = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -1068,8 +750,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         disabled={
                           busy() ||
                           (conversationId() != null &&
-                            (!currentPromptMessage() ||
-                              currentPromptMessage()?.status === 'streaming'))
+                            (!currentPromptMessage() || currentPromptMessage()?.status === 'streaming'))
                         }
                         onClick={() => void usePromptText(text())}
                       >
@@ -1163,12 +844,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           />
                         }
                       >
-                        {(video) => (
-                          <VideoPreview
-                            preview={video()}
-                            active={paneActive() && picker() === null}
-                          />
-                        )}
+                        {(video) => <VideoPreview preview={video()} active={paneActive() && picker() === null} />}
                       </Show>
                     </Show>
                   </Show>
@@ -1204,10 +880,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           galleryFolderId={draft.galleryFolderId}
                         />
                         <Show when={candidate().asset.kind === 'video'}>
-                          <VideoFullscreenButton
-                            asset={candidate().asset}
-                            player={() => videoPlayer}
-                          />
+                          <VideoFullscreenButton asset={candidate().asset} player={() => videoPlayer} />
                         </Show>
                         <Show when={candidate().asset.kind === 'image'}>
                           <button
@@ -1217,10 +890,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             onClick={() => setFullSizeImage(candidate().asset.url)}
                           >
                             <FontAwesomeIcon icon={faExpand} size={14} />{' '}
-                            <Show
-                              when={candidate().asset.width && candidate().asset.height}
-                              fallback="Full size"
-                            >
+                            <Show when={candidate().asset.width && candidate().asset.height} fallback="Full size">
                               {candidate().asset.width} × {candidate().asset.height}
                             </Show>
                           </button>
@@ -1256,8 +926,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         disabled={busy() || comparisonResults().length < 2}
                         onClick={() => {
                           const initial = selected() ?? comparisonResults().at(-1);
-                          if (initial && comparisonResults().length >= 2)
-                            setComparisonInitial(comparisonKey(initial));
+                          if (initial && comparisonResults().length >= 2) setComparisonInitial(comparisonKey(initial));
                         }}
                       >
                         Compare
@@ -1277,13 +946,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   aria-label="Context and destination"
                 >
                   <dt>Context</dt>
-                  <dd>
-                    {draft.avatarContext
-                      ? 'Avatar'
-                      : usesChatContext()
-                        ? `Chat: ${chatTitle()}`
-                        : 'Standalone'}
-                  </dd>
+                  <dd>{draft.avatarContext ? 'Avatar' : usesChatContext() ? `Chat: ${chatTitle()}` : 'Standalone'}</dd>
                   <dt>Destination</dt>
                   <dd>
                     {draft.destination === 'chat'
@@ -1327,19 +990,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         <Show
                           when={inputForSlot(slot)}
                           fallback={
-                            <FontAwesomeIcon
-                              icon={inputKind(slot) === 'video' ? faVideo : faImage}
-                              size={24}
-                            />
+                            <FontAwesomeIcon icon={inputKind(slot) === 'video' ? faVideo : faImage} size={24} />
                           }
                         >
                           {(input) => (
                             <Show
                               when={
                                 assets[input().assetId]?.thumbnail ??
-                                (assets[input().assetId]?.kind === 'image'
-                                  ? assets[input().assetId]?.url
-                                  : undefined)
+                                (assets[input().assetId]?.kind === 'image' ? assets[input().assetId]?.url : undefined)
                               }
                               fallback={<FontAwesomeIcon icon={faVideo} size={24} />}
                             >
@@ -1354,17 +1012,13 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                           id={`media-input-${slot}`}
                         >
                           {mediaInputLabel(slot)}
-                          {inputLabel(slot) !== mediaInputLabel(slot)
-                            ? ` · ${inputLabel(slot)}`
-                            : ''}
+                          {inputLabel(slot) !== mediaInputLabel(slot) ? ` · ${inputLabel(slot)}` : ''}
                         </span>
                         <div class="key-row flex items-center gap-2 [&_input]:flex-1 [&_input]:min-w-0 [&_.select-control]:flex-1 [&_.select-control]:min-w-0 [&>button:not(.select-btn)]:whitespace-nowrap [&>button:not(.select-btn)]:shrink-0">
                           <button
                             classList={{ 'icon-btn': Boolean(inputForSlot(slot)) }}
                             title={`${inputForSlot(slot) ? 'Replace' : 'Choose'} ${inputLabel(slot)}`}
-                            aria-label={
-                              inputForSlot(slot) ? `Replace ${inputLabel(slot)}` : undefined
-                            }
+                            aria-label={inputForSlot(slot) ? `Replace ${inputLabel(slot)}` : undefined}
                             disabled={busy() || frozen()}
                             onClick={() => setPicker(slot)}
                           >
@@ -1431,23 +1085,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   >
                     <summary>
                       <span class="flex-1 min-w-0">
-                        <strong class="block text-sm font-semibold text-foreground">
-                          Render settings
-                        </strong>
+                        <strong class="block text-sm font-semibold text-foreground">Render settings</strong>
                         <Show when={!renderSettingsOpen()}>
-                          <span
-                            class="block text-xs text-dim truncate mt-1"
-                            title={renderSettingsSummary()}
-                          >
+                          <span class="block text-xs text-dim truncate mt-1" title={renderSettingsSummary()}>
                             {renderSettingsSummary()}
                           </span>
                         </Show>
                       </span>
-                      <FontAwesomeIcon
-                        icon={faChevronRight}
-                        size={12}
-                        class="media-settings-chevron text-muted"
-                      />
+                      <FontAwesomeIcon icon={faChevronRight} size={12} class="media-settings-chevron text-muted" />
                     </summary>
                     <div
                       class="workflow-inputs items-start grid grid-cols-2 narrow-panel:grid-cols-1 gap-y-2 gap-x-3 mt-3 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&>.workflow-input:not(.workflow-input-boolean)]:col-span-full [&_.setting-label]:m-0 [&_.setting-label]:min-h-6 [&_.workflow-input>label]:min-h-6"
@@ -1469,11 +1114,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             const input = event.currentTarget;
                             setDraft(
                               'seedOverride',
-                              input.validity.badInput
-                                ? NaN
-                                : input.value === ''
-                                  ? null
-                                  : Number(input.value),
+                              input.validity.badInput ? NaN : input.value === '' ? null : Number(input.value),
                             );
                           }}
                         />
@@ -1546,9 +1187,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         />
                         <div class="grid grid-cols-2 narrow-panel:grid-cols-1 gap-3 [&>button]:min-w-0">
                           <button
-                            disabled={
-                              busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                            }
+                            disabled={busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())}
                             title={
                               usesChatContext()
                                 ? 'Write a prompt from this chat’s active branch and your instruction'
@@ -1559,48 +1198,22 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             Start prompt conversation
                           </button>
                           <button
-                            disabled={
-                              busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())
-                            }
+                            disabled={busy() || frozen() || !selectedWorkflow() || Boolean(workflowError())}
                             title="Write a new prompt from your instruction, then render it"
                             onClick={() => void run('prepare', true)}
                           >
                             Write and render
                           </button>
                         </div>
-                        <div class="flex items-center gap-2 flex-wrap justify-between mt-2 [&_label]:text-sm [&_label]:font-semibold [&_label]:text-foreground [&_label]:m-0">
-                          <label for={thinking() ? undefined : 'media-prompt'}>Final prompt</label>
-                          <Show when={preparingPrompt()}>
-                            <PromptGenerationStatus
-                              active={paneActive()}
-                              content={currentPrompt()}
-                            />
-                          </Show>
-                        </div>
-                        <Show
-                          when={thinking()}
-                          fallback={
-                            <textarea
-                              id="media-prompt"
-                              onPointerDown={prepareTextareaResize}
-                              ref={promptArea}
-                              onScroll={promptScroll.onScroll}
-                              rows={8}
-                              value={currentPrompt()}
-                              readOnly={busy() || frozen()}
-                              onInput={(event) => setDraft('prompt', event.currentTarget.value)}
-                            />
-                          }
-                        >
-                          <div class="media-prompt-thinking p-3 border border-solid border-control-line bg-thinking flex rounded-sm [&_.prompt-generation-status]:flex-1 [&_.prompt-generation-status]:min-h-0 [&_.prompt-generation-reasoning]:flex-1 [&_.prompt-generation-reasoning]:min-h-0 [&_.prompt-generation-reasoning]:max-h-none [&_.prompt-generation-reasoning]:p-0 [&_.prompt-generation-reasoning]:border-clear [&_.prompt-generation-reasoning]:bg-clear h-[11rem]">
-                            <PromptGenerationStatus
-                              active={paneActive()}
-                              content=""
-                              showStatus={false}
-                              reasoning={job()?.reasoning}
-                            />
-                          </div>
-                        </Show>
+                        <label for="media-prompt">Final prompt</label>
+                        <textarea
+                          id="media-prompt"
+                          onPointerDown={prepareTextareaResize}
+                          rows={8}
+                          value={draft.prompt}
+                          readOnly={busy() || frozen()}
+                          onInput={(event) => setDraft('prompt', event.currentTarget.value)}
+                        />
                       </>
                     }
                   >
@@ -1647,10 +1260,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                   <p class="text-xs text-dim m-0" aria-label="Variation queue" role="status">
                     {completedCount()} / {candidates().length} variations complete
                     <Show when={queuedCount()}> · {queuedCount()} queued</Show>
-                    <Show when={pendingCount() > queuedCount()}>
-                      {' '}
-                      · {pendingCount() - queuedCount()} running
-                    </Show>
+                    <Show when={pendingCount() > queuedCount()}> · {pendingCount() - queuedCount()} running</Show>
                   </p>
                 </Show>
                 <Show when={selectedVariation()?.job ?? runningJob() ?? job()}>
@@ -1662,14 +1272,10 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         </Show>
                         <Show
                           when={
-                            current().state === 'succeeded' &&
-                            current().outputs.length === 0 &&
-                            !current().textResult
+                            current().state === 'succeeded' && current().outputs.length === 0 && !current().textResult
                           }
                         >
-                          <p class="hint">
-                            The saved results have been removed. You can still rerun this job.
-                          </p>
+                          <p class="hint">The saved results have been removed. You can still rerun this job.</p>
                         </Show>
                         <Show when={current().error}>
                           <p class="notice notice-error">{current().error}</p>
@@ -1690,8 +1296,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       disabled={
                         busy() ||
                         (hasPrompt() &&
-                          (!draft.prompt.trim() ||
-                            (conversationId() != null && !promptSource()?.valid))) ||
+                          (!draft.prompt.trim() || (conversationId() != null && !promptSource()?.valid))) ||
                         !selectedWorkflow() ||
                         Boolean(workflowError())
                       }
@@ -1713,19 +1318,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </button>
                   </Show>
                   <Show when={job()?.retrievalAvailable}>
-                    <button
-                      title="Retry download"
-                      disabled={busy()}
-                      onClick={() => void run('retry-retrieval')}
-                    >
+                    <button title="Retry download" disabled={busy()} onClick={() => void run('retry-retrieval')}>
                       Retry
                     </button>
                   </Show>
                   <Show when={reviewing()}>
                     <Show
                       when={
-                        selectedVariation()?.job.textResult == null ||
-                        selectedVariation()?.job.destination === 'chat'
+                        selectedVariation()?.job.textResult == null || selectedVariation()?.job.destination === 'chat'
                       }
                     >
                       <button
@@ -1775,9 +1375,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           onClose={() => setComparisonInitial(null)}
         />
       </Show>
-      <Show when={fullSizeImage()}>
-        {(url) => <ImageViewer src={url()} onClose={() => setFullSizeImage(null)} />}
-      </Show>
+      <Show when={fullSizeImage()}>{(url) => <ImageViewer src={url()} onClose={() => setFullSizeImage(null)} />}</Show>
       <Show when={resultDetails()}>
         {(details) => (
           <MediaResultDetails
@@ -1801,8 +1399,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                 : undefined
             }
             onUsePrompt={
-              conversationId() != null &&
-              (!currentPromptMessage() || currentPromptMessage()?.status === 'streaming')
+              conversationId() != null && (!currentPromptMessage() || currentPromptMessage()?.status === 'streaming')
                 ? undefined
                 : () => {
                     void usePromptText(details().prompt).then((used) => {
@@ -1821,9 +1418,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
               kind: inputKind(slot() === '@all' ? slots()[0]! : slot()),
               maximum: slot() === '@all' ? bulkInputCapacity() : 1,
               selectedAssetIds: orderedInputs()
-                .filter((input) =>
-                  slot() === '@all' ? slots().includes(input.slot) : input.slot === slot(),
-                )
+                .filter((input) => (slot() === '@all' ? slots().includes(input.slot) : input.slot === slot()))
                 .map((input) => input.assetId),
               onConfirm: selectReferences,
               onCancel: () => setPicker(null),

@@ -64,9 +64,7 @@ function ownMessage(message: Message): Message {
     genMeta: message.genMeta
       ? {
           ...message.genMeta,
-          ...(message.genMeta.generations
-            ? { generations: message.genMeta.generations.map(ownMetrics) }
-            : {}),
+          ...(message.genMeta.generations ? { generations: message.genMeta.generations.map(ownMetrics) } : {}),
         }
       : null,
   };
@@ -86,24 +84,17 @@ export function createConversationSession(
   },
 ) {
   const selectedConversation = createMemo(
-    () =>
-      state.conversations.find((c) => c.id === state.selectedId) ??
-      options.conversation?.() ??
-      null,
+    () => state.conversations.find((c) => c.id === state.selectedId) ?? options.conversation?.() ?? null,
   );
 
   const selectedCharacter = createMemo(() => {
     const conv = selectedConversation();
-    return conv?.characterId != null
-      ? (state.characters.find((c) => c.id === conv.characterId) ?? null)
-      : null;
+    return conv?.characterId != null ? (state.characters.find((c) => c.id === conv.characterId) ?? null) : null;
   });
 
   const selectedPersona = createMemo(() => {
     const conv = selectedConversation();
-    return conv?.personaId != null
-      ? (state.personas.find((p) => p.id === conv.personaId) ?? null)
-      : null;
+    return conv?.personaId != null ? (state.personas.find((p) => p.id === conv.personaId) ?? null) : null;
   });
 
   const personasEnabled = createMemo(() => {
@@ -111,8 +102,7 @@ export function createConversationSession(
     const character = selectedCharacter();
     if (character?.customTemplate) return character.customTemplate.usesPersonas;
     const templateId = character?.templateId ?? state.settings.defaultTemplateId;
-    const template =
-      templateId != null ? state.templates.find((t) => t.id === templateId) : undefined;
+    const template = templateId != null ? state.templates.find((t) => t.id === templateId) : undefined;
     return template?.usesPersonas ?? true;
   });
 
@@ -179,11 +169,7 @@ export function createConversationSession(
         break;
       case 'treePatch': {
         // Patches only apply on top of a full snapshot for the same conversation.
-        if (
-          ev.conversationId !== state.selectedId ||
-          state.tree.conversationId !== ev.conversationId
-        )
-          break;
+        if (ev.conversationId !== state.selectedId || state.tree.conversationId !== ev.conversationId) break;
         const bodies = new Map(ev.messages.map((m) => [m.id, m]));
         // A node we've never seen and no body for means a missed frame — resync.
         if (ev.nodes.some((node) => !bodies.has(node.id) && !state.tree.messages[node.id])) {
@@ -231,11 +217,7 @@ export function createConversationSession(
       }
       case 'generationMetrics': {
         const message = state.tree.messages[ev.mid];
-        if (
-          message?.status !== 'streaming' ||
-          message.generationToken !== ev.metrics.generationToken
-        )
-          break;
+        if (message?.status !== 'streaming' || message.generationToken !== ev.metrics.generationToken) break;
         setState(
           'tree',
           'messages',
@@ -245,8 +227,7 @@ export function createConversationSession(
             const generations = (msg.genMeta.generations ??= []);
             // Copies/imports retain measurements but restart conversation revision numbering.
             const index = generations.findLastIndex(
-              (entry) =>
-                entry.generationToken === ev.metrics.generationToken && entry.elapsedMs == null,
+              (entry) => entry.generationToken === ev.metrics.generationToken && entry.elapsedMs == null,
             );
             if (index === -1) generations.push(ownMetrics(ev.metrics));
             else generations[index] = ownMetrics(ev.metrics);
@@ -303,8 +284,7 @@ export function createConversationSession(
     if (disposed || state.treeNavigationPending) return false;
     const token = ++navigationToken;
     const conversationId = state.selectedId;
-    const current = () =>
-      !disposed && token === navigationToken && conversationId === state.selectedId;
+    const current = () => !disposed && token === navigationToken && conversationId === state.selectedId;
     setState('treeNavigationPending', true);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -312,10 +292,7 @@ export function createConversationSession(
       await Promise.race([
         action(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error('Request timed out — check your connection.')),
-            15000,
-          );
+          timer = setTimeout(() => reject(new Error('Request timed out — check your connection.')), 15000);
         }),
       ]);
       return current();

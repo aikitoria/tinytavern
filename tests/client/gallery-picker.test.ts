@@ -42,12 +42,9 @@ test('gallery picker reveals details and releases deleted selections', async () 
     sourceConversationId: null,
     sourceImage: null,
     prompt: '',
-    image: `/images/${id}.png`,
-    imageWidth: 10,
-    imageHeight: 10,
     createdAt: id,
     updatedAt: id,
-    media: { id, kind: 'image' } as MediaAsset,
+    media: { id, kind: 'image', url: `/images/${id}.png`, width: 10, height: 10 } as MediaAsset,
   }));
   setState('gallery', items);
   let selected: number[] = [];
@@ -66,19 +63,11 @@ test('gallery picker reveals details and releases deleted selections', async () 
     });
   });
   try {
-    assert.equal(
-      detailsVisible,
-      true,
-      'Picker details remain available after hiding gallery details',
-    );
+    assert.equal(detailsVisible, true, 'Picker details remain available after hiding gallery details');
     setState('gallery', items.slice(1));
     toggle(3);
     confirm();
-    assert.deepEqual(
-      selected,
-      [2, 3],
-      'A deleted image releases its slot and preserves selection order',
-    );
+    assert.deepEqual(selected, [2, 3], 'A deleted image releases its slot and preserves selection order');
   } finally {
     dispose();
     mock.restore();

@@ -4,9 +4,7 @@ import { link, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 process.umask(0o077);
-const sourcePath = resolve(
-  process.env.DB_PATH ?? join(process.env.DATA_DIR ?? '/data', 'tinytavern.db'),
-);
+const sourcePath = resolve(process.env.DB_PATH ?? join(process.env.DATA_DIR ?? '/data', 'tinytavern.db'));
 const requested = process.argv[2];
 if (!requested) {
   console.error('Usage: bun server/src/db/backup.ts <destination.db>');

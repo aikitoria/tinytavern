@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import type { MediaVideoPreview } from '@tinytavern/shared';
-import {
-  createVideoPreviewFrames,
-  type VideoPreviewSequence,
-} from '../../client/src/media/videoPreviewFrames.ts';
+import { createVideoPreviewFrames, type VideoPreviewSequence } from '../../client/src/media/videoPreviewFrames.ts';
 import { createVideoPreviewPlayback } from '../../client/src/media/videoPreviewPlayback.ts';
 
 function harness() {
@@ -18,15 +15,11 @@ function harness() {
   }[] = [];
   const snapshots: VideoPreviewSequence<Bitmap>[] = [];
   const buffer = createVideoPreviewFrames<Bitmap>(
-    (source, signal) =>
-      new Promise((resolve, reject) => requests.push({ source, signal, resolve, reject })),
+    (source, signal) => new Promise((resolve, reject) => requests.push({ source, signal, resolve, reject })),
     (sequence) => snapshots.push(sequence),
   );
   const update = (frames: MediaVideoPreview['frames'], sequence = 'step1', enabled = true) =>
-    buffer.update(
-      { id: 'sampler', sequence, nodeId: 'node', frameCount: 3, frameRate: 6, frames },
-      enabled,
-    );
+    buffer.update({ id: 'sampler', sequence, nodeId: 'node', frameCount: 3, frameRate: 6, frames }, enabled);
   async function finish(index: number) {
     const request = requests[index]!;
     const bitmap = {
@@ -48,11 +41,7 @@ test('video previews wait for all sequence frames and decodes, retaining both si
   const h = harness();
   h.update({ 0: 'a' });
   const a = await h.finish(0);
-  assert.equal(
-    h.snapshots.length,
-    0,
-    'A fully decoded network fragment is not a complete sequence',
-  );
+  assert.equal(h.snapshots.length, 0, 'A fully decoded network fragment is not a complete sequence');
   h.update({ 0: 'a', 1: 'b', 2: 'a' });
   assert.deepEqual(
     h.requests.map((request) => request.source),

@@ -21,19 +21,14 @@ type SettingKey = (typeof GENERAL_TRANSFER_FIELDS)[number];
 
 export default function GeneralTab() {
   const settingsValues = () =>
-    Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, state.settings[key]])) as Pick<
-      Settings,
-      SettingKey
-    >;
+    Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, state.settings[key]])) as Pick<Settings, SettingKey>;
   const [draft, setDraft] = createSignal(settingsValues());
   let baseline = draft();
   const [saved, flashSaved] = createSavedFlash();
   const [error, setError] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [removePassword, setRemovePassword] = createSignal(false);
-  const [maintenance, setMaintenance] = createSignal<'chats' | 'characters' | 'settings' | null>(
-    null,
-  );
+  const [maintenance, setMaintenance] = createSignal<'chats' | 'characters' | 'settings' | null>(null);
 
   const value = <K extends SettingKey>(key: K): Settings[K] => draft()[key] as Settings[K];
   const change = <K extends SettingKey>(key: K, value: Settings[K]) =>
@@ -102,10 +97,7 @@ export default function GeneralTab() {
     setMaintenance(action);
     try {
       const { title, message } = actions[action];
-      if (
-        !(await confirmAction({ title: `${title}?`, message, confirmLabel: title, danger: true }))
-      )
-        return;
+      if (!(await confirmAction({ title: `${title}?`, message, confirmLabel: title, danger: true }))) return;
       if (action === 'chats') await deleteAllConversations();
       else if (action === 'characters') await api.deleteAllCharacters();
       else {
@@ -147,9 +139,7 @@ export default function GeneralTab() {
               setPassword('');
               setRemovePassword(state.settings.hasPassword);
             }}
-            placeholder={
-              state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'
-            }
+            placeholder={state.settings.hasPassword ? 'Enter a new password to replace it' : 'No password set'}
             value={password()}
             onChange={(next) => {
               setPassword(next);
@@ -172,11 +162,7 @@ export default function GeneralTab() {
         <SettingsSection
           title="Messages"
           id="messages"
-          fields={[
-            'autoExpandThinking',
-            'backgroundSwipeGeneration',
-            'parallelBackgroundSwipeGeneration',
-          ]}
+          fields={['autoExpandThinking', 'backgroundSwipeGeneration', 'parallelBackgroundSwipeGeneration']}
         >
           <Field
             name="autoExpandThinking"
@@ -250,9 +236,7 @@ export default function GeneralTab() {
         </Show>
 
         <SettingsSection title="Data management" id="data-management" fields={[]}>
-          <p class="hint">
-            These actions take effect immediately after confirmation and cannot be undone.
-          </p>
+          <p class="hint">These actions take effect immediately after confirmation and cannot be undone.</p>
           <div class="flex flex-wrap gap-2">
             <button
               type="button"
@@ -285,16 +269,11 @@ export default function GeneralTab() {
           <SettingsTransferButtons
             type="page:general"
             onError={setError}
-            exportData={() =>
-              Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, value(key)]))
-            }
+            exportData={() => Object.fromEntries(GENERAL_TRANSFER_FIELDS.map((key) => [key, value(key)]))}
             importData={(data) => {
               const source = transferObject(data);
               for (const key of GENERAL_TRANSFER_FIELDS) {
-                if (
-                  Object.hasOwn(source, key) &&
-                  typeof source[key] !== typeof DEFAULT_SETTINGS[key]
-                )
+                if (Object.hasOwn(source, key) && typeof source[key] !== typeof DEFAULT_SETTINGS[key])
                   throw new Error(`Invalid ${key}`);
               }
               for (const key of GENERAL_TRANSFER_FIELDS) {

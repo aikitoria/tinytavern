@@ -1,3 +1,5 @@
+import { setMessageMedia } from './messageMedia.ts';
+import { messageMedia } from '../db/db.ts';
 import { setMediaCharacters } from './mediaCharacters.ts';
 import { stmt, transaction, invalidateMediaAsset, toMediaAsset } from '../db/db.ts';
 import { invalidate } from '../realtime/events.ts';
@@ -25,11 +27,7 @@ export function ingestedMedia(jobId: number, remoteFileId: number) {
   return row ? toMediaAsset(row) : null;
 }
 
-export function recordMediaResult(
-  jobId: number,
-  remoteFileId: number,
-  media: DownloadedMedia,
-): number {
+export function recordMediaResult(jobId: number, remoteFileId: number, media: DownloadedMedia): number {
   return transaction(() => {
     const job = requireMediaJob(jobId);
     const configuration = JSON.parse(job.configuration_json!) as MediaJobConfiguration;
@@ -68,11 +66,7 @@ export function recordMediaResult(
   });
 }
 
-export function finishMediaJob(
-  jobId: number,
-  state: MediaJobState,
-  error: string | null = null,
-): void {
+export function finishMediaJob(jobId: number, state: MediaJobState, error: string | null = null): void {
   const current = mediaJobRow(jobId);
   if (!current) {
     return;
@@ -95,9 +89,7 @@ export function releaseDeletedMediaInputs(jobId: number): void {
       AND a.reference_deleted = 1`).all(jobId);
   stmt(`DELETE FROM media_owners WHERE owner_type = 'job' AND owner_id = ?
     AND slot LIKE 'input:%' AND EXISTS
-      (SELECT 1 FROM media_assets WHERE id = media_owners.asset_id AND reference_deleted = 1)`).run(
-    jobId,
-  );
+      (SELECT 1 FROM media_assets WHERE id = media_owners.asset_id AND reference_deleted = 1)`).run(jobId);
   // completeMediaJob can call this inside its attachment transaction.
   if (deletedInputs.length) {
     queueMicrotask(() => deleteImageFiles(deletedInputs.map((input) => String(input.path))));
@@ -130,18 +122,17 @@ export function completeMediaJob(jobId: number): void {
         job.message_id === null
           ? null
           : stmt(`
-        SELECT conversation_id, images_json FROM messages WHERE id = ?
+        SELECT conversation_id FROM messages WHERE id = ?
       `).get(job.message_id);
       if (!message) {
         finishMediaJob(jobId, 'cancelled');
         return;
       }
-      const images = JSON.parse(String(message.images_json)) as string[];
-      images.push(...assets.map((asset) => asset.url));
-      stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
-        JSON.stringify(images),
-        images.length - 1,
+      const images = [...messageMedia(job.message_id!), ...assets];
+      setMessageMedia(
         job.message_id!,
+        images.map((asset) => asset.id),
+        images.length - 1,
       );
       touchMediaConversation(Number(message.conversation_id));
     } else if (!config.temporary) {

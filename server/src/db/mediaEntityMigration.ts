@@ -1,7 +1,7 @@
-import { DEFAULT_SETTINGS, type Settings } from '@tinytavern/shared';
+import { settingsPreferences, DEFAULT_SETTINGS, type Settings } from '@tinytavern/shared';
 import { db, stmt } from './db.ts';
 import { SCHEMA_SQL } from './schema.ts';
-import { scalarSettings, writeMediaLibraries } from '../settings/mediaEntities.ts';
+import { scalarSettings, importMediaLibraries } from '../settings/mediaEntities.ts';
 
 type IdMap = Map<string, string>;
 type PromptTable = 'media_chat_prompts' | 'media_standalone_prompts';
@@ -26,9 +26,7 @@ function reserveIds(table: string, ids: Iterable<string>): void {
 
 function archivedId(table: 'media_workflows' | PromptTable, oldId: string): string {
   const id = numericId(oldId);
-  const result = stmt(
-    `INSERT INTO ${table}(id, name, created_at, deleted_at) VALUES (?, 'Unavailable', 0, 0)`,
-  ).run(id);
+  const result = stmt(`INSERT INTO ${table}(id, name, created_at, deleted_at) VALUES (?, 'Unavailable', 0, 0)`).run(id);
   return String(result.lastInsertRowid);
 }
 
@@ -65,8 +63,7 @@ function migrateJobs(workflows: IdMap, chat: IdMap, standalone: IdMap): void {
     }
     const config = row.configuration_json ? JSON.parse(String(row.configuration_json)) : null;
     if (config?.workflowId != null) config.workflowId = workflows.get(String(config.workflowId));
-    row.workflow_id =
-      row.workflow_id == null ? null : Number(workflows.get(String(row.workflow_id)));
+    row.workflow_id = row.workflow_id == null ? null : Number(workflows.get(String(row.workflow_id)));
     row.configuration_json = config ? JSON.stringify(config) : null;
     insert.run(...columns.map((column) => row[column] ?? null));
   }
@@ -113,15 +110,26 @@ export function migrateMediaEntities(): void {
   for (const [table, items, references] of collections) {
     reserveIds(table, [...items.map((item) => item.id ?? ''), ...references]);
   }
+  // The pre-85 settings document stored membership on folders, not entity rows.
+  for (const [items, folders, member] of [
+    [settings.mediaRendering.workflows, settings.mediaRendering.folders, 'workflowIds'],
+    [settings.mediaChatPrompts.presets, settings.mediaChatPrompts.folders, 'presetIds'],
+    [settings.mediaStandalonePrompts.presets, settings.mediaStandalonePrompts.folders, 'presetIds'],
+  ] as const) {
+    const membership = new Map<string, string>();
+    for (const folder of folders) {
+      const ids = (folder as unknown as Record<string, string[]>)[member] ?? [];
+      for (const id of ids) membership.set(id, folder.id);
+    }
+    for (const item of items) item.folderId = membership.get(item.id) ?? null;
+  }
   const chatBefore = settings.mediaChatPrompts.presets.map((item) => item.id);
   const standaloneBefore = settings.mediaStandalonePrompts.presets.map((item) => item.id);
-  const workflows = writeMediaLibraries(settings, true);
+  const workflows = importMediaLibraries(settings, true);
   for (const oldId of workflowRefs) {
     if (!workflows.has(oldId)) workflows.set(oldId, archivedId('media_workflows', oldId));
   }
-  const chat = new Map(
-    chatBefore.map((id, index) => [id, settings.mediaChatPrompts.presets[index]!.id]),
-  );
+  const chat = new Map(chatBefore.map((id, index) => [id, settings.mediaChatPrompts.presets[index]!.id]));
   const standalone = new Map(
     standaloneBefore.map((id, index) => [id, settings.mediaStandalonePrompts.presets[index]!.id]),
   );
@@ -135,5 +143,5 @@ export function migrateMediaEntities(): void {
       row.id!,
     );
   }
-  stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(scalarSettings(settings));
+  stmt("UPDATE settings SET value = ? WHERE key = 'app'").run(scalarSettings(settingsPreferences(settings)));
 }

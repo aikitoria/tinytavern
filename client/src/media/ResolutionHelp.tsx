@@ -49,9 +49,7 @@ export default function ResolutionHelp() {
         minWidth={360}
         gap={8}
       >
-        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">
-          Resolution sizes
-        </div>
+        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">Resolution sizes</div>
         <table class="border-collapse tabular-nums w-full text-caption text-left col-span-full [&_:is(th,_td)]:py-1 [&_:is(th,_td)]:px-2 [&_td]:text-dim [&_td]:whitespace-nowrap">
           <thead>
             <tr>

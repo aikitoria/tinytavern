@@ -64,8 +64,7 @@ function parsePane(hash: string): PageLocation {
     result.modal = 'gallery';
     result.galleryId = positiveId(detail) ?? undefined;
     if (params.has('folder'))
-      result.galleryFolder =
-        params.get('folder') === 'root' ? 'root' : (positiveId(params.get('folder')) ?? undefined);
+      result.galleryFolder = params.get('folder') === 'root' ? 'root' : (positiveId(params.get('folder')) ?? undefined);
     result.query = params.get('q') ?? undefined;
     result.character = params.get('character') ?? undefined;
     result.sort = params.get('sort') ?? undefined;
@@ -140,8 +139,7 @@ function formatPane(page: PageLocation): string {
     }
     if (!page.media.jobId && page.media.contextConversationId)
       params.set('context', String(page.media.contextConversationId));
-    if (!page.media.jobId && page.media.galleryFolderId)
-      params.set('folder', String(page.media.galleryFolderId));
+    if (!page.media.jobId && page.media.galleryFolderId) params.set('folder', String(page.media.galleryFolderId));
   } else if (page.modal === 'conversation') {
     parts.push('conversation');
   } else if (page.viewMode) {
@@ -187,8 +185,7 @@ export function parsePageLocation(hash: string): PageLocation {
         pages.unshift(legacy);
         parent = new URLSearchParams(parent.split('?')[1]).get('return');
       }
-      if (pages[0]!.modal)
-        pages.unshift({ chatId: first.chatId, viewMode: first.viewMode, modal: null });
+      if (pages[0]!.modal) pages.unshift({ chatId: first.chatId, viewMode: first.viewMode, modal: null });
     }
   }
   // Settings has one panel; old nested links select the last requested settings editor.
@@ -203,8 +200,7 @@ export function parsePageLocation(hash: string): PageLocation {
           ? item.modal === 'media-jobs'
           : jobId != null && item.media?.jobId === jobId,
     );
-    if (existing >= 0 && pane.modal === 'settings')
-      unique.splice(existing, unique.length - existing, pane);
+    if (existing >= 0 && pane.modal === 'settings') unique.splice(existing, unique.length - existing, pane);
     else if (existing >= 0) unique.splice(existing + 1);
     else unique.push(pane);
   }
@@ -217,9 +213,7 @@ export function formatPageLocation(page: PageLocation): string {
     '#' +
     pageStack(page)
       .map((pane, index) =>
-        index
-          ? formatPane({ ...pane, chatId: null, viewMode: undefined }).slice(2)
-          : formatPane(pane).slice(1),
+        index ? formatPane({ ...pane, chatId: null, viewMode: undefined }).slice(2) : formatPane(pane).slice(1),
       )
       .join('+/')
   );
@@ -255,9 +249,7 @@ export function guardPageNavigation(
 
 /** Reusing an existing pane can remove several children; guard each removed editor first. */
 export function navigatePageWithGuards(target: PageLocation, action: () => void): void {
-  const guards = navigationGuards
-    .filter((entry) => !entry.applies || entry.applies(target))
-    .reverse();
+  const guards = navigationGuards.filter((entry) => !entry.applies || entry.applies(target)).reverse();
   const originHash = currentHash;
   const originFrame = dialogStack.top();
   const originIndex = historyIndex;
@@ -323,11 +315,7 @@ export function rememberMediaPage(media: MediaPageLocation): void {
 export function applyPageLocation(page: PageLocation, apply: () => void): void {
   applyingPage = true;
   try {
-    history.replaceState(
-      { ...history.state, tinytavernPageIndex: historyIndex },
-      '',
-      formatPageLocation(page),
-    );
+    history.replaceState({ ...history.state, tinytavernPageIndex: historyIndex }, '', formatPageLocation(page));
     currentHash = location.hash;
     apply();
     historyPages.set(historyIndex, currentHash);
@@ -344,16 +332,9 @@ export function installPageNavigation(
   if (backAction && !history.state?.tinytavernUiBack) {
     // Keep one same-document entry behind the initial page so system Back can
     // close local UI even in a freshly launched PWA or a reloaded deep link.
-    history.replaceState(
-      { ...history.state, tinytavernPageIndex: -1, tinytavernBackBoundary: true },
-      '',
-    );
+    history.replaceState({ ...history.state, tinytavernPageIndex: -1, tinytavernBackBoundary: true }, '');
     const { tinytavernBackBoundary: _boundary, ...state } = history.state;
-    history.pushState(
-      { ...state, tinytavernPageIndex: 0, tinytavernUiBack: true },
-      '',
-      location.hash,
-    );
+    history.pushState({ ...state, tinytavernPageIndex: 0, tinytavernUiBack: true }, '', location.hash);
   }
   historyIndex = history.state?.tinytavernPageIndex ?? 0;
   history.replaceState({ ...history.state, tinytavernPageIndex: historyIndex }, '');
@@ -413,9 +394,7 @@ export function installPageNavigation(
       history.go(-1);
       return;
     }
-    const guards = navigationGuards
-      .filter((entry) => !entry.applies || entry.applies(readPageLocation()))
-      .reverse();
+    const guards = navigationGuards.filter((entry) => !entry.applies || entry.applies(readPageLocation())).reverse();
     if (guards.length && !approved && targetIndex !== historyIndex) {
       const guard = (action: () => void) => {
         let index = 0;
@@ -431,11 +410,7 @@ export function installPageNavigation(
       // editor and Back/Forward history intact; approval repeats this traversal.
       restoreBeforeGuard = () =>
         guard(() => {
-          if (
-            guards.some((entry) => !navigationGuards.includes(entry)) ||
-            currentHash !== originHash
-          )
-            return;
+          if (guards.some((entry) => !navigationGuards.includes(entry)) || currentHash !== originHash) return;
           approvedHistoryIndex = targetIndex;
           history.go(targetIndex - historyIndex);
         });

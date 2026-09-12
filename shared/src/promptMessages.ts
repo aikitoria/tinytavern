@@ -64,9 +64,7 @@ export function appendChatMessage(messages: PromptMessage[], message: PromptMess
     const leading = messages[0]?.role === 'system' ? messages[0] : null;
     if (leading) {
       if (message.content) {
-        leading.content = leading.content
-          ? `${leading.content}\n\n${message.content}`
-          : message.content;
+        leading.content = leading.content ? `${leading.content}\n\n${message.content}` : message.content;
       }
       return;
     }
@@ -76,9 +74,7 @@ export function appendChatMessage(messages: PromptMessage[], message: PromptMess
   const previous = messages.at(-1);
   if (previous && previous.role === message.role) {
     if (message.content) {
-      previous.content = previous.content
-        ? `${previous.content}\n\n${message.content}`
-        : message.content;
+      previous.content = previous.content ? `${previous.content}\n\n${message.content}` : message.content;
     }
     if (message.reasoning_content) {
       previous.reasoning_content = previous.reasoning_content
@@ -128,12 +124,9 @@ export function prepareChatMessages(
   }
   let prefillMessageIndex: number | null = null;
   const allowMessage = messagePrefillEnabled(options);
-  if (!allowMessage || !prompt.namePrefill)
-    appendSpeakerHandoff(messages, prompt.speakerHandoff ?? '');
+  if (!allowMessage || !prompt.namePrefill) appendSpeakerHandoff(messages, prompt.speakerHandoff ?? '');
   const content = allowMessage ? (options.content ?? prompt.messagePrefill ?? '') : '';
-  const reasoning = reasoningPrefillEnabled(options)
-    ? (options.reasoning ?? prompt.reasoningPrefill ?? '')
-    : '';
+  const reasoning = reasoningPrefillEnabled(options) ? (options.reasoning ?? prompt.reasoningPrefill ?? '') : '';
   const name = allowMessage ? prompt.namePrefill : null;
   if (content || reasoning || name) {
     append({

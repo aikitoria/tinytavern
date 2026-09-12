@@ -15,9 +15,7 @@ export default function MediaJobList(props: {
   onLoadMore: () => void;
 }) {
   const groups = createMemo(() => new Map(props.groups.map((group) => [group.id, group])));
-  const characters = createMemo(
-    () => new Map(state.characters.map((character) => [character.id, character])),
-  );
+  const characters = createMemo(() => new Map(state.characters.map((character) => [character.id, character])));
   const conversations = createMemo(
     () => new Map(state.conversations.map((conversation) => [conversation.id, conversation])),
   );
@@ -67,11 +65,7 @@ export default function MediaJobList(props: {
         </For>
       </Show>
       <Show when={props.more}>
-        <button
-          class="col-span-full justify-self-start"
-          disabled={props.loading}
-          onClick={props.onLoadMore}
-        >
+        <button class="col-span-full justify-self-start" disabled={props.loading} onClick={props.onLoadMore}>
           {props.loading ? 'Loading…' : 'Load more'}
         </button>
       </Show>

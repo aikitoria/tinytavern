@@ -110,8 +110,7 @@ export function serveComfy(fetch: (request: Request) => Reply, connectDelay = 0)
       const url = new URL(request.url);
       if (url.pathname === '/ws') {
         if (connectDelay) await Bun.sleep(connectDelay);
-        if (server.upgrade(request, { data: { client: url.searchParams.get('clientId')! } }))
-          return;
+        if (server.upgrade(request, { data: { client: url.searchParams.get('clientId')! } })) return;
         return new Response(null, { status: 400 });
       }
       try {

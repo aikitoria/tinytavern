@@ -10,28 +10,16 @@ test('media input prompts', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
-  const { stmt, mediaAssetForPath, invalidateMediaAsset } =
-    await import('../../server/src/db/db.ts');
+  const { stmt, mediaAssetForPath, invalidateMediaAsset } = await import('../../server/src/db/db.ts');
   const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const {
-    createMediaJob,
-    editMediaJob,
-    createMediaJobFromAsset,
-    startMediaJob,
-    cancelMediaJob,
-    deleteMediaJob,
-  } = await import('../../server/src/media/mediaJobs.ts');
-  const { requireMediaJob, updateMediaJob } =
-    await import('../../server/src/media/mediaJobStore.ts');
-  const { saveMediaRecipe, getMediaRecipe } =
-    await import('../../server/src/media/mediaRecipes.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
+  const { createMediaJob, editMediaJob, createMediaJobFromAsset, startMediaJob, cancelMediaJob, deleteMediaJob } =
+    await import('../../server/src/media/mediaJobs.ts');
+  const { requireMediaJob, updateMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { saveMediaRecipe, getMediaRecipe } = await import('../../server/src/media/mediaRecipes.ts');
   const { expandTemplate } = await import('../../server/src/generation/prompt.ts');
-  const imageWorkflow = imageConfig(
-    '{"1":{"inputs":{"prompt":"{{prompt}}"}}}',
-    'http://unused.invalid',
-  ).workflow;
+  const imageWorkflow = imageConfig('{"1":{"inputs":{"prompt":"{{prompt}}"}}}', 'http://unused.invalid').workflow;
   const operations: string[] = ['image-edit', 'video-first', 'video-references', 'sparse'];
   const workflows: MediaWorkflow[] = operations.map((operation) => ({
     ...imageWorkflow,
@@ -109,8 +97,7 @@ test('media input prompts', async () => {
     });
     return { id: mediaAssetForPath(path)!.id, path, recipeId, galleryId };
   }
-  const original =
-    '  A portrait\n\n\nwith {{instruction}} and {{#if input2_prompt}}literal{{/if}}.  ';
+  const original = '  A portrait\n\n\nwith {{instruction}} and {{#if input2_prompt}}literal{{/if}}.  ';
   const first = image(original);
   const upload = image(null);
   const blank = image(' \n ');
@@ -157,22 +144,14 @@ test('media input prompts', async () => {
     { slot: 'input2', assetId: upload.id },
     { slot: 'input3', assetId: blank.id },
   ]);
-  assert.equal(
-    edit.inputs[0]!.prompt,
-    original,
-    'Capture the saved gallery prompt, ignoring client metadata',
-  );
+  assert.equal(edit.inputs[0]!.prompt, original, 'Capture the saved gallery prompt, ignoring client metadata');
   assert.equal(edit.inputs[1]!.prompt, '');
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('Changed later', first.galleryId);
   const unchanged = editMediaJob(requireMediaJob(edit.id), {
     instruction: 'Test',
     inputs: edit.inputs.map(({ slot, assetId }) => ({ slot, assetId })),
   });
-  assert.equal(
-    unchanged.inputs[0]!.prompt,
-    original,
-    'Editing a draft retains each unchanged input snapshot',
-  );
+  assert.equal(unchanged.inputs[0]!.prompt, original, 'Editing a draft retains each unchanged input snapshot');
   const context = prepare(unchanged);
   const expected = `INPUT1<${original}>`;
   for (const value of Object.values(context.template)) assert.equal(value, expected);
@@ -185,22 +164,12 @@ test('media input prompts', async () => {
   stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipeId, output.id);
   deleteMediaJob(requireMediaJob(edit.id));
   const rerun = createMediaJobFromAsset(output.id, { requestKey: newRequestId() });
-  assert.deepEqual(
-    rerun.inputs,
-    unchanged.inputs,
-    'Rerun preserves snapshots after job deletion and source changes',
-  );
+  assert.deepEqual(rerun.inputs, unchanged.inputs, 'Rerun preserves snapshots after job deletion and source changes');
   assert.equal(prepare(rerun).template.userMessage, expected);
   const changed = editMediaJob(requireMediaJob(rerun.id), {
-    inputs: rerun.inputs.map((input) =>
-      input.slot === 'input1' ? { ...input, assetId: replacement.id } : input,
-    ),
+    inputs: rerun.inputs.map((input) => (input.slot === 'input1' ? { ...input, assetId: replacement.id } : input)),
   });
-  assert.equal(
-    changed.inputs[0]!.prompt,
-    'New source prompt',
-    'Replacing a slot captures its new image prompt',
-  );
+  assert.equal(changed.inputs[0]!.prompt, 'New source prompt', 'Replacing a slot captures its new image prompt');
   assert.equal(changed.inputs[1]!.prompt, '');
   const reordered = job('image-edit', [
     { slot: 'input3', assetId: replacement.id },
@@ -227,28 +196,14 @@ test('media input prompts', async () => {
   const newSelection = firstFrame(first.id);
   assert.equal(newSelection.inputs[0]!.prompt, 'Changed later');
   assert.equal(prepare(newSelection).template.userMessage, 'INPUT1<Changed later>');
-  assert.equal(
-    getMediaRecipe(first.recipeId!).prompt,
-    original,
-    'Editing gallery text preserves the original recipe',
-  );
-  stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run(
-    '  Uploaded image description  ',
-    upload.galleryId,
-  );
+  assert.equal(getMediaRecipe(first.recipeId!).prompt, original, 'Editing gallery text preserves the original recipe');
+  stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('  Uploaded image description  ', upload.galleryId);
   const describedUpload = firstFrame(upload.id);
-  assert.equal(
-    prepare(describedUpload).template.userMessage,
-    'INPUT1<  Uploaded image description  >',
-  );
+  assert.equal(prepare(describedUpload).template.userMessage, 'INPUT1<  Uploaded image description  >');
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', upload.galleryId);
   stmt('UPDATE gallery_items SET prompt = ? WHERE id = ?').run('', first.galleryId);
   const cleared = firstFrame(first.id);
-  assert.equal(
-    cleared.inputs[0]!.prompt,
-    '',
-    'Clearing a saved prompt does not restore recipe text',
-  );
+  assert.equal(cleared.inputs[0]!.prompt, '', 'Clearing a saved prompt does not restore recipe text');
 
   const conversationId = conversationFixture();
   for (const operation of ['video-first', 'video-references'] as const) {
@@ -265,9 +220,7 @@ test('media input prompts', async () => {
       const body = 'INPUT1<New source prompt>';
       assert.equal(
         prepared.template.userMessage,
-        contextConversationId === null
-          ? body
-          : '<system_instruction>\n' + body + '\n</system_instruction>',
+        contextConversationId === null ? body : '<system_instruction>\n' + body + '\n</system_instruction>',
       );
     }
   }
@@ -302,11 +255,7 @@ test('media input prompts', async () => {
   );
   assert.throws(() => startMediaJob(requireMediaJob(retry.id), {}, false), /input1/);
   assert.throws(
-    () =>
-      createMediaJob(
-        { requestKey: newRequestId(), inputs: failedRender.inputs },
-        requireMediaJob(failedRender.id),
-      ),
+    () => createMediaJob({ requestKey: newRequestId(), inputs: failedRender.inputs }, requireMediaJob(failedRender.id)),
     { status: 409 },
     'Explicit unavailable references must still be rejected',
   );
@@ -317,11 +266,7 @@ test('media input prompts', async () => {
   assert.equal(startMediaJob(requireMediaJob(retry.id), {}, false).state, 'submitting');
   const saved = getMediaRecipe(recipeId);
   assert.equal(saved.inputs[0]!.assetId, null);
-  assert.equal(
-    saved.inputs[0]!.prompt,
-    original,
-    'Deleting the source clears only the image reference',
-  );
+  assert.equal(saved.inputs[0]!.prompt, original, 'Deleting the source clears only the image reference');
   assert.equal(saved.inputs[1]!.prompt, '');
   assert.equal(
     expandTemplate('{{#if input1_prompt}}Outer{{#if input2_prompt}}Inner{{/if}}{{/if}}', {
@@ -338,7 +283,7 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
   const { basename, join } = await import('node:path');
   const { newRequestId } = await import('@tinytavern/shared');
   const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { saveImage } = await import('../../server/src/media/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { saveAvatar, readAvatarFile } = await import('../../server/src/characters/avatarStore.ts');
@@ -414,10 +359,7 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
     assetId,
     'Manual input overrides automatic binding',
   );
-  assert.equal(
-    draft.inputs.find((input) => input.slot === 'input3')!.prompt,
-    'Manual input description',
-  );
+  assert.equal(draft.inputs.find((input) => input.slot === 'input3')!.prompt, 'Manual input description');
   const identityId = draft.inputs.find((input) => input.slot === 'input1')!.assetId;
   assert.notEqual(identityId, assetId);
   const ownedPath = String(stmt('SELECT path FROM media_assets WHERE id=?').get(identityId)!.path);
@@ -425,11 +367,7 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
   const again = editMediaJob(requireMediaJob(draft.id), {
     fillInputs: { selectedAssetIds: [assetId] },
   });
-  assert.deepEqual(
-    again.inputs,
-    draft.inputs,
-    'Repeated fill preserves prior selections and copied avatar',
-  );
+  assert.deepEqual(again.inputs, draft.inputs, 'Repeated fill preserves prior selections and copied avatar');
   startMediaJob(requireMediaJob(draft.id), {}, true);
   const context = JSON.parse(requireMediaJob(draft.id).context_json!);
   assert(
@@ -438,15 +376,8 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
   );
   cancelMediaJob(requireMediaJob(draft.id));
   deleteMediaJob(requireMediaJob(draft.id));
-  assert(
-    !existsSync(join(IMAGES_DIR, basename(ownedPath))),
-    'Discarding the job releases its private avatar copy',
-  );
-  assert.deepEqual(
-    readAvatarFile('character', characterId),
-    raster,
-    'Source avatar survives cleanup',
-  );
+  assert(!existsSync(join(IMAGES_DIR, basename(ownedPath))), 'Discarding the job releases its private avatar copy');
+  assert.deepEqual(readAvatarFile('character', characterId), raster, 'Source avatar survives cleanup');
   const snapshot = createMediaJob({
     requestKey: newRequestId(),
     workflowId: workflow.id,
@@ -483,11 +414,7 @@ test('numbered automatic inputs honor manual choices, snapshot avatars and roll 
       }),
     /image|available|found/i,
   );
-  assert.deepEqual(
-    readdirSync(IMAGES_DIR).sort(),
-    before,
-    'A failed later binding removes earlier copied files',
-  );
+  assert.deepEqual(readdirSync(IMAGES_DIR).sort(), before, 'A failed later binding removes earlier copied files');
   assert.equal(stmt('SELECT count(*) AS n FROM media_jobs').get()!.n, jobCount);
   assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
 });

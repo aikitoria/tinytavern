@@ -80,10 +80,7 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
         parameters.set(key!, value!);
       }
     }
-    const allowed =
-      spec.type === 'int' || spec.type === 'float'
-        ? ['min', 'max', 'step', 'order', 'unit']
-        : ['order'];
+    const allowed = spec.type === 'int' || spec.type === 'float' ? ['min', 'max', 'step', 'order', 'unit'] : ['order'];
     for (const key of parameters.keys()) {
       if (!allowed.includes(key)) fail(`Unknown ${spec.type} parameter ${key}`);
     }
@@ -170,9 +167,7 @@ export function discoverWorkflowInputs(graph: Record<string, unknown>): MediaWor
 
 export function workflowInputError(control: MediaWorkflowInput, value: unknown): string | null {
   if (control.type === 'select') {
-    return typeof value === 'string' && control.options.includes(value)
-      ? null
-      : `Choose a valid ${control.label}`;
+    return typeof value === 'string' && control.options.includes(value) ? null : `Choose a valid ${control.label}`;
   }
   if (control.type === 'boolean') {
     return typeof value === 'boolean' ? null : `${control.label} must be true or false`;
@@ -181,14 +176,10 @@ export function workflowInputError(control: MediaWorkflowInput, value: unknown):
     if (typeof value !== 'string') return `${control.label} must be text`;
     return null;
   }
-  if (typeof value !== 'number' || !Number.isFinite(value))
-    return `${control.label} must be a number`;
-  if (control.type === 'int' && !Number.isInteger(value))
-    return `${control.label} must be an integer`;
-  if (control.min !== undefined && value < control.min)
-    return `${control.label} must be at least ${control.min}`;
-  if (control.max !== undefined && value > control.max)
-    return `${control.label} must be at most ${control.max}`;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `${control.label} must be a number`;
+  if (control.type === 'int' && !Number.isInteger(value)) return `${control.label} must be an integer`;
+  if (control.min !== undefined && value < control.min) return `${control.label} must be at least ${control.min}`;
+  if (control.max !== undefined && value > control.max) return `${control.label} must be at most ${control.max}`;
   const steps = (value - (control.min ?? 0)) / control.step;
   if (!Number.isFinite(steps) || Math.abs(steps - Math.round(steps)) > 1e-7) {
     return `${control.label} must use steps of ${control.step} from ${control.min ?? 0}`;
@@ -197,10 +188,7 @@ export function workflowInputError(control: MediaWorkflowInput, value: unknown):
 }
 
 /** Validate overrides without coercing types or changing omitted defaults. */
-export function validateWorkflowValues(
-  controls: MediaWorkflowInput[],
-  raw: unknown,
-): MediaWorkflowValues {
+export function validateWorkflowValues(controls: MediaWorkflowInput[], raw: unknown): MediaWorkflowValues {
   const values = object(raw);
   if (!values) throw new Error('Workflow values must be an object');
   const byId = new Map(controls.map((control) => [control.key, control]));
@@ -226,13 +214,7 @@ export function randomizeWorkflowSeeds(
     const inputs = object(object(raw)?.inputs);
     if (!inputs || exposed.has(nodeId)) continue;
     for (const key of Object.keys(inputs)) {
-      if (
-        key !== 'seed' &&
-        key !== 'noise_seed' &&
-        !key.endsWith('.seed') &&
-        !key.endsWith('.noise_seed')
-      )
-        continue;
+      if (key !== 'seed' && key !== 'noise_seed' && !key.endsWith('.seed') && !key.endsWith('.noise_seed')) continue;
       const value = inputs[key];
       if (typeof value === 'number') {
         inputs[key] = seed;

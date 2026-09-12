@@ -19,10 +19,7 @@ export function createVideoPreviewPlayback<T>(options: {
 
   function draw() {
     if (previous) {
-      options.draw(
-        previous.layer,
-        previous.sequence.frames[cursor % previous.sequence.frames.length]!,
-      );
+      options.draw(previous.layer, previous.sequence.frames[cursor % previous.sequence.frames.length]!);
     }
     if (current) options.draw(current.layer, current.sequence.frames[cursor]!);
   }

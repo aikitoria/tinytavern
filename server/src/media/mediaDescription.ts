@@ -7,11 +7,8 @@ import { HttpError } from '../http/router.ts';
 export function descriptionWorkflow(workflowId?: string) {
   const settings = getSettings().mediaRendering;
   const id = workflowId ?? settings.descriptionWorkflowId;
-  const workflow = settings.workflows.find(
-    (item) => item.id === id && item.textOutputNodeId !== null,
-  );
-  if (!workflow)
-    throw new HttpError(400, 'Add a Describe image workflow in Settings → Media rendering');
+  const workflow = settings.workflows.find((item) => item.id === id && item.textOutputNodeId !== null);
+  if (!workflow) throw new HttpError(400, 'Add a Describe image workflow in Settings → Media rendering');
   return {
     comfyUrl: settings.comfyUrl,
     timeoutSeconds: settings.jobTimeoutSeconds,

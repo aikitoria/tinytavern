@@ -1,27 +1,12 @@
 import { publicAvatar } from '../media/mediaUrls.ts';
 import { defineAvatarRoutes } from './shared/avatarRoutes.ts';
-import {
-  namedItem,
-  DEFAULT_CUSTOM_TEMPLATE,
-  ENTITY_FIELDS,
-  type Character,
-} from '@tinytavern/shared';
+import { namedItem, DEFAULT_CUSTOM_TEMPLATE, ENTITY_FIELDS, type Character } from '@tinytavern/shared';
 import { stmt, toCharacter } from '../db/db.ts';
 import { invalidate } from '../realtime/events.ts';
-import {
-  buildCharacterCard,
-  isPng,
-  makePlaceholderPng,
-  parseCharacterCard,
-} from '../characters/pngCard.ts';
+import { buildCharacterCard, isPng, makePlaceholderPng, parseCharacterCard } from '../characters/pngCard.ts';
 import { route, HttpError } from '../http/router.ts';
 import type { Ctx } from '../http/router.ts';
-import {
-  optionalBoolean,
-  optionalNullableString,
-  optionalString,
-  positiveId,
-} from '../http/validation.ts';
+import { optionalBoolean, optionalNullableString, optionalString, positiveId } from '../http/validation.ts';
 import type { JsonObject } from '../http/validation.ts';
 import {
   copyAvatarFiles,
@@ -43,9 +28,7 @@ function parseCustomTemplate(raw: unknown): string | null {
   const t = raw as JsonObject;
   const custom: Record<string, string | boolean> = {};
   for (const [key, fallback] of customTemplateFields) {
-    custom[key] =
-      (typeof fallback === 'boolean' ? optionalBoolean(t, key) : optionalString(t, key)) ??
-      fallback;
+    custom[key] = (typeof fallback === 'boolean' ? optionalBoolean(t, key) : optionalString(t, key)) ?? fallback;
   }
   return JSON.stringify(custom);
 }
@@ -81,9 +64,7 @@ defineEntityRoutes<Character>({
 defineAvatarRoutes('character', (row) => publicAvatar(toCharacter(row)));
 
 function cardObject(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 route.post(
@@ -107,8 +88,7 @@ route.post(
       )?.id ?? null;
     const customTemplate =
       extension.customTemplate === undefined ? null : parseCustomTemplate(extension.customTemplate);
-    const disableBackground =
-      optionalBoolean(extension, 'disableBackgroundSwipeGeneration') ?? false;
+    const disableBackground = optionalBoolean(extension, 'disableBackgroundSwipeGeneration') ?? false;
     const result = stmt(
       `INSERT INTO characters (name, chat_name, personality, scenario, examples, first_message, custom_prompt, card_json, created_at, preset_id, template_id, folder_id, custom_template, disable_background_swipe_generation)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -176,18 +156,15 @@ route.get('/api/characters/:id/card', ({ params }) => {
           presetName:
             character.presetId === null
               ? null
-              : (stmt('SELECT name FROM presets WHERE id = ?').get(character.presetId)?.name ??
-                null),
+              : (stmt('SELECT name FROM presets WHERE id = ?').get(character.presetId)?.name ?? null),
           templateName:
             character.templateId === null
               ? null
-              : (stmt('SELECT name FROM templates WHERE id = ?').get(character.templateId)?.name ??
-                null),
+              : (stmt('SELECT name FROM templates WHERE id = ?').get(character.templateId)?.name ?? null),
           folderName:
             character.folderId === null
               ? null
-              : (stmt('SELECT name FROM character_folders WHERE id = ?').get(character.folderId)
-                  ?.name ?? null),
+              : (stmt('SELECT name FROM character_folders WHERE id = ?').get(character.folderId)?.name ?? null),
           customTemplate: character.customTemplate,
           disableBackgroundSwipeGeneration: character.disableBackgroundSwipeGeneration,
         },

@@ -9,10 +9,7 @@ export const [authCheckError, setAuthCheckError] = createSignal('');
 let onUnlock: (() => void) | null = null;
 let onLock: (() => void) | null = null;
 
-export function configureAuthLifecycle(handlers: {
-  onUnlock: () => void;
-  onLock: () => void;
-}): void {
+export function configureAuthLifecycle(handlers: { onUnlock: () => void; onLock: () => void }): void {
   onUnlock = handlers.onUnlock;
   onLock = handlers.onLock;
 }

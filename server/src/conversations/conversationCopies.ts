@@ -1,5 +1,6 @@
+import { setMessageMedia } from '../media/messageMedia.ts';
 import type { Conversation, Message } from '@tinytavern/shared';
-import { stmt, transaction } from '../db/db.ts';
+import { mediaAssetForPath, stmt, transaction } from '../db/db.ts';
 import { copyImage, deleteImageFiles } from '../media/images.ts';
 import { HttpError } from '../http/router.ts';
 
@@ -9,10 +10,7 @@ export interface MessageRow {
 }
 
 /** Track files before SQL commit so any partial failure can remove every copy. */
-export function copyMessageImages(
-  message: Pick<Message, 'media' | 'activeImage'>,
-  written: string[],
-) {
+export function copyMessageImages(message: Pick<Message, 'media' | 'activeImage'>, written: string[]) {
   const images: string[] = [];
   let activeImage = 0;
   for (const [index, asset] of message.media.entries()) {
@@ -38,13 +36,13 @@ export function insertCopiedMessage(
   generationKind = live.generationKind,
 ): number {
   const { images, activeImage } = copyMessageImages(live, written);
-  return Number(
+  const id = Number(
     stmt(
       `INSERT INTO messages
        (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
-        model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
+        model, gen_meta_json, created_at, name, generation_kind, active_image,
         image_pending, render_recipe_id)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?)`,
     ).run(
       conversationId,
       parentId,
@@ -57,11 +55,16 @@ export function insertCopiedMessage(
       live.createdAt,
       live.name,
       generationKind,
-      JSON.stringify(images),
       activeImage,
       row.render_recipe_id,
     ).lastInsertRowid,
   );
+  setMessageMedia(
+    id,
+    images.map((path) => mediaAssetForPath(path)!.id),
+    activeImage,
+  );
+  return id;
 }
 
 export function copyConversation(

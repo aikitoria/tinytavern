@@ -40,20 +40,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
     ...(props.chat ? { chatPrompt: defaultChatMediaPrompt() } : defaults),
   });
   const [draft, setDraft] = createSignal(blank());
-  const folderMap = createMemo(
-    () =>
-      new Map(
-        collection().folders.flatMap((folder) =>
-          folder.presetIds.map((id) => [id, folder.id] as const),
-        ),
-      ),
-  );
-  const items = createMemo(() =>
-    collection().presets.map((preset): PromptItem => ({
-      ...preset,
-      folderId: folderMap().get(preset.id) ?? null,
-    })),
-  );
+  const items = () => collection().presets.map((item) => ({ ...item, folderId: item.folderId ?? null }));
   const entity = mediaEntityEditor<PromptItem>(key, items);
   const editor = createEntityEditor({
     items,
@@ -80,19 +67,10 @@ function MediaPromptsPage(props: { chat: boolean }) {
     onError: editor.setStatus,
   });
   const navigate = useSettingsNavigation();
-  const keys = [
-    'instruction',
-    'no_instruction',
-    'prompt',
-    'workflow',
-    'char',
-    'user',
-    ...MEDIA_INPUT_PROMPT_KEYS,
-  ];
+  const keys = ['instruction', 'no_instruction', 'prompt', 'workflow', 'char', 'user', ...MEDIA_INPUT_PROMPT_KEYS];
   const value = (field: keyof StandalonePromptTemplate | 'chatPrompt') => {
     const preset = draft();
-    if (field === 'chatPrompt')
-      return preset && 'chatPrompt' in preset ? preset.chatPrompt : defaultChatMediaPrompt();
+    if (field === 'chatPrompt') return preset && 'chatPrompt' in preset ? preset.chatPrompt : defaultChatMediaPrompt();
     return preset && 'systemPrompt' in preset ? preset[field] : defaults[field];
   };
   const fields: [keyof StandalonePromptTemplate | 'chatPrompt', string][] = props.chat
@@ -124,18 +102,9 @@ function MediaPromptsPage(props: { chat: boolean }) {
                       '{{input1_prompt}}',
                       `Inserts the saved prompt for image input1. Use input1_prompt through input${MAX_MEDIA_INPUTS}_prompt to match image binding numbers. Missing prompts produce empty text.`,
                     ],
-                    [
-                      '{{#if input1_prompt}}…{{/if}}',
-                      'Include a block only when input1 has a saved prompt.',
-                    ],
-                    [
-                      '{{#if instruction}}…{{/if}}',
-                      'Include a block when the variable is nonempty',
-                    ],
-                    [
-                      '{{#if no_instruction}}…{{/if}}',
-                      'Include a block when no instruction was entered',
-                    ],
+                    ['{{#if input1_prompt}}…{{/if}}', 'Include a block only when input1 has a saved prompt.'],
+                    ['{{#if instruction}}…{{/if}}', 'Include a block when the variable is nonempty'],
+                    ['{{#if no_instruction}}…{{/if}}', 'Include a block when no instruction was entered'],
                   ]}
                 />
               </>
@@ -147,8 +116,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
             template
             keys={keys}
             onChange={(text) => {
-              if (!props.readOnly && value(field) !== text)
-                setDraft((value) => ({ ...value, [field]: text }));
+              if (!props.readOnly && value(field) !== text) setDraft((value) => ({ ...value, [field]: text }));
             }}
             hint={
               field === 'chatPrompt'
@@ -197,10 +165,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
     <>
       <EntityEditorPane
         editor={editor}
-        sectionSchema={settingsFields(
-          { ...blank() },
-          { folderId: settingsReference(() => collection().folders) },
-        )}
+        sectionSchema={settingsFields({ ...blank() }, { folderId: settingsReference(() => collection().folders) })}
         items={items()}
         itemLabel={(item) => item.name}
         newLabel="New"
@@ -241,9 +206,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
               navigate(() => {
                 void update((current) => importPromptCollection(data, current, props.chat))
                   .then(() => editor.setStatus('Presets imported.', 'success'))
-                  .catch((error) =>
-                    editor.setStatus(error instanceof Error ? error.message : String(error)),
-                  );
+                  .catch((error) => editor.setStatus(error instanceof Error ? error.message : String(error)));
               })
             }
           />
@@ -255,9 +218,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
           id={`media-prompt-${props.chat ? 'chat' : 'standalone'}`}
           fields={['name', 'folderId', ...fields.map(([field]) => field)]}
         >
-          <p class="hint">
-            Selecting a preset makes it the default when a workflow has no explicit preset.
-          </p>
+          <p class="hint">Selecting a preset makes it the default when a workflow has no explicit preset.</p>
           <FormField
             label="Name"
             value={draft().name}

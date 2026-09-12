@@ -1,3 +1,4 @@
+import { galleryFixture } from '../support/fixtures.ts';
 import { mockComfy, serveComfy, comfyEvent } from '../support/comfy.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
@@ -5,8 +6,7 @@ import { test } from 'bun:test';
 test('media description', async () => {
   const { setTimeout: sleep } = await import('node:timers/promises');
 
-  const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } =
-    await import('@tinytavern/shared');
+  const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } = await import('@tinytavern/shared');
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   const { IMAGE_DESCRIPTION_WORKFLOW } = await import('../support/imageDescriptionWorkflow.ts');
@@ -16,11 +16,9 @@ test('media description', async () => {
   const { stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { saveImage } = await import('../../server/src/media/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const { describeImage, descriptionWorkflow } =
-    await import('../../server/src/media/mediaDescription.ts');
-  const { initMediaWorker, stopMediaWorker, tickMediaWorker } =
-    await import('../../server/src/media/mediaWorker.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
+  const { describeImage, descriptionWorkflow } = await import('../../server/src/media/mediaDescription.ts');
+  const { initMediaWorker, stopMediaWorker, tickMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
   const { comfyTextOutput } = await import('../../server/src/media/comfy/comfyTextOutput.ts');
   const { apiRoutes } = await import('../../server/src/http/router.ts');
   await import('../../server/src/routes/gallery.ts');
@@ -39,10 +37,7 @@ test('media description', async () => {
   }) as Record<string, { inputs: Record<string, unknown> }>;
   assert.equal(expanded['2']!.inputs.image, 'uploaded.png');
   assert.equal(expanded['3']!.inputs['sampling_mode.seed'], 12345);
-  assert.equal(
-    expanded['3']!.inputs.prompt,
-    JSON.parse(IMAGE_DESCRIPTION_WORKFLOW.json)['3'].inputs.prompt,
-  );
+  assert.equal(expanded['3']!.inputs.prompt, JSON.parse(IMAGE_DESCRIPTION_WORKFLOW.json)['3'].inputs.prompt);
   assert.equal(comfyTextOutput({ '4': { text: ['  Exact\ntext  '] } }), '  Exact\ntext  ');
   for (const output of [
     {},
@@ -64,17 +59,12 @@ test('media description', async () => {
     },
     submit(body, execution) {
       posted++;
-      assert(
-        uploads.has(String(body.prompt['2']!.inputs.image)),
-        'The image reaches Comfy before submission',
-      );
+      assert(uploads.has(String(body.prompt['2']!.inputs.image)), 'The image reaches Comfy before submission');
       assert(comfy.sockets.has(body.client_id), 'Progress is connected before submission');
       execution.state = 'running';
       execution.outputs = {
         '4': {
-          text: [
-            mode === 'empty' ? '' : '  A detailed uploaded image description.\nSecond line.  ',
-          ],
+          text: [mode === 'empty' ? '' : '  A detailed uploaded image description.\nSecond line.  '],
         },
       };
       const socket = comfy.sockets.get(body.client_id)!;
@@ -106,11 +96,7 @@ test('media description', async () => {
     },
   });
   const path = saveImage('.png', makePlaceholderPng());
-  const id = Number(
-    stmt(
-      "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Uploads', 'Saved before generation', ?, 1, 1)",
-    ).run(path).lastInsertRowid,
-  );
+  const id = galleryFixture(path, { character_name: 'Uploads', prompt: 'Saved before generation' });
   const assetId = mediaAssetForPath(path)!.id;
   async function until(condition: () => boolean) {
     const end = Date.now() + 6000;
@@ -137,15 +123,8 @@ test('media description', async () => {
     });
     const events = await response.text();
     assert.equal(response.status, 200);
-    assert(
-      events.includes('"progress"') &&
-        events.includes('"d":"  A detailed') &&
-        events.includes('"done":true'),
-    );
-    assert.equal(
-      stmt('SELECT prompt FROM gallery_items WHERE id = ?').get(id)!.prompt,
-      'Saved before generation',
-    );
+    assert(events.includes('"progress"') && events.includes('"d":"  A detailed') && events.includes('"done":true'));
+    assert.equal(stmt('SELECT prompt FROM gallery_items WHERE id = ?').get(id)!.prompt, 'Saved before generation');
     await until(() => uploads.size === 0);
 
     mode = 'empty';

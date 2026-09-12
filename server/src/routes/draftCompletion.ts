@@ -2,15 +2,12 @@ import { route, HttpError } from '../http/router.ts';
 import type { Ctx } from '../http/router.ts';
 import { getActivePath } from '../conversations/tree.ts';
 import { buildChatMessages } from '../generation/prompt.ts';
-import {
-  buildDraftCompletionMessages,
-  DraftSuffixFilter,
-} from '../generation/draftCompletionPrompt.ts';
+import { buildDraftCompletionMessages, DraftSuffixFilter } from '../generation/draftCompletionPrompt.ts';
 import { hasForegroundGeneration, streamChatCompletion } from '../generation/generation.ts';
 import { requireExpectedActiveLeaf } from '../conversations/concurrency.ts';
 import { objectBody, optionalNullableId, optionalNumber, positiveId } from '../http/validation.ts';
 import { streamResponse } from '../http/streamResponse.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { getConversation } from '../conversations/conversationStore.ts';
 
 const DRAFT_COMPLETION_MAX_TOKENS = 1024;
@@ -33,11 +30,7 @@ function completeDraft(ctx: Ctx): Response {
 
   const conversation = getConversation(conversationId);
   const built = buildChatMessages(conversation, getActivePath(conversationId));
-  const messages = buildDraftCompletionMessages(
-    built.messages,
-    draft,
-    getSettings().draftCompletionPrompt,
-  );
+  const messages = buildDraftCompletionMessages(built.messages, draft, getSettingsPreferences().draftCompletionPrompt);
   streaming.add(conversationId);
   try {
     return streamResponse(

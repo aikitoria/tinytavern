@@ -4,14 +4,10 @@ import { databaseCase } from '../support/database.ts';
 import { insertFixture } from '../support/fixtures.ts';
 import { mockFetch, upstreamFrame } from '../support/streams.ts';
 import { stmt } from '../../server/src/db/db.ts';
-import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
+import { getSettings, putSettings } from '../support/settings.ts';
 import { createMediaJob, startMediaJob } from '../../server/src/media/mediaJobs.ts';
 import { requireMediaJob, observeMediaJob } from '../../server/src/media/mediaJobStore.ts';
-import {
-  initMediaWorker,
-  stopMediaWorker,
-  tickMediaWorker,
-} from '../../server/src/media/mediaWorker.ts';
+import { initMediaWorker, stopMediaWorker, tickMediaWorker } from '../../server/src/media/mediaWorker.ts';
 
 const workflow: MediaWorkflow = {
   id: 'avatar',
@@ -95,9 +91,7 @@ databaseCase(
     mockFetch((url, options) => {
       assert.equal(String(url), 'http://avatar.invalid/v1/chat/completions');
       requests.push(JSON.parse(String(options?.body)));
-      return new Response(
-        upstreamFrame({ content: 'Truncated portrait' }, 'length') + 'data: [DONE]\n\n',
-      );
+      return new Response(upstreamFrame({ content: 'Truncated portrait' }, 'length') + 'data: [DONE]\n\n');
     });
     let unsubscribe = () => {};
     try {

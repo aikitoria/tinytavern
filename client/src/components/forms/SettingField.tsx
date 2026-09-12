@@ -105,11 +105,7 @@ export function createDefaultField(defaultValue: () => string | boolean): Defaul
   };
 }
 
-export function RevertButton(props: {
-  changed: boolean;
-  onRevert: () => void;
-  describedBy?: string;
-}) {
+export function RevertButton(props: { changed: boolean; onRevert: () => void; describedBy?: string }) {
   return (
     <Show when={props.changed}>
       <button

@@ -9,10 +9,7 @@ import { createAsyncScope } from './state/asyncScope.ts';
 export type EditorId<Id extends number | string = number> = Id | 'new' | 'default';
 export type NoticeKind = 'error' | 'warning' | 'info' | 'success';
 
-interface EntityEditorOptions<
-  T extends { id: number | string },
-  D extends Record<string, unknown>,
-> {
+interface EntityEditorOptions<T extends { id: number | string }, D extends Record<string, unknown>> {
   items: () => readonly T[];
   /** Settings relevant to remote-conflict detection, excluding cached metadata. */
   snapshot?: (item: T) => unknown;
@@ -42,10 +39,9 @@ export function numberOrNull(value: string): number | null {
 }
 
 /** Shared state/actions for the settings master-detail CRUD editors. */
-export function createEntityEditor<
-  T extends { id: number | string },
-  D extends Record<string, unknown>,
->(options: EntityEditorOptions<T, D>) {
+export function createEntityEditor<T extends { id: number | string }, D extends Record<string, unknown>>(
+  options: EntityEditorOptions<T, D>,
+) {
   type Id = EditorId<T['id']>;
   const initialPage = useDialogPage()();
   const paneActive = useDialogActive();
@@ -127,9 +123,7 @@ export function createEntityEditor<
     if (selectedId() !== 'new') return;
     const initialId = initialPage.settingsEntity ?? options.initialId?.();
     const item =
-      initialId != null
-        ? options.items().find((candidate) => String(candidate.id) === String(initialId))
-        : undefined;
+      initialId != null ? options.items().find((candidate) => String(candidate.id) === String(initialId)) : undefined;
     if (item) setSelectedId(item.id);
     else
       setSelectedId(
@@ -168,10 +162,7 @@ export function createEntityEditor<
       if (!item) {
         if (isDirty()) {
           remoteConflict = true;
-          setStatus(
-            'This item was deleted on another device. Discard this draft to continue.',
-            'warning',
-          );
+          setStatus('This item was deleted on another device. Discard this draft to continue.', 'warning');
         } else {
           applySelection(emptySelection, false);
           rawNav.closeDetail();
@@ -179,10 +170,7 @@ export function createEntityEditor<
         }
       } else if (isDirty()) {
         remoteConflict = true;
-        setStatus(
-          'This item changed on another device. Discard to load the latest version.',
-          'warning',
-        );
+        setStatus('This item changed on another device. Discard to load the latest version.', 'warning');
       } else {
         load(item);
       }
@@ -196,18 +184,13 @@ export function createEntityEditor<
       const id = selectedId();
       if (id === 'default') return true;
       if (remoteConflict) {
-        setStatus(
-          'This item changed on another device. Discard to load it before saving.',
-          'warning',
-        );
+        setStatus('This item changed on another device. Discard to load it before saving.', 'warning');
         return false;
       }
       const data = structuredClone(options.data());
       const selectedAtStart = snapshot(selected());
       const item =
-        id === 'new'
-          ? await options.create(data)
-          : await options.patch(id, changedFields(baseline ?? data, data));
+        id === 'new' ? await options.create(data) : await options.patch(id, changedFields(baseline ?? data, data));
       const latest = id === 'new' ? undefined : selected();
       const response = snapshot(item);
       if (id !== 'new' && snapshot(latest) !== selectedAtStart && snapshot(latest) !== response) {

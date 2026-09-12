@@ -32,11 +32,7 @@ export function createMapSearch({
     if (!results.length) return;
     const current = results.indexOf(mapSearchTarget()?.messageId ?? -1);
     const next =
-      current < 0
-        ? direction > 0
-          ? 0
-          : results.length - 1
-        : (current + direction + results.length) % results.length;
+      current < 0 ? (direction > 0 ? 0 : results.length - 1) : (current + direction + results.length) % results.length;
     setMapSearchTarget({ messageId: results[next]! });
   }
 

@@ -53,9 +53,7 @@ export default function MediaResultDetails(props: {
           </For>
         </dl>
         <Show when={!props.workflow.available}>
-          <p class="hint">
-            Workflow defaults are unavailable. Only saved parameter overrides are shown.
-          </p>
+          <p class="hint">Workflow defaults are unavailable. Only saved parameter overrides are shown.</p>
         </Show>
       </section>
       <For each={fields}>
@@ -74,10 +72,7 @@ export default function MediaResultDetails(props: {
                 )}
               </Show>
             </div>
-            <Show
-              when={field.text()}
-              fallback={<p class="hint">No {field.label.toLowerCase()} was used.</p>}
-            >
+            <Show when={field.text()} fallback={<p class="hint">No {field.label.toLowerCase()} was used.</p>}>
               <p class="whitespace-pre-wrap wrap-anywhere text-field m-0 text-body-small leading-prose">
                 {field.text()}
               </p>

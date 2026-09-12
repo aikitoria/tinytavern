@@ -1,5 +1,5 @@
 import type { GenerationKind, Message, MessageStatus, Role, TreeNode } from '@tinytavern/shared';
-import { deleteMessageSubtrees, stmt, toMessage, transaction } from '../db/db.ts';
+import { deleteMessageSubtrees, stmt, toMessage, toMessages, transaction } from '../db/db.ts';
 import { collectMessageImages, collectSubtreeImages, deleteImageFiles } from '../media/images.ts';
 import { bumpConversationRevision } from './conversationRevision.ts';
 
@@ -29,22 +29,22 @@ interface MsgRow {
 }
 
 function getRow(id: number): MsgRow | null {
-  return stmt(
-    'SELECT id, conversation_id, parent_id, active_child_id FROM messages WHERE id = ?',
-  ).get(id) as unknown as MsgRow | null;
+  return stmt('SELECT id, conversation_id, parent_id, active_child_id FROM messages WHERE id = ?').get(
+    id,
+  ) as unknown as MsgRow | null;
 }
 
 export function getMessage(id: number): Message | undefined {
-  const row = stmt('SELECT * FROM messages WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? toMessage(row) : undefined;
 }
 
 export function getTreeMessages(conversationId: number): Message[] {
-  const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
-    conversationId,
-  ) as Record<string, unknown>[];
-  return rows.map(toMessage);
+  const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(conversationId) as Record<
+    string,
+    unknown
+  >[];
+  return toMessages(rows);
 }
 
 /** Structure-only view of the tree (no bodies) for incremental patches. */
@@ -92,7 +92,7 @@ export function getPathToMessage(messageId: number | null): Message[] {
      )
      SELECT * FROM path`,
   ).all(messageId) as Record<string, unknown>[];
-  return rows.map(toMessage).reverse();
+  return toMessages(rows).reverse();
 }
 
 /**
@@ -195,10 +195,9 @@ export function insertMessageAfter(
       throw new Error(`message ${afterId} not found in conversation ${conversationId}`);
     }
     const formerChildren = (
-      stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id = ?').all(
-        conversationId,
-        afterId,
-      ) as { id: number }[]
+      stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id = ?').all(conversationId, afterId) as {
+        id: number;
+      }[]
     ).map((row) => row.id);
     const rememberedChild = formerChildren.includes(after.active_child_id ?? -1)
       ? after.active_child_id
@@ -238,20 +237,17 @@ export function insertMessageAfter(
 }
 
 function newestChildId(conversationId: number, parentId: number | null): number | null {
-  const row = stmt(
-    'SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? ORDER BY id DESC LIMIT 1',
-  ).get(conversationId, parentId) as { id: number } | undefined;
+  const row = stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? ORDER BY id DESC LIMIT 1').get(
+    conversationId,
+    parentId,
+  ) as { id: number } | undefined;
   return row?.id ?? null;
 }
 
 function spliceMessageInTransaction(messageId: number): string[] {
   const row = getRow(messageId);
   if (!row) return [];
-  const {
-    conversation_id: conversationId,
-    parent_id: parentId,
-    active_child_id: activeChildId,
-  } = row;
+  const { conversation_id: conversationId, parent_id: parentId, active_child_id: activeChildId } = row;
   const siblingIds = (
     stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id != ?').all(
       conversationId,
@@ -260,10 +256,7 @@ function spliceMessageInTransaction(messageId: number): string[] {
     ) as { id: number }[]
   ).map((r) => r.id);
   // Collect before cascading deletes; unlink only after commit.
-  const doomedImages = [
-    ...collectMessageImages(messageId),
-    ...siblingIds.flatMap((id) => collectSubtreeImages(id)),
-  ];
+  const doomedImages = [...collectMessageImages(messageId), ...siblingIds.flatMap((id) => collectSubtreeImages(id))];
   const leaf = getActiveLeafId(conversationId);
   // Delete siblings before reparenting children into their group.
   deleteMessageSubtrees(siblingIds);
@@ -311,9 +304,7 @@ export function rotateDown(messageId: number): boolean {
   const { conversation_id: conversationId, parent_id: parentId } = row;
   // A stale active_child_id may point to the parent after rotation; verify the relationship.
   const remembered =
-    row.active_child_id != null && getRow(row.active_child_id)?.parent_id === messageId
-      ? row.active_child_id
-      : null;
+    row.active_child_id != null && getRow(row.active_child_id)?.parent_id === messageId ? row.active_child_id : null;
   const childB = remembered ?? newestChildId(conversationId, messageId);
   if (childB == null) return false;
   const bActiveChild = getRow(childB)!.active_child_id;

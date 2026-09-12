@@ -1,7 +1,7 @@
 import type { MediaAssetInput, MediaImageConfig, MediaResultDetails } from '@tinytavern/shared';
 import type { MediaJobInput, Message } from '@tinytavern/shared';
 import { stmt, toMediaAsset } from '../db/db.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { HttpError } from '../http/router.ts';
 import type { MediaJobConfiguration } from './mediaJobStore.ts';
 
@@ -74,7 +74,7 @@ export function imageRenderConfiguration(config: MediaImageConfig): MediaJobConf
   return {
     comfyUrl: config.comfyUrl,
     workflowId: config.workflow.id,
-    timeoutSeconds: getSettings().mediaRendering.jobTimeoutSeconds,
+    timeoutSeconds: getSettingsPreferences().mediaRendering.jobTimeoutSeconds,
   };
 }
 
@@ -100,8 +100,7 @@ export function getMediaRecipe(id: number): MediaRecipe {
 export function mediaRecipeSeed(recipe: Pick<MediaRecipe, 'id' | 'configuration'>): number | null {
   return (
     recipe.configuration.seed ??
-    (stmt('SELECT seed FROM media_jobs WHERE recipe_id = ?').get(recipe.id)?.seed as
-      number | null | undefined) ??
+    (stmt('SELECT seed FROM media_jobs WHERE recipe_id = ?').get(recipe.id)?.seed as number | null | undefined) ??
     null
   );
 }
@@ -149,7 +148,7 @@ export function messageRecipeId(message: Message): number | null {
     return asset.recipeId;
   }
   return (
-    (stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(message.id)
-      ?.render_recipe_id as number | null) ?? null
+    (stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(message.id)?.render_recipe_id as number | null) ??
+    null
   );
 }

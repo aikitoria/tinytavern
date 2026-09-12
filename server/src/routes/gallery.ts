@@ -1,13 +1,10 @@
-import {
-  mediaCharacterIds,
-  mediaCharacterNames,
-  setMediaCharacters,
-} from '../media/mediaCharacters.ts';
+import { mediaCharacterIds, mediaCharacterNames, setMediaCharacters } from '../media/mediaCharacters.ts';
 import { publicGalleryItem } from '../media/mediaUrls.ts';
-import { insertGalleryAsset } from '../media/galleryStore.ts';
+import { insertGalleryAsset, GALLERY_SELECT } from '../media/galleryStore.ts';
 import type { GalleryItem } from '@tinytavern/shared';
 import {
   mediaAssetForPath,
+  messageMedia,
   invalidateMediaAsset,
   stmt,
   toGalleryItem as canonicalGalleryItem,
@@ -27,20 +24,9 @@ observeInvalidation((entity) => {
   if (entity === 'characters') invalidate('gallery');
 });
 
-const GALLERY_SELECT = `SELECT g.*,
-  json_extract(r.configuration_json, '$.workflowId') AS workflow_id,
-  json_extract(r.configuration_json, '$.workflowName') AS workflow_name,
-  (SELECT json_group_array(json_object('id', id, 'name', name)) FROM (
-    SELECT c.id, c.name FROM media_assets a
-    JOIN media_characters mc ON mc.asset_id = a.id
-    JOIN characters c ON c.id = mc.character_id
-    WHERE a.path = g.image ORDER BY c.name COLLATE NOCASE, c.id
-  )) AS characters_json FROM gallery_items g
-  LEFT JOIN media_assets asset ON asset.path = g.image
-  LEFT JOIN media_recipes r ON r.id = asset.recipe_id`;
-
 type GalleryRow = Record<string, unknown> & {
-  image: string;
+  path: string;
+  asset_id: number;
   folder_id: number | null;
 };
 
@@ -66,9 +52,7 @@ function sourceImageIndex(value: unknown, images: string[]): number {
 }
 
 route.get('/api/gallery', () =>
-  (stmt(`${GALLERY_SELECT} ORDER BY g.updated_at DESC, g.id DESC`).all() as GalleryRow[]).map(
-    toGalleryItem,
-  ),
+  (stmt(`${GALLERY_SELECT} ORDER BY g.updated_at DESC, g.id DESC`).all() as GalleryRow[]).map(toGalleryItem),
 );
 
 // One original per request avoids base64 copies and bounds concurrent upload memory.
@@ -82,9 +66,7 @@ route.post(
     const query = new URL(req.url!, 'http://localhost').searchParams;
     const defaultFolder = !query.has('folderId');
     let folderId =
-      !defaultFolder && query.get('folderId') !== 'root'
-        ? positiveId(query.get('folderId')!, 'folderId')
-        : null;
+      !defaultFolder && query.get('folderId') !== 'root' ? positiveId(query.get('folderId')!, 'folderId') : null;
     requireReference('gallery_folders', folderId, 'folderId');
     const characterId = query.has('characterId') ? positiveId(query.get('characterId')!) : null;
     let characterName = '';
@@ -132,9 +114,7 @@ route.post(
           createdFolder =
             stmt(`INSERT INTO gallery_folders(name, created_at) VALUES ('Uploads', ?)
             ON CONFLICT(name) DO NOTHING`).run(Date.now()).changes > 0;
-          folderId = Number(
-            stmt("SELECT id FROM gallery_folders WHERE name = 'Uploads'").get()!.id,
-          );
+          folderId = Number(stmt("SELECT id FROM gallery_folders WHERE name = 'Uploads'").get()!.id);
         }
         if (characterId !== null) setMediaCharacters(asset.id, [characterId]);
         return galleryItem(insertGalleryAsset(asset, { characterName, prompt: '', folderId }));
@@ -157,7 +137,7 @@ route.post('/api/gallery', ({ body }) => {
     throw new HttpError(400, 'messageId must be a positive integer');
   }
   const source = stmt(
-    `SELECT m.id, m.conversation_id, m.content, m.images_json, m.active_image,
+    `SELECT m.id, m.conversation_id, m.content, m.active_image,
             conv.character_id,
             COALESCE(c.name, 'Assistant') AS character_name
      FROM messages m
@@ -169,19 +149,17 @@ route.post('/api/gallery', ({ body }) => {
         id: number;
         conversation_id: number;
         content: string;
-        images_json: string;
         active_image: number;
         character_id: number | null;
         character_name: string;
       }
     | undefined;
   if (!source) throw new HttpError(404, `message ${String(b.messageId)} not found`);
-  const sourceImages = JSON.parse(source.images_json) as string[];
+  const sourceImages = messageMedia(source.id).map((asset) => asset.url);
   const index = sourceImageIndex(b.index ?? source.active_image, sourceImages);
   const sourceImage = sourceImages[index]!;
 
-  const existing = stmt(`${GALLERY_SELECT} WHERE g.source_image = ?`).get(sourceImage) as
-    GalleryRow | undefined;
+  const existing = stmt(`${GALLERY_SELECT} WHERE g.source_image = ?`).get(sourceImage) as GalleryRow | undefined;
   if (existing) return { item: toGalleryItem(existing), created: false };
 
   const copied = copyImage(sourceImage);
@@ -207,8 +185,10 @@ route.post('/api/gallery', ({ body }) => {
 function deleteGalleryRows(ids: number[]): number {
   const encodedIds = JSON.stringify(ids);
   const rows = stmt(
-    `SELECT id, image FROM gallery_items
-     WHERE id IN (SELECT value FROM json_each(?))`,
+    `SELECT g.id, a.path AS image FROM gallery_items g
+     JOIN media_owners o ON o.owner_type = 'gallery' AND o.owner_id = g.id
+     JOIN media_assets a ON a.id = o.asset_id
+     WHERE g.id IN (SELECT value FROM json_each(?))`,
   ).all(encodedIds) as { id: number; image: string }[];
   if (rows.length !== ids.length) throw new HttpError(404, 'one or more gallery items not found');
   transaction(() =>
@@ -254,17 +234,11 @@ route.post('/api/gallery/move', ({ body }) => {
   }
   const ids = JSON.stringify([...expected.keys()]);
   transaction(() => {
-    const rows = stmt(
-      'SELECT id, folder_id FROM gallery_items WHERE id IN (SELECT value FROM json_each(?))',
-    ).all(ids);
-    if (rows.length !== expected.size)
-      throw new HttpError(404, 'One or more gallery items no longer exist');
+    const rows = stmt('SELECT id, folder_id FROM gallery_items WHERE id IN (SELECT value FROM json_each(?))').all(ids);
+    if (rows.length !== expected.size) throw new HttpError(404, 'One or more gallery items no longer exist');
     if (rows.some((row) => row.folder_id !== expected.get(Number(row.id))))
       throw new HttpError(409, 'An item moved elsewhere. Refresh the gallery and try again.');
-    stmt('UPDATE gallery_items SET folder_id = ? WHERE id IN (SELECT value FROM json_each(?))').run(
-      folderId,
-      ids,
-    );
+    stmt('UPDATE gallery_items SET folder_id = ? WHERE id IN (SELECT value FROM json_each(?))').run(folderId, ids);
   });
   invalidate('gallery');
   return { moved: expected.size };
@@ -273,19 +247,15 @@ route.post('/api/gallery/move', ({ body }) => {
 route.post('/api/gallery/:id/describe', ({ params, body, req }) => {
   const id = positiveId(params.id);
   const item = galleryItem(id);
-  if (!item.media || item.media.kind !== 'image')
-    throw new HttpError(400, 'Choose an image to describe');
-  if (describing.has(id))
-    throw new HttpError(409, 'A prompt is already being generated for this image');
+  if (!item.media || item.media.kind !== 'image') throw new HttpError(400, 'Choose an image to describe');
+  if (describing.has(id)) throw new HttpError(409, 'A prompt is already being generated for this image');
   const configuration = descriptionWorkflow(optionalString(objectBody(body), 'workflowId'));
   const assetId = item.media.id;
   describing.add(id);
   return streamResponse(
     req,
     async (send, signal) => {
-      const prompt = await describeImage(assetId, configuration, signal, (update) =>
-        send({ progress: update }),
-      );
+      const prompt = await describeImage(assetId, configuration, signal, (update) => send({ progress: update }));
       send({ d: prompt });
     },
     () => describing.delete(id),
@@ -315,13 +285,12 @@ route.patch('/api/gallery/:id', ({ params, body }) => {
     throw new HttpError(400, 'Prompt must be text of at most 200000 characters');
   }
   if (hasPrompt) {
-    if (typeof data.expectedPrompt !== 'string')
-      throw new HttpError(400, 'expectedPrompt is required');
+    if (typeof data.expectedPrompt !== 'string') throw new HttpError(400, 'expectedPrompt is required');
     if (row.prompt !== data.expectedPrompt) {
       throw new HttpError(409, 'The saved prompt changed elsewhere. Reopen the media to load it.');
     }
   }
-  const asset = mediaAssetForPath(row.image)!;
+  const asset = { id: row.asset_id };
   const previousIds = mediaCharacterIds(asset.id);
   let characterIds = previousIds;
   if (hasCharacters) {
@@ -345,17 +314,9 @@ route.patch('/api/gallery/:id', ({ params, body }) => {
   if (prompt !== row.prompt || charactersChanged || folderId !== row.folder_id) {
     transaction(() => {
       if (charactersChanged) setMediaCharacters(asset.id, characterIds);
-      const characterName = charactersChanged
-        ? mediaCharacterNames(asset.id)
-        : String(row.character_name);
+      const characterName = charactersChanged ? mediaCharacterNames(asset.id) : String(row.character_name);
       stmt(`UPDATE gallery_items SET prompt = ?, character_name = ?, folder_id = ?,
-        updated_at = MAX(updated_at + 1, ?) WHERE id = ?`).run(
-        prompt,
-        characterName,
-        folderId,
-        Date.now(),
-        id,
-      );
+        updated_at = MAX(updated_at + 1, ?) WHERE id = ?`).run(prompt, characterName, folderId, Date.now(), id);
     });
     invalidate('gallery');
   }

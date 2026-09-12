@@ -9,14 +9,12 @@ export interface SettingsFieldCodec {
 export type SettingsFieldSchema = Readonly<Record<string, SettingsFieldCodec>>;
 const own = (value: unknown, key: string) => value != null && Object.hasOwn(value, key);
 const safeKey = (key: string) => {
-  if (['__proto__', 'prototype', 'constructor'].includes(key))
-    throw new Error('Invalid settings field');
+  if (['__proto__', 'prototype', 'constructor'].includes(key)) throw new Error('Invalid settings field');
 };
 const scalar = (kind: 'string' | 'number' | 'boolean'): SettingsFieldCodec => ({
   encode: (value) => value,
   decode(value) {
-    if (typeof value !== kind || (kind === 'number' && !Number.isFinite(value)))
-      throw new Error(`Expected ${kind}`);
+    if (typeof value !== kind || (kind === 'number' && !Number.isFinite(value))) throw new Error(`Expected ${kind}`);
     return value;
   },
 });
@@ -51,9 +49,7 @@ export const settingsObject = (fields: SettingsFieldSchema): SettingsFieldCodec 
 });
 export const settingsDictionary = (codec: SettingsFieldCodec): SettingsFieldCodec => ({
   encode: (value) =>
-    Object.fromEntries(
-      Object.entries(transferObject(value ?? {})).map(([key, item]) => [key, codec.encode(item)]),
-    ),
+    Object.fromEntries(Object.entries(transferObject(value ?? {})).map(([key, item]) => [key, codec.encode(item)])),
   decode(value, current) {
     const source = transferObject(value);
     const previous = current == null ? {} : transferObject(current);
@@ -73,8 +69,7 @@ export const settingsReference = (
     if (value == null && nullable) return null;
     const item = items().find((item) => item.id === value);
     if (!item) throw new Error('A referenced setting no longer exists');
-    if (namedItem(items(), item.name)?.id !== item.id)
-      throw new Error(`Setting reference is ambiguous: ${item.name}`);
+    if (namedItem(items(), item.name)?.id !== item.id) throw new Error(`Setting reference is ambiguous: ${item.name}`);
     return item.name;
   },
   decode(value) {
@@ -97,8 +92,7 @@ export const settingsCollection = (
       if (!Array.isArray(value)) throw new Error('Expected a settings list');
       const previous = Array.isArray(current) ? (current as { id: string; name: string }[]) : [];
       return importNamedCollection(value.map(transferObject), previous, (item, existing) => {
-        for (const key of Object.keys(fields))
-          if (!own(item, key)) throw new Error(`Missing settings field: ${key}`);
+        for (const key of Object.keys(fields)) if (!own(item, key)) throw new Error(`Missing settings field: ${key}`);
         const next = row.decode(item, existing ?? defaults()) as Record<string, unknown>;
         next.id = existing?.id ?? nextCollectionId(previous);
         return next as { id: string; name: string };
@@ -109,8 +103,7 @@ export const settingsCollection = (
 
 export function readSettingsPath(source: Record<string, unknown>, path: string): unknown {
   let value: unknown = source;
-  for (const key of path.split('.'))
-    value = own(value, key) ? (value as Record<string, unknown>)[key] : undefined;
+  for (const key of path.split('.')) value = own(value, key) ? (value as Record<string, unknown>)[key] : undefined;
   return value;
 }
 function writeSettingsPath(source: Record<string, unknown>, path: string, value: unknown) {
@@ -119,8 +112,7 @@ function writeSettingsPath(source: Record<string, unknown>, path: string, value:
   for (const key of parts.slice(0, -1)) {
     safeKey(key);
     const current = target[key];
-    target[key] =
-      current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
+    target[key] = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
     target = target[key] as Record<string, unknown>;
   }
   const key = parts.at(-1)!;
@@ -133,8 +125,7 @@ export function exportSettingsSection(
   paths: readonly string[],
   source: Record<string, unknown>,
 ) {
-  if (new Set(paths.map(fileKey)).size !== paths.length)
-    throw new Error('Duplicate settings field names');
+  if (new Set(paths.map(fileKey)).size !== paths.length) throw new Error('Duplicate settings field names');
   return Object.fromEntries(
     paths
       .map((path) => {

@@ -16,9 +16,7 @@ export default function MediaPlayer(props: {
   const [failed, setFailed] = createSignal(false);
   const [naturalRatio, setNaturalRatio] = createSignal(1);
   const ratio = () =>
-    props.asset.width && props.asset.height
-      ? props.asset.width / props.asset.height
-      : naturalRatio();
+    props.asset.width && props.asset.height ? props.asset.width / props.asset.height : naturalRatio();
   createEffect(() => {
     const url = props.asset.url;
     const active = props.active !== false;

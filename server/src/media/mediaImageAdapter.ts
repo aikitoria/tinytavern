@@ -5,21 +5,13 @@ import { newRequestId } from '@tinytavern/shared';
 import type { Message } from '@tinytavern/shared';
 import { stmt, transaction } from '../db/db.ts';
 import { createMediaJobFromRecipe, startMediaJob } from './mediaJobs.ts';
-import {
-  requireMediaJob,
-  updateMediaJob,
-  type MediaJobConfiguration,
-  type MediaJobRow,
-} from './mediaJobStore.ts';
+import { requireMediaJob, updateMediaJob, type MediaJobConfiguration, type MediaJobRow } from './mediaJobStore.ts';
 import { tickMediaWorker } from './mediaWorker.ts';
 import { messageRecipeId } from './mediaRecipes.ts';
 import { HttpError } from '../http/router.ts';
 
 /** A chat swipe reuses the full recipe, including image-edit inputs and output selection. */
-export function startMessageImageRender(
-  message: Message,
-  recipeId = messageRecipeId(message),
-): MediaJobRow {
+export function startMessageImageRender(message: Message, recipeId = messageRecipeId(message)): MediaJobRow {
   if (!recipeId) {
     throw new HttpError(400, 'The message has no rendering recipe');
   }
@@ -55,9 +47,7 @@ export function startImageRender(mid: number): void {
     const row = getMessage(mid);
     if (!row) return;
     const meta = JSON.stringify({ ...(row.genMeta ?? {}), imageError: error });
-    stmt(
-      'UPDATE messages SET image_pending = 0, gen_meta_json = ? WHERE id = ? AND image_pending = 1',
-    ).run(meta, mid);
+    stmt('UPDATE messages SET image_pending = 0, gen_meta_json = ? WHERE id = ? AND image_pending = 1').run(meta, mid);
     bumpConversationRevision(message.conversationId);
     markMessageDirty(message.conversationId, mid);
     broadcastTree(message.conversationId);

@@ -1,3 +1,4 @@
+import { setMessageMedia } from './messageMedia.ts';
 import { insertGalleryAsset } from './galleryStore.ts';
 import { mediaJobActive } from '@tinytavern/shared';
 import { stmt, toConversation, toMediaAsset, transaction } from '../db/db.ts';
@@ -67,10 +68,7 @@ function textCandidate(row: MediaJobRow) {
 export function selectMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
   const { asset } = candidate(row, body.assetId);
-  stmt(`UPDATE media_drafts SET selected_asset_id = ?, revision = revision + 1 WHERE id = ?`).run(
-    asset.id,
-    draft.id,
-  );
+  stmt(`UPDATE media_drafts SET selected_asset_id = ?, revision = revision + 1 WHERE id = ?`).run(asset.id, draft.id);
   publishMediaJob(row.id);
   return mediaJobDto(requireMediaJob(row.id));
 }
@@ -90,11 +88,9 @@ export function cancelMediaVariation(row: MediaJobRow) {
 /** Save one result without closing the draft or releasing its other variations. */
 export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unknown>) {
   const draft = requireOpenDraft(row, body);
-  const { source, asset } =
-    body.assetId === null ? textCandidate(row) : candidate(row, body.assetId);
+  const { source, asset } = body.assetId === null ? textCandidate(row) : candidate(row, body.assetId);
   // The message FK is the saved-text identity and is cleared when that message is deleted.
-  if (asset ? draft.savedAssetIds.includes(asset.id) : source.message_id !== null)
-    return mediaJobDto(source);
+  if (asset ? draft.savedAssetIds.includes(asset.id) : source.message_id !== null) return mediaJobDto(source);
   const conversation =
     source.context_conversation_id === null
       ? null
@@ -122,12 +118,10 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
         null,
         asset ? 'Media prompt' : 'Media result',
       );
-      if (asset)
-        stmt('UPDATE messages SET images_json = ?, render_recipe_id = ? WHERE id = ?').run(
-          JSON.stringify([asset.url]),
-          asset.recipeId,
-          message.id,
-        );
+      if (asset) {
+        stmt('UPDATE messages SET render_recipe_id = ? WHERE id = ?').run(asset.recipeId, message.id);
+        setMessageMedia(message.id, [asset.id]);
+      }
       updateMediaJob(source.id, { message_id: message.id });
       markMessageDirty(chat.id, message.id);
       touchMediaConversation(chat.id);
@@ -151,15 +145,10 @@ export function acceptMediaVariation(row: MediaJobRow, body: Record<string, unkn
 export function discardMediaDraft(row: MediaJobRow, body: Record<string, unknown>): void {
   const draft = requireOpenDraft(row, body);
   const jobs = mediaDraftJobs(row);
-  if (
-    body.onlyUnstarted === true &&
-    jobs.some((job) => job.started_at !== null || job.state !== 'draft')
-  ) {
+  if (body.onlyUnstarted === true && jobs.some((job) => job.started_at !== null || job.state !== 'draft')) {
     throw new HttpError(409, 'Generation has started in this draft; its work was kept');
   }
-  stmt(`UPDATE media_drafts SET state = 'discarding', revision = revision + 1 WHERE id = ?`).run(
-    draft.id,
-  );
+  stmt(`UPDATE media_drafts SET state = 'discarding', revision = revision + 1 WHERE id = ?`).run(draft.id);
   for (const job of jobs) {
     if (mediaJobActive(job.state)) {
       const cancelled = cancelMediaJob(job);
@@ -178,8 +167,7 @@ export function cleanupDiscardedMediaDraft(row: MediaJobRow): void {
     row.draft_id &&
     !mediaJobActive(row.state) &&
     (mediaDraft(row.draft_id).state === 'discarding' ||
-      (row.state === 'cancelled' &&
-        JSON.parse(row.configuration_json ?? '{}').discardOnCancel === true))
+      (row.state === 'cancelled' && JSON.parse(row.configuration_json ?? '{}').discardOnCancel === true))
   ) {
     deleteMediaJob(row);
   }

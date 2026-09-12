@@ -21,10 +21,7 @@ export function confirmAction(options: ConfirmRequest): Promise<boolean> {
 }
 
 /** Individual and selected-item deletes only; delete-all/reset actions use confirmAction. */
-export function confirmDelete(
-  options: ConfirmRequest,
-  event?: { shiftKey: boolean },
-): Promise<boolean> {
+export function confirmDelete(options: ConfirmRequest, event?: { shiftKey: boolean }): Promise<boolean> {
   return event?.shiftKey ? Promise.resolve(true) : confirmAction(options);
 }
 

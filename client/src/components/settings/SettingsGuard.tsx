@@ -2,14 +2,8 @@ import { Show, createContext, onCleanup, useContext } from 'solid-js';
 import Modal from '../ui/Modal.tsx';
 import type { JSX } from 'solid-js';
 
-import {
-  createSettingsNavigation,
-  type SettingsSectionActions,
-} from '../../state/settingsSubmission.ts';
-export {
-  createSettingsNavigation,
-  type SettingsSectionActions,
-} from '../../state/settingsSubmission.ts';
+import { createSettingsNavigation, type SettingsSectionActions } from '../../state/settingsSubmission.ts';
+export { createSettingsNavigation, type SettingsSectionActions } from '../../state/settingsSubmission.ts';
 
 type Register = (actions: SettingsSectionActions) => () => void;
 type Navigate = (action: () => void) => void;
@@ -17,16 +11,10 @@ type Navigate = (action: () => void) => void;
 const SettingsGuardContext = createContext<Register>();
 const SettingsNavigationContext = createContext<Navigate>();
 
-export function SettingsGuardProvider(props: {
-  register: Register;
-  navigate: Navigate;
-  children: JSX.Element;
-}) {
+export function SettingsGuardProvider(props: { register: Register; navigate: Navigate; children: JSX.Element }) {
   return (
     <SettingsNavigationContext.Provider value={props.navigate}>
-      <SettingsGuardContext.Provider value={props.register}>
-        {props.children}
-      </SettingsGuardContext.Provider>
+      <SettingsGuardContext.Provider value={props.register}>{props.children}</SettingsGuardContext.Provider>
     </SettingsNavigationContext.Provider>
   );
 }

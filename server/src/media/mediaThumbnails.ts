@@ -2,17 +2,11 @@ import { execFile } from 'node:child_process';
 import { readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import {
-  AVATAR_DIR,
-  IMAGES_DIR,
-  stmt,
-  invalidateMediaAsset,
-  observeMediaAssets,
-} from '../db/db.ts';
+import { AVATAR_DIR, IMAGES_DIR, stmt, invalidateMediaAsset, observeMediaAssets } from '../db/db.ts';
 import { broadcast, invalidate, observeInvalidation } from '../realtime/events.ts';
 import { deleteImageFiles } from './images.ts';
 import { signMediaUrl } from './mediaUrls.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { avatarThumbnailName } from '../characters/avatarFileNames.ts';
 
 const runFile = promisify(execFile);
@@ -116,19 +110,13 @@ const pendingSources = `
     '1:' || source AS task_key
   FROM avatar_thumbnails WHERE thumbnail_size IS NULL`;
 
-async function generate(
-  source: ThumbnailSource,
-  targetSize: number,
-  signal: AbortSignal,
-): Promise<void> {
+async function generate(source: ThumbnailSource, targetSize: number, signal: AbortSignal): Promise<void> {
   const directory = source.avatar ? AVATAR_DIR : IMAGES_DIR;
   const revision = source.thumbnail_revision + 1;
   let temporary: string | undefined;
   const { table, key, path: pathColumn } = sourceTable(source);
   try {
-    const name = source.avatar
-      ? avatarThumbnailName(source.path, revision)
-      : `thumb-${source.id}-${revision}.jpg`;
+    const name = source.avatar ? avatarThumbnailName(source.path, revision) : `thumb-${source.id}-${revision}.jpg`;
     const path = `/${source.avatar ? 'avatars' : 'images'}/${name}`;
     temporary = join(directory, `${name}.part`);
     const destination = join(directory, name);
@@ -224,7 +212,7 @@ function pump(): void {
   if (!running) return;
   try {
     if (avatarsDirty) synchronizeAvatars();
-    const nextSize = getSettings().galleryThumbnailSize;
+    const nextSize = getSettingsPreferences().galleryThumbnailSize;
     if (nextSize !== size) {
       size = nextSize;
       for (const task of active.values()) task.controller.abort();
@@ -251,9 +239,7 @@ function pump(): void {
     }
     if (active.size < CONCURRENCY) {
       const next = stmt(`SELECT MIN(thumbnail_retry_at) AS retry FROM (${pendingSources})
-        WHERE task_key NOT IN (SELECT value FROM json_each(?))`).get(
-        JSON.stringify([...active.keys()]),
-      )!;
+        WHERE task_key NOT IN (SELECT value FROM json_each(?))`).get(JSON.stringify([...active.keys()]))!;
       if (typeof next.retry === 'number') schedule(Math.max(0, next.retry - Date.now()));
     }
   } catch (error) {
@@ -265,28 +251,23 @@ function pump(): void {
 /** Repair missing derivatives and wake on media, avatar, or settings changes. */
 export function initMediaThumbnails(): void {
   if (running) return;
-  size = getSettings().galleryThumbnailSize;
+  size = getSettingsPreferences().galleryThumbnailSize;
   synchronizeAvatars();
   for (const table of ['media_assets', 'avatar_thumbnails']) {
     const avatar = table === 'avatar_thumbnails';
     const directory = avatar ? AVATAR_DIR : IMAGES_DIR;
     const key = avatar ? 'source' : 'id';
     const files = new Set(readdirSync(directory));
-    const rows = stmt(
-      `SELECT ${key} AS id, thumbnail FROM ${table} WHERE thumbnail IS NOT NULL`,
-    ).all();
+    const rows = stmt(`SELECT ${key} AS id, thumbnail FROM ${table} WHERE thumbnail IS NOT NULL`).all();
     const referenced = new Set(rows.map((row) => basename(String(row.thumbnail))));
     for (const row of rows) {
       if (!files.has(basename(String(row.thumbnail)))) {
-        stmt(`UPDATE ${table} SET thumbnail = NULL, thumbnail_size = NULL WHERE ${key} = ?`).run(
-          row.id!,
-        );
+        stmt(`UPDATE ${table} SET thumbnail = NULL, thumbnail_size = NULL WHERE ${key} = ?`).run(row.id!);
       }
     }
     if (avatar) {
       for (const file of files) {
-        if (file.startsWith('thumb-') && !referenced.has(file))
-          removeTemporary(join(directory, file));
+        if (file.startsWith('thumb-') && !referenced.has(file)) removeTemporary(join(directory, file));
       }
     }
     stmt(`UPDATE ${table} SET thumbnail_size = NULL, thumbnail_retry_at = 0

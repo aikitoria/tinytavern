@@ -9,7 +9,7 @@ import {
 } from './generation.ts';
 import { getConversation } from '../conversations/conversationStore.ts';
 import { hasConversationSubscribers, subscribedConversationIds } from '../realtime/events.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { broadcastTree } from '../realtime/sync.ts';
 import { collectSubtreeImages, deleteImageFiles } from '../media/images.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
@@ -24,9 +24,7 @@ import {
 
 const retryTimers = new Map<number, NodeJS.Timeout>();
 
-const RETRY_BACKOFF_MS = Number(
-  process.env.SPECULATION_BACKOFF_MS ?? (process.env.E2E_BASE ? 50 : 500),
-);
+const RETRY_BACKOFF_MS = Number(process.env.SPECULATION_BACKOFF_MS ?? (process.env.E2E_BASE ? 50 : 500));
 
 /** Removes an in-flight speculative sibling before a foreground action takes over. */
 export function cancelBackgroundSwipe(conversationId: number): boolean {
@@ -46,7 +44,7 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   if (!hasConversationSubscribers(message.conversationId)) return;
   const conversation = getConversation(message.conversationId);
   if (conversation.promptMode === 'media' || conversation.activeLeafId !== message.id) return;
-  const settings = getSettings();
+  const settings = getSettingsPreferences();
   if (!settings.backgroundSwipeGeneration) return;
   const parallel =
     settings.parallelBackgroundSwipeGeneration &&
@@ -88,8 +86,7 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
     onError: () => {
       const row = getMessage(speculative.id);
       if (row?.generationKind !== 'speculative') {
-        if (getActiveLeafId(conversation.id) === speculative.id)
-          cancelBackgroundSwipe(conversation.id);
+        if (getActiveLeafId(conversation.id) === speculative.id) cancelBackgroundSwipe(conversation.id);
         return;
       }
       deleteMessage(speculative.id);
@@ -97,8 +94,7 @@ export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
       if (!hasConversationSubscribers(conversation.id)) return;
       scheduleSpeculativeRetry(conversation.id, retryAttempt + 1, () => {
         // Re-check at fire time: the last client may have left during the backoff.
-        if (hasConversationSubscribers(conversation.id))
-          prepareNextSwipe(message.id, retryAttempt + 1);
+        if (hasConversationSubscribers(conversation.id)) prepareNextSwipe(message.id, retryAttempt + 1);
       });
     },
   });
@@ -135,11 +131,7 @@ export function cancelSpeculativeRetries(conversationId?: number): void {
 const MAX_RETRY_ATTEMPTS = 8;
 
 /** Keeps retrying failed background requests without creating concurrent refills. */
-function scheduleSpeculativeRetry(
-  conversationId: number,
-  attempt: number,
-  retry: () => void,
-): void {
+function scheduleSpeculativeRetry(conversationId: number, attempt: number, retry: () => void): void {
   cancelSpeculativeRetries(conversationId);
   if (attempt > MAX_RETRY_ATTEMPTS) {
     console.warn(
@@ -186,9 +178,7 @@ export function discardSpeculativeSwipes(conversationId?: number): void {
     ).all(cid, cid) as { image: string }[]
   ).map((r) => r.image);
   deleteMessageSubtrees(
-    stmt(
-      "SELECT id FROM messages WHERE generation_kind = 'speculative' AND (? IS NULL OR conversation_id = ?)",
-    )
+    stmt("SELECT id FROM messages WHERE generation_kind = 'speculative' AND (? IS NULL OR conversation_id = ?)")
       .all(cid, cid)
       .map((row) => Number(row.id)),
   );
@@ -196,9 +186,7 @@ export function discardSpeculativeSwipes(conversationId?: number): void {
   deleteImageFiles(doomedImages);
   for (const row of rows) {
     const path = activePaths.get(row.conversation_id) ?? [];
-    const survivor = path.findLast((messageId) =>
-      stmt('SELECT id FROM messages WHERE id = ?').get(messageId),
-    );
+    const survivor = path.findLast((messageId) => stmt('SELECT id FROM messages WHERE id = ?').get(messageId));
     if (getActiveLeafId(row.conversation_id) != null && survivor !== path.at(-1)) {
       setActiveLeaf(row.conversation_id, survivor ?? null);
     }

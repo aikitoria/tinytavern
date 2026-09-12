@@ -1,10 +1,7 @@
 const encoder = new TextEncoder();
 
-export function mockFetch(
-  handler: (...args: Parameters<typeof fetch>) => Response | Promise<Response>,
-): void {
-  globalThis.fetch = (async (...args: Parameters<typeof fetch>) =>
-    handler(...args)) as typeof fetch;
+export function mockFetch(handler: (...args: Parameters<typeof fetch>) => Response | Promise<Response>): void {
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => handler(...args)) as typeof fetch;
 }
 
 export function upstreamFrame(delta: object, finishReason?: string): string {

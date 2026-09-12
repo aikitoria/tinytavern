@@ -16,8 +16,7 @@ function sessionHash(token: string): string {
 stmt('DELETE FROM auth_sessions WHERE expires_at <= ?').run(Date.now());
 
 function storedPasswordHash(): string | null {
-  const row = stmt('SELECT value FROM settings WHERE key = ?').get(PASSWORD_KEY) as
-    { value: string } | undefined;
+  const row = stmt('SELECT value FROM settings WHERE key = ?').get(PASSWORD_KEY) as { value: string } | undefined;
   return row?.value ?? null;
 }
 
@@ -65,9 +64,10 @@ export function setAccessPassword(password: string | null): void {
   validateNewPassword(password);
   if (password === null) stmt('DELETE FROM settings WHERE key = ?').run(PASSWORD_KEY);
   else {
-    stmt(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-    ).run(PASSWORD_KEY, hashPassword(password));
+    stmt('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
+      PASSWORD_KEY,
+      hashPassword(password),
+    );
   }
   stmt('DELETE FROM auth_sessions').run();
 }
@@ -87,9 +87,8 @@ function validSession(req: Request): boolean {
   const token = cookieValue(req, SESSION_COOKIE);
   if (!token) return false;
   const tokenHash = sessionHash(token);
-  const session = stmt('SELECT expires_at FROM auth_sessions WHERE token_hash = ?').get(
-    tokenHash,
-  ) as { expires_at: number } | undefined;
+  const session = stmt('SELECT expires_at FROM auth_sessions WHERE token_hash = ?').get(tokenHash) as
+    { expires_at: number } | undefined;
   if (!session) return false;
   if (session.expires_at <= Date.now()) {
     stmt('DELETE FROM auth_sessions WHERE token_hash = ?').run(tokenHash);
@@ -131,8 +130,5 @@ export function startSession(req: Request, headers: Headers): void {
 export function clearSession(req: Request, headers: Headers): void {
   const token = cookieValue(req, SESSION_COOKIE);
   if (token) stmt('DELETE FROM auth_sessions WHERE token_hash = ?').run(sessionHash(token));
-  headers.set(
-    'set-cookie',
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${cookieSecurity(req)}`,
-  );
+  headers.set('set-cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${cookieSecurity(req)}`);
 }

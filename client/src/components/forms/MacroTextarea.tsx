@@ -1,26 +1,10 @@
-import {
-  For,
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  createUniqueId,
-  onCleanup,
-} from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId, onCleanup } from 'solid-js';
 
 export const DEFAULT_TEXTAREA_ROWS = 8;
 
 const TOKEN_RE = /\{\{[^{}]*\}\}/g;
 const BASIC_KEYS = new Set(['char', 'user']);
-const TEMPLATE_KEYS = new Set([
-  'char',
-  'user',
-  'system',
-  'personality',
-  'persona',
-  'scenario',
-  'examples',
-]);
+const TEMPLATE_KEYS = new Set(['char', 'user', 'system', 'personality', 'persona', 'scenario', 'examples']);
 
 type MacroKind = 'valid' | 'invalid' | 'cond';
 
@@ -77,12 +61,9 @@ export default function MacroTextarea(props: {
   const keys = createMemo(
     () =>
       new Set(
-        (
-          props.keys ?? [
-            ...(props.template ? TEMPLATE_KEYS : BASIC_KEYS),
-            ...(props.extraKeys ?? []),
-          ]
-        ).map((key) => key.toLowerCase()),
+        (props.keys ?? [...(props.template ? TEMPLATE_KEYS : BASIC_KEYS), ...(props.extraKeys ?? [])]).map((key) =>
+          key.toLowerCase(),
+        ),
       ),
   );
   const highlighted = createMemo(() => segments(text(), keys(), props.template === true));

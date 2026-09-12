@@ -85,10 +85,7 @@ export interface MediaJobRow {
 
 // Only live prompt text and ephemeral progress are kept in RAM. State changes
 // persist through updateMediaJob; a shutdown flushes these text buffers once.
-export const mediaLive = new Map<
-  number,
-  { prompt?: string; reasoning?: string; progress?: MediaJob['progress'] }
->();
+export const mediaLive = new Map<number, { prompt?: string; reasoning?: string; progress?: MediaJob['progress'] }>();
 export const mediaPromptBuffers = new Map<number, { prompt: string; reasoning: string }>();
 const jobListeners = new Map<number, Set<(row: MediaJobRow) => void>>();
 
@@ -125,8 +122,7 @@ export function notifyMediaJobListeners(id: number): void {
 }
 
 export function mediaJobRow(id: number): MediaJobRow | undefined {
-  return (stmt('SELECT * FROM media_jobs WHERE id = ?').get(id) ?? undefined) as unknown as
-    MediaJobRow | undefined;
+  return (stmt('SELECT * FROM media_jobs WHERE id = ?').get(id) ?? undefined) as unknown as MediaJobRow | undefined;
 }
 export function requireMediaJob(id: number, revision?: unknown): MediaJobRow {
   const row = mediaJobRow(id);
@@ -300,12 +296,7 @@ export function updateMediaJob(id: number, patch: JobPatch): MediaJobRow {
     const row = requireMediaJob(id);
     const value = entries[preset]![1];
     const chat = row.context_conversation_id !== null || row.chat_preset_id !== null;
-    entries.splice(
-      preset,
-      1,
-      ['chat_preset_id', chat ? value : null],
-      ['standalone_preset_id', chat ? null : value],
-    );
+    entries.splice(preset, 1, ['chat_preset_id', chat ? value : null], ['standalone_preset_id', chat ? null : value]);
   }
   if (entries.length > 0) {
     const assignments = entries.map(([key]) => `${key} = ?`).join(', ');

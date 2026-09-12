@@ -14,8 +14,7 @@ export function highlightMapSearch(
 ): void {
   createEffect(() => {
     const text = query().trim();
-    if (!active() || !text || !globalThis.CSS?.highlights || typeof Highlight === 'undefined')
-      return;
+    if (!active() || !text || !globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
     const container = root();
     const highlight = (sharedHighlight ??= new Highlight());
     highlightOwners++;

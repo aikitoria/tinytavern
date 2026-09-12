@@ -1,9 +1,8 @@
 import { stmt } from '../db/db.ts';
 
 export function getConversationRevision(conversationId: number): number {
-  const row = stmt('SELECT mutation_revision FROM conversations WHERE id = ?').get(
-    conversationId,
-  ) as { mutation_revision: number } | undefined;
+  const row = stmt('SELECT mutation_revision FROM conversations WHERE id = ?').get(conversationId) as
+    { mutation_revision: number } | undefined;
   return row?.mutation_revision ?? 0;
 }
 

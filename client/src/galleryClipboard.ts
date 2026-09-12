@@ -8,16 +8,8 @@ export function listenForGalleryPaste(options: {
   const onPaste = (event: ClipboardEvent) => {
     if (!options.active() || event.defaultPrevented || !event.clipboardData) return;
     const dialog = options.dialog();
-    if (
-      !dialog ||
-      dialog.getAttribute('aria-modal') !== 'true' ||
-      dialog.closest('[hidden], [inert]')
-    )
-      return;
-    if (
-      event.target instanceof HTMLElement &&
-      event.target.closest('input, textarea, select, [contenteditable]')
-    )
+    if (!dialog || dialog.getAttribute('aria-modal') !== 'true' || dialog.closest('[hidden], [inert]')) return;
+    if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable]'))
       return;
     const expectedKind = options.kind();
     const files = [...event.clipboardData.files].filter((file) => {

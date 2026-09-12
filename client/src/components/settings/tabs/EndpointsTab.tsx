@@ -64,9 +64,7 @@ export default function EndpointsTab() {
         systemPromptSuffix: endpoint?.systemPromptSuffix ?? '',
         reasoningPrefillPrefix: endpoint?.reasoningPrefillPrefix ?? '',
         reasoningEffort: endpoint?.genParams.reasoningEffort ?? '',
-        ...Object.fromEntries(
-          sampling.map(([key]) => [key, String(endpoint?.genParams[key] ?? '')]),
-        ),
+        ...Object.fromEntries(sampling.map(([key]) => [key, String(endpoint?.genParams[key] ?? '')])),
       });
     },
     data: () => {
@@ -89,8 +87,7 @@ export default function EndpointsTab() {
           .filter(([, value]) => value !== '')
           .map(([key, value]) => [key, Number(value)]),
       );
-      if (reasoningEffort)
-        genParams.reasoningEffort = reasoningEffort as GenParams['reasoningEffort'];
+      if (reasoningEffort) genParams.reasoningEffort = reasoningEffort as GenParams['reasoningEffort'];
       return {
         name,
         folderId: folderId ? Number(folderId) : null,
@@ -137,11 +134,7 @@ export default function EndpointsTab() {
       newLabel="New endpoint"
       activeId={state.settings.activeEndpointId}
     >
-      <SettingsSection
-        title="Connection"
-        id="endpoint-connection"
-        fields={['name', 'folderId', 'baseUrl', 'model']}
-      >
+      <SettingsSection title="Connection" id="endpoint-connection" fields={['name', 'folderId', 'baseUrl', 'model']}>
         <FormField field={form.fields.name} label="Name" placeholder="Local llama.cpp" />
         <EntityFolderField type="endpoints" field={form.fields.folderId} />
         <FormField
@@ -201,9 +194,7 @@ export default function EndpointsTab() {
               onChange={setModel}
               options={[
                 { value: '', label: '— endpoint default —' },
-                ...(model() && !models().includes(model())
-                  ? [{ value: model(), label: `${model()} (custom)` }]
-                  : []),
+                ...(model() && !models().includes(model()) ? [{ value: model(), label: `${model()} (custom)` }] : []),
                 ...models().map((m) => ({ value: m, label: m })),
               ]}
             />
@@ -221,8 +212,8 @@ export default function EndpointsTab() {
         fields={['systemPromptPrefix', 'systemPromptSuffix', 'reasoningPrefillPrefix']}
       >
         <p class="hint">
-          Apply to every request using this endpoint, including chats, media prompts, and background
-          tasks. Text is joined exactly as entered; include any spaces or line breaks you need.
+          Apply to every request using this endpoint, including chats, media prompts, and background tasks. Text is
+          joined exactly as entered; include any spaces or line breaks you need.
         </p>
         <FormField
           field={form.fields.systemPromptPrefix}
@@ -258,14 +249,7 @@ export default function EndpointsTab() {
           <For each={sampling}>
             {([key, label, step, min, max]) => (
               <div>
-                <FormField
-                  field={form.fields[key]}
-                  label={label}
-                  kind="number"
-                  step={step}
-                  min={min}
-                  max={max}
-                />
+                <FormField field={form.fields[key]} label={label} kind="number" step={step} min={min} max={max} />
               </div>
             )}
           </For>
@@ -299,16 +283,12 @@ export default function EndpointsTab() {
           </div>
           <div class="flex items-center gap-3 flex-wrap min-h-control [&_.setting-label]:mt-0">
             <FormField kind="check" field={form.fields.allowReasoningPrefill} label="Reasoning" />
-            <FormField
-              kind="check"
-              field={form.fields.allowMessagePrefill}
-              label="Assistant message"
-            />
+            <FormField kind="check" field={form.fields.allowMessagePrefill} label="Assistant message" />
           </div>
         </div>
         <p class="hint">
-          Choose which prefills this endpoint accepts. Disabling assistant message prefills also
-          disables Resume; /char uses the speaker handoff instruction. Disabled mode turns off both.
+          Choose which prefills this endpoint accepts. Disabling assistant message prefills also disables Resume; /char
+          uses the speaker handoff instruction. Disabled mode turns off both.
         </p>
       </SettingsSection>
     </EntityEditorPane>

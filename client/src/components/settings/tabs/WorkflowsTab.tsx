@@ -37,20 +37,8 @@ const blank = (): WorkflowItem => ({
 
 export default function WorkflowsTab() {
   const [draft, setDraft] = createSignal(blank());
-  const folderMap = createMemo(
-    () =>
-      new Map(
-        state.settings.mediaRendering.folders.flatMap((folder) =>
-          folder.workflowIds.map((id) => [id, folder.id] as const),
-        ),
-      ),
-  );
-  const items = createMemo(() =>
-    state.settings.mediaRendering.workflows.map((workflow): WorkflowItem => ({
-      ...workflow,
-      folderId: folderMap().get(workflow.id) ?? null,
-    })),
-  );
+  const items = () =>
+    state.settings.mediaRendering.workflows.map((item) => ({ ...item, folderId: item.folderId ?? null }));
   const update = settingsCollection('mediaRendering');
   const entity = mediaEntityEditor<WorkflowItem>('workflows', items);
   const editor = createEntityEditor({
@@ -85,9 +73,7 @@ export default function WorkflowsTab() {
           {
             folderId: settingsReference(() => state.settings.mediaRendering.folders),
             chatPromptPresetId: settingsReference(() => state.settings.mediaChatPrompts.presets),
-            standalonePromptPresetId: settingsReference(
-              () => state.settings.mediaStandalonePrompts.presets,
-            ),
+            standalonePromptPresetId: settingsReference(() => state.settings.mediaStandalonePrompts.presets),
             inputBindings: settingsDictionary(settingsDictionary(settingsText)),
           },
         )}
@@ -109,9 +95,7 @@ export default function WorkflowsTab() {
                   ...importWorkflowLibrary(data, { ...state.settings, mediaRendering: current }),
                 }))
                   .then(() => editor.setStatus('Workflows imported.', 'success'))
-                  .catch((err) =>
-                    editor.setStatus(String(err instanceof Error ? err.message : err)),
-                  );
+                  .catch((err) => editor.setStatus(String(err instanceof Error ? err.message : err)));
               })
             }
           />
@@ -156,10 +140,7 @@ export default function WorkflowsTab() {
             options={[{ value: '', label: 'Root' }, ...folders.options()]}
             onChange={(folderId) => setDraft((value) => ({ ...value, folderId: folderId || null }))}
           />
-          <WorkflowFields
-            workflow={draft()}
-            onChange={(fields) => setDraft((value) => ({ ...value, ...fields }))}
-          />
+          <WorkflowFields workflow={draft()} onChange={(fields) => setDraft((value) => ({ ...value, ...fields }))} />
         </SettingsSection>
       </EntityEditorPane>
     </>

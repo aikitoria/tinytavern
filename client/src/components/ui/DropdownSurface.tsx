@@ -61,9 +61,7 @@ export default function DropdownSurface(props: {
   let focusFrame = 0;
 
   const maxHeightLimit = () =>
-    typeof props.maxHeight === 'function'
-      ? props.maxHeight()
-      : (props.maxHeight ?? Number.POSITIVE_INFINITY);
+    typeof props.maxHeight === 'function' ? props.maxHeight() : (props.maxHeight ?? Number.POSITIVE_INFINITY);
 
   const reposition = (reveal = true): boolean => {
     const anchor = props.anchor();
@@ -100,16 +98,11 @@ export default function DropdownSurface(props: {
     const spaceAbove = Math.max(0, rect.top - gap - gutter);
     const spaceBelow = Math.max(0, viewportHeight - rect.bottom - gap - gutter);
     const placement = props.placement ?? 'auto';
-    const up =
-      placement === 'top' ||
-      (placement === 'auto' && measuredHeight > spaceBelow && spaceAbove > spaceBelow);
+    const up = placement === 'top' || (placement === 'auto' && measuredHeight > spaceBelow && spaceAbove > spaceBelow);
     const maxHeight = Math.max(0, Math.min(maxHeightLimit(), up ? spaceAbove : spaceBelow));
     const renderedHeight = Math.min(measuredHeight, maxHeight);
     const preferredLeft = (props.align ?? 'start') === 'end' ? anchorRight - width : anchorLeft;
-    const left = Math.min(
-      Math.max(preferredLeft, gutter),
-      Math.max(gutter, viewportWidth - gutter - width),
-    );
+    const left = Math.min(Math.max(preferredLeft, gutter), Math.max(gutter, viewportWidth - gutter - width));
     const top = up ? rect.top - gap - renderedHeight : rect.bottom + gap;
     setPosition({ left, top, width, maxHeight, up, ready: reveal });
     return true;
@@ -171,10 +164,7 @@ export default function DropdownSurface(props: {
   const onDocumentPointerDown = (event: PointerEvent) => {
     if (!props.open) return;
     const target = event.target as Node;
-    if (
-      !(props.dismissRoot?.() ?? props.anchor())?.contains(target) &&
-      !surface?.contains(target)
-    ) {
+    if (!(props.dismissRoot?.() ?? props.anchor())?.contains(target) && !surface?.contains(target)) {
       props.onClose();
     }
   };

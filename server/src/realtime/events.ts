@@ -16,10 +16,7 @@ let onConnect: ((ws: ClientSocket) => void) | undefined;
 let onSubscribe: ((ws: ClientSocket, conversationId: number) => void) | null = null;
 let onUnsubscribe: ((conversationId: number) => void) | null = null;
 
-export function bindWebSocketServer(
-  value: Server<SocketState>,
-  connected?: typeof onConnect,
-): void {
+export function bindWebSocketServer(value: Server<SocketState>, connected?: typeof onConnect): void {
   server = value;
   onConnect = connected;
 }
@@ -48,8 +45,7 @@ function removeClient(ws: ClientSocket): void {
   ws.data.closed = true;
   clients.delete(ws);
   ws.unsubscribe(GLOBAL_TOPIC);
-  for (const id of ws.data.subscriptions ?? (ws.data.sub === null ? [] : [ws.data.sub]))
-    unsubscribe(ws, id);
+  for (const id of ws.data.subscriptions ?? (ws.data.sub === null ? [] : [ws.data.sub])) unsubscribe(ws, id);
   ws.data.subscriptions?.clear();
   ws.data.sub = null;
 }
@@ -75,14 +71,8 @@ export const websocket: WebSocketHandler<SocketState> = {
     }
     if (parsed == null || typeof parsed !== 'object') return;
     const cmd = parsed as ClientCommand;
-    const ids =
-      'subs' in cmd ? cmd.subs : 'sub' in cmd ? (cmd.sub === null ? [] : [cmd.sub]) : null;
-    if (
-      !Array.isArray(ids) ||
-      ids.length > 32 ||
-      ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
-    )
-      return;
+    const ids = 'subs' in cmd ? cmd.subs : 'sub' in cmd ? (cmd.sub === null ? [] : [cmd.sub]) : null;
+    if (!Array.isArray(ids) || ids.length > 32 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) return;
     const next = new Set(ids);
     const previous = ws.data.subscriptions ?? new Set(ws.data.sub === null ? [] : [ws.data.sub]);
     for (const id of previous) if (!next.has(id)) unsubscribe(ws, id);
@@ -93,8 +83,7 @@ export const websocket: WebSocketHandler<SocketState> = {
         subscriberCounts.set(id, (subscriberCounts.get(id) ?? 0) + 1);
         ws.subscribe(topic(id));
       }
-      if (!previous.has(id) || 'sub' in cmd || ('resync' in cmd && cmd.resync === id))
-        onSubscribe?.(ws, id);
+      if (!previous.has(id) || 'sub' in cmd || ('resync' in cmd && cmd.resync === id)) onSubscribe?.(ws, id);
     }
   },
   close: removeClient,

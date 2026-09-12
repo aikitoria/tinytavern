@@ -1,4 +1,4 @@
-import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
+import { getSettings, putSettings } from '../support/settings.ts';
 import assert from 'node:assert/strict';
 import { newRequestId } from '@tinytavern/shared';
 import { databaseCase } from '../support/database.ts';
@@ -29,12 +29,8 @@ databaseCase('variations distinguish explicit defaults from inherited selections
     },
   });
   const stored = getSettings();
-  const originalWorkflowId = stored.mediaRendering.workflows.find(
-    (item) => item.name === 'original-workflow',
-  )!.id;
-  const newWorkflowId = stored.mediaRendering.workflows.find(
-    (item) => item.name === 'new-workflow',
-  )!.id;
+  const originalWorkflowId = stored.mediaRendering.workflows.find((item) => item.name === 'original-workflow')!.id;
+  const newWorkflowId = stored.mediaRendering.workflows.find((item) => item.name === 'new-workflow')!.id;
   const conversationId = conversationFixture();
   const original = createMediaJob({
     requestKey: newRequestId(),

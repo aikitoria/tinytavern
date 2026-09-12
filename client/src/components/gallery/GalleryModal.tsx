@@ -1,9 +1,5 @@
 import { useDialogNavigationGuard, useDialogPage } from '../../state/dialogContext.ts';
-import {
-  navigatePageWithGuards,
-  readPageLocation,
-  writePageLocation,
-} from '../../state/pageLocation.ts';
+import { navigatePageWithGuards, readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import {
   faArrowLeft,
   faBarsProgress,
@@ -22,27 +18,10 @@ import {
   faWrench,
 } from '@fortawesome/free-solid-svg-icons';
 import { faImages, faTrashCan } from '@fortawesome/free-regular-svg-icons';
-import {
-  For,
-  Show,
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-  untrack,
-} from 'solid-js';
+import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js';
 import type { GalleryItem } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
-import {
-  activeMediaJobCount,
-  galleryFoldersLoaded,
-  openModal,
-  setState,
-  state,
-  toast,
-} from '../../state/store.ts';
+import { activeMediaJobCount, galleryFoldersLoaded, openModal, setState, state, toast } from '../../state/store.ts';
 import { confirmDelete } from '../../state/confirm.ts';
 import {
   adjacentGalleryIndex,
@@ -53,12 +32,7 @@ import {
 } from '../../galleryModel.ts';
 import { errorMessage } from '../../util.ts';
 import { listenForGalleryPaste } from '../../galleryClipboard.ts';
-import {
-  mediaToolLinks,
-  openMediaJobs,
-  openMediaTool,
-  restorePage,
-} from '../../media/navigation.ts';
+import { mediaToolLinks, openMediaJobs, openMediaTool, restorePage } from '../../media/navigation.ts';
 import Avatar from '../ui/Avatar.tsx';
 import DropdownSurface from '../ui/DropdownSurface.tsx';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
@@ -124,17 +98,12 @@ function CharacterPicker(props: {
           <Show when={selected()} fallback={<FontAwesomeIcon icon={faImages} size={15} />}>
             {(current) => (
               <Avatar
-                src={
-                  state.characters.find((character) => character.id === current().id)
-                    ?.avatarThumbnail
-                }
+                src={state.characters.find((character) => character.id === current().id)?.avatarThumbnail}
                 name={current().name}
               />
             )}
           </Show>
-          <span class="select-label flex-1 min-w-0 text-left truncate">
-            {selected()?.name ?? 'All characters'}
-          </span>
+          <span class="select-label flex-1 min-w-0 text-left truncate">{selected()?.name ?? 'All characters'}</span>
           <FontAwesomeIcon icon={faChevronDown} size={10} />
         </button>
         <Show when={state.characters.find((character) => character.id === selected()?.id)}>
@@ -162,12 +131,7 @@ function CharacterPicker(props: {
         keyboardNavigation
         autoFocus
       >
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={props.value === 'all'}
-          onClick={() => pick('all')}
-        >
+        <button type="button" role="menuitemradio" aria-checked={props.value === 'all'} onClick={() => pick('all')}>
           <FontAwesomeIcon icon={faImages} size={16} /> <span>All characters</span>
           <span class="ml-auto text-muted text-xs tabular-nums">{props.total}</span>
         </button>
@@ -180,9 +144,7 @@ function CharacterPicker(props: {
               onClick={() => pick(option.key)}
             >
               <Avatar
-                src={
-                  state.characters.find((character) => character.id === option.id)?.avatarThumbnail
-                }
+                src={state.characters.find((character) => character.id === option.id)?.avatarThumbnail}
                 name={option.name}
               />
               <span>{option.name}</span>
@@ -207,9 +169,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
   const navigation = createSettingsNavigation();
   if (!props.picker) useDialogNavigationGuard(navigation.navigate);
   const galleryItems = () =>
-    props.picker
-      ? state.gallery.filter((item) => item.media?.kind === (props.picker?.kind ?? 'image'))
-      : state.gallery;
+    props.picker ? state.gallery.filter((item) => item.media?.kind === (props.picker?.kind ?? 'image')) : state.gallery;
   const pickerNoun = () => (props.picker?.kind === 'video' ? 'videos' : 'images');
   const [pickedIds, setPickedIds] = createSignal<number[]>(
     (props.picker?.selectedAssetIds ?? []).flatMap((assetId) => {
@@ -229,24 +189,18 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       toast(`Choose up to ${props.picker?.maximum} ${pickerNoun()}.`);
     }
   };
-  const leave = () =>
-    navigation.navigate(() => (props.picker ? props.picker.onCancel() : openModal(null)));
+  const leave = () => navigation.navigate(() => (props.picker ? props.picker.onCancel() : openModal(null)));
   const initialPage = props.picker ? null : useDialogPage()();
   const initialSize = Number(readPreference('size'));
-  const [imageSize, setImageSize] = createSignal(
-    initialSize >= 140 && initialSize <= 320 ? initialSize : 240,
-  );
-  const [showDetails, setShowDetails] = createSignal(
-    props.picker !== undefined || readPreference('details') !== '0',
-  );
+  const [imageSize, setImageSize] = createSignal(initialSize >= 140 && initialSize <= 320 ? initialSize : 240);
+  const [showDetails, setShowDetails] = createSignal(props.picker !== undefined || readPreference('details') !== '0');
   const [query, setQuery] = createSignal(initialPage?.query ?? '');
   const [search, setSearch] = createSignal(initialPage?.query ?? '');
   const [characterKey, setCharacterKey] = createSignal(initialPage?.character ?? 'all');
   const [folderKey, setFolderKey] = createSignal(String(initialPage?.galleryFolder ?? 'all'));
   let folderSelect: SelectHandle | undefined;
   let moveSelect: SelectHandle | undefined;
-  const folderId = () =>
-    folderKey() === 'all' ? undefined : folderKey() === 'root' ? null : Number(folderKey());
+  const folderId = () => (folderKey() === 'all' ? undefined : folderKey() === 'root' ? null : Number(folderKey()));
   createEffect(() => {
     setFolderKey(resolveGalleryFolder(folderKey(), state.galleryFolders, galleryFoldersLoaded()));
   });
@@ -267,15 +221,11 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
   const [selectionMode, setSelectionMode] = createSignal(false);
   const [toolsOpen, setToolsOpen] = createSignal(false);
   const [optionsOpen, setOptionsOpen] = createSignal(false);
-  const [groupedByFolder, setGroupedByFolder] = createSignal(
-    readPreference('groupByFolder') === '1',
-  );
+  const [groupedByFolder, setGroupedByFolder] = createSignal(readPreference('groupByFolder') === '1');
   let toolsButton: HTMLButtonElement | undefined;
   const [selectedIds, setSelectedIds] = createSignal<ReadonlySet<number>>(new Set<number>());
   const [bulkBusy, setBulkBusy] = createSignal(false);
-  const [uploadProgress, setUploadProgress] = createSignal<{ done: number; total: number } | null>(
-    null,
-  );
+  const [uploadProgress, setUploadProgress] = createSignal<{ done: number; total: number } | null>(null);
   const [dragging, setDragging] = createSignal(false);
   const [detailId, setDetailId] = createSignal<number | null>(initialPage?.galleryId ?? null);
   createEffect(() => {
@@ -285,8 +235,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
       modal: 'gallery',
       viewMode: readPageLocation().viewMode,
       galleryId: detailId() ?? undefined,
-      galleryFolder:
-        folderKey() === 'all' ? undefined : folderKey() === 'root' ? 'root' : Number(folderKey()),
+      galleryFolder: folderKey() === 'all' ? undefined : folderKey() === 'root' ? 'root' : Number(folderKey()),
       query: search(),
       character: characterKey(),
       sort: sort(),
@@ -312,16 +261,12 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     if (items.length !== pickedIds().length) setPickedIds(items.map((item) => item.id));
   });
   const index = createMemo(() => indexGallery(galleryItems()));
-  const matching = createMemo(() =>
-    filterGallery(index(), search(), characterKey(), sort() === 'oldest', folderId()),
-  );
+  const matching = createMemo(() => filterGallery(index(), search(), characterKey(), sort() === 'oldest', folderId()));
   const folderGroups = createMemo(() =>
     groupedByFolder() ? groupGalleryByFolder(matching(), state.galleryFolders) : undefined,
   );
   const filtered = createMemo(() => folderGroups()?.flatMap((group) => group.items) ?? matching());
-  const filteredIndex = createMemo(
-    () => new Map(filtered().map((item, index) => [item.id, index])),
-  );
+  const filteredIndex = createMemo(() => new Map(filtered().map((item, index) => [item.id, index])));
   const detailItem = () => (detailId() == null ? undefined : byId().get(detailId()!));
   const detailIndex = () => (detailId() == null ? -1 : (filteredIndex().get(detailId()!) ?? -1));
   const selectedItems = createMemo(() => filtered().filter((item) => selectedIds().has(item.id)));
@@ -392,28 +337,21 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     setSelectedIds(new Set<number>());
   });
   createEffect(() => {
-    if (
-      characterKey() !== 'all' &&
-      !characterOptions().some((option) => option.key === characterKey())
-    )
+    if (characterKey() !== 'all' && !characterOptions().some((option) => option.key === characterKey()))
       setCharacterKey('all');
   });
 
   const showDetail = (item: GalleryItem) => {
-    const moveFocus =
-      detailId() == null || document.activeElement?.closest('.gallery-detail-content');
+    const moveFocus = detailId() == null || document.activeElement?.closest('.gallery-detail-content');
     setToolsOpen(false);
     setDetailId(item.id);
-    if (
-      window.matchMedia('(max-width: 767px), (pointer: coarse) and (max-width: 1024px)').matches
-    ) {
+    if (window.matchMedia('(max-width: 767px), (pointer: coarse) and (max-width: 1024px)').matches) {
       const modal = backButton?.closest<HTMLElement>('.gallery-modal');
       if (modal) modal.scrollTop = 0;
     }
     lastDetailIndex = filteredIndex().get(item.id) ?? 0;
     cancelAnimationFrame(focusFrame);
-    if (moveFocus)
-      focusFrame = requestAnimationFrame(() => backButton?.focus({ preventScroll: true }));
+    if (moveFocus) focusFrame = requestAnimationFrame(() => backButton?.focus({ preventScroll: true }));
   };
   const hideDetail = () => {
     setDetailId(null);
@@ -444,14 +382,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
     if (props.active === false) {
       return;
     }
-    if (
-      !detailItem() ||
-      event.defaultPrevented ||
-      event.isComposing ||
-      event.altKey ||
-      event.ctrlKey ||
-      event.metaKey
-    )
+    if (!detailItem() || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey)
       return;
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (
@@ -533,10 +464,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
         setSelectedIds(new Set<number>());
         setSelectionMode(false);
       });
-      toast(
-        `Deleted ${result.deleted} saved ${result.deleted === 1 ? 'item' : 'items'}.`,
-        'success',
-      );
+      toast(`Deleted ${result.deleted} saved ${result.deleted === 1 ? 'item' : 'items'}.`, 'success');
     } catch (err) {
       toast(errorMessage(err));
     } finally {
@@ -640,9 +568,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                     { value: 'root', label: 'Unfiled' },
                     ...folders
                       .options()
-                      .map((option) =>
-                        props.picker ? { value: option.value, label: option.label } : option,
-                      ),
+                      .map((option) => (props.picker ? { value: option.value, label: option.label } : option)),
                   ]}
                   onChange={(value) => {
                     if (folderSelect) folderSelect.value = folderKey();
@@ -709,9 +635,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                   {(item) => (
                     <button
                       aria-label={
-                        pickedIds().includes(item().id)
-                          ? 'Remove selection'
-                          : `Select ${props.picker?.kind ?? 'image'}`
+                        pickedIds().includes(item().id) ? 'Remove selection' : `Select ${props.picker?.kind ?? 'image'}`
                       }
                       onClick={() => togglePicked(item().id)}
                     >
@@ -784,10 +708,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                         </>
                       }
                     >
-                      <span
-                        class="whitespace-nowrap text-dim text-caption tabular-nums"
-                        aria-live="polite"
-                      >
+                      <span class="whitespace-nowrap text-dim text-caption tabular-nums" aria-live="polite">
                         {selectedItems().length}
                         <span class="gallery-action-label"> selected</span>
                       </span>
@@ -797,17 +718,11 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                         aria-label={allSelected() ? 'Clear selection' : 'Select all'}
                         disabled={bulkBusy() || !filtered().length}
                         onClick={() =>
-                          setSelectedIds(
-                            allSelected()
-                              ? new Set<number>()
-                              : new Set(filtered().map((item) => item.id)),
-                          )
+                          setSelectedIds(allSelected() ? new Set<number>() : new Set(filtered().map((item) => item.id)))
                         }
                       >
                         <FontAwesomeIcon icon={faCheckDouble} size={14} />
-                        <span class="gallery-action-label">
-                          {allSelected() ? 'Clear selection' : 'Select all'}
-                        </span>
+                        <span class="gallery-action-label">{allSelected() ? 'Clear selection' : 'Select all'}</span>
                       </button>
                       <button
                         type="button"
@@ -827,9 +742,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
                   }
                 >
                   <span class="whitespace-nowrap text-dim text-caption tabular-nums">
-                    {detailIndex() >= 0
-                      ? `${detailIndex() + 1} / ${filtered().length}`
-                      : 'Saved image'}
+                    {detailIndex() >= 0 ? `${detailIndex() + 1} / ${filtered().length}` : 'Saved image'}
                   </span>
                   <div class="flex gap-1">
                     <button
@@ -991,13 +904,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             items={filtered()}
             groups={folderGroups()}
             targetHeight={imageSize()}
-            resetKey={JSON.stringify([
-              search(),
-              characterKey(),
-              sort(),
-              folderKey(),
-              groupedByFolder(),
-            ])}
+            resetKey={JSON.stringify([search(), characterKey(), sort(), folderKey(), groupedByFolder()])}
             hidden={detailItem() != null || filtered().length === 0}
             active={props.active}
             selecting={props.picker !== undefined || selectionMode()}
@@ -1011,9 +918,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             <div class="flex items-center justify-center flex-col gap-2 flex-1 p-4 text-dim text-center text-sm [&>svg]:mb-2 [&>svg]:text-muted [&_strong]:text-foreground [&_strong]:text-lg">
               <FontAwesomeIcon icon={faImages} size={34} />
               <strong>
-                {state.gallery.length
-                  ? `No matching ${props.picker ? pickerNoun() : 'media'}`
-                  : 'No saved media yet'}
+                {state.gallery.length ? `No matching ${props.picker ? pickerNoun() : 'media'}` : 'No saved media yet'}
               </strong>
               <span>
                 {state.gallery.length
@@ -1031,10 +936,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
           </Show>
           <Show when={detailItem() && detailId()} keyed>
             {(id) => (
-              <div
-                id="gallery-detail-content"
-                class="gallery-detail-content flex flex-1 min-h-0 mobile:block"
-              >
+              <div id="gallery-detail-content" class="gallery-detail-content flex flex-1 min-h-0 mobile:block">
                 <GalleryDetail
                   readOnly={props.picker !== undefined}
                   active={props.active}
@@ -1103,9 +1005,7 @@ export default function GalleryModal(props: { picker?: GalleryPickerOptions; act
             <Show when={!props.picker}>
               <div class="flex gap-2 items-center border-t border-t-solid border-t-subtle pt-3">
                 <folders.NewButton disabled={bulkBusy()} />
-                <Show
-                  when={state.galleryFolders.find((folder) => String(folder.id) === folderKey())}
-                >
+                <Show when={state.galleryFolders.find((folder) => String(folder.id) === folderKey())}>
                   {(folder) => (
                     <button
                       class="icon-btn"

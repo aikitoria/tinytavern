@@ -1,52 +1,72 @@
-import type { Settings } from '@tinytavern/shared';
-import { DEFAULT_SETTINGS } from '@tinytavern/shared';
+import type { Settings, SettingsPreferences, MediaSettingsCollections } from '@tinytavern/shared';
+import { DEFAULT_SETTINGS, settingsPreferences, composeSettings, copySettingsData } from '@tinytavern/shared';
 import { stmt, transaction } from '../db/db.ts';
-import { readMediaLibraries, writeMediaLibraries, scalarSettings } from './mediaEntities.ts';
+import { scalarSettings } from './mediaEntities.ts';
+import { mediaLibraryVersions, mediaLibraryCollections, clearMediaLibraryCache } from './mediaLibrarySnapshot.ts';
 import { isPasswordConfigured } from '../http/auth.ts';
 
 let cachedSource: string | undefined;
-let cachedSettings: Settings | undefined;
+let cachedPreferences: SettingsPreferences | undefined;
+
+/** Explicit invalidation also covers rolled-back transactions and restored test fixtures. */
 export function invalidateSettingsCache(): void {
   cachedSource = undefined;
-}
-// Copy mutable metadata while sharing immutable graph/prompt strings. Never stringify the library.
-function copy<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(copy) as T;
-  if (value && typeof value === 'object')
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, copy(item)])) as T;
-  return value;
+  clearMediaLibraryCache();
 }
 
+/** Resolve native selections over stored preferences, or an explicit import baseline. */
+export function getSettingsPreferences(base?: SettingsPreferences): SettingsPreferences {
+  if (!base) {
+    const source = String(stmt("SELECT value FROM settings WHERE key = 'app'").get()?.value ?? '{}');
+    if (cachedSource !== source || !cachedPreferences) {
+      const stored = JSON.parse(source) as Record<string, unknown>;
+      const defaults = settingsPreferences(DEFAULT_SETTINGS);
+      const preferences = { ...defaults } as Record<string, unknown>;
+      for (const key of Object.keys(defaults)) {
+        if (key in stored) preferences[key] = stored[key];
+      }
+      cachedPreferences = preferences as SettingsPreferences;
+      cachedSource = source;
+    }
+    base = cachedPreferences!;
+  }
+  const result = copySettingsData(base);
+  const selected = stmt('SELECT * FROM media_selections WHERE id = 1').get()!;
+  const id = (value: unknown) => (value == null ? null : String(value));
+  result.mediaRendering.defaultWorkflowId = id(selected.default_workflow_id);
+  result.mediaRendering.avatarWorkflowId = id(selected.avatar_workflow_id);
+  result.mediaRendering.descriptionWorkflowId = id(selected.description_workflow_id);
+  result.mediaChatPrompts = { defaultPresetId: id(selected.chat_prompt_id) };
+  result.mediaStandalonePrompts = { defaultPresetId: id(selected.standalone_prompt_id) };
+  result.imageGeneration.avatarPromptId = id(selected.avatar_prompt_id);
+  result.hasPassword = isPasswordConfigured();
+  return result;
+}
+
+/** Full projection for existing server readers and explicit import/export responses. */
 export function getSettings(): Settings {
-  const row = stmt('SELECT value FROM settings WHERE key = ?').get('app') as
-    { value: string } | undefined;
-  if (!row) return { ...DEFAULT_SETTINGS };
-  if (cachedSource === row.value && cachedSettings) {
-    const result = copy(cachedSettings);
-    result.hasPassword = isPasswordConfigured();
-    return result;
-  }
-  // Drop obsolete keys so they cannot leak into the API or future saves.
-  const stored = JSON.parse(row.value) as Record<string, unknown>;
-  const settings = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
-  for (const key of Object.keys(settings)) {
-    if (key in stored) settings[key] = stored[key];
-  }
-  settings.hasPassword = isPasswordConfigured();
-  const result = settings as unknown as Settings;
-  readMediaLibraries(result);
-  cachedSource = row.value;
-  cachedSettings = result;
-  return copy(result);
+  return composeSettings(
+    getSettingsPreferences(),
+    mediaLibraryCollections(mediaLibraryVersions()) as MediaSettingsCollections,
+  );
 }
 
-export function putSettings(settings: Settings): void {
+export function putSettings(settings: SettingsPreferences): void {
   transaction(() => {
-    writeMediaLibraries(settings);
-    readMediaLibraries(settings);
     stmt(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-    ).run('app', scalarSettings(settings));
+      `UPDATE media_selections SET default_workflow_id = ?, avatar_workflow_id = ?, description_workflow_id = ?, chat_prompt_id = ?, standalone_prompt_id = ?, avatar_prompt_id = ? WHERE id = 1`,
+    ).run(
+      settings.mediaRendering.defaultWorkflowId,
+      settings.mediaRendering.avatarWorkflowId,
+      settings.mediaRendering.descriptionWorkflowId,
+      settings.mediaChatPrompts.defaultPresetId,
+      settings.mediaStandalonePrompts.defaultPresetId,
+      settings.imageGeneration.avatarPromptId,
+    );
+    stmt('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
+      'app',
+      scalarSettings(settings),
+    );
   });
   cachedSource = undefined;
 }
@@ -68,7 +88,7 @@ export const SETTINGS_REFERENCE_TABLES = {
 export type SettingsReferenceKey = keyof typeof SETTINGS_REFERENCE_TABLES;
 
 export function clearSettingReference(key: SettingsReferenceKey, id: number): boolean {
-  const settings = getSettings();
+  const settings = getSettingsPreferences();
   if (settings[key] !== id) return false;
   putSettings({ ...settings, [key]: null, revision: settings.revision + 1 });
   return true;

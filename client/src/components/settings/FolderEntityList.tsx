@@ -78,10 +78,7 @@ export function createFolderActions<F extends { id: number | string; name: strin
             if (!saving()) setDialog(null);
           }}
         >
-          <form
-            class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2"
-            onSubmit={save}
-          >
+          <form class="form [&_label]:text-label [&_label]:text-foreground [&_label]:mt-2" onSubmit={save}>
             <SettingLabel field={field} for="folder-name">
               Folder name
             </SettingLabel>
@@ -234,9 +231,7 @@ export function createFolderBrowser<
                 <div class="ml-3.5 pl-3 border-l border-l-solid border-l-subtle flex flex-col gap-0.5 min-w-0">
                   <For each={members(folder.id)}>{(item) => <Entry item={item} />}</For>
                   <Show when={!groups().search && members(folder.id).length === 0}>
-                    <span class="px-2 min-h-control flex items-center text-muted text-xs">
-                      Empty folder
-                    </span>
+                    <span class="px-2 min-h-control flex items-center text-muted text-xs">Empty folder</span>
                   </Show>
                 </div>
               </Show>

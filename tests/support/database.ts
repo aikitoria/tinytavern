@@ -6,8 +6,7 @@ import { requireTestIsolation } from './isolation.ts';
 import { invalidateSettingsCache } from '../../server/src/settings/settingsStore.ts';
 
 requireTestIsolation();
-const { db, stmt, transaction, invalidateMediaAsset, DATA_DIR } =
-  await import('../../server/src/db/db.ts');
+const { db, stmt, transaction, invalidateMediaAsset, DATA_DIR } = await import('../../server/src/db/db.ts');
 const tables = stmt('PRAGMA table_list')
   .all()
   .filter((row) => row.schema === 'main' && row.type === 'table' && row.name !== 'sqlite_schema')
@@ -21,8 +20,7 @@ let used = false;
 /** Reuse this suite's schema/connection; only fixture rows and files are reset between cases. */
 function reset(): void {
   assert.equal(db.inTransaction, false, 'A case must finish its transactions');
-  for (const row of stmt('SELECT path FROM media_assets').all())
-    invalidateMediaAsset(String(row.path));
+  for (const row of stmt('SELECT path FROM media_assets').all()) invalidateMediaAsset(String(row.path));
   db.exec('PRAGMA foreign_keys = OFF');
   try {
     transaction(() => {
@@ -36,8 +34,7 @@ function reset(): void {
         }
       }
       stmt('DELETE FROM sqlite_sequence').run();
-      for (const row of sequences)
-        stmt('INSERT INTO sqlite_sequence(name,seq) VALUES (?,?)').run(row.name!, row.seq!);
+      for (const row of sequences) stmt('INSERT INTO sqlite_sequence(name,seq) VALUES (?,?)').run(row.name!, row.seq!);
     });
   } finally {
     db.exec('PRAGMA foreign_keys = ON');

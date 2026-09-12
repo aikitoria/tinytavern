@@ -1,9 +1,4 @@
-import {
-  messagePrefillEnabled,
-  reasoningPrefillEnabled,
-  type Endpoint,
-  type GenParams,
-} from '@tinytavern/shared';
+import { messagePrefillEnabled, reasoningPrefillEnabled, type Endpoint, type GenParams } from '@tinytavern/shared';
 import type { ChatMessage } from './prompt.ts';
 
 export interface CompletionOptions {
@@ -44,10 +39,7 @@ export function endpointReasoningPrefill(
 }
 
 /** Shared parameter mapping for foreground chat and standalone prompt tasks. */
-export function generationParameters(
-  params: GenParams,
-  fallbackMaxTokens?: number,
-): Record<string, unknown> {
+export function generationParameters(params: GenParams, fallbackMaxTokens?: number): Record<string, unknown> {
   const maxTokens = params.maxTokens ?? fallbackMaxTokens;
   return {
     ...(params.temperature != null ? { temperature: params.temperature } : {}),

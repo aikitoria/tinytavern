@@ -18,7 +18,7 @@ import {
   type ImageGenerationSettings,
 } from '@tinytavern/shared';
 import { stmt, toCharacter, toPersona, toPreset, toTemplate } from '../db/db.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { HttpError } from '../http/router.ts';
 
 export type ChatMessage = PromptMessage;
@@ -26,29 +26,25 @@ export { appendChatMessage };
 
 export function getCharacter(id: number | null): Character | null {
   if (id == null) return null;
-  const row = stmt('SELECT * FROM characters WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM characters WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? toCharacter(row) : null;
 }
 
 export function getPersona(id: number | null): Persona | null {
   if (id == null) return null;
-  const row = stmt('SELECT * FROM personas WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM personas WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? toPersona(row) : null;
 }
 
 function getPresetContent(id: number | null): string | null {
   if (id == null) return null;
-  const row = stmt('SELECT * FROM presets WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM presets WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? toPreset(row).content : null;
 }
 
 function getTemplate(id: number | null): Template | null {
   if (id == null) return null;
-  const row = stmt('SELECT * FROM templates WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM templates WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? toTemplate(row) : null;
 }
 
@@ -57,7 +53,7 @@ function resolveTemplate(character: Character | null): CustomTemplate | null {
   return (
     character?.customTemplate ??
     getTemplate(character?.templateId ?? null) ??
-    getTemplate(getSettings().defaultTemplateId)
+    getTemplate(getSettingsPreferences().defaultTemplateId)
   );
 }
 
@@ -90,8 +86,7 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
 /** Expand conditions before values, preserving whitespace and literal macros inside values. */
 export function expandTemplate(template: string, vars: Record<string, string>): string {
   // Resolve nested blocks innermost-first; exclude Object.prototype members from slots.
-  const lookup = (key: string): string | undefined =>
-    Object.hasOwn(vars, key) ? vars[key] : undefined;
+  const lookup = (key: string): string | undefined => (Object.hasOwn(vars, key) ? vars[key] : undefined);
   let out = template;
   for (let prev; prev !== out;) {
     prev = out;
@@ -100,10 +95,7 @@ export function expandTemplate(template: string, vars: Record<string, string>): 
       (_, key: string, body: string) => (lookup(key.toLowerCase())?.trim() ? body : ''),
     );
   }
-  out = out.replaceAll(
-    /\{\{([a-z][a-z0-9_]*)\}\}/gi,
-    (match, key: string) => lookup(key.toLowerCase()) ?? match,
-  );
+  out = out.replaceAll(/\{\{([a-z][a-z0-9_]*)\}\}/gi, (match, key: string) => lookup(key.toLowerCase()) ?? match);
   return out;
 }
 
@@ -134,9 +126,7 @@ function buildContextMessages(context: ConversationPromptContext, history: Messa
     appendChatMessage(messages, {
       role: message.role,
       content: message.content,
-      ...(message.role === 'assistant' && message.reasoning
-        ? { reasoning_content: message.reasoning }
-        : {}),
+      ...(message.role === 'assistant' && message.reasoning ? { reasoning_content: message.reasoning } : {}),
     });
     const turn = messages.at(-1)!;
     const ids = sources.get(turn) ?? [];
@@ -166,7 +156,7 @@ export function buildChatMessages(
   )?.prompt_context_json;
   if (captured) return buildContextMessages(JSON.parse(String(captured)), history);
   const character = getCharacter(conversation.characterId);
-  const settings = getSettings();
+  const settings = getSettingsPreferences();
   const template = resolveTemplate(character);
 
   const usesPersonas = template?.usesPersonas ?? true;
@@ -193,19 +183,13 @@ export function buildChatMessages(
   const prologueSource = template?.userPrologue ?? '';
   const prologue = prologueSource.trim() ? renderTemplate(prologueSource, vars) : '';
   const reasoningPrefillSource = template?.reasoningPrefill ?? '';
-  const reasoningPrefill = reasoningPrefillSource.trim()
-    ? renderTemplate(reasoningPrefillSource, vars)
-    : '';
+  const reasoningPrefill = reasoningPrefillSource.trim() ? renderTemplate(reasoningPrefillSource, vars) : '';
   const messagePrefillSource = template?.messagePrefill ?? '';
-  const messagePrefill = messagePrefillSource.trim()
-    ? renderTemplate(messagePrefillSource, vars)
-    : '';
+  const messagePrefill = messagePrefillSource.trim() ? renderTemplate(messagePrefillSource, vars) : '';
 
   const prefixNames = template?.prefixNames ?? false;
-  const speakerFor = (msg: Message) =>
-    msg.role === 'user' ? userName : msg.name?.trim() || charName;
-  const handoff = (speaker: string) =>
-    expandPromptSlots(template?.speakerHandoffTemplate ?? '', { speaker });
+  const speakerFor = (msg: Message) => (msg.role === 'user' ? userName : msg.name?.trim() || charName);
+  const handoff = (speaker: string) => expandPromptSlots(template?.speakerHandoffTemplate ?? '', { speaker });
   let previousSpeaker = charName;
 
   const messages: ChatMessage[] = [];
@@ -224,9 +208,7 @@ export function buildChatMessages(
       if (speaker !== previousSpeaker) appendSpeakerHandoff(messages, handoff(speaker));
       previousSpeaker = speaker;
     }
-    const content = prefixNames
-      ? `${speaker}: ${trimmedContent}`
-      : trimmedContent || '(No visible response)';
+    const content = prefixNames ? `${speaker}: ${trimmedContent}` : trimmedContent || '(No visible response)';
     appendChatMessage(messages, {
       role: msg.role,
       content,
@@ -259,11 +241,7 @@ export function withDisabledPrefillSpeakerNote(built: BuiltPrompt): ChatMessage[
 }
 
 /** Tool prompts retain chat context and reasoning prefill, but omit character reply prefills. */
-export function buildToolPrompt(
-  conversation: Conversation,
-  history: Message[],
-  prompt: string,
-): BuiltPrompt {
+export function buildToolPrompt(conversation: Conversation, history: Message[], prompt: string): BuiltPrompt {
   const built = buildChatMessages(conversation, history);
   appendChatMessage(built.messages, {
     role: 'user',
@@ -302,20 +280,12 @@ export function appendImagePromptRevisionTask(
     'promptRevisionTemplate' | 'promptRevisionContext' | 'promptRevisionOriginal'
   >,
 ): void {
-  const originalBlock = expandImageRevisionTemplate(
-    settings.promptRevisionOriginal,
-    original,
-    instruction,
-  );
+  const originalBlock = expandImageRevisionTemplate(settings.promptRevisionOriginal, original, instruction);
   // Replay the original prompt's reasoning as an assistant turn; bridge for strict alternation.
   if (messages.at(-1)?.role !== 'user' && settings.promptRevisionContext.trim()) {
     appendChatMessage(messages, {
       role: 'user',
-      content: expandImageRevisionTemplate(
-        systemNote(settings.promptRevisionContext),
-        original,
-        instruction,
-      ),
+      content: expandImageRevisionTemplate(systemNote(settings.promptRevisionContext), original, instruction),
     });
   }
   appendChatMessage(messages, {
@@ -326,19 +296,11 @@ export function appendImagePromptRevisionTask(
   appendChatMessage(messages, {
     role: 'user',
     // One pass keeps macro-looking text inside the user's input literal.
-    content: expandImageRevisionTemplate(
-      systemNote(settings.promptRevisionTemplate),
-      original,
-      instruction,
-    ),
+    content: expandImageRevisionTemplate(systemNote(settings.promptRevisionTemplate), original, instruction),
   });
 }
 
-function expandImageRevisionTemplate(
-  template: string,
-  original: string,
-  instruction: string,
-): string {
+function expandImageRevisionTemplate(template: string, original: string, instruction: string): string {
   return template.replace(/\{\{(instruction|prompt)\}\}/gi, (_, key: string) =>
     key.toLowerCase() === 'instruction' ? instruction.trim() : original.trim(),
   );
@@ -358,7 +320,7 @@ export function buildSteeredToolPrompt(
     original,
     originalReasoning,
     instruction,
-    getSettings().imageGeneration,
+    getSettingsPreferences().imageGeneration,
   );
   return {
     ...built,

@@ -1,45 +1,49 @@
-interface StreamScrollArea {
-  isConnected: boolean;
-  scrollTop: number;
-  scrollHeight: number;
-  clientHeight: number;
-}
+import { createChatScroll, createScrollFrame, type ScrollArea } from './chatScroll.ts';
 
-/** Follow streamed text at most once per frame, without fighting manual scrolling. */
+/** Textareas infer manual scrolling; rendered chat uses explicit input intent. */
 export function createStreamScroll(
-  element: () => StreamScrollArea | undefined,
+  element: () => (ScrollArea & { isConnected: boolean }) | undefined,
   schedule: (callback: () => void) => number,
   cancel: (frame: number) => void,
 ) {
+  const area: ScrollArea = {
+    get scrollTop() {
+      return element()?.scrollTop ?? 0;
+    },
+    set scrollTop(value) {
+      const current = element();
+      if (current) current.scrollTop = value;
+    },
+    get scrollHeight() {
+      return element()?.scrollHeight ?? 0;
+    },
+    get clientHeight() {
+      return element()?.clientHeight ?? 0;
+    },
+  };
+  const scroll = createChatScroll(area, 24, true);
   let stream: string | number | null = null;
   let visible = false;
-  let follow = true;
-  let frame: number | undefined;
-  const stop = () => {
-    if (frame !== undefined) cancel(frame);
-    frame = undefined;
-  };
+  const frame = createScrollFrame(
+    () => {
+      if (element()?.isConnected) scroll.follow();
+    },
+    () => visible && scroll.following(),
+    schedule,
+    cancel,
+  );
   return {
     update(nextStream: string | number | null, nextVisible: boolean) {
       const ended = stream !== null && nextStream === null;
-      if (nextStream !== null && nextStream !== stream) follow = true;
+      if (nextStream !== null && nextStream !== stream) scroll.reset();
       stream = nextStream;
       visible = nextVisible;
-      if (!visible) {
-        stop();
-        return;
-      }
-      if ((!stream && !ended) || !follow || frame !== undefined) return;
-      frame = schedule(() => {
-        frame = undefined;
-        const area = element();
-        if (visible && follow && area?.isConnected) area.scrollTop = area.scrollHeight;
-      });
+      if (!visible) frame.dispose();
+      else if (stream !== null || ended) frame.update();
     },
     onScroll() {
-      const area = element();
-      if (visible && area) follow = area.scrollHeight - area.scrollTop - area.clientHeight < 24;
+      if (visible && element()) scroll.onScroll();
     },
-    dispose: stop,
+    dispose: frame.dispose,
   };
 }

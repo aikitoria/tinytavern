@@ -5,8 +5,7 @@ import type { GalleryDetails } from '../../client/src/components/gallery/gallery
 test('gallery detail drafts survive cancelled navigation and failed saves', async () => {
   const { createRoot } = await import('solid-js');
   const { createSettingsNavigation } = await import('../../client/src/state/settingsSubmission.ts');
-  const { createGalleryDetailEditor } =
-    await import('../../client/src/components/gallery/galleryDetailEditor.ts');
+  const { createGalleryDetailEditor } = await import('../../client/src/components/gallery/galleryDetailEditor.ts');
   let saved = { prompt: 'Original prompt', characterIds: [1], folderId: 7 as number | null };
   let fail = false;
   let error = '';
@@ -85,8 +84,7 @@ test('gallery detail drafts survive cancelled navigation and failed saves', asyn
 
 test('gallery detail keeps the newer snapshot when a save response arrives late', async () => {
   const { createRoot, createSignal } = await import('solid-js');
-  const { createGalleryDetailEditor } =
-    await import('../../client/src/components/gallery/galleryDetailEditor.ts');
+  const { createGalleryDetailEditor } = await import('../../client/src/components/gallery/galleryDetailEditor.ts');
   const original = { prompt: 'Original', characterIds: [], folderId: 1 };
   let finish!: (value: GalleryDetails) => void;
   let dispose!: () => void;
@@ -122,19 +120,10 @@ test('gallery detail keeps the newer snapshot when a save response arrives late'
 });
 
 test('folder browsing recovers missing folders and retains neighbors after a move', async () => {
-  const { adjacentGalleryIndex, resolveGalleryFolder } =
-    await import('../../client/src/galleryModel.ts');
-  assert.equal(
-    resolveGalleryFolder('7', [], false),
-    '7',
-    'Loading must not discard a restored folder',
-  );
+  const { adjacentGalleryIndex, resolveGalleryFolder } = await import('../../client/src/galleryModel.ts');
+  assert.equal(resolveGalleryFolder('7', [], false), '7', 'Loading must not discard a restored folder');
   assert.equal(resolveGalleryFolder('7', [{ id: 7 }], true), '7');
-  assert.equal(
-    resolveGalleryFolder('7', [], true),
-    'root',
-    'An already deleted folder restores to Unfiled',
-  );
+  assert.equal(resolveGalleryFolder('7', [], true), 'root', 'An already deleted folder restores to Unfiled');
   assert.equal(resolveGalleryFolder('all', [], true), 'all');
   assert.equal(resolveGalleryFolder('root', [], true), 'root');
   for (const [position, previous, count, left, right] of [
@@ -193,14 +182,8 @@ function scrollArea(clientHeight: number, scrollHeight: number) {
 
 test('gallery layout', async () => {
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
-  const {
-    filterGallery,
-    indexGallery,
-    layoutGallery,
-    visibleGalleryRows,
-    groupGalleryByFolder,
-    layoutGalleryFolders,
-  } = await import('../../client/src/galleryModel.ts');
+  const { filterGallery, indexGallery, layoutGallery, visibleGalleryRows, groupGalleryByFolder, layoutGalleryFolders } =
+    await import('../../client/src/galleryModel.ts');
 
   const items: GalleryItem[] = Array.from({ length: 5000 }, (_, index) => ({
     folderId: index % 3 === 0 ? 1 : null,
@@ -211,9 +194,19 @@ test('gallery layout', async () => {
     sourceConversationId: null,
     sourceImage: null,
     prompt: index % 3 ? 'Blue forest at night' : 'Warm sunlight',
-    image: `/images/${index}.png`,
-    imageWidth: [600, 1200, 1000, 2000][index % 4]!,
-    imageHeight: 1000,
+    media: {
+      id: index + 1,
+      kind: 'image',
+      mime: 'image/png',
+      url: `/images/${index}.png`,
+      width: [600, 1200, 1000, 2000][index % 4]!,
+      height: 1000,
+      duration: null,
+      byteSize: null,
+      thumbnail: null,
+      thumbnailRevision: 0,
+      recipeId: null,
+    },
     createdAt: index,
     updatedAt: index,
   }));
@@ -230,22 +223,15 @@ test('gallery layout', async () => {
         let right = -8;
         for (const cell of row.cells) {
           assert(Math.abs(cell.left - (right + 8)) < 1e-7);
-          assert(
-            Math.abs(cell.width / row.height - cell.item.imageWidth! / cell.item.imageHeight!) <
-              1e-7,
-          );
+          assert(Math.abs(cell.width / row.height - cell.item.media.width! / cell.item.media.height!) < 1e-7);
           assert.equal(layout.rowById.get(cell.item.id), index);
           right = cell.left + cell.width;
         }
         assert(right <= width + 1e-7, 'No row overflows the viewport');
-        if (index < layout.rows.length - 1)
-          assert(Math.abs(right - width) < 1e-7, 'Complete rows fill the width');
+        if (index < layout.rows.length - 1) assert(Math.abs(right - width) < 1e-7, 'Complete rows fill the width');
       }
       const visible = visibleGalleryRows(layout.rows, 20000, 700);
-      assert(
-        visible.end - visible.start < 35,
-        'DOM work remains bounded independently of collection size',
-      );
+      assert(visible.end - visible.start < 35, 'DOM work remains bounded independently of collection size');
       assert(layout.rows[visible.start]!.top <= 20000);
       assert(Math.abs(layout.height - end) < 1e-7);
     }
@@ -275,11 +261,7 @@ test('gallery layout', async () => {
     const folderId = row.cells[0]!.item.folderId;
     for (const cell of row.cells) {
       assert.equal(cell.item.folderId, folderId, 'Rows never mix folders');
-      assert.equal(
-        groupedItems[cell.index]!.id,
-        cell.item.id,
-        'Keyboard indices match grouped detail navigation',
-      );
+      assert.equal(groupedItems[cell.index]!.id, cell.item.id, 'Keyboard indices match grouped detail navigation');
       assert.equal(grouped.rows[grouped.rowById.get(cell.item.id)!], row);
     }
     const heading = grouped.headings.find((heading) => heading.id === folderId)!;
@@ -287,37 +269,24 @@ test('gallery layout', async () => {
   }
   assert.equal(grouped.height, previousBottom);
   const groupedVisible = visibleGalleryRows(grouped.rows, 20000, 700);
-  assert(
-    groupedVisible.end - groupedVisible.start < 35,
-    'Grouping retains bounded viewport rendering',
-  );
+  assert(groupedVisible.end - groupedVisible.start < 35, 'Grouping retains bounded viewport rendering');
   const heading = grouped.headings[1]!;
   const headingVisible = visibleGalleryRows(grouped.headings, heading.top, heading.height, 0);
-  assert.equal(
-    headingVisible.start,
-    1,
-    'Folder separators are culled independently from image rows',
-  );
+  assert.equal(headingVisible.start, 1, 'Folder separators are culled independently from image rows');
   assert(
     layoutGallery(
-      items.slice(0, 100).map((item) => ({ ...item, imageWidth: 1, imageHeight: 100000 })),
+      items.slice(0, 100).map((item) => ({ ...item, media: { ...item.media, width: 1, height: 100000 } })),
       320,
       240,
     ).rows.every((row) => row.height > 0),
     'Extreme portrait dimensions never produce zero-height rows',
   );
-  assert.equal(
-    layoutGallery(items.slice(0, 1), 1920, 240).rows[0]!.height,
-    240,
-    'Sparse final rows do not balloon',
-  );
+  assert.equal(layoutGallery(items.slice(0, 1), 1920, 240).rows[0]!.height, 240, 'Sparse final rows do not balloon');
   const index = indexGallery(items);
   const filtered = filterGallery(index, 'NIGHT blue', 'id:7', true);
   assert(
     filtered.every(
-      (item) =>
-        item.characters.some((character) => character.id === 7) &&
-        item.prompt === 'Blue forest at night',
+      (item) => item.characters.some((character) => character.id === 7) && item.prompt === 'Blue forest at night',
     ),
   );
   assert(filtered[0]!.id < filtered[1]!.id);
@@ -349,16 +318,10 @@ test('media job cards', async () => {
   const { compileMediaWorkflow } = await import('@tinytavern/shared');
   type MediaJob = import('@tinytavern/shared').MediaJob;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
-  const {
-    groupMediaJobs,
-    jobPromptExcerpt,
-    mediaJobPreviews,
-    mediaVariations,
-    mediaVariationIndex,
-  } = await import('../../client/src/media/jobCards.ts');
+  const { groupMediaJobs, jobPromptExcerpt, mediaJobPreviews, mediaVariations, mediaVariationIndex, compareMediaJobs } =
+    await import('../../client/src/media/jobCards.ts');
 
-  const { createMediaWorkflowControls, mediaWorkflowView } =
-    await import('../../client/src/media/workflowDefaults.ts');
+  const { createMediaWorkflowControls, mediaWorkflowView } = await import('../../client/src/media/workflowDefaults.ts');
   const { createRoot, createSignal } = await import('solid-js');
 
   function job(id: number, overrides: Partial<MediaJob> = {}): MediaJob {
@@ -406,33 +369,23 @@ test('media job cards', async () => {
   const newer = job(2, { draft, createdAt: 3 });
   const complete = job(3, { draft, state: 'succeeded' });
   const standalone = job(4, { createdAt: 4 });
-  let groups = groupMediaJobs([
-    complete,
-    newer,
-    standalone,
-    running,
-    job(5, { temporary: true, createdAt: 10 }),
-  ]);
+  let groups = groupMediaJobs([complete, newer, standalone, running, job(5, { temporary: true, createdAt: 10 })]);
   assert.deepEqual(
     groups.map((group) => group.id),
     [4, -4],
   );
   assert.equal(groups[1]!.job.id, 1, 'An older active variation remains visible');
-  assert.equal(groups[1]!.jobs.length, 3, 'All variations remain available to the card');
+  assert.deepEqual(
+    groups[1]!.jobs.map((job) => job.id),
+    [complete.id, running.id, newer.id],
+    'The group orders variations once for its consumers',
+  );
   const asset = { id: 42 } as import('@tinytavern/shared').MediaAsset;
   complete.outputs = [asset];
-  const previews = mediaJobPreviews([running, newer, complete]);
-  assert.deepEqual(
-    previews.results,
-    [{ job: complete, asset }],
-    'Only completed outputs count as variations',
-  );
-  assert.deepEqual(
-    previews.pending,
-    [running],
-    'A rendering alternative has its own tile beside completed results',
-  );
-  const queue = mediaVariations([newer, running, complete]);
+  const previews = mediaJobPreviews([running, newer, complete].sort(compareMediaJobs));
+  assert.deepEqual(previews.results, [{ job: complete, asset }], 'Only completed outputs count as variations');
+  assert.deepEqual(previews.pending, [running], 'A rendering alternative has its own tile beside completed results');
+  const queue = mediaVariations([newer, running, complete].sort(compareMediaJobs));
   assert.deepEqual(
     queue.map((item) => item.job.id),
     [3, 1, 2],
@@ -444,7 +397,7 @@ test('media job cards', async () => {
   );
   running.state = 'succeeded';
   running.outputs = [{ ...asset, id: 43 }];
-  const finishedQueue = mediaVariations([newer, running, complete]);
+  const finishedQueue = mediaVariations([newer, running, complete].sort(compareMediaJobs));
   assert.equal(
     mediaVariationIndex(finishedQueue, { jobId: running.id }, asset.id),
     1,
@@ -457,14 +410,14 @@ test('media job cards', async () => {
   );
   newer.state = 'failed';
   assert.equal(
-    mediaVariations([newer, running, complete]).length,
+    mediaVariations([newer, running, complete].sort(compareMediaJobs)).length,
     3,
     'A failed attempt keeps its slot in the selector',
   );
   groups = groupMediaJobs([newer, running, complete]);
   assert.equal(groups[0]!.job.id, 2);
   newer.state = 'cancelled';
-  const afterCancel = mediaVariations([newer, running, complete]);
+  const afterCancel = mediaVariations([newer, running, complete].sort(compareMediaJobs));
   assert.equal(afterCancel.length, 2, 'Cancellation removes the variation instead of a tombstone');
   assert.equal(
     mediaVariationIndex(afterCancel, { jobId: newer.id }, null),
@@ -473,6 +426,23 @@ test('media job cards', async () => {
   );
   assert.equal(groupMediaJobs([newer, running, complete])[0]!.job.id, running.id);
   assert.deepEqual(groupMediaJobs([newer]), [], 'A cancelled-only draft leaves no job card');
+  const cancelledDiscussion = { ...newer, draft: { ...draft, conversationId: 90 } };
+  assert.equal(
+    groupMediaJobs([cancelledDiscussion])[0]?.job.id,
+    cancelledDiscussion.id,
+    'Cancelling the only render must leave its saved prompt discussion reachable from Jobs',
+  );
+  for (const jobs of [
+    [cancelledDiscussion, running],
+    [running, cancelledDiscussion],
+  ]) {
+    assert.equal(
+      groupMediaJobs(jobs)[0]!.job.id,
+      running.id,
+      'A cancelled discussion anchor does not displace a completed variation',
+    );
+  }
+  assert.deepEqual(mediaVariations([cancelledDiscussion]), [], 'Cancellation still removes the preview attempt');
   assert.equal(
     mediaVariationIndex(
       mediaVariations([{ ...complete, outputs: [asset, { ...asset, id: 44 }] }]),
@@ -531,13 +501,7 @@ test('media job cards', async () => {
   const unlocked = mediaWorkflowView(captured, other.id, [other], localValues, false);
   assert.equal(unlocked.workflow, other);
   assert.equal(unlocked.values, localValues, 'Unlocked edits retain their local values');
-  const defaulted = mediaWorkflowView(
-    job(11, { workflowId: snapshot.id }),
-    snapshot.id,
-    [edited],
-    {},
-    true,
-  );
+  const defaulted = mediaWorkflowView(job(11, { workflowId: snapshot.id }), snapshot.id, [edited], {}, true);
   assert.equal(
     compileMediaWorkflow(defaulted.workflow!.json).controls[0]!.value,
     9,
@@ -549,11 +513,7 @@ test('media job cards', async () => {
       const controls = createMediaWorkflowControls(() => view().workflow?.json);
       const initial = controls();
       setView({ ...unlocked, workflow: { ...other }, values: { duration: 30 } });
-      assert.equal(
-        controls(),
-        initial,
-        'Refreshing job metadata or values preserves every workflow control identity',
-      );
+      assert.equal(controls(), initial, 'Refreshing job metadata or values preserves every workflow control identity');
       setView({ ...unlocked, workflow: edited });
       assert.notEqual(controls(), initial);
       assert.equal(controls().controls[0]!.value, 9, 'Changed graphs rebuild controls');

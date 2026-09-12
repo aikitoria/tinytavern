@@ -65,11 +65,7 @@ export function entityFields<T extends { name: string }>(
 ): EntityField<T>[] {
   return Object.entries(defaults).map(([key, fallback]) => {
     const boolean = typeof fallback === 'boolean';
-    const parse = boolean
-      ? optionalBoolean
-      : fallback === null
-        ? optionalNullableString
-        : optionalString;
+    const parse = boolean ? optionalBoolean : fallback === null ? optionalNullableString : optionalString;
     return {
       column: key === 'genParams' ? 'gen_params_json' : entityColumn(key),
       value:
@@ -80,18 +76,14 @@ export function entityFields<T extends { name: string }>(
               ? requiredString(body, key)
               : optionalName(optionalString(body, key), current.name);
           const requested = parse(body, key);
-          const value =
-            requested === undefined ? (current?.[key as keyof T] ?? fallback) : requested;
+          const value = requested === undefined ? (current?.[key as keyof T] ?? fallback) : requested;
           return boolean ? Number(value) : (value as string | null);
         }),
     };
   });
 }
 
-export function referenceValue<T>(
-  key: keyof T & string,
-  table: EntityTable,
-): EntityField<T>['value'] {
+export function referenceValue<T>(key: keyof T & string, table: EntityTable): EntityField<T>['value'] {
   return (body, current) => {
     const value = optionalNullableId(body, key);
     requireReference(table, value, key);
@@ -109,15 +101,10 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
   const topic = cfg.invalidateEntity ?? (cfg.table as InvalidateEntity);
   const row = (id: number) => {
     const value = rowById(cfg.table, id);
-    if (cfg.softDelete && value.deleted_at != null)
-      throw new HttpError(404, 'This entity was deleted');
+    if (cfg.softDelete && value.deleted_at != null) throw new HttpError(404, 'This entity was deleted');
     return value;
   };
-  const write = <R>(
-    body: JsonObject,
-    current: Record<string, unknown> | undefined,
-    action: () => R,
-  ): R =>
+  const write = <R>(body: JsonObject, current: Record<string, unknown> | undefined, action: () => R): R =>
     transaction(() => {
       cfg.guard?.(body, current ? cfg.toDto(current) : undefined);
       const result = action();
@@ -127,9 +114,7 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
 
   route.get(`/api/${cfg.table}`, () => {
     const items = cfg.softDelete
-      ? stmt(
-          `SELECT * FROM ${cfg.table} WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id`,
-        ).all()
+      ? stmt(`SELECT * FROM ${cfg.table} WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id`).all()
       : rows(cfg.table);
     return items.map(cfg.toDto).map(publish);
   });
@@ -146,8 +131,7 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     const id = positiveId(params.id);
     const source = row(id);
     const copyColumns = Object.keys(source).filter(
-      (c) =>
-        c !== 'id' && c !== 'created_at' && c !== cfg.readOnlyColumn && c !== cfg.revisionColumn,
+      (c) => c !== 'id' && c !== 'created_at' && c !== cfg.readOnlyColumn && c !== cfg.revisionColumn,
     );
     const originalName = String(source.name);
     let name = `${originalName} (copy)`;
@@ -159,9 +143,7 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     ) {
       name = `${originalName} (copy ${suffix++})`;
     }
-    const values = copyColumns.map((column) =>
-      column === 'name' ? name : (source[column] as string | number | null),
-    );
+    const values = copyColumns.map((column) => (column === 'name' ? name : (source[column] as string | number | null)));
     const result = write(body == null ? {} : objectBody(body), source, () =>
       stmt(
         `INSERT INTO ${cfg.table} (${copyColumns.join(', ')}, created_at)
@@ -224,10 +206,7 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
     write(body == null ? {} : objectBody(body), current, () => {
       cfg.prepareDelete?.(id);
       if (cfg.softDelete)
-        stmt(`UPDATE ${cfg.table} SET deleted_at = ?, revision = revision + 1 WHERE id = ?`).run(
-          Date.now(),
-          id,
-        );
+        stmt(`UPDATE ${cfg.table} SET deleted_at = ?, revision = revision + 1 WHERE id = ?`).run(Date.now(), id);
       else stmt(`DELETE FROM ${cfg.table} WHERE id = ?`).run(id);
     });
     afterDelete([id]);

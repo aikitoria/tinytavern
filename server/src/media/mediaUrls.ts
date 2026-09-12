@@ -26,9 +26,7 @@ export function signMediaUrl(path: string): string {
   cache.set(path, { url, expires: expiry });
   return url;
 }
-export function publicAvatar<T extends { avatar: string | null }>(
-  entity: T,
-): T & { avatarThumbnail: string | null } {
+export function publicAvatar<T extends { avatar: string | null }>(entity: T): T & { avatarThumbnail: string | null } {
   const thumbnail = entity.avatar
     ? stmt('SELECT thumbnail FROM avatar_thumbnails WHERE source = ?').get(entity.avatar)?.thumbnail
     : null;
@@ -50,8 +48,7 @@ export function publicGalleryItem(item: GalleryItem): GalleryItem {
   return key
     ? {
         ...item,
-        image: signMediaUrl(item.image),
-        media: item.media ? publicMediaAsset(item.media) : undefined,
+        media: publicMediaAsset(item.media),
         sourceImage: item.sourceImage ? signMediaUrl(item.sourceImage) : null,
       }
     : item;

@@ -47,12 +47,7 @@ export default function WorkflowFields(props: {
           if (current()?.json !== json) patch({ json });
         }}
         mono
-        keys={[
-          'prompt',
-          'seed',
-          'job_id',
-          ...(compiled().workflow?.mediaInputs.map((input) => input.name) ?? []),
-        ]}
+        keys={['prompt', 'seed', 'job_id', ...(compiled().workflow?.mediaInputs.map((input) => input.name) ?? [])]}
         placeholder="Paste a Comfy API-format workflow"
       />
       <Show when={compiled().error}>
@@ -75,8 +70,7 @@ export default function WorkflowFields(props: {
                   edit: () =>
                     editReferencedEntity(
                       mediaPromptSettingsKey(mode === 'chat'),
-                      state.settings[mediaPromptSettingsKey(mode === 'chat')].defaultPresetId ??
-                        'default',
+                      state.settings[mediaPromptSettingsKey(mode === 'chat')].defaultPresetId ?? 'default',
                     ),
                 },
                 ...entityOptions(
@@ -169,68 +163,55 @@ export default function WorkflowFields(props: {
 
 export function WorkflowSetupHelp() {
   return (
-    <SettingsSection
-      title="Workflow setup"
-      id="workflow-help"
-      class="workflow-setup-help"
-      fields={[]}
-    >
-      <p class="m-0 text-sm text-dim">
-        Export your ComfyUI workflow in API format, including node titles.
-      </p>
+    <SettingsSection title="Workflow setup" id="workflow-help" class="workflow-setup-help" fields={[]}>
+      <p class="m-0 text-sm text-dim">Export your ComfyUI workflow in API format, including node titles.</p>
       <dl>
         <div>
           <dt>Prompt</dt>
           <dd>
-            Put <code>{'{{prompt}}'}</code> in a primitive Text node, or name a text node{' '}
-            <code>Prompt [prompt]</code>.
+            Put <code>{'{{prompt}}'}</code> in a primitive Text node, or name a text node <code>Prompt [prompt]</code>.
           </dd>
         </div>
         <div>
           <dt>Images</dt>
           <dd>
-            Name a Load Image node <code>Subject [image:input1]</code>. Use <code>input1</code>{' '}
-            through <code>input64</code>; “Subject” is just a label. Reuse a number to share an
-            image between loaders.
+            Name a Load Image node <code>Subject [image:input1]</code>. Use <code>input1</code> through{' '}
+            <code>input64</code>; “Subject” is just a label. Reuse a number to share an image between loaders.
           </dd>
         </div>
         <div>
           <dt>Videos</dt>
           <dd>
-            Name a native Load Video node <code>Clip [video:input1]</code>. Its file input receives
-            the original video. Images and videos share the <code>input1</code> through{' '}
-            <code>input64</code> numbering; use a different number for each required source. Connect
-            Load Video to Get Video Components when downstream nodes need frames.
+            Name a native Load Video node <code>Clip [video:input1]</code>. Its file input receives the original video.
+            Images and videos share the <code>input1</code> through <code>input64</code> numbering; use a different
+            number for each required source. Connect Load Video to Get Video Components when downstream nodes need
+            frames.
           </dd>
         </div>
         <div>
           <dt>Controls</dt>
           <dd>
-            Name a constant node <code>Style [input]</code> to make it editable. For numeric limits,
-            use <code>Steps [input: min=1, max=100, step=1]</code>. Add <code>order=0</code> inside
-            the brackets to set display order. Add a numeric display unit, such as{' '}
-            <code>Duration (seconds) [input: unit=s]</code>, to show <code>10 s</code> in the
-            collapsed render summary. The control label and submitted number stay the same.
+            Name a constant node <code>Style [input]</code> to make it editable. For numeric limits, use{' '}
+            <code>Steps [input: min=1, max=100, step=1]</code>. Add <code>order=0</code> inside the brackets to set
+            display order. Add a numeric display unit, such as <code>Duration (seconds) [input: unit=s]</code>, to show{' '}
+            <code>10 s</code> in the collapsed render summary. The control label and submitted number stay the same.
           </dd>
         </div>
         <div>
           <dt>Seeds</dt>
-          <dd>
-            Keep seeds numeric. They are randomized for each render unless exposed as a control.
-          </dd>
+          <dd>Keep seeds numeric. They are randomized for each render unless exposed as a control.</dd>
         </div>
         <div>
           <dt>Outputs</dt>
           <dd>
-            Use one media output node. It can return multiple files from a single run. For
-            descriptions, choose the <strong>Text output node</strong> below.
+            Use one media output node. It can return multiple files from a single run. For descriptions, choose the{' '}
+            <strong>Text output node</strong> below.
           </dd>
         </div>
         <div>
           <dt>Custom nodes</dt>
           <dd>
-            Specify other filename or text fields in the title:{' '}
-            <code>Subject [image:input1, field=filename]</code> or{' '}
+            Specify other filename or text fields in the title: <code>Subject [image:input1, field=filename]</code> or{' '}
             <code>Prompt [prompt, field=text]</code>. Only unconnected text fields can be bound.
           </dd>
         </div>

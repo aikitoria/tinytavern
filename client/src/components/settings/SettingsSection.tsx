@@ -41,11 +41,7 @@ export default function SettingsSection(props: {
               aria-expanded={expanded()}
               onClick={() => setExpanded((value) => !value)}
             >
-              <FontAwesomeIcon
-                icon={faChevronDown}
-                size={11}
-                class={expanded() ? '' : '-rotate-90'}
-              />
+              <FontAwesomeIcon icon={faChevronDown} size={11} class={expanded() ? '' : '-rotate-90'} />
               {props.title}
             </button>
           ) : (

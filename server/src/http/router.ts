@@ -46,10 +46,8 @@ function add(
 
 export const route = {
   get: (p: string, h: Handler) => add('GET', p, h),
-  post: (p: string, h: Handler, opts?: { rawBody?: boolean; maxBodyBytes?: number }) =>
-    add('POST', p, h, opts),
-  put: (p: string, h: Handler, opts?: { rawBody?: boolean; maxBodyBytes?: number }) =>
-    add('PUT', p, h, opts),
+  post: (p: string, h: Handler, opts?: { rawBody?: boolean; maxBodyBytes?: number }) => add('POST', p, h, opts),
+  put: (p: string, h: Handler, opts?: { rawBody?: boolean; maxBodyBytes?: number }) => add('PUT', p, h, opts),
   patch: (p: string, h: Handler) => add('PATCH', p, h),
   del: (p: string, h: Handler) => add('DELETE', p, h),
 };
@@ -81,11 +79,7 @@ async function readBody(req: Request, maxBytes: number): Promise<Buffer> {
   }
 }
 
-async function invoke(
-  req: BunRequest,
-  matched: Route,
-  remoteAddress: string | undefined,
-): Promise<Response> {
+async function invoke(req: BunRequest, matched: Route, remoteAddress: string | undefined): Promise<Response> {
   try {
     // Bun decodes route params. Validate malformed percent escapes without decoding twice.
     if (req.url.includes('%')) {
@@ -122,9 +116,7 @@ async function invoke(
       for (const [key, value] of headers) result.headers.set(key, value);
       return result;
     }
-    return result === undefined
-      ? new Response(null, { status: 204, headers })
-      : Response.json(result, { headers });
+    return result === undefined ? new Response(null, { status: 204, headers }) : Response.json(result, { headers });
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 500;
     const message = err instanceof Error ? err.message : String(err);
@@ -144,9 +136,7 @@ export function apiRoutes<T>(
         const rejected = authorize?.(req, server);
         if (rejected) return rejected;
         const matched = methods.get(req.method);
-        return matched
-          ? invoke(req, matched, server.requestIP(req)?.address)
-          : apiError(404, 'not found');
+        return matched ? invoke(req, matched, server.requestIP(req)?.address) : apiError(404, 'not found');
       },
     ]),
   );

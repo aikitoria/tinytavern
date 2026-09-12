@@ -2,13 +2,7 @@ import { dialogStack } from './state/dialogStack.ts';
 import { DialogContext } from './state/dialogContext.ts';
 import { For, Show, Switch, Match, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { installUiBack, registerUiBack } from './state/uiBack.ts';
-import {
-  booting,
-  state,
-  setState,
-  streamingMessage,
-  mainConversationSession,
-} from './state/store.ts';
+import { booting, state, setState, streamingMessage, mainConversationSession } from './state/store.ts';
 import Sidebar from './components/layout/Sidebar.tsx';
 import Header from './components/layout/Header.tsx';
 import ConversationPane from './components/chat/ConversationPane.tsx';

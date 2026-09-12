@@ -18,8 +18,6 @@ export function canFillMediaInputs(
     const kind = context.inputKinds?.get(slot) ?? 'image';
     if (source === 'character-avatar') return kind === 'image' && context.characterAvatar;
     if (source === 'persona-avatar') return kind === 'image' && context.personaAvatar;
-    return source?.startsWith('selected:')
-      ? context.selectedAssets[Number(source.slice(9)) - 1]?.kind === kind
-      : false;
+    return source?.startsWith('selected:') ? context.selectedAssets[Number(source.slice(9)) - 1]?.kind === kind : false;
   });
 }

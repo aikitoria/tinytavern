@@ -25,9 +25,7 @@ export class DraftSuffixFilter {
 
   finish(): void {
     if (this.matched !== this.draft.length) {
-      throw new Error(
-        'The model stopped before repeating the complete draft. Your original text has been kept.',
-      );
+      throw new Error('The model stopped before repeating the complete draft. Your original text has been kept.');
     }
   }
 }
@@ -35,11 +33,7 @@ export class DraftSuffixFilter {
 /**
  * Append the draft instruction to the fresh, normalized buildChatMessages result.
  */
-export function buildDraftCompletionMessages(
-  history: ChatMessage[],
-  draft: string,
-  template: string,
-): ChatMessage[] {
+export function buildDraftCompletionMessages(history: ChatMessage[], draft: string, template: string): ChatMessage[] {
   const request = expandPromptSlots(systemNote(template), { draft });
   appendChatMessage(history, { role: 'user', content: request });
   return history;

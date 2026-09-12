@@ -12,8 +12,7 @@ databaseCase('chat prompt', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
-  const { appendChatMessage, withDisabledPrefillSpeakerNote } =
-    await import('../../server/src/generation/prompt.ts');
+  const { appendChatMessage, withDisabledPrefillSpeakerNote } = await import('../../server/src/generation/prompt.ts');
 
   const messages: ChatMessage[] = [];
   appendChatMessage(messages, { role: 'user', content: 'first' });
@@ -44,28 +43,19 @@ databaseCase('chat prompt', async () => {
     rootWithNote.map((message) => message.role),
     ['system', 'user'],
   );
-  assert.equal(
-    rootWithNote.at(-1)?.content,
-    '<system_instruction>\n<Note: Reply as Guest>\n</system_instruction>',
-  );
-  assert.equal(
-    systemNote('[System Note]\nCustom'),
-    '<system_instruction>\nCustom\n</system_instruction>',
-  );
+  assert.equal(rootWithNote.at(-1)?.content, '<system_instruction>\n<Note: Reply as Guest>\n</system_instruction>');
+  assert.equal(systemNote('[System Note]\nCustom'), '<system_instruction>\nCustom\n</system_instruction>');
   assert.equal(systemNote(''), '');
   const wrapped = '<system_instruction>\nCustom\n</system_instruction>';
   assert.equal(systemNote(wrapped), wrapped);
-  assert.equal(
-    systemNote('[IMAGE PROMPT TASK]\nCustom'),
-    '<system_instruction>\nCustom\n</system_instruction>',
-  );
+  assert.equal(systemNote('[IMAGE PROMPT TASK]\nCustom'), '<system_instruction>\nCustom\n</system_instruction>');
   assert.equal(
     systemNote('[System Note]\n[IMAGE PROMPT TASK]\nCustom'),
     '<system_instruction>\nCustom\n</system_instruction>',
   );
 
   const { stmt, toConversation } = await import('../../server/src/db/db.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { buildChatMessages } = await import('../../server/src/generation/prompt.ts');
   const characterId = Number(
     stmt(
@@ -73,13 +63,11 @@ databaseCase('chat prompt', async () => {
     ).run().lastInsertRowid,
   );
   const conversationId = Number(
-    stmt(
-      "INSERT INTO conversations(title, character_id, created_at, updated_at) VALUES ('Layout test', ?, 1, 1)",
-    ).run(characterId).lastInsertRowid,
+    stmt("INSERT INTO conversations(title, character_id, created_at, updated_at) VALUES ('Layout test', ?, 1, 1)").run(
+      characterId,
+    ).lastInsertRowid,
   );
-  const conversation = toConversation(
-    stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId)!,
-  );
+  const conversation = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(conversationId)!);
   assert(
     buildChatMessages(conversation, []).messages[0]?.content.includes('Visible personality'),
     'Fresh installations select a normal seeded template',
@@ -87,22 +75,11 @@ databaseCase('chat prompt', async () => {
   const templateId = getSettings().defaultTemplateId!;
   for (const content of ['', '   ']) {
     stmt('UPDATE templates SET content = ? WHERE id = ?').run(content, templateId);
-    assert.deepEqual(
-      buildChatMessages(conversation, []).messages,
-      [],
-      'Empty saved layouts stay empty',
-    );
+    assert.deepEqual(buildChatMessages(conversation, []).messages, [], 'Empty saved layouts stay empty');
   }
-  stmt('UPDATE templates SET content = ?, user_prologue = ? WHERE id = ?').run(
-    '{{system}}',
-    'Prologue',
-    templateId,
-  );
+  stmt('UPDATE templates SET content = ?, user_prologue = ? WHERE id = ?').run('{{system}}', 'Prologue', templateId);
   assert.equal(buildChatMessages(conversation, []).messages[0]?.role, 'system');
-  stmt('UPDATE characters SET custom_template = ? WHERE id = ?').run(
-    JSON.stringify({ content: '' }),
-    characterId,
-  );
+  stmt('UPDATE characters SET custom_template = ? WHERE id = ?').run(JSON.stringify({ content: '' }), characterId);
   assert.deepEqual(
     buildChatMessages(conversation, []).messages,
     [],
@@ -110,11 +87,7 @@ databaseCase('chat prompt', async () => {
   );
   stmt('UPDATE characters SET custom_template = NULL WHERE id = ?').run(characterId);
   putSettings({ ...getSettings(), defaultTemplateId: null });
-  assert.deepEqual(
-    buildChatMessages(conversation, []).messages,
-    [],
-    'No selection does not introduce a hidden layout',
-  );
+  assert.deepEqual(buildChatMessages(conversation, []).messages, [], 'No selection does not introduce a hidden layout');
   putSettings({ ...getSettings(), defaultTemplateId: templateId });
   stmt("UPDATE templates SET content = '' WHERE id = ?").run(templateId);
   assert.deepEqual(
@@ -123,11 +96,12 @@ databaseCase('chat prompt', async () => {
     'An empty system layout still honors the other saved template fields',
   );
 
-  const { resolveSteerTemplate, appendImagePromptRevisionTask } =
-    await import('../../server/src/generation/prompt.ts');
-  stmt(
-    'UPDATE templates SET steer_template = ?, prefix_names = 1, speaker_handoff_template = ? WHERE id = ?',
-  ).run('Adjust {{instruction}} exactly.', 'Speak as {{speaker}} only.', templateId);
+  const { resolveSteerTemplate, appendImagePromptRevisionTask } = await import('../../server/src/generation/prompt.ts');
+  stmt('UPDATE templates SET steer_template = ?, prefix_names = 1, speaker_handoff_template = ? WHERE id = ?').run(
+    'Adjust {{instruction}} exactly.',
+    'Speak as {{speaker}} only.',
+    templateId,
+  );
   assert.equal(resolveSteerTemplate(conversation), 'Adjust {{instruction}} exactly.');
   assert.equal(
     buildChatMessages(conversation, [], 'Guest $& {{speaker}}').speakerHandoff,
@@ -195,14 +169,8 @@ databaseCase('chat prompt', async () => {
     content: '<system_instruction>\nSpeak as Guest only.\n</system_instruction>',
   });
   assert.equal(buildChatMessages(conversation, history.slice(0, 4), 'Guest').speakerHandoff, null);
-  assert.deepEqual(
-    history,
-    savedHistory,
-    'Handoffs are reconstructed without editing stored messages',
-  );
-  stmt("UPDATE templates SET steer_template = '', speaker_handoff_template = '' WHERE id = ?").run(
-    templateId,
-  );
+  assert.deepEqual(history, savedHistory, 'Handoffs are reconstructed without editing stored messages');
+  stmt("UPDATE templates SET steer_template = '', speaker_handoff_template = '' WHERE id = ?").run(templateId);
   assert.throws(() => resolveSteerTemplate(conversation), { status: 400 });
   assert.equal(buildChatMessages(conversation, [], 'Guest').speakerHandoff, '');
   const customRevision = {
@@ -211,13 +179,7 @@ databaseCase('chat prompt', async () => {
     promptRevisionTemplate: 'CHANGE {{instruction}}',
   };
   const revisionHistory: ChatMessage[] = [{ role: 'assistant', content: 'Unchanged chat' }];
-  appendImagePromptRevisionTask(
-    revisionHistory,
-    original,
-    'Original reasoning',
-    instruction,
-    customRevision,
-  );
+  appendImagePromptRevisionTask(revisionHistory, original, 'Original reasoning', instruction, customRevision);
   assert.deepEqual(revisionHistory, [
     { role: 'assistant', content: 'Unchanged chat' },
     {
@@ -295,16 +257,11 @@ databaseCase('completion config', async () => {
     reasoningPrefillPrefix: '\nGlobal reasoning\n',
   };
   for (const mode of ['vllm', 'deepseek', 'none', 'disabled'] as const) {
-    const prepared = prepareStandaloneCompletion(
-      { ...additions, prefillMode: mode },
-      source,
-      1024,
-      {
-        useEndpointParameters: true,
-        reasoningPrefill: 'Consider the light',
-        messagePrefill: 'A scene ',
-      },
-    );
+    const prepared = prepareStandaloneCompletion({ ...additions, prefillMode: mode }, source, 1024, {
+      useEndpointParameters: true,
+      reasoningPrefill: 'Consider the light',
+      messagePrefill: 'A scene ',
+    });
     assert.deepEqual(prepared, {
       messages: [
         ...source,
@@ -334,11 +291,7 @@ databaseCase('completion config', async () => {
     });
   }
   assert.deepEqual(source, original, 'Preparing continuation must not mutate snapshotted messages');
-  assert.strictEqual(
-    withEndpointSystemPrompt(endpoint, source),
-    source,
-    'Empty additions allocate no message list',
-  );
+  assert.strictEqual(withEndpointSystemPrompt(endpoint, source), source, 'Empty additions allocate no message list');
   assert.deepEqual(withEndpointSystemPrompt(additions, source), [
     { role: 'system', content: 'Global system\n\nEnd {{literal}}' },
     ...source,
@@ -352,19 +305,13 @@ databaseCase('completion config', async () => {
   ]);
   assert.deepEqual(withEndpointSystemPrompt(additions, systemSource), wrapped);
   assert.deepEqual(systemSource, systemOriginal, 'System additions never mutate captured prompts');
-  assert.equal(
-    prepareStandaloneCompletion(additions, source, 1024).reasoningPrefill,
-    '\nGlobal reasoning\n',
-  );
+  assert.equal(prepareStandaloneCompletion(additions, source, 1024).reasoningPrefill, '\nGlobal reasoning\n');
   for (const saved of ['\nGlobal reasoning\nThought', 'Global reasoning\nThought', 'Thought']) {
     const continued = endpointReasoningPrefill(additions, saved, true);
     assert.equal(continued, '\nGlobal reasoning\nThought');
     assert.equal(endpointReasoningPrefill(additions, continued, true), continued);
   }
-  assert.equal(
-    endpointReasoningPrefill(additions, 'Global reasoning', true),
-    '\nGlobal reasoning\n',
-  );
+  assert.equal(endpointReasoningPrefill(additions, 'Global reasoning', true), '\nGlobal reasoning\n');
   assert.deepEqual(prepareStandaloneCompletion(endpoint, source, 1024), {
     messages: source,
     parameters: { max_tokens: 1024 },
@@ -399,9 +346,7 @@ databaseCase('draft completion', async () => {
   const { buildChatMessages } = await import('../../server/src/generation/prompt.ts');
 
   const conversation = toConversation(
-    stmt(
-      "INSERT INTO conversations (title, created_at, updated_at) VALUES ('Draft', 1, 1) RETURNING *",
-    ).get()!,
+    stmt("INSERT INTO conversations (title, created_at, updated_at) VALUES ('Draft', 1, 1) RETURNING *").get()!,
   );
   stmt('UPDATE templates SET content = ?, user_prologue = ?, prefix_names = 0 WHERE id = ?').run(
     'System',
@@ -412,12 +357,7 @@ databaseCase('draft completion', async () => {
   const second = appendMessage(conversation.id, 'user', 'Second', first.id);
   const assistant = appendMessage(conversation.id, 'assistant', '', second.id);
   const tool = appendMessage(conversation.id, 'tool', 'Image prompt', assistant.id);
-  const built = buildChatMessages(conversation, [
-    first,
-    second,
-    { ...assistant, reasoning: 'thought' },
-    tool,
-  ]);
+  const built = buildChatMessages(conversation, [first, second, { ...assistant, reasoning: 'thought' }, tool]);
   const prefix = structuredClone(built.messages);
 
   const alternating = buildDraftCompletionMessages(
@@ -449,10 +389,7 @@ databaseCase('draft completion', async () => {
   for (let split = 0; split <= draft.length + continuation.length; split++) {
     const filter = new DraftSuffixFilter(draft);
     const response = draft + continuation;
-    assert.equal(
-      filter.push(response.slice(0, split)) + filter.push(response.slice(split)),
-      continuation,
-    );
+    assert.equal(filter.push(response.slice(0, split)) + filter.push(response.slice(split)), continuation);
     filter.finish();
   }
   const filter = new DraftSuffixFilter(draft);

@@ -28,21 +28,10 @@ import {
 import { faFileLines, faImage, faImages } from '@fortawesome/free-regular-svg-icons';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import { For, Match, Show, Switch, createMemo, createSignal, type JSX } from 'solid-js';
-import {
-  DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE,
-  imageRevisionTemplateError,
-  type Message,
-} from '@tinytavern/shared';
+import { DEFAULT_CHAT_IMAGE_REVISION_TEMPLATE, imageRevisionTemplateError, type Message } from '@tinytavern/shared';
 import type { ComposerCommand } from '../composerCommands.ts';
 import { api } from '../state/api.ts';
-import {
-  applyMediaJob,
-  mediaJobsByMessage,
-  navigateTree,
-  openModal,
-  state,
-  toast,
-} from '../state/store.ts';
+import { applyMediaJob, mediaJobsByMessage, navigateTree, openModal, state, toast } from '../state/store.ts';
 import { errorMessage } from '../util.ts';
 import ImageViewer from '../components/ui/ImageViewer.tsx';
 import MediaPlayer from '../media/MediaPlayer.tsx';
@@ -90,9 +79,7 @@ function normalizePromptPresets(
         (preset.context === undefined || typeof preset.context === 'string'),
     );
     const active =
-      typeof raw.active === 'string' && presets.some((preset) => preset.name === raw.active)
-        ? raw.active
-        : '';
+      typeof raw.active === 'string' && presets.some((preset) => preset.name === raw.active) ? raw.active : '';
     return { presets, active, activeId: raw.activeId };
   }
 
@@ -109,9 +96,7 @@ export function activeImageRenderConfig(): MediaImageConfig | undefined {
 export function avatarRenderConfig(): MediaImageConfig | undefined {
   const cfg = state.settings.mediaRendering;
   const avatar = cfg.workflows.find((workflow) => workflow.id === cfg.avatarWorkflowId);
-  return avatar?.json.trim()
-    ? { workflow: avatar, comfyUrl: cfg.comfyUrl }
-    : activeImageRenderConfig();
+  return avatar?.json.trim() ? { workflow: avatar, comfyUrl: cfg.comfyUrl } : activeImageRenderConfig();
 }
 
 export function avatarGenerationAvailable(): boolean {
@@ -175,9 +160,7 @@ function PromptPresetEditor(props: {
       id: nextCollectionId(presets()),
       name,
       prompt: source?.prompt ?? props.defaultPrompt,
-      ...(props.defaultContext === undefined
-        ? {}
-        : { context: source?.context ?? props.defaultContext }),
+      ...(props.defaultContext === undefined ? {} : { context: source?.context ?? props.defaultContext }),
     }),
   });
   const { current, patch } = collection;
@@ -207,9 +190,7 @@ function PromptPresetEditor(props: {
       <collection.Toolbar
         ariaLabel="Prompt preset"
         nameLabel="Preset name"
-        defaultName={
-          current() ? numberedName('Preset', presets(), presets().indexOf(current()!)) : ''
-        }
+        defaultName={current() ? numberedName('Preset', presets(), presets().indexOf(current()!)) : ''}
         transfer={{
           type: `image-prompt:${props.transferKey}`,
           onError: props.onError,
@@ -243,10 +224,7 @@ function PromptPresetEditor(props: {
         }}
         kind="macro"
         readOnly={!current()}
-        label={
-          props.promptLabel ??
-          (props.defaultContext !== undefined ? 'System instructions' : 'Prompt template')
-        }
+        label={props.promptLabel ?? (props.defaultContext !== undefined ? 'System instructions' : 'Prompt template')}
         extraKeys={props.extraKeys}
       />
       <Show when={props.defaultContext !== undefined}>
@@ -343,8 +321,8 @@ export function ImageGenerationSettingsFields(props: {
         fields={Object.keys(revision.fields).map((key) => `imageGeneration.${key}`)}
       >
         <p class="hint">
-          Used when revising a media prompt inside a chat. The conversation remains as context, with
-          the original prompt supplied as the preceding assistant message.
+          Used when revising a media prompt inside a chat. The conversation remains as context, with the original prompt
+          supplied as the preceding assistant message.
         </p>
         <div class="form-stack field-group" role="group" aria-label="Prompt revision messages">
           <For
@@ -360,11 +338,7 @@ export function ImageGenerationSettingsFields(props: {
                   'Original prompt message template',
                   'Sent as the assistant turn being revised. Include {{prompt}}.',
                 ],
-                [
-                  'promptRevisionTemplate',
-                  'Prompt template',
-                  'Instructions for revising the original image prompt.',
-                ],
+                ['promptRevisionTemplate', 'Prompt template', 'Instructions for revising the original image prompt.'],
               ] as const
             }
           >
@@ -396,8 +370,7 @@ export function ImageGenerationSettingsFields(props: {
 export function createImageMessage(session: ConversationSession, active: () => boolean) {
   const imageSwipeBusy = new Set<number>();
 
-  const imageOnActivePath = (message: Message) =>
-    session.activePath().some((active) => active.id === message.id);
+  const imageOnActivePath = (message: Message) => session.activePath().some((active) => active.id === message.id);
 
   const selectedImageAsset = (message: Message) =>
     message.media[Math.min(message.activeImage, message.media.length - 1)];
@@ -409,8 +382,7 @@ export function createImageMessage(session: ConversationSession, active: () => b
     !message.media.some((asset) => asset.kind === 'video') &&
     (message.hasImageRender ||
       selectedImageAsset(message)?.recipeId != null ||
-      (!message.media.some((asset) => asset.recipeId !== null) &&
-        activeImageRenderConfig() != null));
+      (!message.media.some((asset) => asset.recipeId !== null) && activeImageRenderConfig() != null));
 
   /** Shared by header buttons and ChatView's Left/Right shortcut. */
   async function swipeImage(message: Message, dir: 1 | -1): Promise<void> {
@@ -455,16 +427,12 @@ export function createImageMessage(session: ConversationSession, active: () => b
           api.renderImage(
             message.id,
             session.state.tree,
-            message.hasImageRender || selectedImageAsset(message)?.recipeId
-              ? undefined
-              : activeImageRenderConfig(),
+            message.hasImageRender || selectedImageAsset(message)?.recipeId ? undefined : activeImageRenderConfig(),
           ),
         );
       } else {
         if (!imageOnActivePath(message)) return;
-        await session.navigateTree(() =>
-          api.setActiveImage(message.id, session.state.tree, { index }),
-        );
+        await session.navigateTree(() => api.setActiveImage(message.id, session.state.tree, { index }));
       }
     } finally {
       imageSwipeBusy.delete(message.id);
@@ -480,9 +448,7 @@ export function createImageMessage(session: ConversationSession, active: () => b
         message.name === 'Image prompt' ||
         message.name === 'Media prompt'),
     currentImageConfig: (message: Message) =>
-      message.hasImageRender || selectedImageAsset(message)?.recipeId
-        ? undefined
-        : activeImageRenderConfig(),
+      message.hasImageRender || selectedImageAsset(message)?.recipeId ? undefined : activeImageRenderConfig(),
     swipe: (message: Message, dir: 1 | -1) => {
       void swipeImage(message, dir);
     },
@@ -510,16 +476,13 @@ export function createImageMessage(session: ConversationSession, active: () => b
       });
       const displayedImage = () => (currentVideo() ? currentVideo()?.thumbnail : currentImage());
       // Collapse the prompt on the first preview to keep the render in focus.
-      const promptCollapsed = () =>
-        media().length > 0 || livePreview() != null || liveVideo() != null;
+      const promptCollapsed = () => media().length > 0 || livePreview() != null || liveVideo() != null;
       const onActivePath = () => session.activePath().some((active) => active.id === message().id);
       const canRender = () => canRenderImage(message());
       const savedItem = () => {
         const image = currentImage();
         return image
-          ? state.gallery.find(
-              (item) => item.sourceMessageId === message().id && item.sourceImage === image,
-            )
+          ? state.gallery.find((item) => item.sourceMessageId === message().id && item.sourceImage === image)
           : undefined;
       };
       const saveToGallery = async () => {
@@ -583,8 +546,8 @@ export function createImageMessage(session: ConversationSession, active: () => b
               title="Rerun media"
               aria-label="Rerun media"
               onClick={() => {
-                void openMediaRerun(currentAsset()!, message().conversationId).catch(
-                  (err: unknown) => toast(errorMessage(err)),
+                void openMediaRerun(currentAsset()!, message().conversationId).catch((err: unknown) =>
+                  toast(errorMessage(err)),
                 );
               }}
             >
@@ -598,19 +561,13 @@ export function createImageMessage(session: ConversationSession, active: () => b
                 size={10}
                 class="spinner inline-block flex-none origin-center size-2.5"
               />
-              <SamplerProgress
-                progress={renderProgress()}
-                stepsLabel="Step"
-                fallback={<span>Rendering…</span>}
-              />
+              <SamplerProgress progress={renderProgress()} stepsLabel="Step" fallback={<span>Rendering…</span>} />
             </span>
           </Show>
           <Show when={media().length > 0}>
             <span class="msg-actions inline-flex gap-1 touch:opacity-0 touch:pointer-events-none opacity-0 pointer-events-none [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto">
               <Show when={currentAsset()}>
-                {(asset) => (
-                  <MediaActions compact asset={asset()} conversationId={message().conversationId} />
-                )}
+                {(asset) => <MediaActions compact asset={asset()} conversationId={message().conversationId} />}
               </Show>
               <button
                 class="icon-btn gallery-save-btn"
@@ -628,9 +585,7 @@ export function createImageMessage(session: ConversationSession, active: () => b
                 class="icon-btn"
                 title="Previous image"
                 aria-label="Previous image"
-                disabled={
-                  session.state.treeNavigationPending || !onActivePath() || activeImage() <= 0
-                }
+                disabled={session.state.treeNavigationPending || !onActivePath() || activeImage() <= 0}
                 onClick={() => void swipeImage(message(), -1)}
               >
                 <FontAwesomeIcon icon={faChevronLeft} size={12} />
@@ -649,14 +604,10 @@ export function createImageMessage(session: ConversationSession, active: () => b
                   (activeImage() >= media().length - 1 && !canRender())
                 }
                 title={
-                  activeImage() >= media().length - 1
-                    ? 'Generate another image (same prompt, new seed)'
-                    : 'Next image'
+                  activeImage() >= media().length - 1 ? 'Generate another image (same prompt, new seed)' : 'Next image'
                 }
                 aria-label={
-                  activeImage() >= media().length - 1
-                    ? 'Generate another image with a new seed'
-                    : 'Next image'
+                  activeImage() >= media().length - 1 ? 'Generate another image with a new seed' : 'Next image'
                 }
                 onClick={() => void swipeImage(message(), 1)}
               >
@@ -710,11 +661,7 @@ export function createImageMessage(session: ConversationSession, active: () => b
             </Match>
             <Match when={!ctx.inMap?.() && currentVideo()}>
               {(asset) => (
-                <MediaPlayer
-                  asset={asset()}
-                  class="msg-image block cursor-zoom-in w-full"
-                  active={active()}
-                />
+                <MediaPlayer asset={asset()} class="msg-image block cursor-zoom-in w-full" active={active()} />
               )}
             </Match>
             <Match when={displayedImage()}>
@@ -750,10 +697,7 @@ export function createImageMessage(session: ConversationSession, active: () => b
         Body,
         hideName: true,
         fullBleed: () =>
-          displayedImage() != null ||
-          currentVideo() != null ||
-          livePreview() != null ||
-          liveVideo() != null,
+          displayedImage() != null || currentVideo() != null || livePreview() != null || liveVideo() != null,
       };
     },
   };

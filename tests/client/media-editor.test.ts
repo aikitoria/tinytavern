@@ -10,10 +10,7 @@ import {
   type MediaWorkflow,
   type Message,
 } from '@tinytavern/shared';
-import {
-  orderedMediaInputs,
-  reconcileMediaInputSelection,
-} from '../../client/src/media/inputSelection.ts';
+import { orderedMediaInputs, reconcileMediaInputSelection } from '../../client/src/media/inputSelection.ts';
 
 test('bulk input selection retains slot assignments, gaps and sources outside the gallery', () => {
   const slots = ['input1', 'input2', 'input4'];
@@ -107,14 +104,15 @@ test('media drafts retain edits across settings, generation and ordered job snap
     restoreConversationSelection,
   } = await import(storePath);
   const apiPath = '../../client/src/state/api.ts';
-  const { api } = await import(apiPath);
+  const { api, ApiError } = await import(apiPath);
   const stackPath = '../../client/src/state/dialogStack.ts';
   const { dialogStack, createDialogStack } = await import(stackPath);
   const contextPath = '../../client/src/state/dialogContext.ts';
   const { DialogContext } = await import(contextPath);
   const locationPath = '../../client/src/state/pageLocation.ts';
-  const { parsePageLocation, formatPageLocation, navigatePageWithGuards, rememberMediaPage } =
-    await import(locationPath);
+  const { parsePageLocation, formatPageLocation, navigatePageWithGuards, rememberMediaPage } = await import(
+    locationPath
+  );
   const mediaPath = '../../client/src/media/navigation.ts';
   const { openMediaTool, restorePage } = await import(mediaPath);
   const componentPath = '../../client/src/media/MediaToolsModal.tsx';
@@ -194,7 +192,6 @@ test('media drafts retain edits across settings, generation and ordered job snap
     discardMediaDraft: api.discardMediaDraft,
     conversation: api.conversation,
     restartMediaConversation: api.restartMediaConversation,
-    migrateMediaConversation: api.migrateMediaConversation,
   };
   const keys: string[] = [];
   const created = new Map<string, MediaJob>();
@@ -226,8 +223,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     submitted = structuredClone(draft);
     return { ...job, ...draft, revision: job.revision + 1 } as MediaJob;
   };
-  api.migrateMediaConversation = async (job: MediaJob) => job;
-  api.mediaVariations = async () => [];
+  api.mediaVariations = async (id: number) => (state.mediaJobs[id] ? [state.mediaJobs[id]!] : []);
   api.mediaJobAction = async (
     job: MediaJob,
     _action: string,
@@ -259,11 +255,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     location.hash = formatPageLocation(gallery);
     openMediaTool('a', { input: { asset: source }, galleryFolderId: 7 });
     const frame = dialogStack.top()!;
-    assert.notEqual(
-      frame.media!.requestKey,
-      frame.id,
-      'Server creation keys are independent of dialog counters',
-    );
+    assert.notEqual(frame.media!.requestKey, frame.id, 'Server creation keys are independent of dialog counters');
     assert.match(frame.media!.requestKey, /^\d{15,30}$/);
     const restored = createDialogStack();
     restored.restore(parsePageLocation('#+/media/generate'));
@@ -293,11 +285,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     const current = await started;
     assert.equal(submitted!.workflowId, 'b');
     assert.equal(submitted!.instruction, 'Animate the selected image');
-    assert.equal(
-      submitted!.galleryFolderId,
-      7,
-      'The gallery destination survives workflow changes and child panes',
-    );
+    assert.equal(submitted!.galleryFolderId, 7, 'The gallery destination survives workflow changes and child panes');
     assert.deepEqual(submitted!.inputs, [{ slot: 'input1', assetId: source.id }]);
     assert.equal(keys[0], frame.media!.requestKey);
     assert.equal(
@@ -313,25 +301,26 @@ test('media drafts retain edits across settings, generation and ordered job snap
     applyMediaJob(older);
     dialogStack.restore(parsePageLocation('#+/media/job/200'));
     location.hash = '#+/media/job/200';
-    let finishRefresh!: (job: MediaJob) => void;
-    api.mediaJob = () =>
-      new Promise<MediaJob>((resolve) => {
+    let finishRefresh!: (jobs: MediaJob[]) => void;
+    api.mediaVariations = () =>
+      new Promise<MediaJob[]>((resolve) => {
         finishRefresh = resolve;
       });
     dispose = mount();
     applyMediaJob({ ...older, revision: 2, prompt: 'New prompt from socket' });
-    finishRefresh(older);
+    finishRefresh([older]);
     await Promise.resolve();
     await Promise.resolve();
+    assert.equal(
+      state.mediaJobs[200]!.prompt,
+      'New prompt from socket',
+      'Rejected HTTP snapshots cannot become the editor baseline',
+    );
     controls.get('media-instruction')!.onInput!({ currentTarget: { value: 'Next edit' } });
     const preparing = nextAction();
     controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
     const accepted = await preparing;
-    assert.equal(
-      submitted!.prompt,
-      'New prompt from socket',
-      'Rejected HTTP snapshots cannot become the editor baseline',
-    );
+    assert.equal(submitted!.prompt, '', 'Fresh preparation does not reuse a saved reply');
     assert.equal(accepted.revision, 3);
     assert.equal(state.mediaJobs[200]!.instruction, 'Next edit');
     await Promise.resolve();
@@ -350,6 +339,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     dialogStack.restore(parsePageLocation('#+/media/job/300'));
     location.hash = '#+/media/job/300';
     api.mediaJob = async (id: number) => state.mediaJobs[id];
+    api.mediaVariations = async (id: number) => (state.mediaJobs[id] ? [state.mediaJobs[id]!] : []);
     const variationKeys: string[] = [];
     api.rerunMediaJob = async (job: MediaJob, key: string, values: Partial<MediaJobDraft>) => {
       variationKeys.push(key);
@@ -379,11 +369,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
           resolve();
         }),
       );
-      assert.equal(
-        variationKeys.length,
-        0,
-        'Closing an unchanged running job cannot create a variation',
-      );
+      assert.equal(variationKeys.length, 0, 'Closing an unchanged running job cannot create a variation');
       dispose();
       dialogStack.restore(parsePageLocation('#+/media/job/300'));
       location.hash = '#+/media/job/300';
@@ -394,10 +380,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.equal(controls.get('workflow-values')!.disabled, false);
     assert.equal(controls.get('media-prompt')!.readOnly, false);
     controls.get('Saved media workflow')!.onChange!('a');
-    const changeValue = controls.get('workflow-values')!.onChange as unknown as (
-      key: string,
-      value: number,
-    ) => void;
+    const changeValue = controls.get('workflow-values')!.onChange as unknown as (key: string, value: number) => void;
     changeValue('duration', 9);
     controls.get('media-seed')!.onInput!({
       currentTarget: { value: '0', validity: { badInput: false } },
@@ -432,11 +415,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.equal((await queueAgain).id, 302);
     assert.deepEqual(submitted!.workflowValues, { duration: 12 });
     assert.equal(submitted!.seedOverride, null, 'Clearing the seed restores random renders');
-    assert.equal(
-      submitted!.prompt,
-      'Third prompt',
-      'Completion of an earlier variation cannot replace the next draft',
-    );
+    assert.equal(submitted!.prompt, 'Third prompt', 'Completion of an earlier variation cannot replace the next draft');
     assert.notEqual(variationKeys[0], variationKeys[1]);
     await Promise.resolve();
     await Promise.resolve();
@@ -500,12 +479,12 @@ test('media drafts retain edits across settings, generation and ordered job snap
     dispose();
     const restoredJobs = JSON.parse(JSON.stringify(state.mediaJobs)) as Record<number, MediaJob>;
     for (const id of Object.keys(state.mediaJobs)) setState('mediaJobs', Number(id), undefined!);
-    let finishAnchor!: (job: MediaJob) => void;
+    let anchorRequests = 0;
     let finishVariations!: (jobs: MediaJob[]) => void;
-    api.mediaJob = () =>
-      new Promise<MediaJob>((resolve) => {
-        finishAnchor = resolve;
-      });
+    api.mediaJob = async (id: number) => {
+      anchorRequests++;
+      return restoredJobs[id]!;
+    };
     api.mediaVariations = () =>
       new Promise<MediaJob[]>((resolve) => {
         finishVariations = resolve;
@@ -514,7 +493,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     dialogStack.restore(restoredPreview);
     location.hash = formatPageLocation(restoredPreview);
     dispose = mount();
-    finishAnchor(restoredJobs[302]!);
+    applyMediaJob(restoredJobs[302]!);
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(
@@ -527,6 +506,21 @@ test('media drafts retain edits across settings, generation and ordered job snap
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(parsePageLocation(location.hash).media!.previewJobId, 301);
+    assert.equal(anchorRequests, 0, 'The variation response supplies the anchor without a second request');
+    api.mediaVariations = async () => [restoredJobs[300]!, restoredJobs[301]!];
+    setState('connected', false);
+    setState('connected', true);
+    for (let turn = 0; turn < 6; turn++) await Promise.resolve();
+    assert.equal(anchorRequests, 1, 'Only a missing anchor requires a separate existence check');
+    assert.ok(state.mediaJobs[302], 'An incomplete variation snapshot is not evidence of deletion');
+    api.mediaJob = async () => {
+      throw new ApiError(404, 'Deleted');
+    };
+    setState('connected', false);
+    setState('connected', true);
+    for (let turn = 0; turn < 6; turn++) await Promise.resolve();
+    assert.equal(state.mediaJobs[302], undefined, 'A confirmed deletion repoints the editor to its remaining history');
+
     const restoredQueue = nextAction();
     controls.get('Render the final prompt shown above')!.onClick!();
     await restoredQueue;
@@ -536,7 +530,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     await Promise.resolve();
     dispose();
     api.mediaJob = async (id: number) => state.mediaJobs[id];
-    api.mediaVariations = async () => [];
+    api.mediaVariations = async (id: number) => (state.mediaJobs[id] ? [state.mediaJobs[id]!] : []);
 
     const preparingJob = makeJob(400, { state: 'preparing', prompt: 'Partial prompt' });
     applyMediaJob(preparingJob);
@@ -550,21 +544,13 @@ test('media drafts retain edits across settings, generation and ordered job snap
     const prepared = nextAction();
     controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
     const preparationCopy = await prepared;
-    assert.notEqual(
-      preparationCopy.id,
-      400,
-      'Prompt preparation must fork a running job even before Comfy submission',
-    );
+    assert.notEqual(preparationCopy.id, 400, 'Prompt preparation must fork a running job even before Comfy submission');
     assert.equal(
       submitted!.prompt,
-      'More partial prompt',
-      'Prompt streaming still updates untouched fields while editing other settings',
-    );
-    assert.equal(
-      state.mediaJobs[400]!.instruction,
       '',
-      'The running preparation keeps its captured instruction',
+      'A fresh prompt conversation does not seed itself from the previous partial reply',
     );
+    assert.equal(state.mediaJobs[400]!.instruction, '', 'The running preparation keeps its captured instruction');
     await Promise.resolve();
     await Promise.resolve();
     dispose();
@@ -572,24 +558,15 @@ test('media drafts retain edits across settings, generation and ordered job snap
     setState('settings', 'mediaRendering', 'workflows', [a, b]);
     const legacy = makeJob(449, { prompt: 'Saved full prompt' });
     applyMediaJob(legacy);
-    let migrated = false;
-    api.migrateMediaConversation = async (job: MediaJob) => {
-      assert.equal(job.id, legacy.id);
-      assert.equal(job.prompt, 'Saved full prompt');
-      migrated = true;
-      return { ...job, revision: job.revision + 1, draft: { ...job.draft!, conversationId: 776 } };
-    };
-    api.conversation = async (id: number) =>
-      ({ id, title: 'Migrated prompts', promptMode: 'media' }) as Conversation;
+    applyMediaJob({ ...legacy, revision: legacy.revision + 1, draft: { ...legacy.draft!, conversationId: 776 } });
+    api.conversation = async (id: number) => ({ id, title: 'Migrated prompts', promptMode: 'media' }) as Conversation;
     dialogStack.restore(parsePageLocation('#+/media/job/449'));
     location.hash = '#+/media/job/449';
     dispose = mount();
     for (let i = 0; i < 5; i++) await Promise.resolve();
-    assert.ok(migrated, 'Opening a saved prompt automatically imports its discussion');
     assert.equal(state.mediaJobs[449]!.draft!.conversationId, 776);
     assert.equal(controls.get('prompt-conversation')!.session!.state.selectedId, 776);
     dispose();
-    api.migrateMediaConversation = async (job: MediaJob) => job;
 
     const unstarted = makeJob(450);
     applyMediaJob(unstarted);
@@ -609,27 +586,21 @@ test('media drafts retain edits across settings, generation and ordered job snap
     dispose();
     setState('mediaJobs', 450, undefined!);
     api.mediaJob = async () => persisted;
+    api.mediaVariations = async () => [persisted];
     dialogStack.restore(parsePageLocation('#'));
     dialogStack.restore(reloadPage);
     dispose = mount();
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(
-      state.mediaJobs[450]!.startedAt,
-      null,
-      'Saving the selection starts no generation',
-    );
+    assert.equal(state.mediaJobs[450]!.startedAt, null, 'Saving the selection starts no generation');
     const afterReload = nextAction();
     controls.get('Write a new prompt from your instruction, then render it')!.onClick!();
-    assert.equal(
-      (await afterReload).workflowId,
-      'a',
-      'The reopened editor uses the saved workflow',
-    );
+    assert.equal((await afterReload).workflowId, 'a', 'The reopened editor uses the saved workflow');
     await Promise.resolve();
     await Promise.resolve();
     dispose();
     api.mediaJob = async (id: number) => state.mediaJobs[id];
+    api.mediaVariations = async (id: number) => (state.mediaJobs[id] ? [state.mediaJobs[id]!] : []);
 
     const textResult = makeJob(500, {
       state: 'succeeded',
@@ -648,11 +619,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
       acceptedText = resolve;
     });
     let acceptanceCount = 0;
-    api.acceptMediaVariation = async (
-      job: MediaJob,
-      assetId: number | null,
-      expectedDraftRevision: number,
-    ) => {
+    api.acceptMediaVariation = async (job: MediaJob, assetId: number | null, expectedDraftRevision: number) => {
       acceptanceCount++;
       assert.equal(job.id, textResult.id);
       assert.equal(assetId, null);
@@ -704,11 +671,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     restorePage(parsePageLocation(`#777+/media/job/${pendingJob.id}`));
     assert.equal(state.selectedId, null, 'History navigation excludes media conversations');
     assert.equal(parsePageLocation(location.hash).chatId, null);
-    assert.equal(
-      dialogStack.top()!.page.media!.jobId,
-      pendingJob.id,
-      'The media panel remains accessible',
-    );
+    assert.equal(dialogStack.top()!.page.media!.jobId, pendingJob.id, 'The media panel remains accessible');
     setState('conversations', conversations);
     for (const launchId of [undefined, launchJob.id]) {
       dialogStack.restore(parsePageLocation('#'));
@@ -765,11 +728,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
         mutationRevision: 1,
       } as const;
       handleServerEvent(tree);
-      assert.equal(
-        session.state.tree.conversationId,
-        777,
-        'The remounted thread receives its tree',
-      );
+      assert.equal(session.state.tree.conversationId, 777, 'The remounted thread receives its tree');
       const directRender = nextAction();
       controls.get('prompt-conversation')!.renderPrompt!(reply, 'Blue sky');
       assert.equal((await directRender).prompt, 'Blue sky', 'The reply action renders directly');
@@ -893,6 +852,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
       dispose();
     }
     api.mediaJob = async (id: number) => state.mediaJobs[id];
+    api.mediaVariations = async (id: number) => (state.mediaJobs[id] ? [state.mediaJobs[id]!] : []);
 
     const avatarPath = '../../client/src/images/AvatarGenerateModal.tsx';
     const { default: AvatarGenerateModal } = await import(avatarPath);
@@ -905,9 +865,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
       const avatarWorkflow = {
         ...a,
         inputBindings: {},
-        json: promptInput
-          ? '{"output":{"inputs":{"text":"{{prompt}}"}}}'
-          : '{"output":{"inputs":{}}}',
+        json: promptInput ? '{"output":{"inputs":{"text":"{{prompt}}"}}}' : '{"output":{"inputs":{}}}',
       };
       setState('settings', 'mediaRendering', 'workflows', [avatarWorkflow]);
       setState('settings', 'mediaRendering', 'avatarWorkflowId', avatarWorkflow.id);
@@ -924,9 +882,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
         started = resolve;
       });
       api.mediaJobAction = async (
-        ...[job, action, options]: Parameters<
-          typeof import('../../client/src/state/api.ts').api.mediaJobAction
-        >
+        ...[job, action, options]: Parameters<typeof import('../../client/src/state/api.ts').api.mediaJobAction>
       ) => {
         assert.equal(action, promptInput ? 'prepare' : 'render');
         assert.equal(options?.autoRender, true);

@@ -69,9 +69,7 @@ export class ComfyGraphProgress {
           // An expanded child finishing does not mean its parent node has finished.
           if (node.state === 'finished' && this.names.has(id)) this.finished.add(id);
         }
-        const current =
-          running.find(([id, node]) => (node.display_node_id ?? id) === this.nodeId) ??
-          running.at(-1);
+        const current = running.find(([id, node]) => (node.display_node_id ?? id) === this.nodeId) ?? running.at(-1);
         if (current) {
           const [id, node] = current;
           this.selectNode(node.display_node_id ?? id);

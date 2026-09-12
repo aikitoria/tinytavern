@@ -5,8 +5,7 @@ import { guardPageNavigation, readPageLocation } from './pageLocation.ts';
 
 export const DialogContext = createContext<{ frame: DialogFrame; active: Accessor<boolean> }>();
 export const useDialogActive = () => useContext(DialogContext)?.active ?? (() => true);
-export const useDialogMediaPreview = () =>
-  useContext(DialogContext)?.frame.mediaPreview ?? (() => undefined);
+export const useDialogMediaPreview = () => useContext(DialogContext)?.frame.mediaPreview ?? (() => undefined);
 export function useDialogMediaPromptSelection() {
   const frame = useContext(DialogContext)?.frame;
   return frame
@@ -21,10 +20,5 @@ export function useDialogPage() {
 /** Guard every pane being removed, including an editor covered by another pane. */
 export function useDialogNavigationGuard(guard: (action: () => void) => void): void {
   const context = useContext(DialogContext);
-  onCleanup(
-    guardPageNavigation(
-      guard,
-      context ? (target) => !dialogStack.retains(context.frame, target) : undefined,
-    ),
-  );
+  onCleanup(guardPageNavigation(guard, context ? (target) => !dialogStack.retains(context.frame, target) : undefined));
 }

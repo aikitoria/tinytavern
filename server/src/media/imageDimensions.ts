@@ -20,10 +20,8 @@ function swapsExifAxes(read: Read, offset: number, size: number): boolean {
   const order = header.toString('ascii', 0, 2);
   if (order !== 'II' && order !== 'MM') return false;
   const little = order === 'II';
-  const u16 = (data: Buffer, start = 0) =>
-    little ? data.readUInt16LE(start) : data.readUInt16BE(start);
-  const u32 = (data: Buffer, start = 0) =>
-    little ? data.readUInt32LE(start) : data.readUInt32BE(start);
+  const u16 = (data: Buffer, start = 0) => (little ? data.readUInt16LE(start) : data.readUInt16BE(start));
+  const u32 = (data: Buffer, start = 0) => (little ? data.readUInt32LE(start) : data.readUInt32BE(start));
   if (u16(header, 2) !== 42) return false;
   const directory = base + u32(header, 4);
   if (directory < base + 8 || directory + 2 > end) return false;
@@ -49,9 +47,7 @@ function inspect(read: Read): ImageDimensions | null {
   if (!header) return null;
   if (header.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
     const ihdr = read(12, 12);
-    return ihdr?.toString('ascii', 0, 4) === 'IHDR'
-      ? dimensions(ihdr.readUInt32BE(4), ihdr.readUInt32BE(8))
-      : null;
+    return ihdr?.toString('ascii', 0, 4) === 'IHDR' ? dimensions(ihdr.readUInt32BE(4), ihdr.readUInt32BE(8)) : null;
   }
   if (header[0] === 0xff && header[1] === 0xd8) {
     let offset = 2;
@@ -70,9 +66,7 @@ function inspect(read: Read): ImageDimensions | null {
       if (code === 0xe1 && size >= 16) swap ||= swapsExifAxes(read, offset + 2, size - 2);
       if (code >= 0xc0 && code <= 0xcf && code !== 0xc4 && code !== 0xc8 && code !== 0xcc) {
         const frame = size >= 8 ? read(offset, 8) : null;
-        return frame
-          ? dimensions(frame.readUInt16BE(swap ? 3 : 5), frame.readUInt16BE(swap ? 5 : 3))
-          : null;
+        return frame ? dimensions(frame.readUInt16BE(swap ? 3 : 5), frame.readUInt16BE(swap ? 5 : 3)) : null;
       }
       offset += size;
     }
@@ -108,9 +102,7 @@ function inspect(read: Read): ImageDimensions | null {
 }
 
 export function imageDimensions(data: Buffer): ImageDimensions | null {
-  return inspect((offset, length) =>
-    offset + length <= data.length ? data.subarray(offset, offset + length) : null,
-  );
+  return inspect((offset, length) => (offset + length <= data.length ? data.subarray(offset, offset + length) : null));
 }
 
 /** Bounded header reads also skip large JPEG metadata without loading image pixels. */
@@ -122,9 +114,7 @@ export function imageFileDimensions(path: string): ImageDimensions | null {
     const scratch = Buffer.allocUnsafe(16);
     return inspect((offset, length) => {
       if (offset + length > size) return null;
-      return readSync(fd!, scratch, 0, length, offset) === length
-        ? scratch.subarray(0, length)
-        : null;
+      return readSync(fd!, scratch, 0, length, offset) === length ? scratch.subarray(0, length) : null;
     });
   } catch {
     // Missing/older invalid files still keep their gallery rows and prompt snapshots.

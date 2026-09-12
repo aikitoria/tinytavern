@@ -21,17 +21,10 @@ test('media url', async () => {
   const realNow = Date.now;
   Date.now = () => 1_000_000_000;
   try {
-    for (const path of [
-      '/images/a.png',
-      '/avatars/character-1.png?v=42',
-      '/any/nested/file.txt?download=1',
-    ]) {
+    for (const path of ['/images/a.png', '/avatars/character-1.png?v=42', '/any/nested/file.txt?download=1']) {
       const url = signMediaUrl(path);
       const signed = `${path}${path.includes('?') ? '&' : '?'}expires=1086400`;
-      assert.equal(
-        url,
-        `${signed}&sig=${createHmac('sha256', key).update(signed).digest('base64url')}`,
-      );
+      assert.equal(url, `${signed}&sig=${createHmac('sha256', key).update(signed).digest('base64url')}`);
       Date.now = () => 1_010_000_000;
       assert.equal(signMediaUrl(path), url, 'reuse URL across snapshots');
       Date.now = () => 1_000_000_000;
@@ -41,19 +34,17 @@ test('media url', async () => {
     assert.equal(avatar.avatar, '/avatars/character-1.png?v=42');
     assert.equal(publicMessage(undefined), undefined);
     assert.equal(publicMessage(null), null);
-    const { toMessage, toGalleryItem, stmt } = await import('../../server/src/db/db.ts');
+    const { toMessage, toGalleryItem, stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
     stmt('INSERT INTO avatar_thumbnails(source, thumbnail, thumbnail_size) VALUES (?, ?, 128)').run(
       avatar.avatar,
       '/avatars/thumb-character-1-1-1.jpg',
     );
-    assert.match(
-      publicAvatar(avatar).avatarThumbnail!,
-      /^\/avatars\/thumb-character-1-1-1\.jpg\?expires=.*&sig=/,
+    assert.match(publicAvatar(avatar).avatarThumbnail!, /^\/avatars\/thumb-character-1-1-1\.jpg\?expires=.*&sig=/);
+    stmt("INSERT INTO media_assets(path, thumbnail) VALUES ('/images/a.png', '/images/a-thumb.jpg')").run();
+    stmt("INSERT INTO media_owners(asset_id, owner_type, owner_id, slot) VALUES (?, 'message', 1, '0')").run(
+      mediaAssetForPath('/images/a.png')!.id,
     );
-    stmt(
-      "INSERT INTO media_assets(path, thumbnail) VALUES ('/images/a.png', '/images/a-thumb.jpg')",
-    ).run();
-    const message = toMessage({ id: 1, images_json: '["/images/a.png"]' });
+    const message = toMessage({ id: 1 });
     assert.match(publicMessage(message).media[0]!.url, /&sig=/);
     assert.deepEqual(
       message.media.map((asset) => asset.url),
@@ -63,23 +54,23 @@ test('media url', async () => {
     assert.equal(message.media[0]!.thumbnail, '/images/a-thumb.jpg');
     assert.equal('images' in publicMessage(message), false);
     assert.throws(
-      () => toMessage({ id: 1, images_json: '["/images/a.png","/images/missing-record.png"]' }),
-      /Missing media asset for message 1: \/images\/missing-record\.png/,
+      () =>
+        stmt("INSERT INTO media_owners(asset_id, owner_type, owner_id, slot) VALUES (999999, 'message', 1, '1')").run(),
+      /FOREIGN KEY/,
       'A missing asset record fails explicitly instead of shifting attachment indices',
     );
-    stmt(
-      "INSERT INTO media_assets(path, thumbnail) VALUES ('/images/g.png', '/images/thumbnail.jpg')",
-    ).run();
+    stmt("INSERT INTO media_assets(path, thumbnail) VALUES ('/images/g.png', '/images/thumbnail.jpg')").run();
     const gallery = toGalleryItem({
       id: 1,
       characters_json: '[]',
-      image: '/images/g.png',
+      ...stmt("SELECT * FROM media_assets WHERE path = '/images/g.png'").get()!,
+      asset_id: mediaAssetForPath('/images/g.png')!.id,
       source_image: '/images/a.png',
     });
-    assert.match(publicGalleryItem(gallery).image, /&sig=/);
+    assert.match(publicGalleryItem(gallery).media.url, /&sig=/);
     assert.match(publicGalleryItem(gallery).media?.thumbnail!, /&sig=/);
     assert.equal(gallery.media?.thumbnail, '/images/thumbnail.jpg');
-    assert.equal(gallery.image, '/images/g.png');
+    assert.equal(gallery.media.url, '/images/g.png');
     const previous = signMediaUrl('/images/a.png');
     Date.now = () => 1_086_400_000;
     const fresh = signMediaUrl('/images/a.png');

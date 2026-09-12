@@ -1,3 +1,4 @@
+import { galleryFixture } from '../support/fixtures.ts';
 import { testRequestKey } from '../support/requestKey.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
@@ -21,11 +22,10 @@ test('media restart', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
-  const { stmt, IMAGES_DIR, DATA_DIR, mediaAssetForPath, toMediaAsset } =
-    await import('../../server/src/db/db.ts');
+  const { stmt, IMAGES_DIR, DATA_DIR, mediaAssetForPath, toMediaAsset } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { createMediaJob, startMediaJob } = await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaJobRow } = await import('../../server/src/media/mediaJobStore.ts');
 
@@ -173,9 +173,7 @@ test('media restart', async () => {
     },
   });
   const inputPath = saveImage('.png', png);
-  stmt(
-    "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Test', '', ?, 1, 1)",
-  ).run(inputPath);
+  galleryFixture(inputPath, { character_name: 'Test', prompt: '' });
   const draft = createMediaJob({
     requestKey: testRequestKey('restart-idempotency'),
 
@@ -249,7 +247,9 @@ test('media restart', async () => {
     assert.equal(uploads, 1, 'Recorded input upload survives restart');
     assert.equal(downloads.get('first.webm'), 1, 'Already ingested video is not downloaded again');
     assert.equal(downloads.get('second.webm'), 2);
-    const outputs = stmt(`SELECT a.* FROM media_assets a JOIN gallery_items g ON g.image = a.path`)
+    const outputs = stmt(
+      `SELECT a.* FROM media_assets a JOIN media_owners o ON o.asset_id = a.id WHERE o.owner_type = 'gallery'`,
+    )
       .all()
       .map(toMediaAsset);
     assert.equal(outputs.length, 2);
@@ -261,22 +261,15 @@ test('media restart', async () => {
     assert.equal(stmt('SELECT count(*) AS n FROM gallery_items').get()!.n, 2);
     assert.equal(mediaJobRow(draft.id), undefined);
     assert.equal(
-      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get(
-        testRequestKey('restart-idempotency'),
-      ),
+      stmt('SELECT id FROM media_jobs WHERE request_key = ?').get(testRequestKey('restart-idempotency')),
       null,
     );
-    assert.equal(
-      stmt("SELECT count(*) AS n FROM media_remote_files WHERE state != 'deleted'").get()!.n,
-      4,
-    );
+    assert.equal(stmt("SELECT count(*) AS n FROM media_remote_files WHERE state != 'deleted'").get()!.n, 4);
 
     allowCleanup = true;
     const fourth = await launch();
     await until(
-      () =>
-        stmt("SELECT count(*) AS n FROM media_remote_files WHERE state != 'deleted'").get()!.n ===
-        0,
+      () => stmt("SELECT count(*) AS n FROM media_remote_files WHERE state != 'deleted'").get()!.n === 0,
       'cleanup after history removal and restart',
     );
     await crash(fourth);
@@ -285,11 +278,7 @@ test('media restart', async () => {
       0,
       'Confirmed remote cleanup removes its ledger rows after the job is deleted',
     );
-    assert.equal(
-      deleted.size,
-      4,
-      'Both videos, temporary preview and uploaded input are deleted remotely',
-    );
+    assert.equal(deleted.size, 4, 'Both videos, temporary preview and uploaded input are deleted remotely');
     assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
     assert.equal(failure, undefined);
   } finally {

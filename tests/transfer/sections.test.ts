@@ -27,12 +27,7 @@ test('section imports validate atomically and retain unrelated draft fields', ()
     content: 'Original',
     reasoningPrefill: 'Before',
   });
-  const next = importSettingsSection(
-    schema,
-    section,
-    { content: 'Imported', reasoningPrefill: 'After' },
-    draft,
-  );
+  const next = importSettingsSection(schema, section, { content: 'Imported', reasoningPrefill: 'After' }, draft);
   assert.deepEqual(next, {
     ...draft,
     content: 'Imported',
@@ -41,23 +36,13 @@ test('section imports validate atomically and retain unrelated draft fields', ()
   assert.equal(draft.content, 'Original');
   assert.equal(draft.template.reasoningPrefill, 'Before');
   assert.throws(
-    () =>
-      importSettingsSection(
-        schema,
-        section,
-        { content: 'Would change', reasoningPrefill: false },
-        draft,
-      ),
+    () => importSettingsSection(schema, section, { content: 'Would change', reasoningPrefill: false }, draft),
     /Expected string/,
   );
   assert.equal(draft.content, 'Original');
+  assert.throws(() => importSettingsSection(schema, section, { apiKey: 'injected' }, draft), /Unknown settings field/);
   assert.throws(
-    () => importSettingsSection(schema, section, { apiKey: 'injected' }, draft),
-    /Unknown settings field/,
-  );
-  assert.throws(
-    () =>
-      importSettingsSection(schema, section, JSON.parse('{"__proto__":{"polluted":true}}'), draft),
+    () => importSettingsSection(schema, section, JSON.parse('{"__proto__":{"polluted":true}}'), draft),
     /Unknown settings field/,
   );
 });
@@ -67,10 +52,10 @@ test('ordered section collections resolve names to local IDs and preserve unimpo
     { id: '42', name: 'Portrait' },
     { id: '43', name: 'Landscape' },
   ];
-  const codec = settingsCollection(
-    { name: settingsText, workflowId: settingsReference(() => local, false) },
-    () => ({ name: '', workflowId: '' }),
-  );
+  const codec = settingsCollection({ name: settingsText, workflowId: settingsReference(() => local, false) }, () => ({
+    name: '',
+    workflowId: '',
+  }));
   const schema = { shortcuts: codec };
   const items = [
     { id: '1', name: 'First', workflowId: '42' },

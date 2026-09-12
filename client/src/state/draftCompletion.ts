@@ -50,5 +50,4 @@ export function createDraftCompletion() {
 }
 
 export const mainDraftCompletion = createDraftCompletion();
-export const { completeComposerDraft, draftCompletionActive, stopDraftCompletion } =
-  mainDraftCompletion;
+export const { completeComposerDraft, draftCompletionActive, stopDraftCompletion } = mainDraftCompletion;

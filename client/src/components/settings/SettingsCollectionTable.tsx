@@ -24,9 +24,7 @@ export default function SettingsCollectionTable<T extends { id: string; name: st
     props.onReorder(moveCollectionItem(props.items, item.id, direction));
     queueMicrotask(() => {
       const row = table.querySelector<HTMLElement>(`[data-setting-entry="${CSS.escape(item.id)}"]`);
-      const button = row?.querySelector<HTMLButtonElement>(
-        `[data-move="${direction}"]:not(:disabled)`,
-      );
+      const button = row?.querySelector<HTMLButtonElement>(`[data-move="${direction}"]:not(:disabled)`);
       (button ?? row)?.focus({ preventScroll: true });
     });
   };
@@ -63,9 +61,7 @@ export default function SettingsCollectionTable<T extends { id: string; name: st
                             class="w-full min-w-0"
                             aria-label={`${column().label} for ${item().name}`}
                             value={column().value(item())}
-                            onInput={(event) =>
-                              column().onChange(item(), event.currentTarget.value)
-                            }
+                            onInput={(event) => column().onChange(item(), event.currentTarget.value)}
                           />
                         }
                       >
@@ -81,11 +77,7 @@ export default function SettingsCollectionTable<T extends { id: string; name: st
                   )}
                 </Index>
                 <td>
-                  <div
-                    class="flex items-center justify-end gap-1"
-                    data-setting-entry={item().id}
-                    tabIndex={-1}
-                  >
+                  <div class="flex items-center justify-end gap-1" data-setting-entry={item().id} tabIndex={-1}>
                     <button
                       class="icon-btn"
                       data-move="-1"

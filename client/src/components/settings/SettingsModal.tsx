@@ -1,8 +1,4 @@
-import {
-  useDialogActive,
-  useDialogNavigationGuard,
-  useDialogPage,
-} from '../../state/dialogContext.ts';
+import { useDialogActive, useDialogNavigationGuard, useDialogPage } from '../../state/dialogContext.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Component } from 'solid-js';
@@ -14,11 +10,7 @@ import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 import Select from '../ui/Select.tsx';
 import { SettingsActionsContext } from './SettingsActions.tsx';
 import type { SelectHandle } from '../ui/Select.tsx';
-import {
-  createSettingsNavigation,
-  SettingsGuardProvider,
-  SettingsNavigationPrompt,
-} from './SettingsGuard.tsx';
+import { createSettingsNavigation, SettingsGuardProvider, SettingsNavigationPrompt } from './SettingsGuard.tsx';
 import GeneralTab from './tabs/GeneralTab.tsx';
 import EndpointsTab from './tabs/EndpointsTab.tsx';
 import PresetsTab from './tabs/PresetsTab.tsx';
@@ -63,19 +55,14 @@ const TABS: { key: string; label: string; group: string; component: Component }[
 ];
 
 const canScroll = (element: HTMLElement, deltaY: number) =>
-  deltaY < 0
-    ? element.scrollTop > 1
-    : element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+  deltaY < 0 ? element.scrollTop > 1 : element.scrollTop + element.clientHeight < element.scrollHeight - 1;
 
 /** Scroll ownership varies by tab: modal body or detail form. */
 function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
   const modal = area.closest<HTMLElement>('.settings-modal');
   for (let element = area.parentElement; element; element = element.parentElement) {
     const overflow = getComputedStyle(element).overflowY;
-    if (
-      (overflow === 'auto' || overflow === 'scroll') &&
-      element.scrollHeight > element.clientHeight
-    ) {
+    if ((overflow === 'auto' || overflow === 'scroll') && element.scrollHeight > element.clientHeight) {
       return element;
     }
     if (element === modal) break;
@@ -87,14 +74,11 @@ export default function SettingsModal() {
   const [actionsTarget, setActionsTarget] = createSignal<HTMLElement>();
   const page = useDialogPage()();
   const initialTab = page.settingsTab;
-  const [tab, setTab] = createSignal(
-    TABS.some((item) => item.key === initialTab) ? initialTab! : 'general',
-  );
+  const [tab, setTab] = createSignal(TABS.some((item) => item.key === initialTab) ? initialTab! : 'general');
   const navigation = createSettingsNavigation();
   useDialogNavigationGuard(navigation.navigate);
   const paneActive = useDialogActive();
-  const activeTab = () =>
-    TABS.find((item) => item.key === tab()) ?? TABS.find((item) => item.key === 'general')!;
+  const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS.find((item) => item.key === 'general')!;
   let sectionPicker!: SelectHandle;
   let contentEl!: HTMLDivElement;
   const leaveSettings = () => navigation.navigate(() => openModal(null));
@@ -140,8 +124,7 @@ export default function SettingsModal() {
       });
   };
   const onTabKeyDown = (event: KeyboardEvent, index: number) => {
-    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
-      return;
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
     const nextIndex =
@@ -151,9 +134,7 @@ export default function SettingsModal() {
           ? TABS.length - 1
           : (index + direction + TABS.length) % TABS.length;
     const nextKey = TABS[nextIndex]!.key;
-    chooseTab(nextKey, () =>
-      queueMicrotask(() => document.getElementById(`settings-tab-${nextKey}`)?.focus()),
-    );
+    chooseTab(nextKey, () => queueMicrotask(() => document.getElementById(`settings-tab-${nextKey}`)?.focus()));
   };
 
   return (
@@ -239,10 +220,7 @@ export default function SettingsModal() {
                 role="tabpanel"
                 aria-label={activeTab().label}
               >
-                <SettingsGuardProvider
-                  register={navigation.register}
-                  navigate={navigation.navigate}
-                >
+                <SettingsGuardProvider register={navigation.register} navigate={navigation.navigate}>
                   <Dynamic component={activeTab().component} />
                 </SettingsGuardProvider>
               </div>

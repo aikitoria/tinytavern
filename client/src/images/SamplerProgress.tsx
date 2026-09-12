@@ -8,10 +8,7 @@ export default function SamplerProgress(props: {
   fallback?: JSX.Element;
 }) {
   return (
-    <Show
-      when={props.progress?.value !== undefined && props.progress.max}
-      fallback={props.fallback}
-    >
+    <Show when={props.progress?.value !== undefined && props.progress.max} fallback={props.fallback}>
       <span class="img-progress">
         <span
           class="img-progress-fill"

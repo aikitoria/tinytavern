@@ -18,17 +18,9 @@ import { parseMediaWorkflow } from '../media/mediaSettings.ts';
 import { requireString } from '../http/validation.ts';
 import { getSettings, touchMediaSettings } from '../settings/settingsStore.ts';
 import { insertMediaEntity } from '../settings/mediaEntities.ts';
-import {
-  mediaRecipeSeed,
-  saveMediaRecipe,
-  type MediaRecipe,
-  type MediaRecipeInput,
-} from '../media/mediaRecipes.ts';
+import { mediaRecipeSeed, saveMediaRecipe, type MediaRecipe, type MediaRecipeInput } from '../media/mediaRecipes.ts';
 
-export interface TransferImageRecipe extends Pick<
-  MediaResultDetails,
-  'workflowName' | 'workflowParameters'
-> {
+export interface TransferImageRecipe extends Pick<MediaResultDetails, 'workflowName' | 'workflowParameters'> {
   workflowValues?: MediaWorkflowValues;
   seed?: number | null;
   seedOverride?: number | null;
@@ -61,9 +53,7 @@ export function exportImageRecipes(
       if (!row) {
         throw new HttpError(409, 'Cannot export a missing image recipe');
       }
-      const configuration = JSON.parse(
-        String(row.configuration_json),
-      ) as MediaRecipe['configuration'];
+      const configuration = JSON.parse(String(row.configuration_json)) as MediaRecipe['configuration'];
       const workflow = requireMediaWorkflow(configuration.workflowId, true);
       const inputs = JSON.parse(String(row.inputs_json)) as MediaRecipeInput[];
       recipe = {
@@ -91,9 +81,7 @@ export function exportImageRecipes(
             throw new HttpError(409, 'Cannot export an incomplete image recipe');
           }
           if (input.assetId === null) return { slot, assetId: null, prompt: input.prompt };
-          const source = stmt('SELECT path, kind FROM media_assets WHERE id = ?').get(
-            input.assetId,
-          );
+          const source = stmt('SELECT path, kind FROM media_assets WHERE id = ?').get(input.assetId);
           // Conversation transfers omit video files but preserve the missing input slot.
           if (source?.kind === 'video') return { slot, assetId: null, prompt: input.prompt };
           if (!source || source.kind !== 'image') {
@@ -183,10 +171,7 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
     let workflowValues: MediaWorkflowValues | undefined;
     if (source.workflowValues !== undefined) {
       try {
-        workflowValues = validateWorkflowValues(
-          compileMediaWorkflow(workflow.json).controls,
-          source.workflowValues,
-        );
+        workflowValues = validateWorkflowValues(compileMediaWorkflow(workflow.json).controls, source.workflowValues);
       } catch (err) {
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
@@ -200,13 +185,9 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
       seedOverride !== null &&
       (typeof seedOverride !== 'number' || !Number.isSafeInteger(seedOverride) || seedOverride < 0)
     ) {
-      throw new HttpError(
-        400,
-        'Image recipe seed override must be a non-negative safe integer or null',
-      );
+      throw new HttpError(400, 'Image recipe seed override must be a non-negative safe integer or null');
     }
-    const workflowName =
-      source.workflowName == null ? undefined : text(source.workflowName, 'workflow name', 1000);
+    const workflowName = source.workflowName == null ? undefined : text(source.workflowName, 'workflow name', 1000);
     let workflowParameters: MediaResultDetails['workflowParameters'];
     if (source.workflowParameters !== undefined) {
       if (!Array.isArray(source.workflowParameters) || source.workflowParameters.length > 1024) {
@@ -326,9 +307,7 @@ export function importRecipeImages(
       // Older exports already contain the source recipe, so imports can capture its prompt.
       prompt:
         input.prompt ??
-        (input.assetId === null
-          ? ''
-          : (recipes.get(assets.get(input.assetId)?.recipeId ?? '')?.prompt ?? '')),
+        (input.assetId === null ? '' : (recipes.get(assets.get(input.assetId)?.recipeId ?? '')?.prompt ?? '')),
     }));
     let workflow = namedItem(rendering.workflows, recipe.workflow.name);
     if (!workflow) {
@@ -361,10 +340,7 @@ export function importRecipeImages(
   }
   for (const [id, asset] of assets) {
     if (asset.recipeId !== null) {
-      stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(
-        recipeIds.get(asset.recipeId)!,
-        assetIds.get(id)!,
-      );
+      stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipeIds.get(asset.recipeId)!, assetIds.get(id)!);
       invalidateMediaAsset(paths.get(id)!);
     }
   }

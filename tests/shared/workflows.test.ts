@@ -11,8 +11,7 @@ test('workflows require strict JSON and numbered bindings without filename infer
     defaultMediaPrompt,
     defaultChatMediaPrompt,
   } = await import('@tinytavern/shared');
-  const { parseMediaRendering, parseMediaPrompts } =
-    await import('../../server/src/media/mediaSettings.ts');
+  const { parseMediaRendering, parseMediaPrompts } = await import('../../server/src/media/mediaSettings.ts');
   const graph = {
     source: { class_type: 'LoadImage', inputs: { image: 'source.png' } },
     first: { class_type: 'LoadImage', inputs: { image: 'first_frame.png' } },
@@ -62,22 +61,12 @@ test('workflows require strict JSON and numbered bindings without filename infer
   assert.equal(result.custom.inputs.filename, values.input2);
   assert.equal(result.text.inputs.value, prompt);
   assert.equal(result.sampler.inputs.seed, 123);
-  for (const key of ['source', 'first', 'reference', 'linked'] as const)
-    assert.deepEqual(result[key], graph[key]);
+  for (const key of ['source', 'first', 'reference', 'linked'] as const) assert.deepEqual(result[key], graph[key]);
   result.subject.inputs.image = 'mutated';
   assert.equal(JSON.stringify(compiled.graph), original);
-  assert.equal(
-    (expandMediaWorkflow(compiled, values) as typeof graph).subject.inputs.image,
-    values.input1,
-  );
-  assert.throws(
-    () => expandMediaWorkflow(compiled, { prompt, seed: 1, job_id: 'missing' }),
-    /Missing workflow input/,
-  );
-  assert.equal(
-    mediaWorkflowError({ ...workflow, textOutputNodeId: 'missing' })?.includes('existing node'),
-    true,
-  );
+  assert.equal((expandMediaWorkflow(compiled, values) as typeof graph).subject.inputs.image, values.input1);
+  assert.throws(() => expandMediaWorkflow(compiled, { prompt, seed: 1, job_id: 'missing' }), /Missing workflow input/);
+  assert.equal(mediaWorkflowError({ ...workflow, textOutputNodeId: 'missing' })?.includes('existing node'), true);
   for (const json of [
     '{"seed":{{seed}}}',
     '{"seed":"{{seed}}"}',
@@ -103,7 +92,7 @@ test('workflows require strict JSON and numbered bindings without filename infer
     workflows: [workflow],
     defaultWorkflowId: workflow.id,
   };
-  assert.deepEqual(parseMediaRendering(settings)!.workflows[0], workflow);
+  assert.deepEqual(parseMediaRendering(settings)!.workflows[0], { ...workflow, folderId: null });
   for (const overrides of [
     { folders: [{ id: 'folder', name: 'Missing', workflowIds: ['missing'] }] },
     { folders: [{ id: 'folder', name: 'Duplicate', workflowIds: [workflow.id, workflow.id] }] },
@@ -131,12 +120,10 @@ test('workflows require strict JSON and numbered bindings without filename infer
     [standalone, 'mediaStandalonePrompts'],
     [chat, 'mediaChatPrompts'],
   ] as const) {
-    const folder = { id: 'folder', name: 'My prompts', presetIds: [preset.id] };
-    const grouped = { presets: [preset], folders: [folder], defaultPresetId: preset.id };
+    const folder = { id: 'folder', name: 'My prompts' };
+    const grouped = { presets: [{ ...preset, folderId: folder.id }], folders: [folder], defaultPresetId: preset.id };
     assert.deepEqual(parseMediaPrompts(grouped, key), grouped);
-    assert.throws(() =>
-      parseMediaPrompts({ ...grouped, folders: [{ ...folder, presetIds: ['missing'] }] }, key),
-    );
+    assert.throws(() => parseMediaPrompts({ ...grouped, folders: [{ ...folder, presetIds: ['missing'] }] }, key));
   }
   for (const [preset, key] of [
     [standalone, 'mediaChatPrompts'],
@@ -150,19 +137,14 @@ test('workflows require strict JSON and numbered bindings without filename infer
   const evicted = compileMediaWorkflow('{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}');
   for (let index = 0; index < 64; index++)
     compileMediaWorkflow(`{"1":{"inputs":{"text":"{{prompt}}","tag":${index}}}}`);
-  assert.notEqual(
-    compileMediaWorkflow('{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}'),
-    evicted,
-  );
-  assert.deepEqual(
-    expandMediaWorkflow(evicted, { prompt: 'after eviction', seed: 0, job_id: 'retained' }),
-    { '1': { inputs: { text: 'after eviction', tag: 'eviction' } } },
-  );
+  assert.notEqual(compileMediaWorkflow('{"1":{"inputs":{"text":"{{prompt}}","tag":"eviction"}}}'), evicted);
+  assert.deepEqual(expandMediaWorkflow(evicted, { prompt: 'after eviction', seed: 0, job_id: 'retained' }), {
+    '1': { inputs: { text: 'after eviction', tag: 'eviction' } },
+  });
 });
 
 test('workflow inputs', async () => {
-  const { compileMediaWorkflow, expandMediaWorkflow, validateWorkflowValues } =
-    await import('@tinytavern/shared');
+  const { compileMediaWorkflow, expandMediaWorkflow, validateWorkflowValues } = await import('@tinytavern/shared');
 
   const compile = (graph: unknown) => compileMediaWorkflow(JSON.stringify(graph));
   const node = (class_type: string, value: number | string | boolean, title: string) => ({
@@ -172,11 +154,7 @@ test('workflow inputs', async () => {
   });
   const graph = {
     frames: node('PrimitiveInt', 81, 'Frames [input: min=1, max=241, step=4]'),
-    duration: node(
-      'PrimitiveFloat',
-      2.5,
-      'Duration (seconds) [input: min=1, max=10, step=0.5, unit=s]',
-    ),
+    duration: node('PrimitiveFloat', 2.5, 'Duration (seconds) [input: min=1, max=10, step=0.5, unit=s]'),
     text: node('PrimitiveStringMultiline', 'soft light', 'Style [input]'),
     sampler: { class_type: 'KSampler', inputs: { seed: 123, text: '{{prompt}}', steps: 20 } },
     noise: { class_type: 'RandomNoise', inputs: { noise_seed: 456 } },
@@ -202,11 +180,7 @@ test('workflow inputs', async () => {
     assert.equal(annotated.controls[0]!.label, 'Custom measurement');
     assert.deepEqual(validateWorkflowValues(annotated.controls, { custom: 20 }), { custom: 20 });
   }
-  for (const title of [
-    'Bad [input: unit=]',
-    'Bad [input: unit=s, unit=ms]',
-    'Bad [input: unit=per second]',
-  ]) {
+  for (const title of ['Bad [input: unit=]', 'Bad [input: unit=s, unit=ms]', 'Bad [input: unit=per second]']) {
     assert.throws(() => compile({ bad: node('PrimitiveInt', 10, title) }));
   }
   assert.throws(
@@ -227,11 +201,7 @@ test('workflow inputs', async () => {
   ) as typeof graph;
   assert.equal(result.frames.inputs.value, 121);
   assert.equal(result.duration.inputs.value, 3.5);
-  assert.equal(
-    result.text.inputs.value,
-    text,
-    'User strings are never expanded as workflow macros',
-  );
+  assert.equal(result.text.inputs.value, text, 'User strings are never expanded as workflow macros');
   assert.equal(result.sampler.inputs.seed, 12345);
   assert.equal(result.noise.inputs.noise_seed, 12345);
   assert.equal(result.seed.inputs.value, 12345);
@@ -281,10 +251,7 @@ test('workflow inputs', async () => {
     /Unknown string parameter/,
   );
   assert.throws(() => compile({ node: node('KSampler', 1, 'Sampler [input]') }), /constant node/);
-  assert.throws(
-    () => compile({ text: node('PrimitiveString', '{{prompt}}', 'Prompt [input]') }),
-    /literal default/,
-  );
+  assert.throws(() => compile({ text: node('PrimitiveString', '{{prompt}}', 'Prompt [input]') }), /literal default/);
   assert.throws(
     () => compile({ ...graph, frames: { ...graph.frames, inputs: { value: ['seed', 0] } } }),
     /Invalid default/,
@@ -313,11 +280,7 @@ test('workflow inputs', async () => {
       { prompt: '', seed: 1, job_id: 'text' },
       { text: longText },
     ) as Record<string, { inputs: Record<string, string> }>;
-    assert.equal(
-      expanded.text!.inputs[input],
-      longText,
-      'Workflow text has no per-field maximum or truncation',
-    );
+    assert.equal(expanded.text!.inputs[input], longText, 'Workflow text has no per-field maximum or truncation');
   }
 
   const resolutionGraph = {
@@ -350,10 +313,7 @@ test('workflow inputs', async () => {
   );
   assert.deepEqual(ordered.graph, orderedGraph, 'Display order does not change node IDs or inputs');
   for (const order of ['1.5', 'NaN', 'Infinity', 'later']) {
-    assert.throws(
-      () => compile({ bad: node('PrimitiveInt', 1, `Bad [input: order=${order}]`) }),
-      /order must be/,
-    );
+    assert.throws(() => compile({ bad: node('PrimitiveInt', 1, `Bad [input: order=${order}]`) }), /order must be/);
   }
   // Both overrides and omitted defaults preserve the latent's wiring and fixed multiple.
   for (const [aspect, megapixels] of [
@@ -399,9 +359,7 @@ test('workflow inputs', async () => {
       _meta: { title: 'Resolution [input: min=0.5, max=4, step=0.5]' },
     },
   });
-  assert.throws(() =>
-    validateWorkflowValues(boundedResolution.controls, { 'size.megapixels': 4.5 }),
-  );
+  assert.throws(() => validateWorkflowValues(boundedResolution.controls, { 'size.megapixels': 4.5 }));
   assert.throws(
     () =>
       compile({
@@ -420,10 +378,10 @@ test('comfy graph progress', async () => {
     save: { class_type: 'VHS_VideoCombine' },
   });
   assert.deepEqual(progress.update('execution_start', {})?.graph, { value: 0, max: 3 });
-  assert.deepEqual(
-    progress.update('execution_cached', { nodes: ['load', 'load', 'unrelated'] })?.graph,
-    { value: 1, max: 3 },
-  );
+  assert.deepEqual(progress.update('execution_cached', { nodes: ['load', 'load', 'unrelated'] })?.graph, {
+    value: 1,
+    max: 3,
+  });
   assert.deepEqual(progress.update('executing', { node: 'sampler' })?.node, {
     id: 'sampler',
     name: 'Motion sampler',
@@ -445,11 +403,7 @@ test('comfy graph progress', async () => {
       sampler: { state: 'running', value: 1, max: 2 },
     },
   })!;
-  assert.deepEqual(
-    parent.graph,
-    { value: 1, max: 3 },
-    'A child finishing does not finish its parent',
-  );
+  assert.deepEqual(parent.graph, { value: 1, max: 3 }, 'A child finishing does not finish its parent');
   const save = progress.update('progress_state', {
     nodes: {
       sampler: { state: 'finished', value: 20, max: 20 },
@@ -509,15 +463,11 @@ test('numbered bindings sort numerically, share images and retain sparse numbers
   };
   assert.equal(compileMediaWorkflow(workflow.json), compiled);
   for (const invalid of ['input0', 'input65', 'input01'])
-    assert.throws(
-      () => compileMediaWorkflow(json.replaceAll('input64', invalid)),
-      /input1 through input64/,
-    );
+    assert.throws(() => compileMediaWorkflow(json.replaceAll('input64', invalid)), /input1 through input64/);
 });
 
 test('video bindings share numbered slots while preserving types, loader fields and graph links', async () => {
-  const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } =
-    await import('@tinytavern/shared');
+  const { compileMediaWorkflow, expandMediaWorkflow, mediaWorkflowError } = await import('@tinytavern/shared');
   const graph = {
     video: {
       class_type: 'LoadVideo',
@@ -559,10 +509,7 @@ test('video bindings share numbered slots while preserving types, loader fields 
     /both image and video/,
   );
   assert.throws(
-    () =>
-      compileMediaWorkflow(
-        JSON.stringify({ video: { ...graph.video, inputs: { file: ['other', 0] } } }),
-      ),
+    () => compileMediaWorkflow(JSON.stringify({ video: { ...graph.video, inputs: { file: ['other', 0] } } })),
     /literal string/,
   );
   const workflow = {

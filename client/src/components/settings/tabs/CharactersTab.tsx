@@ -49,8 +49,7 @@ export default function CharactersTab() {
         ...character,
         folderId: String(character?.folderId ?? ''),
         presetId: character?.customPrompt != null ? 'custom' : String(character?.presetId ?? ''),
-        templateId:
-          character?.customTemplate != null ? 'custom' : String(character?.templateId ?? ''),
+        templateId: character?.customTemplate != null ? 'custom' : String(character?.templateId ?? ''),
       });
       templateFields.value = character?.customTemplate;
       setCustomPrompt(character?.customPrompt != null);
@@ -97,10 +96,7 @@ export default function CharactersTab() {
     const failed: string[] = [];
     for (const [index, file] of files.entries()) {
       if (current())
-        editor.setStatus(
-          files.length === 1 ? 'Importing…' : `Importing ${index + 1} of ${files.length}…`,
-          'info',
-        );
+        editor.setStatus(files.length === 1 ? 'Importing…' : `Importing ${index + 1} of ${files.length}…`, 'info');
       try {
         imported.push(await api.characters.importCard(file));
       } catch (err) {
@@ -114,9 +110,7 @@ export default function CharactersTab() {
       editor.adopt(last);
     }
     if (failed.length > 0) {
-      editor.setStatus(
-        `${imported.length} imported, ${failed.length} failed. ${failed.join(' · ')}`,
-      );
+      editor.setStatus(`${imported.length} imported, ${failed.length} failed. ${failed.join(' · ')}`);
     } else if (imported.length === 1) {
       editor.setStatus(`Imported ${imported[0]!.name}.`, 'success');
     } else {
@@ -157,16 +151,10 @@ export default function CharactersTab() {
         }
         folderBrowser={folders}
         extraActions={
-          <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>
-            Export PNG
-          </button>
+          <button onClick={() => download(`/api/characters/${editor.selectedId()}/card`)}>Export PNG</button>
         }
       >
-        <SettingsSection
-          title="Basics"
-          id="character-basics"
-          fields={['name', 'chatName', 'folderId']}
-        >
+        <SettingsSection title="Basics" id="character-basics" fields={['name', 'chatName', 'folderId']}>
           <Show when={editor.selectedId() !== 'new'}>
             <AvatarRow
               src={editor.selected()?.avatar}
@@ -304,11 +292,7 @@ export default function CharactersTab() {
           </div>
         </SettingsSection>
 
-        <SettingsSection
-          title="Generation"
-          id="character-generation"
-          fields={['disableBackgroundSwipeGeneration']}
-        >
+        <SettingsSection title="Generation" id="character-generation" fields={['disableBackgroundSwipeGeneration']}>
           <FormField
             kind="check"
             field={form.fields.disableBackgroundSwipeGeneration}

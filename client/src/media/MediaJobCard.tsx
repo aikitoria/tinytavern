@@ -1,23 +1,12 @@
 import { state } from '../state/store.ts';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { faImage, faVideo, faComments, faArrowRight } from '@fortawesome/free-solid-svg-icons';
-import {
-  mediaJobActive,
-  mediaInputLabel,
-  type Character,
-  type Conversation,
-  type MediaJob,
-} from '@tinytavern/shared';
+import { mediaJobActive, mediaInputLabel, type Character, type Conversation, type MediaJob } from '@tinytavern/shared';
 import FontAwesomeIcon from '../components/ui/FontAwesomeIcon.tsx';
 import MediaJobStatus from './MediaJobStatus.tsx';
 import MediaJobPreviews from './MediaJobPreviews.tsx';
 import { createStreamScroll } from '../streamScroll.ts';
-import {
-  MEDIA_JOB_STATUS,
-  jobPromptExcerpt,
-  mediaJobPreviews,
-  type MediaJobGroup,
-} from './jobCards.ts';
+import { MEDIA_JOB_STATUS, jobPromptExcerpt, mediaJobPreviews, type MediaJobGroup } from './jobCards.ts';
 
 export default function MediaJobCard(props: {
   group: MediaJobGroup;
@@ -33,8 +22,8 @@ export default function MediaJobCard(props: {
   const active = () => mediaJobActive(job().state);
   const preparing = () => job().state === 'preparing';
   const label = () =>
-    state.settings.mediaRendering.workflows.find((workflow) => workflow.id === job().workflowId)
-      ?.name ?? 'Unavailable workflow';
+    state.settings.mediaRendering.workflows.find((workflow) => workflow.id === job().workflowId)?.name ??
+    'Unavailable workflow';
   const canOpen = () => !props.disabled;
   const conversation = () => props.conversations.get(job().contextConversationId!);
   const characters = createMemo(() => {
@@ -54,9 +43,7 @@ export default function MediaJobCard(props: {
   const [intersecting, setVisible] = createSignal(false);
   const visible = () => props.active !== false && intersecting();
   const status = () =>
-    job().draft?.state === 'open' && job().state === 'succeeded'
-      ? 'Choose a variation'
-      : MEDIA_JOB_STATUS[job().state];
+    job().draft?.state === 'open' && job().state === 'succeeded' ? 'Choose a variation' : MEDIA_JOB_STATUS[job().state];
   const open = () => props.onOpen(job());
   let textArea: HTMLParagraphElement | undefined;
   const scroll = createStreamScroll(() => textArea, requestAnimationFrame, cancelAnimationFrame);
@@ -85,8 +72,7 @@ export default function MediaJobCard(props: {
           >
             <FontAwesomeIcon
               icon={
-                job().outputs.some((asset) => asset.kind === 'video') ||
-                Boolean(job().progress?.videoPreview)
+                job().outputs.some((asset) => asset.kind === 'video') || Boolean(job().progress?.videoPreview)
                   ? faVideo
                   : faImage
               }
@@ -96,14 +82,8 @@ export default function MediaJobCard(props: {
             <span class="truncate">{label()}</span>
           </button>
           <div class="flex items-center flex-wrap min-w-0 gap-2 text-dim text-tiny">
-            <Show
-              when={job().contextConversationId !== null}
-              fallback={<span>Standalone · Gallery</span>}
-            >
-              <span
-                class="max-w-full truncate [&_svg]:mr-1"
-                title={conversation()?.title ?? 'Chat unavailable'}
-              >
+            <Show when={job().contextConversationId !== null} fallback={<span>Standalone · Gallery</span>}>
+              <span class="max-w-full truncate [&_svg]:mr-1" title={conversation()?.title ?? 'Chat unavailable'}>
                 <FontAwesomeIcon icon={faComments} size={12} />
                 {conversation()?.title ?? 'Chat unavailable'}
               </span>
@@ -145,12 +125,7 @@ export default function MediaJobCard(props: {
               {job().draft?.state === 'open' ? 'Discard' : 'Remove'}
             </button>
           </Show>
-          <button
-            type="button"
-            class="inline-flex items-center gap-2"
-            disabled={!canOpen()}
-            onClick={open}
-          >
+          <button type="button" class="inline-flex items-center gap-2" disabled={!canOpen()} onClick={open}>
             Open
             <FontAwesomeIcon icon={faArrowRight} size={11} />
           </button>

@@ -8,19 +8,14 @@ import { rowById, rows } from './shared/entityUtils.ts';
 for (const entity of Object.keys(ENTITY_FOLDERS) as FolderEntity[]) {
   const { table, path, state } = ENTITY_FOLDERS[entity];
   const validateName = (name: string, exceptId = 0) => {
-    if (
-      stmt(`SELECT id FROM ${table} WHERE name = ? COLLATE NOCASE AND id <> ?`).get(name, exceptId)
-    )
+    if (stmt(`SELECT id FROM ${table} WHERE name = ? COLLATE NOCASE AND id <> ?`).get(name, exceptId))
       throw new HttpError(409, 'a folder with this name already exists');
   };
   route.get(`/api/${path}`, () => rows(table).map(toFolder));
   route.post(`/api/${path}`, ({ body }) => {
     const name = requiredString(objectBody(body), 'name');
     validateName(name);
-    const result = stmt(`INSERT INTO ${table} (name, created_at) VALUES (?, ?)`).run(
-      name,
-      Date.now(),
-    );
+    const result = stmt(`INSERT INTO ${table} (name, created_at) VALUES (?, ?)`).run(name, Date.now());
     invalidate(state);
     return toFolder(rowById(table, Number(result.lastInsertRowid)));
   });

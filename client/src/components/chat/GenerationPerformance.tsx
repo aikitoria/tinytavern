@@ -1,9 +1,5 @@
 import { For, Show } from 'solid-js';
-import {
-  generationTokensPerSecond,
-  type GenerationAttemptMetrics,
-  type GenerationMetrics,
-} from '@tinytavern/shared';
+import { generationTokensPerSecond, type GenerationAttemptMetrics, type GenerationMetrics } from '@tinytavern/shared';
 
 const duration = (ms: number | undefined) => (ms == null ? '—' : `${(ms / 1000).toFixed(2)} s`);
 const count = (tokens: number | undefined) => (tokens == null ? '—' : tokens.toLocaleString());
@@ -58,12 +54,8 @@ export default function GenerationPerformance(props: { generations?: GenerationM
                   {generation.continuation ? 'Continuation' : 'Generation'}
                   {(props.generations?.length ?? 0) > 1 ? ` ${index() + 1}` : ''}
                   {speed() == null ? '' : ` · ${speed()!.toFixed(1)} t/s`}
-                  {latest()?.firstTokenMs == null
-                    ? ''
-                    : ` · first output ${duration(latest()!.firstTokenMs)}`}
-                  {generation.elapsedMs == null
-                    ? ' · running'
-                    : ` · ${duration(generation.elapsedMs)} total`}
+                  {latest()?.firstTokenMs == null ? '' : ` · first output ${duration(latest()!.firstTokenMs)}`}
+                  {generation.elapsedMs == null ? ' · running' : ` · ${duration(generation.elapsedMs)} total`}
                   {generation.speculative ? ' · speculative' : ''}
                 </summary>
                 <div class="flex flex-col gap-2 mt-2">
@@ -82,9 +74,7 @@ export default function GenerationPerformance(props: { generations?: GenerationM
                       </div>
                     )}
                   </For>
-                  <p class="hint m-0">
-                    Token counts come from the endpoint. — means unavailable or not yet received.
-                  </p>
+                  <p class="hint m-0">Token counts come from the endpoint. — means unavailable or not yet received.</p>
                 </div>
               </details>
             );

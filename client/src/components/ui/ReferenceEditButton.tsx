@@ -1,11 +1,7 @@
 import { faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from './FontAwesomeIcon.tsx';
 
-export default function ReferenceEditButton(props: {
-  label: string;
-  onClick: () => void;
-  role?: 'menuitem';
-}) {
+export default function ReferenceEditButton(props: { label: string; onClick: () => void; role?: 'menuitem' }) {
   return (
     <button
       type="button"

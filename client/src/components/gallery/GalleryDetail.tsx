@@ -48,8 +48,8 @@ export default function GalleryDetail(props: {
   const [failed, setFailed] = createSignal(false);
   const [naturalRatio, setNaturalRatio] = createSignal(1);
   const imageRatio = () =>
-    props.item.imageWidth && props.item.imageHeight
-      ? props.item.imageWidth / props.item.imageHeight
+    props.item.media.width && props.item.media.height
+      ? props.item.media.width / props.item.media.height
       : naturalRatio();
   const [deleting, setDeleting] = createSignal(false);
   const itemId = props.item.id;
@@ -91,10 +91,7 @@ export default function GalleryDetail(props: {
     );
   const selectedDescriptionWorkflow = () => {
     const selected = descriptionWorkflowId() ?? state.settings.mediaRendering.descriptionWorkflowId;
-    return (
-      descriptionWorkflows().find((workflow) => workflow.id === selected)?.id ??
-      descriptionWorkflows()[0]?.id
-    );
+    return descriptionWorkflows().find((workflow) => workflow.id === selected)?.id ?? descriptionWorkflows()[0]?.id;
   };
   let descriptionAbort: AbortController | undefined;
   const generatePrompt = async () => {
@@ -106,12 +103,7 @@ export default function GalleryDetail(props: {
     setDescriptionProgress(undefined);
     setError('');
     try {
-      const generated = await api.generateGalleryPrompt(
-        itemId,
-        workflowId,
-        abort.signal,
-        setDescriptionProgress,
-      );
+      const generated = await api.generateGalleryPrompt(itemId, workflowId, abort.signal, setDescriptionProgress);
       if (!abort.signal.aborted) setPrompt(generated);
     } catch (err) {
       if (!abort.signal.aborted) setError(errorMessage(err));
@@ -140,7 +132,7 @@ export default function GalleryDetail(props: {
     );
   const video = () => (props.item.media?.kind === 'video' ? props.item.media : undefined);
   createEffect(() => {
-    void props.item.image;
+    void props.item.media.url;
     setFailed(false);
   });
 
@@ -183,7 +175,7 @@ export default function GalleryDetail(props: {
             >
               <Show when={!failed()} fallback={<span class="hint">Image unavailable</span>}>
                 <img
-                  src={props.item.image}
+                  src={props.item.media.url}
                   alt={`Saved image for ${props.item.characterName}`}
                   decoding="async"
                   onLoad={(event) => {
@@ -216,7 +208,7 @@ export default function GalleryDetail(props: {
               <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
             </button>
           </Show>
-          <button type="button" onClick={() => download(props.item.image)}>
+          <button type="button" onClick={() => download(props.item.media.url)}>
             <FontAwesomeIcon icon={faDownload} size={14} /> Download
           </button>
           <Show when={!props.readOnly && props.item.media}>
@@ -233,9 +225,7 @@ export default function GalleryDetail(props: {
               type="button"
               disabled={savingDetails() || generatingPrompt()}
               onClick={() => {
-                void openMediaRerun(props.item.media!).catch((err: unknown) =>
-                  toast(errorMessage(err)),
-                );
+                void openMediaRerun(props.item.media!).catch((err: unknown) => toast(errorMessage(err)));
               }}
             >
               <FontAwesomeIcon icon={faRotateRight} size={14} /> Rerun
@@ -250,14 +240,12 @@ export default function GalleryDetail(props: {
               onClick={() => setZoomed(true)}
             >
               <FontAwesomeIcon icon={faExpand} size={14} />{' '}
-              <Show when={props.item.imageWidth && props.item.imageHeight} fallback="Full size">
-                {props.item.imageWidth} × {props.item.imageHeight}
+              <Show when={props.item.media.width && props.item.media.height} fallback="Full size">
+                {props.item.media.width} × {props.item.media.height}
               </Show>
             </button>
           </Show>
-          <Show when={video()}>
-            {(asset) => <VideoFullscreenButton asset={asset()} player={() => videoPlayer} />}
-          </Show>
+          <Show when={video()}>{(asset) => <VideoFullscreenButton asset={asset()} player={() => videoPlayer} />}</Show>
         </div>
       </div>
       <aside
@@ -394,8 +382,7 @@ export default function GalleryDetail(props: {
               {(update) => (
                 <div class="flex flex-col gap-2">
                   <p class="hint" role="status">
-                    {update().progress.node?.name ??
-                      (update().state === 'queued' ? 'Queued' : 'Starting workflow…')}
+                    {update().progress.node?.name ?? (update().state === 'queued' ? 'Queued' : 'Starting workflow…')}
                   </p>
                   <div class="media-progress-row items-center tabular-nums grid gap-3 text-xs [&:empty]:display-none [&_.img-progress]:w-full grid-cols-[minmax(0,_1fr)_12ch]">
                     <SamplerProgress
@@ -424,10 +411,7 @@ export default function GalleryDetail(props: {
                   >
                     {savingDetails() ? 'Saving…' : 'Save'}
                   </button>
-                  <button
-                    disabled={savingDetails() || generatingPrompt() || !dirty()}
-                    onClick={discardDetails}
-                  >
+                  <button disabled={savingDetails() || generatingPrompt() || !dirty()} onClick={discardDetails}>
                     Discard
                   </button>
                 </Show>
@@ -458,31 +442,18 @@ export default function GalleryDetail(props: {
         </div>
         <Show when={!props.readOnly}>
           <div class="mt-auto pt-3 border-t border-t-solid border-t-subtle [&_button]:pl-0 [&_button]:bg-clear [&_button]:border-transparent [&_button]:text-xs">
-            <button
-              type="button"
-              class="danger"
-              disabled={deleting()}
-              onClick={(event) => void remove(event)}
-            >
-              <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete saved{' '}
-              {video() ? 'video' : 'image'}
+            <button type="button" class="danger" disabled={deleting()} onClick={(event) => void remove(event)}>
+              <FontAwesomeIcon icon={faTrashCan} size={14} /> Delete saved {video() ? 'video' : 'image'}
             </button>
           </div>
         </Show>
       </aside>
       <Show when={resultDetailsOpen() && props.item.media}>
-        {(asset) => (
-          <MediaAssetResultDetails
-            assetId={asset().id}
-            onClose={() => setResultDetailsOpen(false)}
-          />
-        )}
+        {(asset) => <MediaAssetResultDetails assetId={asset().id} onClose={() => setResultDetailsOpen(false)} />}
       </Show>
-      <Show when={sourceImage()}>
-        {(url) => <ImageViewer src={url()} onClose={() => setSourceImage(null)} />}
-      </Show>
+      <Show when={sourceImage()}>{(url) => <ImageViewer src={url()} onClose={() => setSourceImage(null)} />}</Show>
       <Show when={zoomed()}>
-        <ImageViewer src={props.item.image} onClose={() => setZoomed(false)} />
+        <ImageViewer src={props.item.media.url} onClose={() => setZoomed(false)} />
       </Show>
     </div>
   );

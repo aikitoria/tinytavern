@@ -10,8 +10,7 @@ export default function VideoFullscreenButton(props: {
   player: () => HTMLVideoElement | undefined;
 }) {
   const open = async () => {
-    const player = props.player() as
-      (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | undefined;
+    const player = props.player() as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | undefined;
     if (!player?.isConnected) return;
     try {
       if (player.requestFullscreen) {

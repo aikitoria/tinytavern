@@ -1,23 +1,11 @@
-import {
-  readSseData,
-  prepareChatMessages,
-  messagePrefillEnabled,
-  reasoningPrefillEnabled,
-} from '@tinytavern/shared';
+import { readSseData, prepareChatMessages, messagePrefillEnabled, reasoningPrefillEnabled } from '@tinytavern/shared';
 import { publicMessage } from '../media/mediaUrls.ts';
-import type {
-  Conversation,
-  Endpoint,
-  GenMeta,
-  Message,
-  PromptTrace,
-  GenerationMetrics,
-} from '@tinytavern/shared';
+import type { Conversation, Endpoint, GenMeta, Message, PromptTrace, GenerationMetrics } from '@tinytavern/shared';
 import { stmt, toEndpoint, toMessage, transaction } from '../db/db.ts';
 import { getMessage, getPathToMessage } from '../conversations/tree.ts';
 import { buildChatMessages } from './prompt.ts';
 import type { BuiltPrompt, ChatMessage } from './prompt.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { broadcastConv, invalidate } from '../realtime/events.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import {
@@ -52,6 +40,7 @@ interface ActiveGen {
     endpoint: Endpoint;
     built: BuiltPrompt;
   };
+  requireComplete?: boolean;
   onDone?: () => void;
   onError?: () => void;
 }
@@ -78,9 +67,7 @@ export function hasActiveNonToolGeneration(conversationId: number): boolean {
 
 /** Lets structural mutations stop only streams whose rows will be removed. */
 export function activeGenerationMessageIds(conversationId: number): number[] {
-  return [...active.values()]
-    .filter((gen) => gen.conversationId === conversationId)
-    .map((gen) => gen.mid);
+  return [...active.values()].filter((gen) => gen.conversationId === conversationId).map((gen) => gen.mid);
 }
 
 export function hasForegroundGeneration(conversationId: number): boolean {
@@ -177,15 +164,8 @@ function finalize(gen: ActiveGen, status: 'done' | 'error' | 'stopped'): void {
       `UPDATE messages SET content = ?, reasoning = ?, model = ?, status = ?, gen_meta_json = ?,
        image_pending = CASE WHEN ? = 'done' THEN image_pending ELSE 0 END
        WHERE id = ? RETURNING *`,
-    ).get(
-      gen.content,
-      gen.reasoning || null,
-      gen.model,
-      status,
-      JSON.stringify(gen.meta),
-      status,
-      gen.mid,
-    ) as Record<string, unknown> | undefined;
+    ).get(gen.content, gen.reasoning || null, gen.model, status, JSON.stringify(gen.meta), status, gen.mid) as
+      Record<string, unknown> | undefined;
     // A deleted message must never be recreated by a late stream callback.
     if (!row) return null;
     return {
@@ -249,6 +229,7 @@ export function startGeneration(
   options?: {
     background?: boolean;
     prompt?: BuiltPrompt;
+    requireComplete?: boolean;
     onDone?: () => void;
     onError?: () => void;
   },
@@ -279,48 +260,47 @@ export function startGeneration(
     started: performance.now(),
     metrics,
     promptOverride: options?.prompt,
+    requireComplete: options?.requireComplete,
     onDone: options?.onDone,
     onError: options?.onError,
   };
   active.set(mid, gen);
   const isResumeInitially = resumeFrom != null;
   const launch = (attempt: number): void => {
-    run(
-      conversation,
-      gen,
-      isResumeInitially || gen.content.length > 0 || gen.reasoning.length > 0,
-    ).catch((err: unknown) => {
-      if (active.get(mid) !== gen) return;
-      // Foreground retries resume partial content; speculation.ts owns background retries.
-      if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err)) {
-        // Without prefills, retrying would append a fresh answer to the partial result.
-        if (
-          gen.requestContext &&
-          ((gen.content.length > 0 && !messagePrefillEnabled(gen.requestContext.endpoint)) ||
-            (gen.reasoning.length > 0 && !reasoningPrefillEnabled(gen.requestContext.endpoint)))
-        ) {
-          gen.meta.error ??= err instanceof Error ? err.message : String(err);
-          finalize(gen, 'error');
+    run(conversation, gen, isResumeInitially || gen.content.length > 0 || gen.reasoning.length > 0).catch(
+      (err: unknown) => {
+        if (active.get(mid) !== gen) return;
+        // Foreground retries resume partial content; speculation.ts owns background retries.
+        if (!gen.background && attempt < MAX_UPSTREAM_RETRIES && isTransientFailure(err)) {
+          // Without prefills, retrying would append a fresh answer to the partial result.
+          if (
+            gen.requestContext &&
+            ((gen.content.length > 0 && !messagePrefillEnabled(gen.requestContext.endpoint)) ||
+              (gen.reasoning.length > 0 && !reasoningPrefillEnabled(gen.requestContext.endpoint)))
+          ) {
+            gen.meta.error ??= err instanceof Error ? err.message : String(err);
+            finalize(gen, 'error');
+            return;
+          }
+          const reason = gen.meta.error ?? (err instanceof Error ? err.message : String(err));
+          console.warn(
+            `[generation] transient upstream failure for message ${mid} (${reason}), retry ${attempt + 1}/${MAX_UPSTREAM_RETRIES}`,
+          );
+          gen.meta.error = undefined;
+          gen.abort = new AbortController();
+          setTimeout(
+            () => {
+              if (active.get(mid) === gen) launch(attempt + 1);
+            },
+            1000 * (attempt + 1),
+          );
           return;
         }
-        const reason = gen.meta.error ?? (err instanceof Error ? err.message : String(err));
-        console.warn(
-          `[generation] transient upstream failure for message ${mid} (${reason}), retry ${attempt + 1}/${MAX_UPSTREAM_RETRIES}`,
-        );
-        gen.meta.error = undefined;
-        gen.abort = new AbortController();
-        setTimeout(
-          () => {
-            if (active.get(mid) === gen) launch(attempt + 1);
-          },
-          1000 * (attempt + 1),
-        );
-        return;
-      }
-      // May already carry a specific message (e.g. idle timeout).
-      gen.meta.error ??= err instanceof Error ? err.message : String(err);
-      finalize(gen, 'error');
-    });
+        // May already carry a specific message (e.g. idle timeout).
+        gen.meta.error ??= err instanceof Error ? err.message : String(err);
+        finalize(gen, 'error');
+      },
+    );
   };
   launch(0);
 }
@@ -328,10 +308,9 @@ export function startGeneration(
 const MAX_UPSTREAM_RETRIES = 2;
 
 export function resolveEndpoint(conversation: Conversation | null): Endpoint {
-  const endpointId = conversation?.endpointId ?? getSettings().activeEndpointId;
+  const endpointId = conversation?.endpointId ?? getSettingsPreferences().activeEndpointId;
   const endpointRow = endpointId
-    ? (stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId) as
-        Record<string, unknown> | undefined)
+    ? (stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId) as Record<string, unknown> | undefined)
     : undefined;
   if (!endpointRow) {
     throw new Error('No active endpoint — pick one in Settings → General');
@@ -505,9 +484,7 @@ export async function streamEndpointCompletion(
   );
   if (options?.requireComplete && receivedVisibleContent) {
     if (finishReason === 'length') {
-      throw new Error(
-        'Prompt was truncated by the token limit; review the partial text or prepare again',
-      );
+      throw new Error('Prompt was truncated by the token limit; review the partial text or prepare again');
     }
     const missingCompletion = !completed && !finishReason;
     const interruptedCompletion = finishReason && finishReason !== 'stop';
@@ -545,14 +522,9 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
 
   // Seed fresh replies only; retries/resumes already carry the template in their buffers.
   if (!isResume || reasoningPrefillEnabled(endpoint)) {
-    gen.reasoning = endpointReasoningPrefill(
-      endpoint,
-      isResume ? gen.reasoning : built.reasoningPrefill,
-      isResume,
-    );
+    gen.reasoning = endpointReasoningPrefill(endpoint, isResume ? gen.reasoning : built.reasoningPrefill, isResume);
   }
-  if (!isResume && messagePrefillEnabled(endpoint) && built.messagePrefill)
-    gen.content = built.messagePrefill;
+  if (!isResume && messagePrefillEnabled(endpoint) && built.messagePrefill) gen.content = built.messagePrefill;
 
   const { messages, prefilled } = prepareChatMessages(built, {
     prefillMode: endpoint.prefillMode,
@@ -581,6 +553,7 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
     return out;
   };
 
+  let completed = false;
   let refusal = '';
   let receivedVisibleContent = false;
   let receivedReasoning = false;
@@ -637,7 +610,11 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
       gen.abort.signal,
       (data) => {
         if (active.get(gen.mid) !== gen) return false;
+        if (data === '[DONE]') completed = true;
         processData(data);
+        if (gen.requireComplete && gen.content.length > 200_000) {
+          throw new Error('Generated prompt exceeds the text limit');
+        }
         return active.get(gen.mid) === gen;
       },
     );
@@ -672,13 +649,16 @@ async function run(conversation: Conversation, gen: ActiveGen, isResume: boolean
     }
     throw new Error('The model returned an empty reply');
   }
+  if (gen.requireComplete) {
+    const finishReason = attempt.data.finishReason;
+    if ((!completed && !finishReason) || (finishReason && finishReason !== 'stop')) {
+      throw new Error('Prompt completion ended before a complete reply; review before rendering');
+    }
+  }
   finalize(gen, 'done');
 }
 
-function snapshotRequestContext(
-  conversation: Conversation,
-  gen: ActiveGen,
-): NonNullable<ActiveGen['requestContext']> {
+function snapshotRequestContext(conversation: Conversation, gen: ActiveGen): NonNullable<ActiveGen['requestContext']> {
   const resolved = resolveEndpoint(conversation);
   const endpoint: Endpoint = {
     ...resolved,

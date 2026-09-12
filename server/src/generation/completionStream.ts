@@ -65,9 +65,7 @@ export function completionDataReader(
     if (parsed?.error) {
       throw new Error(
         `Upstream stream error: ${
-          typeof parsed.error.message === 'string'
-            ? parsed.error.message.slice(0, 500)
-            : 'Generation failed'
+          typeof parsed.error.message === 'string' ? parsed.error.message.slice(0, 500) : 'Generation failed'
         }`,
       );
     }
@@ -82,8 +80,7 @@ export function completionDataReader(
       if (prompt != null) counts.promptTokens = prompt;
       if (completion != null) counts.completionTokens = completion;
       if (cached != null && (prompt == null || cached <= prompt)) counts.cachedTokens = cached;
-      if (reasoning != null && (completion == null || reasoning <= completion))
-        counts.reasoningTokens = reasoning;
+      if (reasoning != null && (completion == null || reasoning <= completion)) counts.reasoningTokens = reasoning;
       if (text != null && (completion == null || text <= completion)) counts.textTokens = text;
       onUsage(counts);
     }

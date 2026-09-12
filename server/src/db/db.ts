@@ -1,12 +1,15 @@
+import { migrateReviewPrompts } from './mediaPromptSeed.ts';
+import { MEDIA_LIBRARY_VERSION_SCHEMA } from './mediaLibraryVersions.ts';
 import { Database, type Statement, type SQLQueryBindings } from 'bun:sqlite';
 
 type SqlRow = Record<string, string | number | bigint | Uint8Array | null>;
 type PreparedStatement = Statement<SqlRow, SQLQueryBindings[]>;
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { ATTACHMENT_SCHEMA } from './attachmentSchema.ts';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
 import { MEDIA_ENTITY_SCHEMA, MEDIA_REFERENCE_INDEXES } from './mediaEntitySchema.ts';
-import { scalarSettings, writeMediaLibraries } from '../settings/mediaEntities.ts';
+import { scalarSettings, importMediaLibraries } from '../settings/mediaEntities.ts';
 import { migrateMediaEntities } from './mediaEntityMigration.ts';
 import type {
   Character,
@@ -27,6 +30,7 @@ import {
   DEFAULT_STEER_TEMPLATE,
   DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
   DEFAULT_SETTINGS,
+  settingsPreferences,
 } from '@tinytavern/shared';
 
 export const DATA_DIR = process.env.DATA_DIR ?? '/data';
@@ -105,8 +109,8 @@ if (version === 0) {
       defaultPresetId: presetId,
       defaultTemplateId: templateId,
     });
-    writeMediaLibraries(settings);
-    stmt("INSERT INTO settings (key, value) VALUES ('app', ?)").run(scalarSettings(settings));
+    importMediaLibraries(settings);
+    stmt("INSERT INTO settings (key, value) VALUES ('app', ?)").run(scalarSettings(settingsPreferences(settings)));
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   });
   version = SCHEMA_VERSION;
@@ -153,11 +157,45 @@ migrate(84, () => {
 
 migrate(85, () => {
   db.exec(MEDIA_ENTITY_SCHEMA);
-  db.exec(
-    'ALTER TABLE media_recipes ADD COLUMN workflow_id INTEGER REFERENCES media_workflows(id)',
-  );
+  db.exec('ALTER TABLE media_recipes ADD COLUMN workflow_id INTEGER REFERENCES media_workflows(id)');
   migrateMediaEntities();
   db.exec(MEDIA_REFERENCE_INDEXES);
+});
+
+migrate(86, () => {
+  db.exec('DROP TRIGGER media_message_insert');
+  db.exec('DROP TRIGGER media_message_update');
+  db.exec('DROP TRIGGER media_gallery_insert');
+  db.exec('DROP TRIGGER media_gallery_update');
+  db.exec('DROP TRIGGER media_message_reference_insert');
+  db.exec('DROP TRIGGER media_message_reference_update');
+  db.exec('DROP TRIGGER media_message_reference_delete');
+  db.exec('DROP TRIGGER media_gallery_reference_insert');
+  db.exec('DROP TRIGGER media_gallery_reference_update');
+  db.exec('DROP TRIGGER media_gallery_input_delete');
+  db.exec(`DROP INDEX idx_gallery_image;
+    DROP VIEW message_media_files;
+    ALTER TABLE messages DROP COLUMN images_json;
+    ALTER TABLE gallery_items DROP COLUMN image;
+    ALTER TABLE gallery_items DROP COLUMN image_width;
+    ALTER TABLE gallery_items DROP COLUMN image_height;`);
+  db.exec(ATTACHMENT_SCHEMA);
+});
+
+migrate(87, () => {
+  db.exec(MEDIA_LIBRARY_VERSION_SCHEMA);
+  migrateReviewPrompts();
+});
+
+migrate(88, () => {
+  // Version 87 only linked the first saved prompt in each draft.
+  migrateReviewPrompts();
+  // Version 87 moved interrupted review preparation to ready without releasing deleted inputs.
+  // Keep pins for active work; the normal startup sweep removes files whose final pin is released.
+  stmt(`DELETE FROM media_owners WHERE owner_type = 'job' AND slot LIKE 'input:%'
+    AND EXISTS (SELECT 1 FROM media_assets WHERE id = media_owners.asset_id AND reference_deleted = 1)
+    AND EXISTS (SELECT 1 FROM media_jobs WHERE id = media_owners.owner_id
+      AND state IN ('draft', 'ready', 'succeeded', 'failed', 'cancelled'))`).run();
 });
 
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
@@ -213,9 +251,7 @@ export function deleteMessageSubtrees(rootIds: readonly number[]): number {
         WHERE id IN (SELECT value FROM json_each(?))
           AND (parent_id IS NOT NULL OR active_child_id IS NOT NULL)`).run(ids);
     }
-    return Number(
-      stmt('DELETE FROM messages WHERE id IN (SELECT value FROM json_each(?))').run(ids).changes,
-    );
+    return Number(stmt('DELETE FROM messages WHERE id IN (SELECT value FROM json_each(?))').run(ids).changes);
   });
 }
 
@@ -227,16 +263,14 @@ export function deleteConversationRows(ids: readonly number[]): number {
     stmt(`UPDATE messages SET parent_id = NULL, active_child_id = NULL
       WHERE conversation_id IN (SELECT value FROM json_each(?))
         AND (parent_id IS NOT NULL OR active_child_id IS NOT NULL)`).run(encoded);
-    return Number(
-      stmt('DELETE FROM conversations WHERE id IN (SELECT value FROM json_each(?))').run(encoded)
-        .changes,
-    );
+    return Number(stmt('DELETE FROM conversations WHERE id IN (SELECT value FROM json_each(?))').run(encoded).changes);
   });
 }
 
 type Row = Record<string, unknown>;
 
 const assetCache = new Map<string, MediaAsset>();
+const assetsById = new Map<number, MediaAsset>();
 const assetObservers = new Set<() => void>();
 export function observeMediaAssets(observer: () => void): () => void {
   assetObservers.add(observer);
@@ -245,6 +279,8 @@ export function observeMediaAssets(observer: () => void): () => void {
   };
 }
 export function invalidateMediaAsset(path: string): void {
+  const asset = assetCache.get(path);
+  if (asset) assetsById.delete(asset.id);
   assetCache.delete(path);
   for (const observer of assetObservers) observer();
 }
@@ -265,15 +301,23 @@ export function toMediaAsset(row: Row): MediaAsset {
   };
 }
 
+function cacheMediaAsset(row: Row): MediaAsset {
+  const asset = toMediaAsset(row);
+  if (assetCache.size >= 16384) {
+    const oldest = assetCache.values().next().value!;
+    assetCache.delete(oldest.url);
+    assetsById.delete(oldest.id);
+  }
+  assetCache.set(asset.url, asset);
+  assetsById.set(asset.id, asset);
+  return asset;
+}
+
 export function mediaAssetForPath(path: string): MediaAsset | undefined {
   const cached = assetCache.get(path);
   if (cached) return cached;
   const row = stmt('SELECT * FROM media_assets WHERE path = ?').get(path);
-  if (!row) return undefined;
-  const asset = toMediaAsset(row);
-  if (assetCache.size >= 16384) assetCache.delete(assetCache.keys().next().value!);
-  assetCache.set(path, asset);
-  return asset;
+  return row ? cacheMediaAsset(row) : undefined;
 }
 
 function parseCustomTemplate(raw: string | null): CustomTemplate | null {
@@ -281,8 +325,61 @@ function parseCustomTemplate(raw: string | null): CustomTemplate | null {
   return JSON.parse(raw) as CustomTemplate;
 }
 
-export function toMessage(r: Row): Message {
-  const images = r.images_json ? (JSON.parse(r.images_json as string) as string[]) : [];
+/** Fetch metadata only for cache misses; associations remain authoritative on every read. */
+function attachmentMedia(attachments: Row[]): Map<number, MediaAsset[]> {
+  const assets = new Map<number, MediaAsset>();
+  const missing = new Set<number>();
+  for (const attachment of attachments) {
+    const assetId = Number(attachment.asset_id);
+    const cached = assetsById.get(assetId);
+    if (cached) {
+      assets.set(assetId, cached);
+    } else {
+      missing.add(assetId);
+    }
+  }
+  if (missing.size) {
+    const rows = stmt('SELECT * FROM media_assets WHERE id IN (SELECT value FROM json_each(?))').all(
+      JSON.stringify([...missing]),
+    );
+    for (const row of rows) {
+      const asset = cacheMediaAsset(row);
+      assets.set(asset.id, asset);
+    }
+  }
+  const media = new Map<number, MediaAsset[]>();
+  for (const attachment of attachments) {
+    const asset = assets.get(Number(attachment.asset_id));
+    if (!asset) continue;
+    const messageId = Number(attachment.owner_id);
+    let list = media.get(messageId);
+    if (!list) {
+      list = [];
+      media.set(messageId, list);
+    }
+    list.push(asset);
+  }
+  return media;
+}
+
+export function messageMedia(messageId: number): MediaAsset[] {
+  const attachments = stmt(`SELECT owner_id, asset_id FROM media_owners
+    WHERE owner_type = 'message' AND owner_id = ? ORDER BY CAST(slot AS INTEGER)`).all(messageId);
+  return attachmentMedia(attachments).get(messageId) ?? [];
+}
+
+/** One association query for a whole tree or path, including messages with no attachments. */
+export function toMessages(rows: Row[]): Message[] {
+  if (rows.length === 0) return [];
+  const ids = JSON.stringify(rows.map((row) => row.id));
+  const attachments = stmt(`SELECT owner_id, asset_id FROM media_owners
+    WHERE owner_type = 'message' AND owner_id IN (SELECT value FROM json_each(?))
+    ORDER BY owner_id, CAST(slot AS INTEGER)`).all(ids);
+  const media = attachmentMedia(attachments);
+  return rows.map((row) => toMessage(row, media.get(Number(row.id)) ?? []));
+}
+
+export function toMessage(r: Row, media = messageMedia(Number(r.id))): Message {
   return {
     id: r.id as number,
     conversationId: r.conversation_id as number,
@@ -297,12 +394,7 @@ export function toMessage(r: Row): Message {
     genMeta: r.gen_meta_json ? JSON.parse(r.gen_meta_json as string) : null,
     generationKind: r.generation_kind as Message['generationKind'],
     generationToken: (r.generation_token as number | null) ?? null,
-    media: images.map((path) => {
-      const asset = mediaAssetForPath(path);
-      // Attachment triggers create asset records for every stored path, including missing files.
-      if (!asset) throw new Error(`Missing media asset for message ${r.id}: ${path}`);
-      return asset;
-    }),
+    media,
     activeImage: (r.active_image as number) ?? 0,
     imagePending: (r.image_pending as number) === 1,
     hasImageRender: r.render_recipe_id != null,
@@ -318,16 +410,12 @@ export function toGalleryItem(r: Row): GalleryItem {
     id: r.id as number,
     folderId: (r.folder_id as number | null) ?? null,
     characters,
-    characterName:
-      characters.map((character) => character.name).join(', ') || String(r.character_name),
+    characterName: characters.map((character) => character.name).join(', ') || String(r.character_name),
     sourceConversationId: (r.source_conversation_id as number | null) ?? null,
     sourceMessageId: (r.source_message_id as number | null) ?? null,
     sourceImage: (r.source_image as string | null) ?? null,
     prompt: r.prompt as string,
-    image: r.image as string,
-    media: typeof r.image === 'string' ? mediaAssetForPath(r.image) : undefined,
-    imageWidth: (r.image_width as number | null) ?? null,
-    imageHeight: (r.image_height as number | null) ?? null,
+    media: toMediaAsset({ ...r, id: r.asset_id }),
     createdAt: r.created_at as number,
     updatedAt: r.updated_at as number,
   };

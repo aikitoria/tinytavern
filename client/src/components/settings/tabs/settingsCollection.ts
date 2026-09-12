@@ -7,7 +7,7 @@ import { applySettings, state } from '../../../state/store.ts';
 export function settingsCollection<K extends keyof Settings>(key: K) {
   return async (change: (current: Settings[K]) => Settings[K]) => {
     const settings = state.settings;
-    const next = await api.putSettings(
+    const next = await api.importMediaSettings(
       { [key]: change(structuredClone(unwrap(settings[key]))) },
       settings.revision,
     );

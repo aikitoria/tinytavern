@@ -9,7 +9,7 @@ import { requireObject, optionalNullableId } from '../http/validation.ts';
 import { HttpError } from '../http/router.ts';
 import { readAvatarFile } from '../characters/avatarStore.ts';
 import { rasterImageFormat, saveImage } from './images.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { getSettingsPreferences } from '../settings/settingsStore.ts';
 import { setMediaCharacters } from './mediaCharacters.ts';
 
 /** Caller holds the job mutation transaction and cleans copiedPaths if that transaction fails. */
@@ -35,26 +35,20 @@ export function fillAutomaticMediaInputs(
       : stmt('SELECT character_id, persona_id FROM conversations WHERE id = ?').get(conversationId);
   let characterId = conversation?.character_id == null ? null : Number(conversation.character_id);
   let personaId =
-    conversation?.persona_id == null
-      ? getSettings().defaultPersonaId
-      : Number(conversation.persona_id);
-  const avatar =
-    context.avatar === undefined ? null : requireObject(context.avatar, 'avatar context');
+    conversation?.persona_id == null ? getSettingsPreferences().defaultPersonaId : Number(conversation.persona_id);
+  const avatar = context.avatar === undefined ? null : requireObject(context.avatar, 'avatar context');
   if (avatar) {
     const id = optionalNullableId(avatar, 'id');
     if (id == null || !['character', 'persona'].includes(String(avatar.kind)))
       throw new HttpError(400, 'Invalid avatar context');
     const entity = avatar.kind === 'character' ? 'characters' : 'personas';
-    if (!stmt(`SELECT id FROM ${entity} WHERE id = ?`).get(id))
-      throw new HttpError(404, 'Avatar entity not found');
+    if (!stmt(`SELECT id FROM ${entity} WHERE id = ?`).get(id)) throw new HttpError(404, 'Avatar entity not found');
     if (avatar.kind === 'character') characterId = id;
     else personaId = id;
   }
   const mode = avatar ? 'avatar' : conversationId === null ? 'standalone' : 'chat';
   const bindings = workflow.inputBindings[mode] ?? {};
-  const allowed = new Map(
-    compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]),
-  );
+  const allowed = new Map(compileMediaWorkflow(workflow.json).mediaInputs.map((input) => [input.name, input.kind]));
   const next = [...inputs];
   const copied = new Map<string, number>();
   for (const [slot, source] of Object.entries(bindings)) {
@@ -72,9 +66,7 @@ export function fillAutomaticMediaInputs(
     const kind = source === 'character-avatar' ? 'character' : 'persona';
     const id = kind === 'character' ? characterId : personaId;
     if (id === null) continue;
-    const entity = stmt(
-      `SELECT avatar FROM ${kind === 'character' ? 'characters' : 'personas'} WHERE id = ?`,
-    ).get(id);
+    const entity = stmt(`SELECT avatar FROM ${kind === 'character' ? 'characters' : 'personas'} WHERE id = ?`).get(id);
     if (!entity?.avatar) continue;
     const identity = `${kind}:${id}`;
     let assetId = copied.get(identity);

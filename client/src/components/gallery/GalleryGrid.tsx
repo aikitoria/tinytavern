@@ -1,22 +1,7 @@
-import {
-  For,
-  Show,
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-  untrack,
-} from 'solid-js';
+import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js';
 import { faCheck, faImage, faPlay, faFilm } from '@fortawesome/free-solid-svg-icons';
 import type { GalleryItem } from '@tinytavern/shared';
-import {
-  galleryRowAt,
-  layoutGallery,
-  layoutGalleryFolders,
-  visibleGalleryRows,
-} from '../../galleryModel.ts';
+import { galleryRowAt, layoutGallery, layoutGalleryFolders, visibleGalleryRows } from '../../galleryModel.ts';
 import type { GalleryCell, GalleryLayout, GalleryFolderGroup } from '../../galleryModel.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 
@@ -83,8 +68,8 @@ function GalleryTile(props: {
   const kind = () => (video() ? 'video' : 'image');
   const summary = createMemo(() => {
     const item = props.cell.item;
-    const width = item.media?.width ?? item.imageWidth;
-    const height = item.media?.height ?? item.imageHeight;
+    const width = item.media.width;
+    const height = item.media.height;
     const duration = video() ? item.media?.duration : null;
     return [
       props.workflowName,
@@ -129,8 +114,8 @@ function GalleryTile(props: {
           <img
             src={props.cell.item.media?.thumbnail!}
             alt={`${video() ? 'Video preview' : 'Saved image'} for ${props.cell.item.characterName}`}
-            width={props.cell.item.imageWidth ?? undefined}
-            height={props.cell.item.imageHeight ?? undefined}
+            width={props.cell.item.media.width ?? undefined}
+            height={props.cell.item.media.height ?? undefined}
             loading="lazy"
             decoding="async"
             onError={() => setFailed(true)}
@@ -154,10 +139,7 @@ function GalleryTile(props: {
             aria-hidden="true"
           >
             <Show when={props.selected}>
-              <Show
-                when={props.selectionNumber}
-                fallback={<FontAwesomeIcon icon={faCheck} size={12} />}
-              >
+              <Show when={props.selectionNumber} fallback={<FontAwesomeIcon icon={faCheck} size={12} />}>
                 {props.selectionNumber}
               </Show>
             </Show>
@@ -173,20 +155,13 @@ function GalleryTile(props: {
           <Show when={summary()}>
             <span class="block truncate">{summary()}</span>
           </Show>
-          <span
-            class="block truncate text-white/70"
-            classList={{ 'pr-20': Boolean(props.onInspect) }}
-          >
+          <span class="block truncate text-white/70" classList={{ 'pr-20': Boolean(props.onInspect) }}>
             {saved()}
           </span>
         </span>
       </button>
       <Show when={props.onInspect}>
-        <button
-          class="right-2 bottom-2 absolute"
-          onClick={props.onInspect}
-          aria-label={`View ${kind()} details`}
-        >
+        <button class="right-2 bottom-2 absolute" onClick={props.onInspect} aria-label={`View ${kind()} details`}>
           Details
         </button>
       </Show>
@@ -226,10 +201,7 @@ export default function GalleryGrid(props: {
     scrollRoot().scrollTop = Math.max(0, top + stageOffset);
   };
   const measureOffset = () => {
-    stageOffset =
-      stage.getBoundingClientRect().top -
-      scrollRoot().getBoundingClientRect().top +
-      scrollRoot().scrollTop;
+    stageOffset = stage.getBoundingClientRect().top - scrollRoot().getBoundingClientRect().top + scrollRoot().scrollTop;
   };
   const [width, setWidth] = createSignal(0);
   const [view, setView] = createSignal({ top: 0, height: 600 });
@@ -245,11 +217,9 @@ export default function GalleryGrid(props: {
     const { start, end } = visibleGalleryRows(headings, view().top, view().height);
     return headings.slice(start, end);
   });
-  const range = createMemo(
-    () => visibleGalleryRows(layout().rows, view().top, view().height),
-    undefined,
-    { equals: (a, b) => a.start === b.start && a.end === b.end },
-  );
+  const range = createMemo(() => visibleGalleryRows(layout().rows, view().top, view().height), undefined, {
+    equals: (a, b) => a.start === b.start && a.end === b.end,
+  });
   const renderedRows = createMemo(() => {
     const current = layout();
     const { start, end } = range();
@@ -257,8 +227,7 @@ export default function GalleryGrid(props: {
     const focused = focusedId();
     const focusRow = focused == null ? undefined : current.rowById.get(focused);
     // A wheel scroll must not unmount the currently focused button.
-    if (focusRow !== undefined && (focusRow < start || focusRow >= end))
-      rows.push(current.rows[focusRow]!);
+    if (focusRow !== undefined && (focusRow < start || focusRow >= end)) rows.push(current.rows[focusRow]!);
     return rows;
   });
   // Keep tiles mounted by gallery ID even when their row or position changes.
@@ -266,9 +235,7 @@ export default function GalleryGrid(props: {
     () =>
       new Map(
         renderedRows().flatMap((row) =>
-          row.cells.map(
-            (cell) => [cell.item.id, { cell, top: row.top, height: row.height }] as const,
-          ),
+          row.cells.map((cell) => [cell.item.id, { cell, top: row.top, height: row.height }] as const),
         ),
       ),
   );
@@ -278,8 +245,7 @@ export default function GalleryGrid(props: {
       if (props.hidden || props.active === false || !documentVisible()) return visible;
       const { top, height } = view();
       for (const row of renderedRows()) {
-        if (height > 0 && row.top < top + height && row.top + row.height > top)
-          visible.add(row.top);
+        if (height > 0 && row.top < top + height && row.top + row.height > top) visible.add(row.top);
       }
       return visible;
     },
@@ -297,8 +263,7 @@ export default function GalleryGrid(props: {
     if (!frame) frame = requestAnimationFrame(updateViewport);
   };
   const focusButton = (id: number | null) => {
-    const button =
-      id == null ? null : stage.querySelector<HTMLButtonElement>(`[data-gallery-id="${id}"]`);
+    const button = id == null ? null : stage.querySelector<HTMLButtonElement>(`[data-gallery-id="${id}"]`);
     (button ?? viewport).focus({ preventScroll: true });
   };
   onMount(() => {
@@ -307,16 +272,12 @@ export default function GalleryGrid(props: {
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     onCleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
-    const mobile = window.matchMedia(
-      '(max-width: 767px), (pointer: coarse) and (max-width: 1024px)',
-    );
+    const mobile = window.matchMedia('(max-width: 767px), (pointer: coarse) and (max-width: 1024px)');
     const measure = () => {
       if (props.hidden || props.active === false) return;
       cancelAnimationFrame(frame);
       frame = 0;
-      const nextHost = mobile.matches
-        ? (viewport.closest<HTMLElement>('.gallery-modal') ?? viewport)
-        : viewport;
+      const nextHost = mobile.matches ? (viewport.closest<HTMLElement>('.gallery-modal') ?? viewport) : viewport;
       if (nextHost !== scrollHost) {
         scrollHost?.removeEventListener('scroll', onScroll);
         scrollHost = nextHost;
@@ -341,11 +302,7 @@ export default function GalleryGrid(props: {
         const previous = sizes.get(entry.target);
         sizes.set(entry.target, { width, height });
         // Our own row layout changes the stage height; only its width is an input.
-        if (
-          !previous ||
-          previous.width !== width ||
-          (entry.target !== stage && previous.height !== height)
-        ) {
+        if (!previous || previous.width !== width || (entry.target !== stage && previous.height !== height)) {
           changed = true;
         }
       }
@@ -418,14 +375,10 @@ export default function GalleryGrid(props: {
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key))
-      return;
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
     const current = layout();
     if (!current.rows.length) return;
-    const id = Number(
-      (event.target as HTMLElement).closest<HTMLButtonElement>('[data-gallery-id]')?.dataset
-        .galleryId,
-    );
+    const id = Number((event.target as HTMLElement).closest<HTMLButtonElement>('[data-gallery-id]')?.dataset.galleryId);
     const rowIndex = current.rowById.get(id) ?? 0;
     const row = current.rows[rowIndex]!;
     const cell = row.cells.find((entry) => entry.item.id === id) ?? row.cells[0]!;
@@ -439,8 +392,7 @@ export default function GalleryGrid(props: {
       if (neighbor) {
         const center = cell.left + cell.width / 2;
         index = neighbor.cells.reduce((best, entry) =>
-          Math.abs(entry.left + entry.width / 2 - center) <
-          Math.abs(best.left + best.width / 2 - center)
+          Math.abs(entry.left + entry.width / 2 - center) < Math.abs(best.left + best.width / 2 - center)
             ? entry
             : best,
         ).index;
@@ -450,10 +402,7 @@ export default function GalleryGrid(props: {
     const next = props.items[Math.max(0, Math.min(props.items.length - 1, index))]!;
     const nextRow = current.rows[current.rowById.get(next.id)!]!;
     setFocusedId(next.id);
-    if (
-      nextRow.top < scrollTop() ||
-      nextRow.top + nextRow.height > scrollTop() + scrollRoot().clientHeight
-    )
+    if (nextRow.top < scrollTop() || nextRow.top + nextRow.height > scrollTop() + scrollRoot().clientHeight)
       setScrollTop(nextRow.top);
     updateViewport();
     cancelAnimationFrame(focusFrame);
@@ -508,11 +457,7 @@ export default function GalleryGrid(props: {
                       }
                     : undefined
                 }
-                selectionNumber={
-                  props.selectionOrder?.includes(id)
-                    ? props.selectionOrder.indexOf(id) + 1
-                    : undefined
-                }
+                selectionNumber={props.selectionOrder?.includes(id) ? props.selectionOrder.indexOf(id) + 1 : undefined}
                 count={props.items.length}
                 selected={props.selectedIds.has(id)}
                 selecting={props.selecting}

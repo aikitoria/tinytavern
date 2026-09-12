@@ -3,8 +3,7 @@ import { stmt, toConversation } from '../db/db.ts';
 import { HttpError } from '../http/router.ts';
 
 export function getConversation(id: number): Conversation {
-  const row = stmt('SELECT * FROM conversations WHERE id = ?').get(id) as
-    Record<string, unknown> | undefined;
+  const row = stmt('SELECT * FROM conversations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!row) throw new HttpError(404, `conversation ${id} not found`);
   return toConversation(row);
 }

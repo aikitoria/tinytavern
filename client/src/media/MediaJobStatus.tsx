@@ -15,11 +15,7 @@ export default function MediaJobStatus(props: { job: MediaJob; label?: string })
         role="status"
       >
         <Show when={active()}>
-          <FontAwesomeIcon
-            icon={faSpinner}
-            size={11}
-            class="spinner inline-block size-2.5 flex-none origin-center"
-          />
+          <FontAwesomeIcon icon={faSpinner} size={11} class="spinner inline-block size-2.5 flex-none origin-center" />
         </Show>
         {props.label ?? MEDIA_JOB_STATUS[props.job.state]}
       </span>

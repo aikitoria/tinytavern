@@ -1,12 +1,7 @@
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js';
 import { marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
-import {
-  faCheck,
-  faEllipsis,
-  faTriangleExclamation,
-  type IconDefinition,
-} from '@fortawesome/free-solid-svg-icons';
+import { faCheck, faEllipsis, faTriangleExclamation, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { faCopy } from '@fortawesome/free-regular-svg-icons';
 import DropdownSurface from './DropdownSurface.tsx';
 import MediaPromptMenuItems from '../../media/MediaPromptMenuItems.tsx';
@@ -143,11 +138,7 @@ function hideAngleInstructions(src: string): string {
       const close = src.indexOf('>', i + 1);
       const newline = src.indexOf('\n', i + 1);
       const nestedOpen = src.indexOf('<', i + 1);
-      if (
-        close !== -1 &&
-        (newline === -1 || close < newline) &&
-        (nestedOpen === -1 || close < nestedOpen)
-      ) {
+      if (close !== -1 && (newline === -1 || close < newline) && (nestedOpen === -1 || close < nestedOpen)) {
         i = close + 1;
         continue;
       }
@@ -185,9 +176,7 @@ function autoclose(src: string): string {
 function markQuotes(src: string): string {
   return src
     .split(PROTECTED_SPLIT)
-    .map((part, i) =>
-      i % 2 === 1 ? part : part.replace(QUOTE_RE, (m) => `<span class="quoted">${m}</span>`),
-    )
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(QUOTE_RE, (m) => `<span class="quoted">${m}</span>`)))
     .join('');
 }
 
@@ -224,20 +213,12 @@ export default function Markdown(props: {
       if (!wrap.querySelector(':scope > .code-actions')) {
         wrap.insertAdjacentHTML(
           'beforeend',
-          props.renderPrompt
-            ? CODE_RENDER_ACTIONS
-            : props.showMediaMenu === false
-              ? CODE_COPY_ACTIONS
-              : CODE_ACTIONS,
+          props.renderPrompt ? CODE_RENDER_ACTIONS : props.showMediaMenu === false ? CODE_COPY_ACTIONS : CODE_ACTIONS,
         );
       }
-      const button = wrap.querySelector<HTMLButtonElement>(
-        ':scope > .code-actions > .code-copy-btn:empty',
-      );
+      const button = wrap.querySelector<HTMLButtonElement>(':scope > .code-actions > .code-copy-btn:empty');
       if (button) setCopyIcon(button, faCopy);
-      const more = wrap.querySelector<HTMLButtonElement>(
-        ':scope > .code-actions > .code-more-btn:empty',
-      );
+      const more = wrap.querySelector<HTMLButtonElement>(':scope > .code-actions > .code-more-btn:empty');
       if (more) setCopyIcon(more, faEllipsis);
       const use = wrap.querySelector<HTMLButtonElement>('.code-render-prompt-btn');
       if (use) {
@@ -259,9 +240,7 @@ export default function Markdown(props: {
   };
 
   const highlight = async () => {
-    const blocks = container?.querySelectorAll<HTMLElement>(
-      'pre code[class*="language-"]:not(.hljs, .no-highlight)',
-    );
+    const blocks = container?.querySelectorAll<HTMLElement>('pre code[class*="language-"]:not(.hljs, .no-highlight)');
     if (!blocks?.length) return;
     // Load highlighting only for labelled fences; never guess a language.
     hljsPromise ??= import('highlight.js');
@@ -378,11 +357,7 @@ export default function Markdown(props: {
         keyboardNavigation
         autoFocus
       >
-        <MediaPromptMenuItems
-          text={menuText()}
-          conversationId={props.conversationId}
-          onClose={closeMenu}
-        />
+        <MediaPromptMenuItems text={menuText()} conversationId={props.conversationId} onClose={closeMenu} />
       </DropdownSurface>
     </>
   );

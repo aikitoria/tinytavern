@@ -29,11 +29,7 @@ export default function Modal(props: {
   onCleanup(layer.dispose);
   const close = () => (props.onClose ?? (() => openModal(null)))();
   const focusable = () =>
-    [
-      ...dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]',
-      ),
-    ].filter(
+    [...dialog.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]')].filter(
       (element) =>
         !element.hasAttribute('disabled') &&
         element.tabIndex >= 0 &&
@@ -41,12 +37,8 @@ export default function Modal(props: {
         element.getClientRects().length > 0,
     );
   const isTopDialog = () => {
-    const dialogs = [
-      ...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'),
-    ];
-    return (
-      layer.isTop() && dialogs.filter((element) => !element.closest('[hidden]')).at(-1) === dialog
-    );
+    const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')];
+    return layer.isTop() && dialogs.filter((element) => !element.closest('[hidden]')).at(-1) === dialog;
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (!isTopDialog()) return;
@@ -78,19 +70,14 @@ export default function Modal(props: {
   });
   createEffect(() => {
     if (!layer.isTop() || !enabled()) {
-      if (dialog?.contains(document.activeElement))
-        lastFocused = document.activeElement as HTMLElement;
+      if (dialog?.contains(document.activeElement)) lastFocused = document.activeElement as HTMLElement;
       return;
     }
     queueMicrotask(() => {
       if (!dialog?.isConnected || !layer.isTop() || !enabled()) return;
       // Restoring a full page after reload is not a request to focus a control.
       // Keep focus unset until the user clicks or starts navigating with Tab.
-      if (
-        props.fullscreen &&
-        !lastFocused?.isConnected &&
-        (!previouslyFocused || previouslyFocused === document.body)
-      )
+      if (props.fullscreen && !lastFocused?.isConnected && (!previouslyFocused || previouslyFocused === document.body))
         return;
       const preferred = lastFocused?.isConnected
         ? lastFocused

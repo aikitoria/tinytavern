@@ -2,15 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import { createRoot, createSignal } from 'solid-js';
 import type { MediaAsset, MediaJob } from '@tinytavern/shared';
-import {
-  comparisonKey,
-  createMediaComparison,
-  type ComparisonResult,
-} from '../../client/src/media/mediaComparison.ts';
-import {
-  createComparisonPlayback,
-  type ComparisonPlaybackState,
-} from '../../client/src/media/comparisonPlayback.ts';
+import { comparisonKey, createMediaComparison, type ComparisonResult } from '../../client/src/media/mediaComparison.ts';
+import { createComparisonPlayback, type ComparisonPlaybackState } from '../../client/src/media/comparisonPlayback.ts';
 
 test('comparison pins an exact output while candidate navigation and deletion preserve distinct sides', () => {
   const result = (job: number, asset: number): ComparisonResult => ({
@@ -40,11 +33,7 @@ test('comparison pins an exact output while candidate navigation and deletion pr
       assert.strictEqual(comparison.reference(), a);
       assert.strictEqual(comparison.candidate(), b);
       comparison.navigate(1);
-      assert.strictEqual(
-        comparison.candidate(),
-        b,
-        'Navigation stays within completed alternatives',
-      );
+      assert.strictEqual(comparison.candidate(), b, 'Navigation stays within completed alternatives');
       assert.equal(a.job.prompt, 'Prompt 1');
     } finally {
       dispose();

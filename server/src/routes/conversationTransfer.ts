@@ -1,16 +1,10 @@
+import { setMessageMedia } from '../media/messageMedia.ts';
 import { mediaCharacters } from '../media/mediaCharacters.ts';
 import { getMediaRecipe } from '../media/mediaRecipes.ts';
 import { readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type { GenerationKind, MessageStatus, Role } from '@tinytavern/shared';
-import {
-  IMAGES_DIR,
-  mediaAssetForPath,
-  stmt,
-  toConversation,
-  toMessage,
-  transaction,
-} from '../db/db.ts';
+import { IMAGES_DIR, mediaAssetForPath, stmt, toConversation, toMessages, transaction } from '../db/db.ts';
 import { invalidate } from '../realtime/events.ts';
 import { mergeLiveBuffers } from '../generation/generation.ts';
 import { deleteImageFiles, rasterImageFormat } from '../media/images.ts';
@@ -102,7 +96,6 @@ interface MessageRow {
   created_at: number;
   name: string | null;
   generation_kind: GenerationKind;
-  images_json: string;
   active_image: number;
   render_recipe_id: number | null;
 }
@@ -147,8 +140,7 @@ function parseJsonObject(raw: string | null, label: string): JsonObject | null {
 
 function namedReference(table: 'characters' | 'personas' | 'endpoints', id: number | null) {
   if (id == null) return null;
-  const row = stmt(`SELECT id, name FROM ${table} WHERE id = ?`).get(id) as
-    { id: number; name: string } | undefined;
+  const row = stmt(`SELECT id, name FROM ${table} WHERE id = ?`).get(id) as { id: number; name: string } | undefined;
   return row ? { sourceId: row.id, name: row.name } : null;
 }
 
@@ -167,8 +159,7 @@ function exportImage(path: string): { mime: TransferAsset['mime']; data: Buffer 
   }
   const format = rasterImageFormat(data);
   if (!format) throw new HttpError(409, `cannot export invalid image: ${path}`);
-  if (data.length > MAX_IMAGE_BYTES)
-    throw new HttpError(409, `cannot export oversized image: ${path}`);
+  if (data.length > MAX_IMAGE_BYTES) throw new HttpError(409, `cannot export oversized image: ${path}`);
   return { mime: format.mime, data };
 }
 
@@ -186,9 +177,7 @@ export function exportPortableConversation(conversationId: number): PortableConv
     throw new HttpError(409, `conversation has more than ${MAX_MESSAGES} messages`);
   }
   const live = new Map(
-    mergeLiveBuffers(rows.map((row) => toMessage(row as unknown as Record<string, unknown>))).map(
-      (message) => [message.id, message],
-    ),
+    mergeLiveBuffers(toMessages(rows as unknown as Record<string, unknown>[])).map((message) => [message.id, message]),
   );
   const assets: TransferAsset[] = [];
   const assetByPath = new Map<string, string>();
@@ -217,45 +206,41 @@ export function exportPortableConversation(conversationId: number): PortableConv
     });
     return id;
   }
-  const messages = rows.map(
-    (row): Omit<TransferMessage, 'renderRecipeId'> & { renderRecipeId: number | null } => {
-      const paths = JSON.parse(row.images_json) as string[];
-      const imageAssetIds: string[] = [];
-      let activeImage = 0;
-      for (const [index, path] of paths.entries()) {
-        // Portable JSON carries raster images only. Keep video prompts and tree nodes.
-        if (extname(path).toLowerCase() === '.webm' || mediaAssetForPath(path)?.kind === 'video') {
-          continue;
-        }
-        if (index <= row.active_image) {
-          activeImage = imageAssetIds.length;
-        }
-        imageAssetIds.push(addImage(path));
+  const messages = rows.map((row): Omit<TransferMessage, 'renderRecipeId'> & { renderRecipeId: number | null } => {
+    const paths = live.get(row.id)!.media.map((asset) => asset.url);
+    const imageAssetIds: string[] = [];
+    let activeImage = 0;
+    for (const [index, path] of paths.entries()) {
+      // Portable JSON carries raster images only. Keep video prompts and tree nodes.
+      if (extname(path).toLowerCase() === '.webm' || mediaAssetForPath(path)?.kind === 'video') {
+        continue;
       }
-      const renderRecipeId =
-        row.render_recipe_id && (imageAssetIds.length > 0 || paths.length === 0)
-          ? row.render_recipe_id
-          : null;
-      const current = live.get(row.id);
-      return {
-        id: row.id,
-        parentId: row.parent_id,
-        role: row.role,
-        content: current?.content ?? row.content,
-        reasoning: current?.reasoning ?? row.reasoning,
-        name: row.name,
-        status: row.status,
-        activeChildId: row.active_child_id,
-        model: current?.model ?? row.model,
-        genMeta: parseJsonObject(row.gen_meta_json, `message ${row.id} genMeta`),
-        generationKind: row.generation_kind,
-        imageAssetIds,
-        activeImage,
-        renderRecipeId,
-        createdAt: row.created_at,
-      };
-    },
-  );
+      if (index <= row.active_image) {
+        activeImage = imageAssetIds.length;
+      }
+      imageAssetIds.push(addImage(path));
+    }
+    const renderRecipeId =
+      row.render_recipe_id && (imageAssetIds.length > 0 || paths.length === 0) ? row.render_recipe_id : null;
+    const current = live.get(row.id);
+    return {
+      id: row.id,
+      parentId: row.parent_id,
+      role: row.role,
+      content: current?.content ?? row.content,
+      reasoning: current?.reasoning ?? row.reasoning,
+      name: row.name,
+      status: row.status,
+      activeChildId: row.active_child_id,
+      model: current?.model ?? row.model,
+      genMeta: parseJsonObject(row.gen_meta_json, `message ${row.id} genMeta`),
+      generationKind: row.generation_kind,
+      imageAssetIds,
+      activeImage,
+      renderRecipeId,
+      createdAt: row.created_at,
+    };
+  });
 
   const { recipes, assetRecipes, recipeIds } = exportImageRecipes(
     assetByPath,
@@ -323,8 +308,7 @@ function parsePortableConversation(raw: unknown): {
 } {
   const root = object(raw, 'import');
   if (root.format !== FORMAT) throw new HttpError(400, `format must be ${FORMAT}`);
-  if (root.version !== VERSION)
-    throw new HttpError(400, `unsupported export version: ${String(root.version)}`);
+  if (root.version !== VERSION) throw new HttpError(400, `unsupported export version: ${String(root.version)}`);
   const sourceConversation = object(root.conversation, 'conversation');
   if (sourceConversation.promptContext != null)
     throw new HttpError(400, 'Media conversations cannot be imported independently of their draft');
@@ -336,14 +320,8 @@ function parsePortableConversation(raw: unknown): {
     endpoint: parseReference(sourceConversation.endpoint, 'conversation.endpoint'),
     speakerName: nullableString(sourceConversation.speakerName, 'conversation.speakerName'),
     // Older V1 exports omit this field and retain inherited scenario behavior.
-    scenarioOverride: nullableString(
-      sourceConversation.scenarioOverride,
-      'conversation.scenarioOverride',
-    ),
-    activeLeafId: nullablePositiveInteger(
-      sourceConversation.activeLeafId,
-      'conversation.activeLeafId',
-    ),
+    scenarioOverride: nullableString(sourceConversation.scenarioOverride, 'conversation.scenarioOverride'),
+    activeLeafId: nullablePositiveInteger(sourceConversation.activeLeafId, 'conversation.activeLeafId'),
     createdAt: timestamp(sourceConversation.createdAt, 'conversation.createdAt'),
     updatedAt: timestamp(sourceConversation.updatedAt, 'conversation.updatedAt'),
   };
@@ -375,8 +353,7 @@ function parsePortableConversation(raw: unknown): {
       characterNames,
       data,
       ext: detected.ext,
-      recipeId:
-        asset.recipeId == null ? null : string(asset.recipeId, `assets[${i}].recipeId`, 200),
+      recipeId: asset.recipeId == null ? null : string(asset.recipeId, `assets[${i}].recipeId`, 200),
     });
   }
 
@@ -504,9 +481,9 @@ function resolveReference(
   const byId = stmt(`SELECT id, name FROM ${table} WHERE id = ?`).get(reference.sourceId) as
     { id: number; name: string } | undefined;
   if (byId?.name === reference.name) return byId.id;
-  const byName = stmt(`SELECT id FROM ${table} WHERE name = ? ORDER BY id LIMIT 2`).all(
-    reference.name,
-  ) as { id: number }[];
+  const byName = stmt(`SELECT id FROM ${table} WHERE name = ? ORDER BY id LIMIT 2`).all(reference.name) as {
+    id: number;
+  }[];
   return byName.length === 1 ? byName[0]!.id : null;
 }
 
@@ -516,11 +493,7 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
   const writtenImages: string[] = [];
   try {
     const newConversationId = transaction(() => {
-      const { imagePath, recipeIds } = importRecipeImages(
-        parsed.assets,
-        parsed.recipes,
-        writtenImages,
-      );
+      const { imagePath, recipeIds } = importRecipeImages(parsed.assets, parsed.recipes, writtenImages);
       const conv = parsed.conversation;
       const result = stmt(
         `INSERT INTO conversations
@@ -544,9 +517,9 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
         const inserted = stmt(
           `INSERT INTO messages
              (conversation_id, parent_id, role, content, reasoning, status, active_child_id,
-              model, gen_meta_json, created_at, name, generation_kind, images_json, active_image,
+              model, gen_meta_json, created_at, name, generation_kind, active_image,
               image_pending, render_recipe_id)
-           VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+           VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?)`,
         ).run(
           conversationId,
           message.role,
@@ -558,11 +531,16 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
           message.createdAt,
           message.name,
           message.generationKind,
-          JSON.stringify(images),
           message.activeImage,
           message.renderRecipeId ? recipeIds.get(message.renderRecipeId)! : null,
         );
-        idMap.set(message.id, Number(inserted.lastInsertRowid));
+        const id = Number(inserted.lastInsertRowid);
+        setMessageMedia(
+          id,
+          images.map((path) => mediaAssetForPath(path)!.id),
+          message.activeImage,
+        );
+        idMap.set(message.id, id);
       }
       for (const message of parsed.messages) {
         stmt('UPDATE messages SET parent_id = ?, active_child_id = ? WHERE id = ?').run(
@@ -573,10 +551,7 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
       }
       if (conv.activeLeafId != null) {
         const activeLeafId = idMap.get(conv.activeLeafId)!;
-        stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(
-          activeLeafId,
-          conversationId,
-        );
+        stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(activeLeafId, conversationId);
         const importedPath = getPathToMessage(activeLeafId);
         if (importedPath.length === 0 || importedPath.at(-1)?.id !== activeLeafId) {
           throw new Error('imported conversation active path failed validation');
@@ -585,10 +560,7 @@ export function importPortableConversation(raw: unknown): ReturnType<typeof toCo
       return conversationId;
     });
     invalidate('conversations');
-    const row = stmt('SELECT * FROM conversations WHERE id = ?').get(newConversationId) as Record<
-      string,
-      unknown
-    >;
+    const row = stmt('SELECT * FROM conversations WHERE id = ?').get(newConversationId) as Record<string, unknown>;
     return toConversation(row);
   } catch (err) {
     deleteImageFiles(writtenImages);

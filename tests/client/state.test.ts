@@ -18,11 +18,7 @@ test('pending prompt trace preserves history and replaces only its editable tail
   const first = prepareChatMessages(prompt, { prefillMode: 'none', pendingMessage: ' first ' });
   const second = prepareChatMessages(prompt, { prefillMode: 'none', pendingMessage: 'second' });
   assert.strictEqual(first.messages[0], prompt.messages[0]);
-  assert.strictEqual(
-    second.messages[0],
-    first.messages[0],
-    'Keystrokes retain the committed history DOM',
-  );
+  assert.strictEqual(second.messages[0], first.messages[0], 'Keystrokes retain the committed history DOM');
   assert.equal(
     first.messages[1]!.content,
     'Earlier user message\n\nfirst\n<system_instruction>\nReply as Guest.\n</system_instruction>',
@@ -78,11 +74,7 @@ test('pending prompt trace preserves history and replaces only its editable tail
   assert.equal(awaitingReply.prefillMessageIndex, 2);
   const live = { ...trace, stream: { messageId: 12, generationToken: 34, namePrefix: '' } };
   const streaming = preparePromptTrace(live, 'Draft for the next turn');
-  assert.strictEqual(
-    streaming.messages,
-    live.messages,
-    'Live history never acquires another seed or an unsent draft',
-  );
+  assert.strictEqual(streaming.messages, live.messages, 'Live history never acquires another seed or an unsent draft');
   assert.equal(streaming.prefillMessageIndex, null);
   assert.equal(streaming.pendingMessageIndex, null);
 });
@@ -188,17 +180,9 @@ test('settings submission', async () => {
     password = 'newer-password';
     form.discard();
     assert.equal(draft.title, 'Original');
-    assert.equal(
-      password,
-      'newer-password',
-      'Discard cannot reset a draft while it is being saved',
-    );
+    assert.equal(password, 'newer-password', 'Discard cannot reset a draft while it is being saved');
     resolve({ revision: 4, values: { title: 'Submitted', enabled: false } });
-    assert.equal(
-      await first,
-      false,
-      'Save-and-leave must remain in the editor when newer edits exist',
-    );
+    assert.equal(await first, false, 'Save-and-leave must remain in the editor when newer edits exist');
     assert.equal(form.saving(), false);
     assert.deepEqual(draft, { title: 'Original', enabled: true });
     assert.equal(password, 'newer-password');
@@ -318,11 +302,7 @@ test('settings submission', async () => {
       assert.equal(form.isDirty(), newerEdit);
     }
     const conflicted = form.save();
-    assert.equal(
-      requests.at(-1)!.revision,
-      13,
-      'A preserved local edit keeps its baseline revision',
-    );
+    assert.equal(requests.at(-1)!.revision, 13, 'A preserved local edit keeps its baseline revision');
     reject(Object.assign(new Error('Conflict'), { status: 409 }));
     assert.equal(await conflicted, false);
     assert.equal(draft.title, 'Newer local edit');
@@ -337,9 +317,7 @@ test('client transport', async () => {
   // Dynamic paths keep browser-only types out of the server typecheck.
   const apiPath = '../../client/src/state/api.ts';
   const draftPath = '../../client/src/state/draftCompletion.ts';
-  const { api, ApiError, streamTextCompletion, setAuthenticationRequiredHandler } = await import(
-    apiPath
-  );
+  const { api, ApiError, streamTextCompletion, setAuthenticationRequiredHandler } = await import(apiPath);
   const { completeComposerDraft, stopDraftCompletion } = await import(draftPath);
   const originalFetch = globalThis.fetch;
 
@@ -410,11 +388,7 @@ test('client transport', async () => {
         if (text !== options.draft) stopDraftCompletion();
       },
     });
-    assert.equal(
-      await completeComposerDraft(options),
-      false,
-      'concurrent draft completion is rejected',
-    );
+    assert.equal(await completeComposerDraft(options), false, 'concurrent draft completion is rejected');
     assert.equal(await pending, false);
     assert.deepEqual(draftTexts, ['Original cancelled', 'Original']);
 
@@ -444,20 +418,12 @@ test('client transport', async () => {
     await assert.rejects(api.conversations(), /locked/);
     assert.equal(authenticationRequests, 1);
     await assert.rejects(api.login('bad'), /locked/);
-    assert.equal(
-      authenticationRequests,
-      1,
-      'login errors do not recursively trigger authentication',
-    );
+    assert.equal(authenticationRequests, 1, 'login errors do not recursively trigger authentication');
     await assert.rejects(
       streamTextCompletion('/test', {}, () => {}, 'test'),
       /locked/,
     );
-    assert.equal(
-      authenticationRequests,
-      1,
-      'streaming retains its existing error-only authentication behavior',
-    );
+    assert.equal(authenticationRequests, 1, 'streaming retains its existing error-only authentication behavior');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -540,9 +506,7 @@ test('ws lifecycle', async () => {
   // A dynamic path excludes browser code from the server's DOM-free type graph;
   // client tsconfig checks it, and this test supplies runtime browser globals.
   const wsModulePath = '../../client/src/state/ws.ts';
-  const { configureWs, startWs, stopWs, subscribe, watchConversation } = (await import(
-    wsModulePath
-  )) as WsModule;
+  const { configureWs, startWs, stopWs, subscribe, watchConversation } = (await import(wsModulePath)) as WsModule;
   jest.useFakeTimers();
   const dispatch = (listeners: Map<string, Listener[]>, type: string, event = {}) => {
     for (const listener of listeners.get(type) ?? []) listener(event);
@@ -624,11 +588,7 @@ test('ws lifecycle', async () => {
     dispatch(documentListeners, 'resume');
     jest.advanceTimersByTime(50);
     const resumed = FakeWebSocket.instances.at(-1)!;
-    assert.notEqual(
-      resumed,
-      initial,
-      'Gallery/jobs resume replaces a stale socket without a chat subscription',
-    );
+    assert.notEqual(resumed, initial, 'Gallery/jobs resume replaces a stale socket without a chat subscription');
     resumed.open();
     assert.equal(resyncs, before + 1, 'Every page triggers the full data resync');
     assert.equal(resumed.sent.length, 0);
@@ -641,11 +601,7 @@ test('ws lifecycle', async () => {
     jest.advanceTimersByTime(50);
     const stuck = FakeWebSocket.instances.at(-1)!;
     jest.advanceTimersByTime(10_000);
-    assert.equal(
-      stuck.readyState,
-      FakeWebSocket.CLOSED,
-      'A stalled handshake does not hang indefinitely',
-    );
+    assert.equal(stuck.readyState, FakeWebSocket.CLOSED, 'A stalled handshake does not hang indefinitely');
     jest.advanceTimersByTime(500);
     const replacement = FakeWebSocket.instances.at(-1)!;
     assert.notEqual(replacement, stuck);

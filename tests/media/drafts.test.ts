@@ -13,7 +13,7 @@ test('media drafts', async () => {
   requireTestIsolation();
   const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { createMediaJob, createMediaJobFromAsset, editMediaJob, startMediaJob, deleteMediaJob } =
     await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, updateMediaJob, mediaJobDto, mediaDraft } =
@@ -30,8 +30,7 @@ test('media drafts', async () => {
     cleanupDiscardedMediaDraft,
   } = await import('../../server/src/media/mediaDrafts.ts');
   const { appendMessage } = await import('../../server/src/conversations/tree.ts');
-  const { saveImage, deleteImageFiles, sweepOrphanedImages } =
-    await import('../../server/src/media/images.ts');
+  const { saveImage, deleteImageFiles, sweepOrphanedImages } = await import('../../server/src/media/images.ts');
   function job(body: Parameters<typeof createMediaJob>[0] = {}, source?: number) {
     return createMediaJob(
       { requestKey: newRequestId(), ...body },
@@ -91,8 +90,7 @@ test('media drafts', async () => {
     });
   }
   assert.equal(
-    editMediaJob(requireMediaJob(unused.id), { seedOverride: Number.MAX_SAFE_INTEGER })
-      .seedOverride,
+    editMediaJob(requireMediaJob(unused.id), { seedOverride: Number.MAX_SAFE_INTEGER }).seedOverride,
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(editMediaJob(requireMediaJob(unused.id), { seedOverride: null }).seedOverride, null);
@@ -107,11 +105,14 @@ test('media drafts', async () => {
   });
   updateMediaJob(promptCancelled.id, { state: 'preparing' });
   assert.equal(cancelMediaVariation(requireMediaJob(promptCancelled.id)).state, 'cancelled');
+  assert.equal(requireMediaJob(promptCancelled.id).state, 'cancelled');
+  assert.ok(mediaDraft(promptCancelled.draft!.id).conversationId, 'Cancellation preserves the saved prompt discussion');
+  discard(promptCancelled.id);
   assert.throws(() => requireMediaJob(promptCancelled.id), { status: 404 });
   assert.equal(
     stmt('SELECT id FROM media_drafts WHERE id = ?').get(promptCancelled.draft!.id),
     null,
-    'Cancelling the only prompt attempt removes its empty draft',
+    'Explicit discard removes the cancelled draft and its prompt conversation',
   );
   const restarted = job({
     requestKey: cancelledKey,
@@ -144,11 +145,12 @@ test('media drafts', async () => {
     'Leaving an unused draft cannot discard work started by another client',
   );
   assert.equal(requireMediaJob(first.id).state, 'submitting');
-  assert.equal(count('messages'), 1, 'Rendering a draft never inserts a chat placeholder');
   assert.equal(
-    stmt('SELECT active_leaf_id FROM conversations WHERE id = 1').get()!.active_leaf_id,
-    original.id,
+    stmt('SELECT count(*) AS n FROM messages WHERE conversation_id = 1').get()!.n,
+    1,
+    'Rendering a draft never inserts a chat placeholder',
   );
+  assert.equal(stmt('SELECT active_leaf_id FROM conversations WHERE id = 1').get()!.active_leaf_id, original.id);
 
   let remoteId = 0;
   function result(jobId: number, count = 1) {
@@ -175,16 +177,9 @@ test('media drafts', async () => {
   const firstAssets = result(first.id, 2);
   const storedRecipe = requireMediaJob(first.id).recipe_id!;
   assert.notEqual(storedRecipe, decoy);
-  assert.equal(
-    getMediaRecipe(decoy).prompt,
-    'Unrelated recipe',
-    'Saving output never overwrites an unrelated recipe',
-  );
+  assert.equal(getMediaRecipe(decoy).prompt, 'Unrelated recipe', 'Saving output never overwrites an unrelated recipe');
   for (const asset of firstAssets)
-    assert.equal(
-      stmt('SELECT recipe_id FROM media_assets WHERE id = ?').get(asset)!.recipe_id,
-      storedRecipe,
-    );
+    assert.equal(stmt('SELECT recipe_id FROM media_assets WHERE id = ?').get(asset)!.recipe_id, storedRecipe);
   const firstResultDetails = getMediaAssetResultDetails(firstAssets[0]!);
   assert.equal(firstResultDetails.seed, requireMediaJob(first.id).seed);
   assert.equal(firstResultDetails.instruction, 'First instruction');
@@ -217,8 +212,7 @@ test('media drafts', async () => {
     { status: 409 },
     'Stale selection cannot overwrite a newer choice',
   );
-  const { initMediaWorker, stopMediaWorker } =
-    await import('../../server/src/media/mediaWorker.ts');
+  const { initMediaWorker, stopMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
   const oldSaved = job({
     prompt: 'Saved before upgrade',
   });
@@ -287,11 +281,12 @@ test('media drafts', async () => {
     accepted.outputs.map((asset) => asset.id),
     firstAssets,
   );
-  assert.equal(count('messages'), 2, 'Only acceptance inserts a message');
   assert.equal(
-    stmt('SELECT content FROM messages WHERE id = ?').get(accepted.messageId!)!.content,
-    'First prompt',
+    stmt('SELECT count(*) AS n FROM messages WHERE conversation_id = 1').get()!.n,
+    2,
+    'Only acceptance inserts a message',
   );
+  assert.equal(stmt('SELECT content FROM messages WHERE id = ?').get(accepted.messageId!)!.content, 'First prompt');
   assert.equal(
     stmt('SELECT count(*) AS n FROM media_jobs WHERE draft_id = ?').get(first.draft!.id)!.n,
     2,
@@ -303,7 +298,11 @@ test('media drafts', async () => {
     expectedDraftRevision: accepted.draft!.revision,
   });
   assert.equal(repeated.draft!.revision, accepted.draft!.revision);
-  assert.equal(count('messages'), 2, 'Saving an already-owned output is idempotent');
+  assert.equal(
+    stmt('SELECT count(*) AS n FROM messages WHERE conversation_id = 1').get()!.n,
+    2,
+    'Saving an already-owned output is idempotent',
+  );
   const secondAssets = result(second.id);
   const completedDraftRevision = mediaDraft(first.draft!.id).revision;
   const afterFirst = stmt('SELECT * FROM conversations WHERE id = 1').get()!;
@@ -322,7 +321,7 @@ test('media drafts', async () => {
     expectedActiveLeafId: Number(afterFirst.active_leaf_id),
     expectedMutationRevision: Number(afterFirst.mutation_revision),
   });
-  assert.equal(count('messages'), 3);
+  assert.equal(stmt('SELECT count(*) AS n FROM messages WHERE conversation_id = 1').get()!.n, 3);
   assert.equal(
     stmt('SELECT content FROM messages WHERE id = ?').get(acceptedSecond.messageId!)!.content,
     'Second prompt',
@@ -351,22 +350,13 @@ test('media drafts', async () => {
   );
 
   const acceptedRerun = createMediaJobFromAsset(firstAssets[0]!, { requestKey: newRequestId() });
-  assert.equal(
-    acceptedRerun.seedOverride,
-    0,
-    'Saved media retains the fixed seed setting after job deletion',
-  );
-  assert.equal(
-    acceptedRerun.instruction,
-    'First instruction',
-    'Acceptance retains the selected variation instruction',
-  );
+  assert.equal(acceptedRerun.seedOverride, 0, 'Saved media retains the fixed seed setting after job deletion');
+  assert.equal(acceptedRerun.instruction, 'First instruction', 'Acceptance retains the selected variation instruction');
   assert.equal(acceptedRerun.prompt, 'First prompt');
   deleteMediaJob(requireMediaJob(acceptedRerun.id));
 
   const galleryFolderId = Number(
-    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Generated', 1)").run()
-      .lastInsertRowid,
+    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Generated', 1)").run().lastInsertRowid,
   );
   const galleryDraft = job({
     galleryFolderId,
@@ -376,11 +366,7 @@ test('media drafts', async () => {
   start(galleryDraft.id);
   const galleryAssets = result(galleryDraft.id, 2);
   const galleryPending = job({ prompt: 'Next gallery variation' }, galleryDraft.id);
-  assert.equal(
-    galleryPending.galleryFolderId,
-    galleryFolderId,
-    'Variations inherit the saved destination',
-  );
+  assert.equal(galleryPending.galleryFolderId, galleryFolderId, 'Variations inherit the saved destination');
   start(galleryPending.id);
   const runningGallery = requireMediaJob(galleryPending.id);
   let saved = mediaJobDto(requireMediaJob(galleryDraft.id));
@@ -403,7 +389,9 @@ test('media drafts', async () => {
     );
     if (expectedCount === 1)
       assert.equal(
-        stmt('SELECT image FROM gallery_items').get()!.image,
+        stmt(
+          "SELECT a.path AS image FROM media_owners o JOIN media_assets a ON a.id = o.asset_id WHERE o.owner_type = 'gallery'",
+        ).get()!.image,
         saved.outputs.find((asset) => asset.id === galleryAssets[1])!.url,
       );
   }
@@ -414,11 +402,7 @@ test('media drafts', async () => {
       .every((item) => item.folder_id === galleryFolderId),
   );
   const folderRerun = createMediaJobFromAsset(resavedAsset.id, { requestKey: newRequestId() });
-  assert.equal(
-    folderRerun.galleryFolderId,
-    galleryFolderId,
-    'Rerunning a saved image retains its folder',
-  );
+  assert.equal(folderRerun.galleryFolderId, galleryFolderId, 'Rerunning a saved image retains its folder');
   deleteMediaJob(requireMediaJob(folderRerun.id));
   stmt('DELETE FROM gallery_folders WHERE id = ?').run(galleryFolderId);
   assert.equal(
@@ -426,7 +410,9 @@ test('media drafts', async () => {
     null,
     'Deleting a folder safely rehomes pending jobs',
   );
-  stmt('DELETE FROM gallery_items WHERE image = ?').run(resavedAsset.url);
+  stmt(
+    "DELETE FROM gallery_items WHERE id IN (SELECT o.owner_id FROM media_owners o JOIN media_assets a ON a.id = o.asset_id WHERE o.owner_type = 'gallery' AND a.path = ?)",
+  ).run(resavedAsset.url);
   deleteImageFiles([resavedAsset.url]);
   assert.ok(onDisk(resavedAsset.url), 'The open draft retains a deleted saved variation');
   saved = acceptMediaVariation(requireMediaJob(galleryDraft.id), {
@@ -434,7 +420,9 @@ test('media drafts', async () => {
     expectedDraftRevision: mediaDraft(saved.draft!.id).revision,
   });
   assert.equal(
-    stmt('SELECT folder_id FROM gallery_items WHERE image = ?').get(resavedAsset.url)!.folder_id,
+    stmt(
+      "SELECT folder_id FROM gallery_items WHERE id IN (SELECT o.owner_id FROM media_owners o JOIN media_assets a ON a.id = o.asset_id WHERE o.owner_type = 'gallery' AND a.path = ?)",
+    ).get(resavedAsset.url)!.folder_id,
     null,
   );
   const resavedInput = job({ inputs: [{ slot: 'input1', assetId: resavedAsset.id }] });
@@ -462,9 +450,14 @@ test('media drafts', async () => {
   finishMediaJob(galleryPending.id, 'cancelled');
   initMediaWorker();
   stopMediaWorker();
-  assert.throws(() => requireMediaJob(galleryPending.id), { status: 404 });
+  assert.equal(
+    requireMediaJob(galleryPending.id).state,
+    'cancelled',
+    'The prompt discussion retains cancelled variations',
+  );
   assert.equal(requireMediaJob(queuedAfterCancel.id).state, 'draft');
   assert.deepEqual(mediaDraft(saved.draft!.id).savedAssetIds, galleryAssets);
+  deleteMediaJob(requireMediaJob(galleryPending.id));
   assert.throws(
     () =>
       selectMediaVariation(requireMediaJob(galleryDraft.id), {
@@ -478,12 +471,10 @@ test('media drafts', async () => {
     expectedDraftRevision: mediaDraft(saved.draft!.id).revision,
   });
   assert.throws(() => requireMediaJob(saved.id), { status: 404 });
-  for (const asset of saved.outputs)
-    assert.ok(onDisk(asset.url), 'Every saved gallery output survives finishing');
+  for (const asset of saved.outputs) assert.ok(onDisk(asset.url), 'Every saved gallery output survives finishing');
 
   const automaticFolder = Number(
-    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Automatic', 1)").run()
-      .lastInsertRowid,
+    stmt("INSERT INTO gallery_folders (name, created_at) VALUES ('Automatic', 1)").run().lastInsertRowid,
   );
   assert.throws(() => job({ galleryFolderId: 999999 }), { status: 400 });
   const automatic = job({ prompt: 'Direct result', galleryFolderId: automaticFolder });
@@ -491,7 +482,7 @@ test('media drafts', async () => {
   const automaticAssets = result(automatic.id);
   assert.equal(
     stmt(
-      `SELECT g.folder_id FROM gallery_items g JOIN media_assets a ON a.path = g.image WHERE a.id = ?`,
+      `SELECT g.folder_id FROM gallery_items g JOIN media_owners o ON o.owner_type = 'gallery' AND o.owner_id = g.id JOIN media_assets a ON a.id = o.asset_id WHERE a.id = ?`,
     ).get(automaticAssets[0]!)!.folder_id,
     automaticFolder,
   );
@@ -525,11 +516,7 @@ test('media drafts', async () => {
     const sourceId = queued.at(-1)!;
     const next = job({ requestKey }, sourceId);
     assert.equal(next.draft!.id, discarded.draft!.id);
-    assert.equal(
-      job({ requestKey }, sourceId).id,
-      next.id,
-      'A repeated queue request creates only one variation',
-    );
+    assert.equal(job({ requestKey }, sourceId).id, next.id, 'A repeated queue request creates only one variation');
     start(next.id);
     queued.push(next.id);
   }
@@ -554,7 +541,7 @@ test('media drafts', async () => {
   assert.ok(onDisk(inputPath), 'Individual cancellation retains inputs until execution stops');
   finishMediaJob(discarded.id, 'cancelled');
   cleanupDiscardedMediaDraft(requireMediaJob(discarded.id));
-  assert.throws(() => requireMediaJob(discarded.id), { status: 404 });
+  assert.equal(requireMediaJob(discarded.id).state, 'cancelled');
   queued.shift();
   assert.ok(onDisk(inputPath), 'Removing one variation preserves inputs owned by other jobs');
   discard(queued[0]!, {
@@ -573,6 +560,7 @@ test('media drafts', async () => {
     finishMediaJob(id, 'cancelled');
     cleanupDiscardedMediaDraft(requireMediaJob(id));
   }
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
   assert.equal(existsSync(join(IMAGES_DIR, inputPath.slice(8))), false);
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(discarded.draft!.id), null);
   assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);

@@ -11,10 +11,7 @@ export default function GallerySourceImages(props: {
   onView: (url: string) => void;
 }) {
   const [inputs, { refetch }] = createResource(
-    () =>
-      props.active && props.asset.recipeId
-        ? { id: props.asset.id, revision: galleryRevision() }
-        : false,
+    () => (props.active && props.asset.recipeId ? { id: props.asset.id, revision: galleryRevision() } : false),
     async ({ id }) => {
       try {
         return { images: await api.mediaAssetInputs(id), error: '' };
@@ -76,11 +73,7 @@ export default function GallerySourceImages(props: {
                   >
                     <div class="form-stack">
                       <span>{mediaInputLabel(input.slot)}</span>
-                      <MediaPlayer
-                        asset={asset()}
-                        active={props.active}
-                        class="w-full max-h-48 object-contain"
-                      />
+                      <MediaPlayer asset={asset()} active={props.active} class="w-full max-h-48 object-contain" />
                     </div>
                   </Show>
                 )}

@@ -90,17 +90,12 @@ const server = Bun.serve({
     message() {},
   },
   async fetch(req, server) {
-    if (
-      req.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
-      server.upgrade(req, { data: undefined })
-    )
-      return;
+    if (req.headers.get('upgrade')?.toLowerCase() === 'websocket' && server.upgrade(req, { data: undefined })) return;
     const parsedUrl = new URL(req.url);
     const path = parsedUrl.pathname + parsedUrl.search;
     let status = 200;
     let mime = 'application/json';
-    const reply = (body?: string | Buffer) =>
-      new Response(body ?? null, { status, headers: { 'content-type': mime } });
+    const reply = (body?: string | Buffer) => new Response(body ?? null, { status, headers: { 'content-type': mime } });
     if (req.method === 'GET' && path === '/control/comfy-cancelled') {
       return reply(JSON.stringify({ ids: comfyCancelled }));
     }
@@ -139,9 +134,7 @@ const server = Bun.serve({
       return reply(JSON.stringify({ dieAfterContent }));
     }
     if (req.method === 'GET' && path === '/control/last-workflow') {
-      return reply(
-        JSON.stringify({ workflow: lastComfyWorkflow, previewMethod: lastComfyPreviewMethod }),
-      );
+      return reply(JSON.stringify({ workflow: lastComfyWorkflow, previewMethod: lastComfyPreviewMethod }));
     }
     if (req.method === 'GET' && path === '/control/last-model-authorization') {
       return reply(JSON.stringify({ authorization: lastModelAuthorization }));
@@ -211,27 +204,21 @@ const server = Bun.serve({
       if (comfyFailRenders > 0) comfyFailRenders--;
       setTimeout(() => {
         for (const client of clients) {
-          client.send(
-            JSON.stringify({ type: 'progress', data: { value: 1, max: 2, prompt_id: promptId } }),
-          );
+          client.send(JSON.stringify({ type: 'progress', data: { value: 1, max: 2, prompt_id: promptId } }));
           if (parsed.extra_data?.preview_method === 'taesd') {
             const header = Buffer.alloc(8);
             header.writeUInt32BE(1, 0); // BinaryEventTypes.PREVIEW_IMAGE
             header.writeUInt32BE(1, 4); // JPEG
             client.send(Buffer.concat([header, MOCK_JPEG]));
           }
-          client.send(
-            JSON.stringify({ type: 'progress', data: { value: 2, max: 2, prompt_id: promptId } }),
-          );
+          client.send(JSON.stringify({ type: 'progress', data: { value: 2, max: 2, prompt_id: promptId } }));
         }
       }, 100);
       return reply(JSON.stringify({ prompt_id: promptId }));
     }
     if (req.method === 'GET' && path === '/queue') {
       const queued = [...comfyJobs].filter(([, job]) => Date.now() < job.readyAt);
-      return reply(
-        JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }),
-      );
+      return reply(JSON.stringify({ queue_running: [], queue_pending: queued.map(([id]) => [1, id]) }));
     }
     if (req.method === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(path ?? '')) {
       const id = path!.split('/')[3]!;
@@ -280,9 +267,7 @@ const server = Bun.serve({
             status: { status_str: 'success', completed: true },
             outputs: {
               '9': {
-                images: [
-                  { filename: COMFY_OUTPUTS[job.output].filename, subfolder: '', type: 'output' },
-                ],
+                images: [{ filename: COMFY_OUTPUTS[job.output].filename, subfolder: '', type: 'output' }],
               },
             },
           },
@@ -292,9 +277,7 @@ const server = Bun.serve({
     if ((req.method === 'GET' || req.method === 'DELETE') && path?.startsWith('/view')) {
       // Match ComfyUI's strict file parameters to test the server's URL construction.
       const q = new URL(path, 'http://mock').searchParams;
-      const output = Object.values(COMFY_OUTPUTS).find(
-        (candidate) => candidate.filename === q.get('filename'),
-      );
+      const output = Object.values(COMFY_OUTPUTS).find((candidate) => candidate.filename === q.get('filename'));
       if (!output || q.get('type') !== 'output' || q.get('subfolder') !== '') {
         status = 404;
         return reply();
@@ -327,15 +310,12 @@ const server = Bun.serve({
         return reply(JSON.stringify({ error: 'invalid JSON' }));
       }
       const firstNonSystem = parsed.messages.findIndex((message) => message.role !== 'system');
-      const conversational = parsed.messages.slice(
-        firstNonSystem === -1 ? parsed.messages.length : firstNonSystem,
-      );
+      const conversational = parsed.messages.slice(firstNonSystem === -1 ? parsed.messages.length : firstNonSystem);
       const invalidShape =
         parsed.messages.some(
           (message, index) =>
             typeof message.content !== 'string' ||
-            (!message.content.trim() &&
-              !(message.role === 'assistant' && message.reasoning_content?.trim())) ||
+            (!message.content.trim() && !(message.role === 'assistant' && message.reasoning_content?.trim())) ||
             (message.role === 'system' && firstNonSystem !== -1 && index >= firstNonSystem),
         ) ||
         conversational.some(
@@ -345,9 +325,7 @@ const server = Bun.serve({
         );
       if (invalidShape) {
         status = 400;
-        return reply(
-          JSON.stringify({ error: 'User and assistant messages must alternate and be non-empty' }),
-        );
+        return reply(JSON.stringify({ error: 'User and assistant messages must alternate and be non-empty' }));
       }
       const lastUser = [...parsed.messages].reverse().find((m) => m.role === 'user');
       lastCompletion = {
@@ -402,10 +380,7 @@ const server = Bun.serve({
           `${LOREM}\n\n\`\`\`js\nconsole.log('hello from the mock');\n\`\`\``;
       nextCompletionContent = null;
       const words = text.split(/(?<=\s)/);
-      const reasoning =
-        'Thinking about the request… composing a demo answer with markdown and code. '.split(
-          /(?<=\s)/,
-        );
+      const reasoning = 'Thinking about the request… composing a demo answer with markdown and code. '.split(/(?<=\s)/);
       const encoder = new TextEncoder();
       const bodyStream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -434,8 +409,7 @@ const server = Bun.serve({
                 }
                 return;
               }
-              if (onlyReasoning)
-                send({ choices: [{ delta: { reasoning_content: 'REASONING_ONLY_OUTPUT' } }] });
+              if (onlyReasoning) send({ choices: [{ delta: { reasoning_content: 'REASONING_ONLY_OUTPUT' } }] });
               else {
                 for (const token of reasoning) {
                   await Bun.sleep(tokenMs);
@@ -449,9 +423,7 @@ const server = Bun.serve({
                 }
                 if (terminalWithoutNewline) {
                   terminalWithoutNewline = false;
-                  write(
-                    `data: ${JSON.stringify({ choices: [{ delta: { content: 'TERMINAL_NO_NEWLINE' } }] })}`,
-                  );
+                  write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'TERMINAL_NO_NEWLINE' } }] })}`);
                   return;
                 }
               }

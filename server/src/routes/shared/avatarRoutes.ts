@@ -4,18 +4,11 @@ import { IMAGES_DIR, stmt } from '../../db/db.ts';
 import { invalidate } from '../../realtime/events.ts';
 import { HttpError, route } from '../../http/router.ts';
 import { objectBody, positiveId } from '../../http/validation.ts';
-import {
-  deleteAvatarFiles,
-  deleteObsoleteAvatarFiles,
-  saveAvatar,
-} from '../../characters/avatarStore.ts';
+import { deleteAvatarFiles, deleteObsoleteAvatarFiles, saveAvatar } from '../../characters/avatarStore.ts';
 import type { AvatarKind } from '../../characters/avatarStore.ts';
 import { rowById } from './entityUtils.ts';
 
-export function defineAvatarRoutes<T>(
-  kind: AvatarKind,
-  toDto: (row: Record<string, unknown>) => T,
-): void {
+export function defineAvatarRoutes<T>(kind: AvatarKind, toDto: (row: Record<string, unknown>) => T): void {
   const table = kind === 'character' ? 'characters' : 'personas';
   const save = (id: number, data: Buffer) => {
     rowById(table, id);
@@ -31,10 +24,7 @@ export function defineAvatarRoutes<T>(
     const asset = stmt(`SELECT path FROM media_assets a WHERE id = ? AND kind = 'image'
       AND EXISTS (SELECT 1 FROM media_owners o WHERE o.asset_id = a.id)`).get(assetId);
     if (!asset) throw new HttpError(409, 'The avatar image is no longer available');
-    return save(
-      positiveId(params.id),
-      readFileSync(join(IMAGES_DIR, basename(String(asset.path)))),
-    );
+    return save(positiveId(params.id), readFileSync(join(IMAGES_DIR, basename(String(asset.path)))));
   });
   route.put(
     `/api/${table}/:id/avatar`,

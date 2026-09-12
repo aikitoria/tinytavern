@@ -46,9 +46,7 @@ export default function MediaRenderingTab() {
       shortcuts: current.shortcuts.map((item) => (item.id === id ? { ...item, ...fields } : item)),
     }));
   const patchFavorite = (id: string, fields: Partial<MediaFavorite>) =>
-    form.setFavorites((current) =>
-      current.map((item) => (item.id === id ? { ...item, ...fields } : item)),
-    );
+    form.setFavorites((current) => current.map((item) => (item.id === id ? { ...item, ...fields } : item)));
   const workflowReference = settingsReference(() => configuredWorkflows());
   const entryFields = {
     name: settingsText,
@@ -77,10 +75,11 @@ export default function MediaRenderingTab() {
       name: '',
       workflowId: '',
     })),
-    mediaFavorites: settingsCollection(
-      { ...entryFields, presetId: settingsReference(presets, false) },
-      () => ({ name: '', workflowId: '', presetId: '' }),
-    ),
+    mediaFavorites: settingsCollection({ ...entryFields, presetId: settingsReference(presets, false) }, () => ({
+      name: '',
+      workflowId: '',
+      presetId: '',
+    })),
     ...Object.fromEntries(
       Object.entries(DEFAULT_SETTINGS.imageGeneration)
         .filter(([, value]) => typeof value === 'string')
@@ -140,9 +139,7 @@ export default function MediaRenderingTab() {
             value={form.draft().defaultWorkflowId ?? ''}
             defaultValue=""
             options={[{ value: '', label: 'Choose in the generator' }, ...workflowOptions()]}
-            onChange={(value) =>
-              form.setDraft((current) => ({ ...current, defaultWorkflowId: value || null }))
-            }
+            onChange={(value) => form.setDraft((current) => ({ ...current, defaultWorkflowId: value || null }))}
           />
           <FormField
             label="Avatar workflow"
@@ -158,9 +155,7 @@ export default function MediaRenderingTab() {
               },
               ...workflowOptions(),
             ]}
-            onChange={(value) =>
-              form.setDraft((current) => ({ ...current, avatarWorkflowId: value || null }))
-            }
+            onChange={(value) => form.setDraft((current) => ({ ...current, avatarWorkflowId: value || null }))}
             hint="The result must be an image to use it as an avatar."
           />
           <FormField
@@ -174,19 +169,11 @@ export default function MediaRenderingTab() {
                 workflows().filter((item) => item.textOutputNodeId !== null),
               ),
             ]}
-            onChange={(value) =>
-              form.setDraft((current) => ({ ...current, descriptionWorkflowId: value || null }))
-            }
+            onChange={(value) => form.setDraft((current) => ({ ...current, descriptionWorkflowId: value || null }))}
           />
         </SettingsSection>
-        <SettingsSection
-          title="Generator shortcuts"
-          id="generator-shortcuts"
-          fields={['mediaRendering.shortcuts']}
-        >
-          <p class="hint">
-            Open the generator with a selected workflow, then edit inputs and generate.
-          </p>
+        <SettingsSection title="Generator shortcuts" id="generator-shortcuts" fields={['mediaRendering.shortcuts']}>
+          <p class="hint">Open the generator with a selected workflow, then edit inputs and generate.</p>
           <SettingsCollectionTable
             items={form.draft().shortcuts}
             onReorder={(shortcuts) => form.setDraft((current) => ({ ...current, shortcuts }))}
@@ -230,14 +217,10 @@ export default function MediaRenderingTab() {
             Add shortcut
           </button>
         </SettingsSection>
-        <SettingsSection
-          title="Toolbar favorites"
-          id="toolbar-favorites"
-          fields={['mediaFavorites']}
-        >
+        <SettingsSection title="Toolbar favorites" id="toolbar-favorites" fields={['mediaFavorites']}>
           <p class="hint">
-            Prepare the selected prompt using the conversation and run the workflow immediately.
-            Workflows must have a prompt input and no media inputs.
+            Prepare the selected prompt using the conversation and run the workflow immediately. Workflows must have a
+            prompt input and no media inputs.
           </p>
           <SettingsCollectionTable
             items={form.favorites()}
@@ -263,9 +246,7 @@ export default function MediaRenderingTab() {
                 onChange: (item, workflowId) => patchFavorite(item.id, { workflowId }),
               },
             ]}
-            onRemove={(favorite) =>
-              form.setFavorites((items) => items.filter((item) => item.id !== favorite.id))
-            }
+            onRemove={(favorite) => form.setFavorites((items) => items.filter((item) => item.id !== favorite.id))}
           />
           <div class="flex gap-2">
             <button

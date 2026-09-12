@@ -7,9 +7,8 @@ import type { ClientSocket } from '../../server/src/realtime/events.ts';
 test('speculative swipes exclude media conversations even when both background options are enabled', async () => {
   const { stmt } = await import('../../server/src/db/db.ts');
   const { appendMessage } = await import('../../server/src/conversations/tree.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const { prepareNextSwipe, prepareSubscribedSwipes } =
-    await import('../../server/src/generation/speculation.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
+  const { prepareNextSwipe, prepareSubscribedSwipes } = await import('../../server/src/generation/speculation.ts');
   const { stopConversationGenerations } = await import('../../server/src/generation/generation.ts');
   const { websocket } = await import('../../server/src/realtime/events.ts');
   const endpointId = insertFixture('endpoints', {
@@ -45,9 +44,7 @@ test('speculative swipes exclude media conversations even when both background o
     return new Response(controlledStream(init?.signal).body);
   });
   const speculative = (id: number) =>
-    stmt(
-      "SELECT id FROM messages WHERE conversation_id = ? AND generation_kind = 'speculative'",
-    ).all(id);
+    stmt("SELECT id FROM messages WHERE conversation_id = ? AND generation_kind = 'speculative'").all(id);
   try {
     websocket.message!(socket, JSON.stringify({ subs: [mediaId, chatId] }));
     prepareNextSwipe(mediaReply.id);

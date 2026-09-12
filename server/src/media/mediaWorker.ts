@@ -97,12 +97,7 @@ function requestSignal(signal: AbortSignal, timeout = 30_000): AbortSignal {
   return AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
 }
 
-async function comfyJson<T>(
-  base: string,
-  path: string,
-  signal: AbortSignal,
-  body?: unknown,
-): Promise<T> {
+async function comfyJson<T>(base: string, path: string, signal: AbortSignal, body?: unknown): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -203,18 +198,12 @@ function openProgress(row: MediaJobRow): Promise<void> {
       sockets.delete(row.id);
     }
   });
-  const workflow = getSettings().mediaRendering.workflows.find(
-    (item) => item.id === row.workflow_id,
-  );
-  const graphProgress = new ComfyGraphProgress(
-    workflow?.json ? compileMediaWorkflow(workflow.json).graph : {},
-  );
+  const workflow = getSettings().mediaRendering.workflows.find((item) => item.id === row.workflow_id);
+  const graphProgress = new ComfyGraphProgress(workflow?.json ? compileMediaWorkflow(workflow.json).graph : {});
   const cachedPreview = mediaLive.get(row.id)?.progress?.videoPreview;
   const previewMetadata = cachedPreview ?? config.videoPreview;
   let executingNode: string | null = previewMetadata?.nodeId ?? null;
-  let videoPreview = previewMetadata
-    ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.sequence)
-    : null;
+  let videoPreview = previewMetadata ? ComfyVideoPreview.restore(previewMetadata, cachedPreview?.sequence) : null;
   let pendingVideoHeader: ComfyVideoPreview | null = null;
   socket.addEventListener('message', ({ data: raw }) => {
     const binary = typeof raw !== 'string';
@@ -281,8 +270,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
       if (
         event.type === 'executing' &&
         event.data &&
-        (event.data.prompt_id === expectedId ||
-          (!event.data.prompt_id && mediaJobRow(row.id)?.state === 'rendering'))
+        (event.data.prompt_id === expectedId || (!event.data.prompt_id && mediaJobRow(row.id)?.state === 'rendering'))
       ) {
         // Comfy's reconnect snapshot is sent only to this client and omits prompt_id.
         const nodeId = event.data.display_node ?? event.data.node;
@@ -298,9 +286,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
           }
         }
       }
-      if (
-        ['execution_success', 'execution_error', 'execution_interrupted'].includes(event.type ?? '')
-      ) {
+      if (['execution_success', 'execution_error', 'execution_interrupted'].includes(event.type ?? '')) {
         executingNode = null;
         videoPreview = null;
         pendingVideoHeader = null;
@@ -311,9 +297,7 @@ function openProgress(row: MediaJobRow): Promise<void> {
         if (incoming) pendingVideoHeader = incoming;
         return;
       }
-      if (
-        ['execution_start', 'executing', 'progress', 'progress_state'].includes(event.type ?? '')
-      ) {
+      if (['execution_start', 'executing', 'progress', 'progress_state'].includes(event.type ?? '')) {
         const current = mediaJobRow(row.id);
         if (
           current &&
@@ -422,10 +406,7 @@ async function preparePrompt(row: MediaJobRow, signal: AbortSignal): Promise<voi
   publishMediaJob(row.id);
 }
 
-async function uploadInputs(
-  row: MediaJobRow,
-  signal: AbortSignal,
-): Promise<Partial<WorkflowValues>> {
+async function uploadInputs(row: MediaJobRow, signal: AbortSignal): Promise<Partial<WorkflowValues>> {
   const base = configuration(row).comfyUrl;
   const inputs = JSON.parse(row.inputs_json) as MediaJobInput[];
   const uploaded = new Map<number, string>();
@@ -476,9 +457,7 @@ async function uploadInputs(
         throw new Error('Comfy returned an invalid uploaded filename');
       }
       ownRemoteFile(row.id, base, returned, 'input');
-      remoteName = returned.subfolder
-        ? `${returned.subfolder}/${returned.filename}`
-        : returned.filename;
+      remoteName = returned.subfolder ? `${returned.subfolder}/${returned.filename}` : returned.filename;
       uploaded.set(input.assetId, remoteName);
     }
     bindings[input.slot] = remoteName;
@@ -636,11 +615,7 @@ async function cancel(row: MediaJobRow, signal: AbortSignal): Promise<void> {
   finishMediaJob(row.id, 'cancelled', row.error);
 }
 
-async function retrieve(
-  row: MediaJobRow,
-  history: ComfyHistory,
-  signal: AbortSignal,
-): Promise<void> {
+async function retrieve(row: MediaJobRow, history: ComfyHistory, signal: AbortSignal): Promise<void> {
   const config = configuration(row);
   const outputs = history.outputs ?? {};
   if (config.textOutputNodeId != null) {
@@ -656,9 +631,7 @@ async function retrieve(
     .map(([id, output]) => ({
       id,
       files: comfyOutputFiles(output).filter(
-        (file) =>
-          file.type !== 'input' &&
-          /\.(png|jpe?g|webp|avif|bmp|gif|webm|mp4|mkv|mov|avi)$/i.test(file.filename),
+        (file) => file.type !== 'input' && /\.(png|jpe?g|webp|avif|bmp|gif|webm|mp4|mkv|mov|avi)$/i.test(file.filename),
       ),
     }))
     .filter((node) => node.files.length > 0);
@@ -719,17 +692,10 @@ async function poll(row: MediaJobRow, signal: AbortSignal): Promise<void> {
   if (observed.history?.status?.status_str === 'error') {
     const details = (observed.history.status.messages ?? [])
       .filter(([kind]) => kind === 'execution_error')
-      .map(
-        ([, data]) =>
-          `${data.node_type} [${data.node_id}] ${data.exception_type}: ${data.exception_message}`,
-      )
+      .map(([, data]) => `${data.node_type} [${data.node_id}] ${data.exception_type}: ${data.exception_message}`)
       .join('; ');
     releaseRemoteFiles(row.id);
-    finishMediaJob(
-      row.id,
-      'failed',
-      `Comfy workflow execution failed${details ? `: ${details}` : ''}`,
-    );
+    finishMediaJob(row.id, 'failed', `Comfy workflow execution failed${details ? `: ${details}` : ''}`);
     return;
   }
   if (observed.history?.status?.completed) {
@@ -934,11 +900,7 @@ export function initMediaWorker(): void {
   }
   const interrupted = stmt("SELECT id FROM media_jobs WHERE state = 'preparing'").all();
   for (const row of interrupted) {
-    finishMediaJob(
-      Number(row.id),
-      'failed',
-      'Prompt preparation was interrupted; prepare it again',
-    );
+    finishMediaJob(Number(row.id), 'failed', 'Prompt preparation was interrupted; prepare it again');
   }
   if (!timer) {
     timer = setInterval(tickMediaWorker, POLL_MS);

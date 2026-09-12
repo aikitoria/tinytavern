@@ -55,11 +55,7 @@ export default function PresetsTab() {
         <SettingLabel for={contentEl.id()} field={readOnly() ? undefined : contentEl}>
           System instructions <MacroHelp />
         </SettingLabel>
-        <MacroTextarea
-          readOnly={readOnly()}
-          ref={contentEl.ref}
-          placeholder="You are {{char}}, …"
-        />
+        <MacroTextarea readOnly={readOnly()} ref={contentEl.ref} placeholder="You are {{char}}, …" />
       </SettingsSection>
     </EntityEditorPane>
   );

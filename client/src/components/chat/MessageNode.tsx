@@ -25,11 +25,7 @@ import Modal from '../ui/Modal.tsx';
 import MediaPromptMenuItems from '../../media/MediaPromptMenuItems.tsx';
 import { followMessageStream } from '../../messageStreamScroll.ts';
 
-export default function MessageNode(props: {
-  message: Message;
-  inMap?: boolean;
-  active?: boolean;
-}) {
+export default function MessageNode(props: { message: Message; inMap?: boolean; active?: boolean }) {
   const view = useConversationView();
   const {
     state,
@@ -52,10 +48,7 @@ export default function MessageNode(props: {
     moreMenuId,
     setMoreMenuId,
   } = view.session;
-  const { imageMessage, messageSupportsSwipe, swipeMessage } = createMessageSwipe(
-    view.session,
-    view.active,
-  );
+  const { imageMessage, messageSupportsSwipe, swipeMessage } = createMessageSwipe(view.session, view.active);
 
   const [editing, setEditing] = createSignal(false);
   const [showReasoning, setShowReasoning] = createSignal(false);
@@ -73,8 +66,7 @@ export default function MessageNode(props: {
       : isTool()
         ? (props.message.name ?? 'Tool')
         : (props.message.name ?? characterChatName(selectedCharacter()));
-  const avatarSrc = () =>
-    isUser() ? persona()?.avatarThumbnail : selectedCharacter()?.avatarThumbnail;
+  const avatarSrc = () => (isUser() ? persona()?.avatarThumbnail : selectedCharacter()?.avatarThumbnail);
   const streaming = () => props.message.status === 'streaming';
 
   const siblings = () => siblingsOf(props.message);
@@ -130,8 +122,7 @@ export default function MessageNode(props: {
     showReasoning() || (state.settings.autoExpandThinking && streaming() && !props.message.content);
 
   // Match the server generation guard while allowing swipes past a streaming leaf.
-  const ancestorNavigationBlocked = () =>
-    streamingMessage() != null && state.tree.activeLeafId !== props.message.id;
+  const ancestorNavigationBlocked = () => streamingMessage() != null && state.tree.activeLeafId !== props.message.id;
 
   const swipeable = () =>
     messageSupportsSwipe(props.message) &&
@@ -242,9 +233,7 @@ export default function MessageNode(props: {
   const saveEdit = async (edit: typeof api.editMessage) => {
     const expected = editBaseline;
     if (!expected) return;
-    const saved = await navigateTree(() =>
-      edit(props.message.id, expected, { content: editArea!.value }),
-    );
+    const saved = await navigateTree(() => edit(props.message.id, expected, { content: editArea!.value }));
     if (saved) setEditing(false);
   };
 
@@ -264,12 +253,7 @@ export default function MessageNode(props: {
 
   const menuOpen = () => moreMenuId() === props.message.id;
   const closeMenu = () => setMoreMenuId(null);
-  const MenuItem = (item: {
-    action: () => void;
-    disabled?: boolean;
-    danger?: boolean;
-    children: JSX.Element;
-  }) => (
+  const MenuItem = (item: { action: () => void; disabled?: boolean; danger?: boolean; children: JSX.Element }) => (
     <button
       type="button"
       role="menuitem"
@@ -285,8 +269,7 @@ export default function MessageNode(props: {
   );
   const canMoveUp = () => props.message.parentId != null;
   const canMoveDown = () => (childrenByParent().get(props.message.id)?.length ?? 0) > 0;
-  const duplicate = () =>
-    void navigateTree(() => api.duplicateMessage(props.message.id, state.tree));
+  const duplicate = () => void navigateTree(() => api.duplicateMessage(props.message.id, state.tree));
   const branchToConversation = () => void navigateTree(() => branchConversation(props.message.id));
   const move = (direction: 'up' | 'down') =>
     void navigateTree(() => api.moveMessage(props.message.id, state.tree, { direction }));
@@ -310,9 +293,7 @@ export default function MessageNode(props: {
   };
 
   // Preserve image view state across streaming and image updates.
-  const imageBehavior = createMemo(() =>
-    imageMessage.matches(props.message) ? imageMessage : undefined,
-  );
+  const imageBehavior = createMemo(() => (imageMessage.matches(props.message) ? imageMessage : undefined));
   const imageView = createMemo(() =>
     imageBehavior()?.create(() => props.message, {
       streaming,
@@ -411,9 +392,7 @@ export default function MessageNode(props: {
           </Show>
           <Show
             when={!props.inMap && isAssistant() && selectedCharacter()}
-            fallback={
-              <span class="msg-name truncate min-w-0 font-semibold text-label">{name()}</span>
-            }
+            fallback={<span class="msg-name truncate min-w-0 font-semibold text-label">{name()}</span>}
           >
             {(character) => (
               <button
@@ -435,9 +414,7 @@ export default function MessageNode(props: {
               stopped
             </span>
           </Show>
-          <Show
-            when={streaming() && !isTool() && !props.message.content && !props.message.reasoning}
-          >
+          <Show when={streaming() && !isTool() && !props.message.content && !props.message.reasoning}>
             <FontAwesomeIcon
               icon={faSpinner}
               size={12}
@@ -500,16 +477,8 @@ export default function MessageNode(props: {
                       editing() ||
                       (!isAssistant() && siblingIndex() >= siblings().length - 1)
                     }
-                    title={
-                      isAssistant() && siblingIndex() >= siblings().length - 1
-                        ? 'Regenerate'
-                        : 'Next swipe'
-                    }
-                    aria-label={
-                      isAssistant() && siblingIndex() >= siblings().length - 1
-                        ? 'Regenerate'
-                        : 'Next swipe'
-                    }
+                    title={isAssistant() && siblingIndex() >= siblings().length - 1 ? 'Regenerate' : 'Next swipe'}
+                    aria-label={isAssistant() && siblingIndex() >= siblings().length - 1 ? 'Regenerate' : 'Next swipe'}
                     onClick={() => swipeMessage(props.message, 1)}
                   >
                     <FontAwesomeIcon icon={faChevronRight} size={12} />
@@ -569,9 +538,7 @@ export default function MessageNode(props: {
                         <MenuItem action={duplicate}>Duplicate</MenuItem>
                         <MenuItem action={branchToConversation}>Branch chat</MenuItem>
                         <div class="h-px my-1 mx-0 bg-line" role="separator" />
-                        <MenuItem action={() => startMessageSelection(props.message.id)}>
-                          Select range
-                        </MenuItem>
+                        <MenuItem action={() => startMessageSelection(props.message.id)}>Select range</MenuItem>
                         <Show when={canMoveUp()}>
                           <MenuItem action={() => move('up')}>Move up</MenuItem>
                         </Show>
@@ -579,12 +546,7 @@ export default function MessageNode(props: {
                           <MenuItem action={() => move('down')}>Move down</MenuItem>
                         </Show>
                         <div class="h-px my-1 mx-0 bg-line" role="separator" />
-                        <Show
-                          when={
-                            imageBehavior()?.canDeleteSwipe?.(props.message) ||
-                            siblings().length > 1
-                          }
-                        >
+                        <Show when={imageBehavior()?.canDeleteSwipe?.(props.message) || siblings().length > 1}>
                           <MenuItem danger action={removeSwipe}>
                             <FontAwesomeIcon icon={faTrashCan} size={15} /> Delete swipe
                           </MenuItem>
@@ -682,10 +644,7 @@ export default function MessageNode(props: {
                       {isUser() ? 'Send as branch' : 'Save as branch'}
                     </button>
                   </Show>
-                  <button
-                    classList={{ 'primary-btn': isTool() }}
-                    onClick={() => void saveEdit(api.editMessage)}
-                  >
+                  <button classList={{ 'primary-btn': isTool() }} onClick={() => void saveEdit(api.editMessage)}>
                     Save in place
                   </button>
                   <button onClick={() => setEditing(false)}>Cancel</button>
@@ -702,18 +661,13 @@ export default function MessageNode(props: {
                   streaming={streaming()}
                   conversationId={props.message.conversationId}
                   renderPrompt={
-                    view.renderPrompt && isAssistant()
-                      ? (text) => view.renderPrompt?.(props.message, text)
-                      : undefined
+                    view.renderPrompt && isAssistant() ? (text) => view.renderPrompt?.(props.message, text) : undefined
                   }
                   selectedPromptText={
-                    view.selectedPrompt?.()?.messageId === props.message.id
-                      ? view.selectedPrompt?.()?.text
-                      : undefined
+                    view.selectedPrompt?.()?.messageId === props.message.id ? view.selectedPrompt?.()?.text : undefined
                   }
                   promptSelectionDisabled={
-                    view.promptSelectionDisabled?.() ||
-                    !['done', 'stopped'].includes(props.message.status)
+                    view.promptSelectionDisabled?.() || !['done', 'stopped'].includes(props.message.status)
                   }
                   showMediaMenu={!view.embedded}
                 />

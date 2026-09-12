@@ -20,17 +20,13 @@ test('media latency', async () => {
   process.env.COMFY_POLL_MS = '60000';
   const { stmt } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { createMediaJob, startMediaJob } = await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaLive, observeMediaJob, mediaJobDto, activeMediaJobs } =
     await import('../../server/src/media/mediaJobStore.ts');
-  const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
-    await import('../../server/src/media/mediaWorker.ts');
+  const { initMediaWorker, tickMediaWorker, stopMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
 
-  const submissions = new Map<
-    number,
-    { accept: (response: Response) => void; promptId: string; connected: boolean }
-  >();
+  const submissions = new Map<number, { accept: (response: Response) => void; promptId: string; connected: boolean }>();
   const videoJobs = new Set<number>();
   let submissionAttempts = 0;
   let recoveredWorker: ChildProcess | undefined;
@@ -184,21 +180,10 @@ test('media latency', async () => {
       const submission = submissions.get(job.id)!;
       assert(submission.connected, 'The first Comfy step must have a connected preview listener');
       await waitFor(() => previews.has(job.id));
-      assert.equal(
-        previews.get(job.id)!.value,
-        1,
-        'The first preview is forwarded before later sampler steps',
-      );
-      assert.equal(
-        previews.get(job.id)!.state,
-        'rendering',
-        'Execution start is visible before submission responds',
-      );
+      assert.equal(previews.get(job.id)!.value, 1, 'The first preview is forwarded before later sampler steps');
+      assert.equal(previews.get(job.id)!.state, 'rendering', 'Execution start is visible before submission responds');
       if (mode === 'video') {
-        await waitFor(
-          () =>
-            Object.keys(mediaLive.get(job.id)?.progress?.videoPreview?.frames ?? {}).length === 3,
-        );
+        await waitFor(() => Object.keys(mediaLive.get(job.id)?.progress?.videoPreview?.frames ?? {}).length === 3);
         for (const otherId of submissions.keys()) {
           if (otherId !== job.id) assert(!mediaLive.get(otherId)?.progress?.videoPreview);
         }
@@ -209,9 +194,7 @@ test('media latency', async () => {
             data: { id: 'unrelated', length: 3, rate: 6 },
           }),
         );
-        server.sockets
-          .get(requireMediaJob(job.id).request_key!)!
-          .send(videoPreviewFrame(0, 'unrelated'));
+        server.sockets.get(requireMediaJob(job.id).request_key!)!.send(videoPreviewFrame(0, 'unrelated'));
         await sleep(60);
         assert.equal(mediaLive.get(job.id)!.progress!.videoPreview!.id, clipId);
       }
@@ -247,9 +230,7 @@ test('media latency', async () => {
       'Refreshing a browser receives the complete in-memory frame cache',
     );
     assert.equal(
-      Object.keys(
-        activeMediaJobs().find((job) => job.id === videoJobId)!.progress!.videoPreview!.frames,
-      ).length,
+      Object.keys(activeMediaJobs().find((job) => job.id === videoJobId)!.progress!.videoPreview!.frames).length,
       3,
       'The initial WebSocket snapshot includes the cached video preview',
     );
@@ -329,8 +310,7 @@ test('media latency', async () => {
     }
     for (const unsubscribe of subscriptions) unsubscribe();
     stopMediaWorker();
-    for (const submission of submissions.values())
-      submission.accept(new Response(null, { status: 503 }));
+    for (const submission of submissions.values()) submission.accept(new Response(null, { status: 503 }));
     await server.stop();
   }
 });

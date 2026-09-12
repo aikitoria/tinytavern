@@ -13,7 +13,7 @@ import {
   type TransferEntity,
 } from '@tinytavern/shared';
 import { stmt, transaction } from '../../db/db.ts';
-import { getSettings, putSettings } from '../../settings/settingsStore.ts';
+import { getSettingsPreferences, putSettings } from '../../settings/settingsStore.ts';
 import { route, HttpError } from '../../http/router.ts';
 import { objectBody, positiveId } from '../../http/validation.ts';
 import { rowById, rows } from './entityUtils.ts';
@@ -32,15 +32,11 @@ import { bumpAllConversationRevisions } from '../../conversations/conversationRe
 import { broadcastTree } from '../../realtime/sync.ts';
 
 /** Reuse the entity's normal field validators; bulk imports commit as one database change. */
-export function defineEntityTransfer<T extends { id: number }>(
-  cfg: EntityConfig<T>,
-  writer: EntityWriter,
-): void {
+export function defineEntityTransfer<T extends { id: number }>(cfg: EntityConfig<T>, writer: EntityWriter): void {
   if (!Object.hasOwn(ENTITY_TRANSFER_FIELDS, cfg.table)) return;
   const type = cfg.table as TransferEntity;
   const folderConfig = ENTITY_FOLDERS[type];
-  const folderRows = () =>
-    rows(folderConfig.table).map((row) => ({ id: Number(row.id), name: String(row.name) }));
+  const folderRows = () => rows(folderConfig.table).map((row) => ({ id: Number(row.id), name: String(row.name) }));
   const folderColumn = cfg.fields.findIndex((field) => field.column === 'folder_id');
   const snapshot = () =>
     createHash('sha256')
@@ -48,7 +44,7 @@ export function defineEntityTransfer<T extends { id: number }>(
         JSON.stringify({
           rows: rows(cfg.table),
           folders: folderRows(),
-          revision: getSettings().revision,
+          revision: getSettingsPreferences().revision,
         }),
       )
       .digest('hex');
@@ -56,8 +52,7 @@ export function defineEntityTransfer<T extends { id: number }>(
     const entity = cfg.toDto(row);
     const item = entityTransferData(type, {
       ...entity,
-      folderId:
-        row.folder_id == null ? null : rowById(folderConfig.table, Number(row.folder_id)).name,
+      folderId: row.folder_id == null ? null : rowById(folderConfig.table, Number(row.folder_id)).name,
     });
     if (type === 'personas') {
       const avatar = readAvatarFile('persona', entity.id);
@@ -67,21 +62,17 @@ export function defineEntityTransfer<T extends { id: number }>(
   };
   route.get(`/api/${type}/settings-export`, () => {
     const entities = rows(cfg.table);
-    const activeId = cfg.settingsRef ? getSettings()[cfg.settingsRef] : null;
+    const activeId = cfg.settingsRef ? getSettingsPreferences()[cfg.settingsRef] : null;
     return {
       snapshot: snapshot(),
       document: transferDocument(`page:${type}`, {
         items: entities.map(exportItem),
         folders: folderRows().map(({ name }) => ({ name })),
-        ...(cfg.settingsRef
-          ? { active: entities.find((row) => row.id === activeId)?.name ?? null }
-          : {}),
+        ...(cfg.settingsRef ? { active: entities.find((row) => row.id === activeId)?.name ?? null } : {}),
       }),
     };
   });
-  route.get(`/api/${type}/:id/settings-export`, ({ params }) =>
-    exportItem(rowById(cfg.table, positiveId(params.id))),
-  );
+  route.get(`/api/${type}/:id/settings-export`, ({ params }) => exportItem(rowById(cfg.table, positiveId(params.id))));
   route.post(`/api/${type}/settings-import`, ({ body }) => {
     const input = objectBody(body);
     const single = Object.hasOwn(input, 'targetId');
@@ -131,8 +122,7 @@ export function defineEntityTransfer<T extends { id: number }>(
         const current = protectedRow ? undefined : matching;
         if (protectedRow) {
           let copyName = `${name} (imported)`;
-          for (let index = 2; names.has(copyName); index++)
-            copyName = `${name} (imported ${index})`;
+          for (let index = 2; names.has(copyName); index++) copyName = `${name} (imported ${index})`;
           item.name = copyName;
         }
         names.add(String(item.name));
@@ -153,9 +143,7 @@ export function defineEntityTransfer<T extends { id: number }>(
         const values = writer.values(
           {
             ...item,
-            ...(folderName === undefined
-              ? {}
-              : { folderId: namedItem(folders, folderName)?.id ?? null }),
+            ...(folderName === undefined ? {} : { folderId: namedItem(folders, folderName)?.id ?? null }),
           },
           current,
         );
@@ -167,14 +155,14 @@ export function defineEntityTransfer<T extends { id: number }>(
         transaction(() => {
           for (const name of folderNames.values()) {
             if (namedItem(folders, name)) continue;
-            const result = stmt(
-              `INSERT INTO ${folderConfig.table} (name, created_at) VALUES (?, ?)`,
-            ).run(name, Date.now());
+            const result = stmt(`INSERT INTO ${folderConfig.table} (name, created_at) VALUES (?, ?)`).run(
+              name,
+              Date.now(),
+            );
             folders.push({ id: Number(result.lastInsertRowid), name });
           }
           for (const item of plan) {
-            if (item.folderName !== undefined)
-              item.values[folderColumn] = namedItem(folders, item.folderName)!.id;
+            if (item.folderName !== undefined) item.values[folderColumn] = namedItem(folders, item.folderName)!.id;
             const id = item.id ?? writer.insert(item.values);
             if (item.id !== null) writer.update(id, item.values);
             if (item.avatar !== undefined) {
@@ -185,7 +173,7 @@ export function defineEntityTransfer<T extends { id: number }>(
             imported.push({ name: item.name, id });
           }
           if (!single && cfg.settingsRef && Object.hasOwn(source, 'active')) {
-            const settings = getSettings();
+            const settings = getSettingsPreferences();
             const active =
               source.active === null
                 ? null

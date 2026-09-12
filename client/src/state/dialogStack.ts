@@ -21,11 +21,7 @@ function nextDialogId(): string {
   return String(++nextFrameId);
 }
 
-function createFrame(
-  page: PageLocation,
-  session?: MediaToolSession,
-  inputs?: RestoredMediaInputs,
-): DialogFrame {
+function createFrame(page: PageLocation, session?: MediaToolSession, inputs?: RestoredMediaInputs): DialogFrame {
   const id = nextDialogId();
   const media = page.media;
   const [mediaPreview, selectMediaPreview] = createSignal<{ jobId: number; assetId?: number }>();
@@ -77,9 +73,7 @@ export function createDialogStack() {
       return frames().find((frame) => {
         const media = frame.page.media;
         if (!media?.jobId) return false;
-        return (
-          media.jobId === jobId || (draftId != null && jobs[media.jobId]?.draft?.id === draftId)
-        );
+        return media.jobId === jobId || (draftId != null && jobs[media.jobId]?.draft?.id === draftId);
       });
     },
     parent: () => frames().at(-2)?.page ?? background,
@@ -87,10 +81,7 @@ export function createDialogStack() {
       const index = frames().indexOf(frame);
       return index >= 0 && index < retainedCount(page);
     },
-    restore(
-      page: PageLocation,
-      restoreInputs?: (page: PageLocation) => RestoredMediaInputs | undefined,
-    ) {
+    restore(page: PageLocation, restoreInputs?: (page: PageLocation) => RestoredMediaInputs | undefined) {
       const pages = pageStack(page);
       background = pages[0]!;
       const dialogs = pages.filter((item) => item.modal);

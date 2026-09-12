@@ -1,4 +1,5 @@
-import { putSettings } from '../../server/src/settings/settingsStore.ts';
+import { attachImages, messageImages } from '../support/fixtures.ts';
+import { putSettings } from '../support/settings.ts';
 import { requireMediaWorkflow } from '../../server/src/media/mediaWorkflows.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
@@ -58,8 +59,7 @@ databaseCase('conversation transfer', async () => {
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const png = makePlaceholderPng();
   const sourceImages = [saveImage('.png', png), saveImage('.png', png)];
-  const { createImageRecipe, getMediaRecipe } =
-    await import('../../server/src/media/mediaRecipes.ts');
+  const { createImageRecipe, getMediaRecipe } = await import('../../server/src/media/mediaRecipes.ts');
   const now = Date.now();
   const sourceConversationId = conversationFixture({
     title: 'Portable tree',
@@ -87,7 +87,7 @@ databaseCase('conversation transfer', async () => {
     role: 'tool',
     content: 'Long silver hair like the previous portrait',
     name: 'Image',
-    images_json: JSON.stringify(sourceImages),
+    images: sourceImages,
     active_image: 1,
     created_at: now - 700,
     render_recipe_id: createImageRecipe(
@@ -100,22 +100,16 @@ databaseCase('conversation transfer', async () => {
     role: 'tool',
     content: 'Short red hair',
     name: 'Image',
-    images_json: JSON.stringify([sourceImages[0]]),
+    images: [sourceImages[0]!],
     created_at: now - 600,
   });
   stmt('UPDATE messages SET parent_id = ? WHERE id = ?').run(imagePrompt, continuation);
   stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(imagePrompt, root);
   stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(continuation, imagePrompt);
-  stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(
-    continuation,
-    sourceConversationId,
-  );
+  stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(continuation, sourceConversationId);
 
   const portable = exportPortableConversation(sourceConversationId);
-  assert(
-    portable.format === 'tinytavern-conversation' && portable.version === 1,
-    'schema is versioned',
-  );
+  assert(portable.format === 'tinytavern-conversation' && portable.version === 1, 'schema is versioned');
   assert(
     portable.conversation.scenarioOverride === 'A portable scenario',
     'conversation scenario override is exported',
@@ -123,11 +117,7 @@ databaseCase('conversation transfer', async () => {
   assert(portable.assets.length === 2, 'all image alternatives are embedded');
   assert(
     portable.recipes
-      ?.find(
-        (recipe) =>
-          recipe.id ===
-          portable.messages.find((message) => message.id === imagePrompt)?.renderRecipeId,
-      )
+      ?.find((recipe) => recipe.id === portable.messages.find((message) => message.id === imagePrompt)?.renderRecipeId)
       ?.workflow.json.includes('{{prompt}}'),
     'image prompt and render configuration are exported',
   );
@@ -153,13 +143,11 @@ databaseCase('conversation transfer', async () => {
       'imported originals use ownership-neutral names',
     );
   }
-  assert(
-    imported.scenarioOverride === 'A portable scenario',
-    'conversation scenario override is imported',
-  );
-  const importedRows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
-    imported.id,
-  ) as Record<string, unknown>[];
+  assert(imported.scenarioOverride === 'A portable scenario', 'conversation scenario override is imported');
+  const importedRows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(imported.id) as Record<
+    string,
+    unknown
+  >[];
   assert(importedRows.length === 4, 'all branches import');
   const importedLeaf = imported.activeLeafId!;
   const path = getPathToMessage(importedLeaf);
@@ -185,18 +173,18 @@ databaseCase('conversation transfer', async () => {
     ),
     'import writes independent, byte-identical image files',
   );
-  const importedPromptRow = stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(
-    importedPrompt.id,
-  ) as { render_recipe_id: number };
+  const importedPromptRow = stmt('SELECT render_recipe_id FROM messages WHERE id = ?').get(importedPrompt.id) as {
+    render_recipe_id: number;
+  };
   assert(
-    requireMediaWorkflow(
-      getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflowId,
-    ).json.includes('\"seed\":0'),
+    requireMediaWorkflow(getMediaRecipe(importedPromptRow.render_recipe_id).configuration.workflowId).json.includes(
+      '\"seed\":0',
+    ),
     'stored render configuration still supports rerendering',
   );
   const sibling = importedRows.find((row) => row.content === 'Short red hair');
   assert(sibling?.parent_id === importedRoot.id, 'inactive sibling branch round-trips');
-  const siblingImages = JSON.parse(sibling!.images_json as string) as string[];
+  const siblingImages = messageImages(Number(sibling!.id));
   assert(
     siblingImages.length === 1 &&
       siblingImages[0] !== importedPrompt.media[0]!.url &&
@@ -218,25 +206,13 @@ databaseCase('conversation transfer', async () => {
       ['selected video falls back to preceding raster', mixedPaths, 3, [2, 1]],
       ['video-only selection is empty', ['/images/omitted-only.webm'], 0, [0, 0]],
     ] as const) {
-      stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
-        JSON.stringify(images),
-        selected,
-        importedPrompt.id,
-      );
+      attachImages(importedPrompt.id, images, selected);
       const exported = exportPortableConversation(imported.id);
       const message = exported.messages.find((message) => message.id === importedPrompt.id)!;
       assert.deepEqual([message.imageAssetIds.length, message.activeImage], expected, name);
-      assert.equal(
-        message.content,
-        'Video prompt currently streaming',
-        'Export includes live text',
-      );
+      assert.equal(message.content, 'Video prompt currently streaming', 'Export includes live text');
       const copy = importPortableConversation(exported);
-      assert.equal(
-        getPathToMessage(copy.activeLeafId!).length,
-        3,
-        `${name}: path survives omission`,
-      );
+      assert.equal(getPathToMessage(copy.activeLeafId!).length, 3, `${name}: path survives omission`);
     }
   } finally {
     mediaPromptBuffers.delete(importedPrompt.id);
@@ -258,17 +234,14 @@ databaseCase('conversation copy', async () => {
   const id = conversationFixture({ title: 'Source', created_at: now, updated_at: now });
   const messageId = Number(
     stmt(`INSERT INTO messages
-  (conversation_id, role, content, reasoning, status, model, gen_meta_json, created_at, images_json, active_image, image_pending, render_recipe_id)
-  VALUES (?, 'assistant', 'persisted', 'persisted reasoning', 'streaming', 'model', '{"test":true}', ?, ?, 1, 1, ?)`).run(
+  (conversation_id, role, content, reasoning, status, model, gen_meta_json, created_at, active_image, image_pending, render_recipe_id)
+  VALUES (?, 'assistant', 'persisted', 'persisted reasoning', 'streaming', 'model', '{"test":true}', ?, 1, 1, ?)`).run(
       id,
       now,
-      JSON.stringify(images),
-      createImageRecipe(
-        imageConfig('{"1":{"inputs":{"text":"{{prompt}}"}}}', 'http://comfy.invalid'),
-        'persisted',
-      ),
+      createImageRecipe(imageConfig('{"1":{"inputs":{"text":"{{prompt}}"}}}', 'http://comfy.invalid'), 'persisted'),
     ).lastInsertRowid,
   );
+  attachImages(messageId, images, 1);
   const source = toConversation(stmt('SELECT * FROM conversations WHERE id = ?').get(id)!);
   const row = stmt('SELECT * FROM messages WHERE id = ?').get(messageId)!;
   const live = { ...toMessage(row), content: 'live content', reasoning: 'live reasoning' };
@@ -281,13 +254,7 @@ databaseCase('conversation copy', async () => {
   assert.equal('images' in live, false, 'The live DTO has one ordered attachment representation');
   let copiedMessageId = 0;
   const copiedConversationId = copyConversation(source, ' (copy)', (conversationId, written) => {
-    copiedMessageId = insertCopiedMessage(
-      conversationId,
-      null,
-      row as unknown as MessageRow,
-      live,
-      written,
-    );
+    copiedMessageId = insertCopiedMessage(conversationId, null, row as unknown as MessageRow, live, written);
   });
   const copiedRow = stmt('SELECT * FROM messages WHERE id = ?').get(copiedMessageId)!;
   const copied = toMessage(copiedRow);
@@ -306,11 +273,7 @@ databaseCase('conversation copy', async () => {
       'Copies of legacy paths use ownership-neutral original names',
     );
   }
-  assert.equal(
-    copied.activeImage,
-    0,
-    'selected A retains its identity after the preceding missing file is skipped',
-  );
+  assert.equal(copied.activeImage, 0, 'selected A retains its identity after the preceding missing file is skipped');
   assert.notEqual(copied.media[0]!.url, images[1]);
   assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(copied.media[0]!.url))), png);
 
@@ -335,11 +298,7 @@ databaseCase('conversation copy', async () => {
     /injected after copy/,
   );
   assert.equal(stmt('SELECT COUNT(*) AS n FROM conversations').get()!.n, countBefore);
-  assert.deepEqual(
-    readdirSync(IMAGES_DIR).sort(),
-    filesBefore,
-    'rolled-back copies leave no files',
-  );
+  assert.deepEqual(readdirSync(IMAGES_DIR).sort(), filesBefore, 'rolled-back copies leave no files');
 
   deleteImageFiles(images);
   for (const asset of copied.media)
@@ -351,25 +310,19 @@ databaseCase('media transfer', async () => {
 
   type MediaJobInput = import('@tinytavern/shared').MediaJobInput;
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
-  const { IMAGES_DIR, stmt, mediaAssetForPath, invalidateMediaAsset } =
-    await import('../../server/src/db/db.ts');
-  const { saveImage, deleteImageFiles, collectConversationImages } =
-    await import('../../server/src/media/images.ts');
+  const { IMAGES_DIR, stmt, mediaAssetForPath, invalidateMediaAsset } = await import('../../server/src/db/db.ts');
+  const { saveImage, deleteImageFiles, collectConversationImages } = await import('../../server/src/media/images.ts');
   const { exportPortableConversation, importPortableConversation } =
     await import('../../server/src/routes/conversationTransfer.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-  const { createMediaJobFromAsset, deleteMediaJob } =
-    await import('../../server/src/media/mediaJobs.ts');
+  const { createMediaJobFromAsset, deleteMediaJob } = await import('../../server/src/media/mediaJobs.ts');
   const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { requireMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
   const { getMediaAssetResultDetails } = await import('../../server/src/media/mediaRecipes.ts');
 
-  const { mediaCharacterIds, setMediaCharacters } =
-    await import('../../server/src/media/mediaCharacters.ts');
+  const { mediaCharacterIds, setMediaCharacters } = await import('../../server/src/media/mediaCharacters.ts');
   const organizationCharacters = ['Ashina', 'Haeun'].map((name) =>
-    Number(
-      stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid,
-    ),
+    Number(stmt('INSERT INTO characters(name, created_at) VALUES (?, 1)').run(name).lastInsertRowid),
   );
   const png = makePlaceholderPng();
   const source = saveImage('.png', png);
@@ -413,10 +366,7 @@ databaseCase('media transfer', async () => {
       ...settings,
       mediaRendering: {
         ...settings.mediaRendering,
-        workflows: [
-          ...settings.mediaRendering.workflows.filter((w) => w.id !== workflow.id),
-          workflow,
-        ],
+        workflows: [...settings.mediaRendering.workflows.filter((w) => w.id !== workflow.id), workflow],
       },
     });
     stmt(
@@ -443,11 +393,7 @@ databaseCase('media transfer', async () => {
     stmt('UPDATE media_assets SET recipe_id = ? WHERE path = ?').run(id, path);
     invalidateMediaAsset(path);
     for (const input of inputs) {
-      stmt("INSERT INTO media_owners VALUES (?, 'recipe', ?, ?)").run(
-        input.assetId,
-        id,
-        input.slot,
-      );
+      stmt("INSERT INTO media_owners VALUES (?, 'recipe', ?, ?)").run(input.assetId, id, input.slot);
     }
   }
   recipe(
@@ -472,23 +418,17 @@ databaseCase('media transfer', async () => {
       parent_id,
       role: 'tool',
       content: 'Preserve the subject',
-      images_json: JSON.stringify([output]),
+      images: [output],
     });
   const rootId = message(null);
   const leafId = message(rootId);
   stmt('UPDATE messages SET active_child_id = ? WHERE id = ?').run(leafId, rootId);
   stmt('UPDATE conversations SET active_leaf_id = ? WHERE id = ?').run(leafId, conversationId);
   const portable = exportPortableConversation(conversationId);
-  assert.equal(
-    portable.assets.length,
-    3,
-    'Repeated source/reference slots embed each raster only once',
-  );
+  assert.equal(portable.assets.length, 3, 'Repeated source/reference slots embed each raster only once');
   assert.equal(portable.recipes!.length, 2, 'Export follows recipes on referenced images');
   assert.equal(portable.recipes![0]!.workflowName, 'Captured workflow name');
-  assert.deepEqual(portable.recipes![0]!.workflowParameters, [
-    { label: 'Captured setting', value: 42 },
-  ]);
+  assert.deepEqual(portable.recipes![0]!.workflowParameters, [{ label: 'Captured setting', value: 42 }]);
   assert.deepEqual(
     portable.recipes!.map((recipe) => recipe.seed),
     [4294967295, 0],
@@ -499,17 +439,8 @@ databaseCase('media transfer', async () => {
     ['input1', 'input2', 'input3'],
   );
   const json = JSON.stringify(portable);
-  for (const secret of [
-    'private-secret',
-    'private-user',
-    'source-only',
-    'must-not-export',
-    'private-preset',
-  ]) {
-    assert(
-      !json.includes(secret),
-      `Connection/execution identity ${secret} stays on the source server`,
-    );
+  for (const secret of ['private-secret', 'private-user', 'source-only', 'must-not-export', 'private-preset']) {
+    assert(!json.includes(secret), `Connection/execution identity ${secret} stays on the source server`);
   }
   stmt('DELETE FROM conversations WHERE id = ?').run(conversationId);
   deleteImageFiles([output]);
@@ -527,11 +458,7 @@ databaseCase('media transfer', async () => {
   }
   const paths = collectConversationImages(imported.id);
   assert.equal(paths.length, 2);
-  assert.notEqual(
-    paths[0],
-    paths[1],
-    'Each imported message has an independently owned result file',
-  );
+  assert.notEqual(paths[0], paths[1], 'Each imported message has an independently owned result file');
   const asset = mediaAssetForPath(paths[0]!)!;
   assert.deepEqual(
     mediaCharacterIds(asset.id),
@@ -548,10 +475,7 @@ databaseCase('media transfer', async () => {
     requireMediaWorkflow(configuration.workflowId).standalonePromptPresetId,
     workflow.standalonePromptPresetId,
   );
-  assert.equal(
-    requireMediaWorkflow(configuration.workflowId).chatPromptPresetId,
-    workflow.chatPromptPresetId,
-  );
+  assert.equal(requireMediaWorkflow(configuration.workflowId).chatPromptPresetId, workflow.chatPromptPresetId);
   assert.deepEqual(configuration.workflowValues, { strength: 0.8 });
   assert.equal(getMediaAssetResultDetails(asset.id).seed, 4294967295);
   const importedInputs = JSON.parse(String(importedRecipe.inputs_json)) as MediaJobInput[];
@@ -587,11 +511,7 @@ databaseCase('media transfer', async () => {
   deleteMediaJob(requireMediaJob(rerun.id));
   stmt('DELETE FROM conversations WHERE id = ?').run(imported.id);
   deleteImageFiles(paths);
-  assert.equal(
-    readdirSync(IMAGES_DIR).length,
-    0,
-    'Deleting imported results releases all transitive reference files',
-  );
+  assert.equal(readdirSync(IMAGES_DIR).length, 0, 'Deleting imported results releases all transitive reference files');
   assert.equal(stmt('SELECT count(*) AS n FROM media_recipes').get()!.n, 0);
 
   const invalidCases = [
@@ -607,16 +527,12 @@ databaseCase('media transfer', async () => {
     (value: typeof portable) => {
       value.recipes![0]!.inputs.reverse();
     },
-    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map(
-      (seed) => (value: typeof portable) => {
-        Object.assign(value.recipes![0]!, { seed });
-      },
-    ),
-    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map(
-      (seedOverride) => (value: typeof portable) => {
-        Object.assign(value.recipes![0]!, { seedOverride });
-      },
-    ),
+    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map((seed) => (value: typeof portable) => {
+      Object.assign(value.recipes![0]!, { seed });
+    }),
+    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map((seedOverride) => (value: typeof portable) => {
+      Object.assign(value.recipes![0]!, { seedOverride });
+    }),
   ];
   for (const mutate of invalidCases) {
     const invalid = structuredClone(portable);
@@ -633,34 +549,22 @@ databaseCase('media transfer', async () => {
   assert.equal(stmt('SELECT count(*) AS n FROM conversations').get()!.n, 0);
   assert.equal(stmt('SELECT count(*) AS n FROM media_recipes').get()!.n, 0);
   assert.equal(stmt('SELECT count(*) AS n FROM media_assets').get()!.n, 0);
-  assert.equal(
-    readdirSync(IMAGES_DIR).length,
-    0,
-    'Failed SQL commits discard every imported raster',
-  );
+  assert.equal(readdirSync(IMAGES_DIR).length, 0, 'Failed SQL commits discard every imported raster');
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
   assert(!existsSync(join(IMAGES_DIR, basename(output))));
 
   const emptySource = importPortableConversation(portable);
-  const emptyRows = stmt('SELECT id, images_json FROM messages WHERE conversation_id = ?').all(
-    emptySource.id,
-  );
+  const emptyRows = stmt('SELECT id FROM messages WHERE conversation_id = ?').all(emptySource.id);
   for (const row of emptyRows) {
-    const path = (JSON.parse(String(row.images_json)) as string[])[0]!;
+    const path = messageImages(Number(row.id))[0]!;
     const recipeId = mediaAssetForPath(path)!.recipeId!;
     stmt('UPDATE messages SET render_recipe_id = ? WHERE id = ?').run(recipeId, row.id!);
   }
   const originalFiles = collectConversationImages(emptySource.id);
-  stmt("UPDATE messages SET images_json = '[]', active_image = 0 WHERE conversation_id = ?").run(
-    emptySource.id,
-  );
+  for (const row of emptyRows) attachImages(Number(row.id), []);
   deleteImageFiles(originalFiles);
   const emptyExport = exportPortableConversation(emptySource.id);
-  assert(
-    emptyExport.messages.every(
-      (message) => message.renderRecipeId && message.imageAssetIds.length === 0,
-    ),
-  );
+  assert(emptyExport.messages.every((message) => message.renderRecipeId && message.imageAssetIds.length === 0));
   assert.equal(
     emptyExport.assets.length,
     2,
@@ -668,9 +572,7 @@ databaseCase('media transfer', async () => {
   );
   const emptyCopy = importPortableConversation(emptyExport);
   assert(
-    stmt('SELECT render_recipe_id FROM messages WHERE conversation_id = ? LIMIT 1').get(
-      emptyCopy.id,
-    )!.render_recipe_id,
+    stmt('SELECT render_recipe_id FROM messages WHERE conversation_id = ? LIMIT 1').get(emptyCopy.id)!.render_recipe_id,
   );
   for (const id of [emptySource.id, emptyCopy.id]) {
     const files = collectConversationImages(id);
@@ -689,9 +591,7 @@ databaseCase('media transfer', async () => {
   delete editedRecipe.seedOverride;
   for (const input of editedRecipe.inputs) input.assetId = null;
   missingReferences.recipes = [editedRecipe];
-  missingReferences.assets = missingReferences.assets.filter(
-    (asset) => asset.recipeId === editedRecipe.id,
-  );
+  missingReferences.assets = missingReferences.assets.filter((asset) => asset.recipeId === editedRecipe.id);
   const missingCopy = importPortableConversation(missingReferences);
   const missingExport = exportPortableConversation(missingCopy.id);
   assert.deepEqual(
@@ -710,9 +610,7 @@ databaseCase('media transfer', async () => {
   });
   assert.deepEqual(missingRerun.inputs, []);
   assert.equal(
-    (await import('@tinytavern/shared')).mediaInputSlots(
-      requireMediaWorkflow(missingRerun.workflowId!),
-    ).length,
+    (await import('@tinytavern/shared')).mediaInputSlots(requireMediaWorkflow(missingRerun.workflowId!)).length,
     3,
   );
   deleteMediaJob(requireMediaJob(missingRerun.id));

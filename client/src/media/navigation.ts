@@ -10,14 +10,7 @@ import {
 import { batch } from 'solid-js';
 import { dialogStack, type DialogFrame } from '../state/dialogStack.ts';
 import type { MediaAsset, MediaJobInput } from '@tinytavern/shared';
-import {
-  applyMediaJob,
-  openModal,
-  openDialog,
-  selectConversation,
-  setState,
-  state,
-} from '../state/store.ts';
+import { applyMediaJob, openModal, openDialog, selectConversation, setState, state } from '../state/store.ts';
 import { api } from '../state/api.ts';
 
 export interface MediaToolSession {
@@ -59,11 +52,7 @@ export function openMediaTool(
   } = {},
 ): void {
   const existing = options.jobId ? dialogStack.findJob(options.jobId, state.mediaJobs) : undefined;
-  if (
-    revisitDialog(existing, () =>
-      existing!.selectMediaPreview({ jobId: options.jobId!, assetId: options.assetId }),
-    )
-  )
+  if (revisitDialog(existing, () => existing!.selectMediaPreview({ jobId: options.jobId!, assetId: options.assetId })))
     return;
   const input = options.input;
   const conversationId = options.conversationId ?? null;
@@ -80,25 +69,18 @@ export function openMediaTool(
     assets: input ? [input.asset] : [],
   };
   const current = readPageLocation();
-  openDialog(
-    { chatId: current.chatId, viewMode: current.viewMode, modal: 'media-tools', media: session },
-    session,
-  );
+  openDialog({ chatId: current.chatId, viewMode: current.viewMode, modal: 'media-tools', media: session }, session);
 }
 
 export function openMediaJobs(): void {
-  if (!revisitDialog(dialogStack.frames().find((frame) => frame.page.modal === 'media-jobs')))
-    openModal('media-jobs');
+  if (!revisitDialog(dialogStack.frames().find((frame) => frame.page.modal === 'media-jobs'))) openModal('media-jobs');
 }
 
 export function leaveMediaTool(): void {
   openModal(null);
 }
 
-export async function openMediaRerun(
-  asset: MediaAsset,
-  conversationId?: number | null,
-): Promise<void> {
+export async function openMediaRerun(asset: MediaAsset, conversationId?: number | null): Promise<void> {
   const job = await api.rerunMediaAsset(asset.id, newRequestId(), {
     contextConversationId: conversationId ?? null,
     destination: conversationId == null ? 'gallery' : 'chat',
@@ -119,9 +101,7 @@ export function mediaToolLinks() {
 }
 
 export function restorePage(page: PageLocation): void {
-  const chatId = state.conversations.some(
-    (chat) => chat.id === page.chatId && chat.promptMode !== 'media',
-  )
+  const chatId = state.conversations.some((chat) => chat.id === page.chatId && chat.promptMode !== 'media')
     ? page.chatId
     : null;
   const restored = { ...page, chatId, stack: page.stack?.map((pane) => ({ ...pane, chatId })) };
@@ -129,9 +109,7 @@ export function restorePage(page: PageLocation): void {
     applyPageLocation(restored, () => {
       selectConversation(chatId);
       setState('viewMode', page.viewMode ?? 'chat');
-      dialogStack.restore(restored, (pane) =>
-        restoreMediaInputs(pane, state.gallery, state.mediaJobs),
-      );
+      dialogStack.restore(restored, (pane) => restoreMediaInputs(pane, state.gallery, state.mediaJobs));
       setState('modal', page.modal);
     }),
   );

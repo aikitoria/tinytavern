@@ -1,4 +1,4 @@
-import type { Settings } from '@tinytavern/shared';
+import type { Settings, SettingsPreferences } from '@tinytavern/shared';
 import { stmt } from '../db/db.ts';
 import { HttpError } from '../http/router.ts';
 import { createEntityWriter } from '../routes/shared/entityWriter.ts';
@@ -102,71 +102,6 @@ export function insertMediaEntity(table: MediaEntityTable, item: Record<string, 
   return String(writer.insert(writer.values({})));
 }
 
-/** Scalar preferences remain in settings; this projection is shared by existing readers. */
-export function readMediaLibraries(settings: Settings): void {
-  const folders = (table: MediaEntityTable, member: string, items: Item[]) => {
-    const folder = MEDIA_ENTITIES[table].folder!;
-    const members = new Map<string, string[]>();
-    for (const item of items) {
-      if (item.folderId == null) continue;
-      const key = String(item.folderId);
-      if (!members.has(key)) members.set(key, []);
-      members.get(key)!.push(item.id);
-    }
-    return stmt(`SELECT id, name FROM ${folder} ORDER BY name COLLATE NOCASE, id`)
-      .all()
-      .map((row) => ({
-        id: String(row.id),
-        name: String(row.name),
-        [member]: members.get(String(row.id)) ?? [],
-      }));
-  };
-  const workflows = mediaEntityRows('media_workflows');
-  settings.mediaRendering = {
-    ...settings.mediaRendering,
-    workflows,
-    folders: folders('media_workflows', 'workflowIds', workflows),
-    shortcuts: mediaEntityRows('media_shortcuts'),
-  } as unknown as Settings['mediaRendering'];
-  settings.mediaFavorites = mediaEntityRows(
-    'media_favorites',
-  ) as unknown as Settings['mediaFavorites'];
-  for (const [key, table] of [
-    ['mediaChatPrompts', 'media_chat_prompts'],
-    ['mediaStandalonePrompts', 'media_standalone_prompts'],
-  ] as const) {
-    const presets = mediaEntityRows(table);
-    settings[key] = {
-      presets,
-      folders: folders(table, 'presetIds', presets),
-      defaultPresetId: null,
-    } as unknown as Settings[typeof key];
-  }
-  const selected = stmt('SELECT * FROM media_selections WHERE id = 1').get()!;
-  settings.mediaRendering.defaultWorkflowId = nullableId(selected.default_workflow_id);
-  settings.mediaRendering.avatarWorkflowId = nullableId(selected.avatar_workflow_id);
-  settings.mediaRendering.descriptionWorkflowId = nullableId(selected.description_workflow_id);
-  settings.mediaChatPrompts.defaultPresetId = nullableId(selected.chat_prompt_id);
-  settings.mediaStandalonePrompts.defaultPresetId = nullableId(selected.standalone_prompt_id);
-  const presets = mediaEntityRows('avatar_prompts');
-  settings.imageGeneration = {
-    ...settings.imageGeneration,
-    promptPresets: {
-      avatar: {
-        presets: presets.map((preset) => ({
-          id: preset.id,
-          name: preset.name,
-          prompt: String(preset.prompt),
-          context: String(preset.context),
-        })),
-        active:
-          presets.find((preset) => preset.id === nullableId(selected.avatar_prompt_id))?.name ?? '',
-        activeId: nullableId(selected.avatar_prompt_id),
-      },
-    },
-  };
-}
-
 function synchronizeRows(
   table: MediaEntityTable | MediaFolderTable,
   incoming: Item[],
@@ -192,18 +127,11 @@ function synchronizeRows(
   for (const key of previous.keys()) {
     if (retained.has(key)) continue;
     if (soft) {
-      stmt(`UPDATE ${table} SET deleted_at = ?, revision = revision + 1 WHERE id = ?`).run(
-        now,
-        key,
-      );
+      stmt(`UPDATE ${table} SET deleted_at = ?, revision = revision + 1 WHERE id = ?`).run(now, key);
     } else {
-      const entity = Object.entries(MEDIA_ENTITIES).find(
-        ([, config]) => config.folder === table,
-      )?.[0];
+      const entity = Object.entries(MEDIA_ENTITIES).find(([, config]) => config.folder === table)?.[0];
       if (entity) {
-        stmt(
-          `UPDATE ${entity} SET folder_id = NULL, revision = revision + 1 WHERE folder_id = ?`,
-        ).run(key);
+        stmt(`UPDATE ${entity} SET folder_id = NULL, revision = revision + 1 WHERE folder_id = ?`).run(key);
       }
       stmt(`DELETE FROM ${table} WHERE id = ?`).run(key);
     }
@@ -212,9 +140,7 @@ function synchronizeRows(
   for (const item of incoming) {
     const requested = item.id;
     const current = previous.get(requested);
-    const values = Object.entries(fieldMap).map(([key, column]) =>
-      encodeMediaField(column, item[key]),
-    );
+    const values = Object.entries(fieldMap).map(([key, column]) => encodeMediaField(column, item[key]));
     if (current) {
       const changed = columns.some((column, index) => current[column] !== values[index]);
       if (changed) {
@@ -222,8 +148,7 @@ function synchronizeRows(
       }
       previous.delete(requested);
     } else {
-      const explicit =
-        migration && /^[1-9][0-9]*$/.test(requested) && Number.isSafeInteger(Number(requested));
+      const explicit = migration && /^[1-9][0-9]*$/.test(requested) && Number.isSafeInteger(Number(requested));
       let insertedId: number;
       if (explicit) {
         const placeholders = columns.map(() => '?').join(', ');
@@ -251,46 +176,30 @@ function synchronizeFolderCollection(
   table: MediaEntityTable,
   raw: unknown[],
   rawFolders: unknown[],
-  member: string,
   migration: boolean,
 ): Map<string, string> {
   const items = raw as Item[];
   const groups = rawFolders as Item[];
   const config = MEDIA_ENTITIES[table];
-  synchronizeRows(config.folder!, groups, { name: 'name' }, false, migration);
-  const membership = new Map<string, string>();
-  for (const group of groups) {
-    for (const id of group[member] as string[]) membership.set(id, group.id);
-  }
-  for (const item of items) item.folderId = membership.get(item.id) ?? null;
-  const map = synchronizeRows(
-    table,
-    items,
-    { ...config.fields, folderId: 'folder_id' },
-    true,
-    migration,
-  );
-  for (const group of groups)
-    group[member] = (group[member] as string[]).map((key) => map.get(key)!).filter(Boolean);
+  const folders = synchronizeRows(config.folder!, groups, { name: 'name' }, false, migration);
+  for (const item of items) item.folderId = item.folderId == null ? null : (folders.get(String(item.folderId)) ?? null);
+  const map = synchronizeRows(table, items, { ...config.fields, folderId: 'folder_id' }, true, migration);
   return map;
 }
 
 /** Server assignment treats incoming IDs of new rows as request-local references only. */
-export function writeMediaLibraries(settings: Settings, migration = false): Map<string, string> {
-  const resolve = (map: Map<string, string>, key: string | null) =>
-    key == null ? null : (map.get(key) ?? null);
+export function importMediaLibraries(settings: Settings, migration = false): Map<string, string> {
+  const resolve = (map: Map<string, string>, key: string | null) => (key == null ? null : (map.get(key) ?? null));
   const chat = synchronizeFolderCollection(
     'media_chat_prompts',
     settings.mediaChatPrompts.presets,
     settings.mediaChatPrompts.folders,
-    'presetIds',
     migration,
   );
   const standalone = synchronizeFolderCollection(
     'media_standalone_prompts',
     settings.mediaStandalonePrompts.presets,
     settings.mediaStandalonePrompts.folders,
-    'presetIds',
     migration,
   );
   const rendering = settings.mediaRendering;
@@ -298,20 +207,11 @@ export function writeMediaLibraries(settings: Settings, migration = false): Map<
     workflow.chatPromptPresetId = resolve(chat, workflow.chatPromptPresetId);
     workflow.standalonePromptPresetId = resolve(standalone, workflow.standalonePromptPresetId);
   }
-  const workflows = synchronizeFolderCollection(
-    'media_workflows',
-    rendering.workflows,
-    rendering.folders,
-    'workflowIds',
-    migration,
-  );
+  const workflows = synchronizeFolderCollection('media_workflows', rendering.workflows, rendering.folders, migration);
   rendering.defaultWorkflowId = resolve(workflows, rendering.defaultWorkflowId);
   rendering.avatarWorkflowId = resolve(workflows, rendering.avatarWorkflowId);
   rendering.descriptionWorkflowId = resolve(workflows, rendering.descriptionWorkflowId);
-  settings.mediaChatPrompts.defaultPresetId = resolve(
-    chat,
-    settings.mediaChatPrompts.defaultPresetId,
-  );
+  settings.mediaChatPrompts.defaultPresetId = resolve(chat, settings.mediaChatPrompts.defaultPresetId);
   settings.mediaStandalonePrompts.defaultPresetId = resolve(
     standalone,
     settings.mediaStandalonePrompts.defaultPresetId,
@@ -327,27 +227,14 @@ export function writeMediaLibraries(settings: Settings, migration = false): Map<
       if (!item.workflowId || ('presetId' in item && !item.presetId))
         throw new HttpError(400, 'A media shortcut or favorite references a missing entity');
     }
-    synchronizeRows(
-      table,
-      items as unknown as Item[],
-      MEDIA_ENTITIES[table].fields,
-      false,
-      migration,
-    );
+    synchronizeRows(table, items as unknown as Item[], MEDIA_ENTITIES[table].fields, false, migration);
   }
   const avatarSet = settings.imageGeneration.promptPresets?.avatar;
   const previousAvatars = mediaEntityRows('avatar_prompts');
   const avatars = (avatarSet?.presets ?? []) as unknown as Item[];
   for (const [index, preset] of avatars.entries())
-    preset.id ??=
-      previousAvatars.find((item) => item.name === preset.name)?.id ?? `new-avatar-${index}`;
-  const avatarIds = synchronizeRows(
-    'avatar_prompts',
-    avatars,
-    MEDIA_ENTITIES.avatar_prompts.fields,
-    true,
-    migration,
-  );
+    preset.id ??= previousAvatars.find((item) => item.name === preset.name)?.id ?? `new-avatar-${index}`;
+  const avatarIds = synchronizeRows('avatar_prompts', avatars, MEDIA_ENTITIES.avatar_prompts.fields, true, migration);
   const selectedAvatar =
     avatarSet?.activeId === undefined
       ? (avatars.find((item) => item.name === avatarSet?.active)?.id ?? null)
@@ -369,17 +256,9 @@ export function writeMediaLibraries(settings: Settings, migration = false): Map<
   return workflows;
 }
 
-export function scalarSettings(settings: Settings): string {
-  const {
-    workflows,
-    folders,
-    shortcuts,
-    defaultWorkflowId,
-    avatarWorkflowId,
-    descriptionWorkflowId,
-    ...rendering
-  } = settings.mediaRendering;
-  const { promptPresets, ...imageGeneration } = settings.imageGeneration;
-  const { mediaFavorites, mediaChatPrompts, mediaStandalonePrompts, ...rest } = settings;
-  return JSON.stringify({ ...rest, mediaRendering: rendering, imageGeneration });
+export function scalarSettings(settings: SettingsPreferences): string {
+  const { defaultWorkflowId, avatarWorkflowId, descriptionWorkflowId, ...mediaRendering } = settings.mediaRendering;
+  const { avatarPromptId, ...imageGeneration } = settings.imageGeneration;
+  const { mediaChatPrompts, mediaStandalonePrompts, ...rest } = settings;
+  return JSON.stringify({ ...rest, mediaRendering, imageGeneration });
 }

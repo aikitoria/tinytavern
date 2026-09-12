@@ -20,12 +20,7 @@ export default function SettingsTransferButtons(props: {
 }) {
   let input!: HTMLInputElement;
   const draft = useContext(SettingsDraftContext);
-  const capture = createAsyncScope(() => [
-    props.type,
-    readPageLocation(),
-    draft?.identity?.(),
-    draft?.read(),
-  ]);
+  const capture = createAsyncScope(() => [props.type, readPageLocation(), draft?.identity?.(), draft?.read()]);
   const [busy, setBusy] = createSignal(false);
   const run = async (action: (current: () => boolean) => void | Promise<void>) => {
     if (busy()) return;
@@ -41,9 +36,7 @@ export default function SettingsTransferButtons(props: {
   };
   const exportFile = async () => {
     const document = transferDocument(props.type, await props.exportData());
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(document, null, 2) + '\n'], { type: 'application/json' }),
-    );
+    const url = URL.createObjectURL(new Blob([JSON.stringify(document, null, 2) + '\n'], { type: 'application/json' }));
     const link = window.document.createElement('a');
     link.href = url;
     link.download = `${props.type.replaceAll(':', '-')}.json`;

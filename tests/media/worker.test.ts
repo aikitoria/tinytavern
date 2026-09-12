@@ -1,3 +1,4 @@
+import { attachImages, galleryFixture } from '../support/fixtures.ts';
 import { mockComfy } from '../support/comfy.ts';
 import { insertFixture } from '../support/fixtures.ts';
 import { testRequestKey } from '../support/requestKey.ts';
@@ -22,14 +23,13 @@ test('media jobs', async () => {
   const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { requireMediaJob, mediaJobRow, mediaJobDto, updateMediaJob, observeMediaJob } =
     await import('../../server/src/media/mediaJobStore.ts');
   const { createMediaJob, createMediaJobFromAsset, editMediaJob, startMediaJob, cancelMediaJob } =
     await import('../../server/src/media/mediaJobs.ts');
-  const { initMediaWorker, tickMediaWorker, stopMediaWorker } =
-    await import('../../server/src/media/mediaWorker.ts');
-  const { cancelMediaVariation } = await import('../../server/src/media/mediaDrafts.ts');
+  const { initMediaWorker, tickMediaWorker, stopMediaWorker } = await import('../../server/src/media/mediaWorker.ts');
+  const { cancelMediaVariation, discardMediaDraft } = await import('../../server/src/media/mediaDrafts.ts');
   const { drainRemoteCleanup } = await import('../../server/src/media/mediaRemote.ts');
   const { startMessageImageRender } = await import('../../server/src/media/mediaImageAdapter.ts');
   const { appendMessage, getMessage } = await import('../../server/src/conversations/tree.ts');
@@ -224,19 +224,13 @@ test('media jobs', async () => {
       'Success deletes the full job, including its request key, even when remote cleanup fails',
     );
     assert.equal(
-      stmt("SELECT owner_id FROM media_owners WHERE owner_type = 'job' AND owner_id = ?").get(
-        first.id,
-      ),
+      stmt("SELECT owner_id FROM media_owners WHERE owner_type = 'job' AND owner_id = ?").get(first.id),
       null,
     );
 
     stmt("UPDATE media_remote_files SET retry_at = 0 WHERE state = 'pending'").run();
     await drainRemoteCleanup();
-    assert(
-      [...deleted].some(
-        (identity) => identity.includes('trace.json') && identity.includes('type=temp'),
-      ),
-    );
+    assert([...deleted].some((identity) => identity.includes('trace.json') && identity.includes('type=temp')));
 
     for (const kind of ['image', 'video'] as const) {
       extraOutput = kind;
@@ -250,9 +244,7 @@ test('media jobs', async () => {
       assert.equal(requireMediaJob(invalid.id).retention_deadline, null);
       await drainRemoteCleanup();
       assert.equal(
-        stmt(
-          "SELECT count(*) AS n FROM media_remote_files WHERE job_id = ? AND state != 'deleted'",
-        ).get(invalid.id)!.n,
+        stmt("SELECT count(*) AS n FROM media_remote_files WHERE job_id = ? AND state != 'deleted'").get(invalid.id)!.n,
         0,
         'Invalid workflows still clean every remote output, including temporary files',
       );
@@ -260,10 +252,7 @@ test('media jobs', async () => {
     extraOutput = null;
 
     const sourcePath = saveImage('.png', raster);
-    stmt(`
-    INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at)
-    VALUES ('Input', 'Saved source description', ?, 1, 1)
-  `).run(sourcePath);
+    galleryFixture(sourcePath, { character_name: 'Input', prompt: 'Saved source description' });
     const sourceId = mediaAssetForPath(sourcePath)!.id;
     const editInstruction = '  Preserve the face.\nChange the lighting to sunset.  ';
     const edit = draft('references', {
@@ -299,10 +288,7 @@ test('media jobs', async () => {
       'Cleanup deletes the exact uploaded file from the input root',
     );
     assert.throws(() => requireMediaJob(edit.id), { status: 404 });
-    assert(
-      existsSync(join(IMAGES_DIR, sourcePath.slice(8))),
-      'Saved result recipes retain rerun inputs',
-    );
+    assert(existsSync(join(IMAGES_DIR, sourcePath.slice(8))), 'Saved result recipes retain rerun inputs');
 
     const renderingSettings = getSettings().mediaRendering;
     putSettings({
@@ -325,14 +311,8 @@ test('media jobs', async () => {
         workflows: [imageWorkflow, { ...editWorkflow, json: JSON.stringify(enhancedGraph) }],
       },
     });
-    const replacement = getSettings().mediaRendering.workflows.find(
-      (item) => item.name === editWorkflow.name,
-    )!;
-    assert.notEqual(
-      replacement.id,
-      editWorkflow.id,
-      'Recreating a workflow cannot revive its deleted identity',
-    );
+    const replacement = getSettings().mediaRendering.workflows.find((item) => item.name === editWorkflow.name)!;
+    assert.notEqual(replacement.id, editWorkflow.id, 'Recreating a workflow cannot revive its deleted identity');
     assert.throws(
       () =>
         createMediaJobFromAsset(edited.outputs[0]!.id, {
@@ -345,11 +325,7 @@ test('media jobs', async () => {
       workflowId: replacement.id,
     });
     assert.equal(restored.inputs.length, 3);
-    assert.equal(
-      restored.instruction,
-      editInstruction,
-      'Rerun restores the instruction after job deletion',
-    );
+    assert.equal(restored.instruction, editInstruction, 'Rerun restores the instruction after job deletion');
     assert.equal(restored.workflowId, replacement.id);
     editMediaJob(requireMediaJob(restored.id), { prompt: 'A changed edit prompt' });
     startMediaJob(requireMediaJob(restored.id), {}, false);
@@ -360,83 +336,45 @@ test('media jobs', async () => {
         'workflow' in
         JSON.parse(
           String(
-            stmt('SELECT configuration_json FROM media_recipes WHERE id = ?').get(
-              restoredResult.outputs[0]!.recipeId!,
-            )!.configuration_json,
+            stmt('SELECT configuration_json FROM media_recipes WHERE id = ?').get(restoredResult.outputs[0]!.recipeId!)!
+              .configuration_json,
           ),
         )
       ),
     );
-    assert.equal(
-      uploads[1]!.name,
-      `tinytavern-${testRequestKey('recipe-rerun')}-asset-${sourceId}.png`,
-    );
-    assert.notEqual(
-      uploads[1]!.name,
-      uploadedPath,
-      'Separate jobs never overwrite each other’s inputs',
-    );
+    assert.equal(uploads[1]!.name, `tinytavern-${testRequestKey('recipe-rerun')}-asset-${sourceId}.png`);
+    assert.notEqual(uploads[1]!.name, uploadedPath, 'Separate jobs never overwrite each other’s inputs');
     assert.equal(
       restoredResult.outputs.length,
       2,
       'Recipes rerun after job history deletion using the current saved workflow',
     );
-    assert.equal(
-      submitted.get(restoredResult.comfyPromptId!)!.prompt['1']!.inputs.text,
-      'A changed edit prompt',
-    );
+    assert.equal(submitted.get(restoredResult.comfyPromptId!)!.prompt['1']!.inputs.text, 'A changed edit prompt');
     const conversationId = Number(
       stmt(`
     INSERT INTO conversations(title, created_at, updated_at) VALUES ('Image alternatives', 1, 1)
   `).run().lastInsertRowid,
     );
-    const message = appendMessage(
-      conversationId,
-      'tool',
-      'A new edit with literal {{seed}}',
-      null,
-      'done',
-    );
-    stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(
-      JSON.stringify([restoredResult.outputs[0]!.url]),
-      message.id,
-    );
+    const message = appendMessage(conversationId, 'tool', 'A new edit with literal {{seed}}', null, 'done');
+    attachImages(message.id, [restoredResult.outputs[0]!.url]);
     const uploadsBeforeSwipe = uploads.length;
     const swipe = startMessageImageRender(getMessage(message.id)!);
-    assert(
-      getMessage(message.id)!.imagePending,
-      'Starting a recipe swipe synchronously marks its message pending',
-    );
+    assert(getMessage(message.id)!.imagePending, 'Starting a recipe swipe synchronously marks its message pending');
     const swiped = await waitFor(swipe.id, 'succeeded');
     const updatedMessage = getMessage(message.id)!;
     assert.equal(swiped.messageId, message.id);
     assert.equal(updatedMessage.content, message.content);
     assert.equal(updatedMessage.status, 'done');
-    assert.equal(
-      updatedMessage.media.length,
-      3,
-      'All new recipe outputs append to the original image alternatives',
-    );
+    assert.equal(updatedMessage.media.length, 3, 'All new recipe outputs append to the original image alternatives');
     assert.equal(updatedMessage.activeImage, 2);
-    assert.deepEqual(
-      swiped.inputs,
-      edited.inputs,
-      'Image-edit swipes retain the source and ordered reference slots',
-    );
-    assert.equal(
-      uploads.length,
-      uploadsBeforeSwipe + 1,
-      'Repeated recipe inputs still upload only once per swipe',
-    );
+    assert.deepEqual(swiped.inputs, edited.inputs, 'Image-edit swipes retain the source and ordered reference slots');
+    assert.equal(uploads.length, uploadsBeforeSwipe + 1, 'Repeated recipe inputs still upload only once per swipe');
     assert.equal(submitted.get(swiped.comfyPromptId!)!.prompt['1']!.inputs.text, message.content);
     assert.throws(() => requireMediaJob(swiped.id), { status: 404 });
-    stmt("UPDATE messages SET images_json = '[]', active_image = 0 WHERE id = ?").run(message.id);
+    attachImages(message.id, []);
     deleteImageFiles(updatedMessage.media.map((asset) => asset.url));
     const emptyMessage = getMessage(message.id)!;
-    assert(
-      emptyMessage.hasImageRender,
-      'Deleting the last image retains the message rendering recipe',
-    );
+    assert(emptyMessage.hasImageRender, 'Deleting the last image retains the message rendering recipe');
     const emptySwipe = startMessageImageRender(emptyMessage);
     const recreated = await waitFor(emptySwipe.id, 'succeeded');
     assert.deepEqual(
@@ -448,7 +386,9 @@ test('media jobs', async () => {
     putSettings({ ...getSettings(), mediaRendering: renderingSettings });
 
     const removedResult = restoredResult.outputs[0]!;
-    stmt('DELETE FROM gallery_items WHERE image = ?').run(removedResult.url);
+    stmt(
+      "DELETE FROM gallery_items WHERE id IN (SELECT o.owner_id FROM media_owners o JOIN media_assets a ON a.id = o.asset_id WHERE o.owner_type = 'gallery' AND a.path = ?)",
+    ).run(removedResult.url);
     deleteImageFiles([removedResult.url]);
     assert(
       !existsSync(join(IMAGES_DIR, basename(removedResult.url))),
@@ -466,7 +406,9 @@ test('media jobs', async () => {
     await waitFor(pending.id, 'queued');
     const pendingId = requireMediaJob(pending.id).comfy_prompt_id!;
     cancelMediaVariation(requireMediaJob(pending.id));
-    await waitFor(pending.id, 'cancelled', true);
+    const cancelled = await waitFor(pending.id, 'cancelled');
+    assert.ok(cancelled.draft?.conversationId, 'Cancellation retains the prompt discussion');
+    discardMediaDraft(requireMediaJob(pending.id), { expectedDraftRevision: cancelled.draft!.revision });
     assert.equal(mediaJobRow(pending.id), undefined);
     assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(pending.draft!.id), null);
     assert.deepEqual(cancellations, [pendingId], 'Cancellation targets only the recorded job');
@@ -496,11 +438,7 @@ test('media jobs', async () => {
     const unlimited = draft('unlimited');
     startMediaJob(requireMediaJob(unlimited.id), {}, false);
     await waitFor(unlimited.id, 'queued');
-    assert.equal(
-      requireMediaJob(unlimited.id).deadline,
-      null,
-      'Unlimited Comfy jobs have no wall-clock deadline',
-    );
+    assert.equal(requireMediaJob(unlimited.id).deadline, null, 'Unlimited Comfy jobs have no wall-clock deadline');
     cancelMediaJob(requireMediaJob(unlimited.id));
     await waitFor(unlimited.id, 'cancelled');
     putSettings({ ...getSettings(), mediaRendering: renderingSettings });
@@ -519,10 +457,7 @@ test('media jobs', async () => {
     await waitFor(interruptedDownload.id, 'downloading');
     cancelMediaJob(requireMediaJob(interruptedDownload.id));
     await waitFor(interruptedDownload.id, 'cancelled');
-    assert(
-      downloadAborted,
-      'Cancel interrupts an in-flight download rather than waiting for its request timeout',
-    );
+    assert(downloadAborted, 'Cancel interrupts an in-flight download rather than waiting for its request timeout');
     holdDownloads = false;
 
     const { renderMediaFixture } = await import('../support/media.ts');
@@ -576,10 +511,7 @@ test('media jobs', async () => {
         { slot: 'input2', assetId: stillId },
       ],
     });
-    assert.throws(
-      () => startMediaJob(requireMediaJob(invalidKind.id), {}, false),
-      /requires a video/,
-    );
+    assert.throws(() => startMediaJob(requireMediaJob(invalidKind.id), {}, false), /requires a video/);
     const videoJob = draft('video-input-roundtrip', {
       workflowId: videoWorkflow.id,
       fillInputs: { selectedAssetIds: [videoId, stillId] },
@@ -595,11 +527,7 @@ test('media jobs', async () => {
     const videoUploads = uploads.slice(uploadCount);
     assert.equal(videoUploads.length, 2, 'Repeated video bindings upload the original only once');
     const videoUpload = videoUploads.find((upload) => upload.name.endsWith('.webm'))!;
-    assert.deepEqual(
-      videoUpload.data,
-      originalVideo,
-      'Videos return to Comfy byte-for-byte without transcoding',
-    );
+    assert.deepEqual(videoUpload.data, originalVideo, 'Videos return to Comfy byte-for-byte without transcoding');
     const videoGraph = submitted.get(videoResult.comfyPromptId!)!.prompt;
     assert.equal(videoGraph.video!.inputs.file, videoUpload.name);
     assert.equal(videoGraph.repeated!.inputs.file, videoUpload.name);
@@ -612,18 +540,12 @@ test('media jobs', async () => {
       }),
       'Cleanup deletes the original uploaded video from Comfy',
     );
-    assert(
-      existsSync(join(IMAGES_DIR, basename(videoPath))),
-      'Remote cleanup preserves the locally owned video',
-    );
+    assert(existsSync(join(IMAGES_DIR, basename(videoPath))), 'Remote cleanup preserves the locally owned video');
     const { exportImageRecipes, parseImageRecipes } =
       await import('../../server/src/conversations/conversationImageRecipes.ts');
     const resultAsset = videoResult.outputs[0]!;
     const exported = exportImageRecipes(new Map([[resultAsset.url, 'result']]), (path) => path);
-    assert.equal(
-      exported.recipes[0]!.inputs.find((input) => input.slot === 'input1')!.assetId,
-      null,
-    );
+    assert.equal(exported.recipes[0]!.inputs.find((input) => input.slot === 'input1')!.assetId, null);
     assert.equal(
       parseImageRecipes(exported.recipes).size,
       1,

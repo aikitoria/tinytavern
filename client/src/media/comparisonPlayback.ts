@@ -28,15 +28,11 @@ export function createComparisonPlayback(changed: (state: ComparisonPlaybackStat
   const present = () => players.filter((player): player is Player => player !== undefined);
   const duration = () => {
     const current = present();
-    return current.length &&
-      current.every((player) => Number.isFinite(player.duration) && player.duration > 0)
+    return current.length && current.every((player) => Number.isFinite(player.duration) && player.duration > 0)
       ? Math.min(...current.map((player) => player.duration))
       : 0;
   };
-  const ready = () =>
-    active &&
-    duration() > 0 &&
-    present().every((player) => player.readyState >= 2 && !player.error);
+  const ready = () => active && duration() > 0 && present().every((player) => player.readyState >= 2 && !player.error);
   const emit = () => {
     if (!disposed) changed({ playing, ready: ready(), time, duration: duration(), error });
   };
@@ -102,11 +98,7 @@ export function createComparisonPlayback(changed: (state: ComparisonPlaybackStat
           }
           time = player.currentTime;
           for (const other of present()) {
-            if (
-              other !== player &&
-              other.readyState >= 2 &&
-              Math.abs(other.currentTime - time) > 0.08
-            )
+            if (other !== player && other.readyState >= 2 && Math.abs(other.currentTime - time) > 0.08)
               other.currentTime = time;
           }
           emit();

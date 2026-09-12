@@ -1,7 +1,5 @@
 import { createMemo, type JSX } from 'solid-js';
-import NamedCollectionToolbar, {
-  type NamedCollectionToolbarHandle,
-} from './NamedCollectionToolbar.tsx';
+import NamedCollectionToolbar, { type NamedCollectionToolbarHandle } from './NamedCollectionToolbar.tsx';
 import SettingsTransferButtons from '../settings/SettingsTransferButtons.tsx';
 import { uniqueCollectionName } from '../../state/collectionNames.ts';
 import { collectionByName } from '../../state/collectionOrder.ts';
@@ -26,9 +24,7 @@ export function createNamedCollection<T extends { name: string }>(options: {
     const previous = current();
     options.commit(
       previous
-        ? options
-            .items()
-            .map((entry) => (options.identify(entry) === options.identify(previous) ? item : entry))
+        ? options.items().map((entry) => (options.identify(entry) === options.identify(previous) ? item : entry))
         : [...options.items(), item],
       options.identify(item),
     );
@@ -40,10 +36,7 @@ export function createNamedCollection<T extends { name: string }>(options: {
   const add = (duplicate = false) => {
     const source = current();
     const base = typeof options.newName === 'function' ? options.newName() : options.newName;
-    const name = uniqueCollectionName(
-      duplicate && source ? `${source.name} (copy)` : base,
-      choices(),
-    );
+    const name = uniqueCollectionName(duplicate && source ? `${source.name} (copy)` : base, choices());
     const item = options.create(source, name);
     options.commit([...options.items(), item], options.identify(item));
   };
@@ -85,14 +78,10 @@ export function createNamedCollection<T extends { name: string }>(options: {
         ariaLabel={props.ariaLabel}
         selected={options.selected()}
         options={[
-          ...(options.defaultLabel === undefined
-            ? []
-            : [{ value: '', label: options.defaultLabel }]),
+          ...(options.defaultLabel === undefined ? [] : [{ value: '', label: options.defaultLabel }]),
           ...sortedChoices().map((item) => ({ value: options.identify(item), label: item.name })),
         ]}
-        buttonLabel={
-          current()?.name ?? (choices().length ? props.unselectedLabel : props.emptyLabel)
-        }
+        buttonLabel={current()?.name ?? (choices().length ? props.unselectedLabel : props.emptyLabel)}
         hasSelection={!!current()}
         name={props.name ?? current()?.name ?? ''}
         nameLabel={props.nameLabel}

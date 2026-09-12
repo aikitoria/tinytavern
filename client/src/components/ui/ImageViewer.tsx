@@ -161,13 +161,7 @@ export default function ImageViewer(props: { src: string; onClose: () => void })
         on:touchend={onTouchStart}
         on:touchcancel={onTouchStart}
       >
-        <img
-          ref={img}
-          src={props.src}
-          alt="Generated image"
-          draggable={false}
-          onMouseDown={onMouseDown}
-        />
+        <img ref={img} src={props.src} alt="Generated image" draggable={false} onMouseDown={onMouseDown} />
       </div>
     </Portal>
   );

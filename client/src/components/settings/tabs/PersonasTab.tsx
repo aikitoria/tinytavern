@@ -78,18 +78,12 @@ export default function PersonasTab() {
         description: 'New conversations will start without a persona selected.',
       }}
     >
-      <SettingsSection
-        title="Basics"
-        id="persona-basics"
-        fields={['name', 'folderId', 'avatarData']}
-      >
+      <SettingsSection title="Basics" id="persona-basics" fields={['name', 'folderId', 'avatarData']}>
         <Show when={avatarData() !== undefined}>
           <div class="flex items-center gap-3 [&_.avatar]:size-14">
             <Avatar src={avatarData()} name={nameEl.value || '?'} />
             <span class="hint">
-              {avatarData() === null
-                ? 'Avatar will be removed on save.'
-                : 'Imported avatar · save to apply.'}
+              {avatarData() === null ? 'Avatar will be removed on save.' : 'Imported avatar · save to apply.'}
             </span>
           </div>
         </Show>
@@ -116,18 +110,11 @@ export default function PersonasTab() {
         <input ref={nameEl.ref} placeholder="Your name" />
         <EntityFolderField type="personas" field={folderEl} />
       </SettingsSection>
-      <SettingsSection
-        title="Persona description"
-        id="persona-description"
-        fields={['description']}
-      >
+      <SettingsSection title="Persona description" id="persona-description" fields={['description']}>
         <SettingLabel field={descriptionEl}>
           Description (injected into the prompt) <MacroHelp />
         </SettingLabel>
-        <MacroTextarea
-          ref={descriptionEl.ref}
-          placeholder="A few sentences about {{user}} (optional)"
-        />
+        <MacroTextarea ref={descriptionEl.ref} placeholder="A few sentences about {{user}} (optional)" />
       </SettingsSection>
     </EntityEditorPane>
   );

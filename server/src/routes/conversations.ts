@@ -15,7 +15,7 @@ import {
   stmt,
   toConversation,
   toEndpoint,
-  toMessage,
+  toMessages,
   transaction,
 } from '../db/db.ts';
 import { getConversation, touchConversation } from '../conversations/conversationStore.ts';
@@ -39,11 +39,8 @@ import {
   substituteMacros,
 } from '../generation/prompt.ts';
 import type { BuiltPrompt } from '../generation/prompt.ts';
-import {
-  withEndpointSystemPrompt,
-  endpointReasoningPrefill,
-} from '../generation/completionConfig.ts';
-import { clearSettingReference, getSettings } from '../settings/settingsStore.ts';
+import { withEndpointSystemPrompt, endpointReasoningPrefill } from '../generation/completionConfig.ts';
+import { clearSettingReference, getSettingsPreferences } from '../settings/settingsStore.ts';
 import {
   chatCompletionOnce,
   activePromptTrace,
@@ -64,11 +61,7 @@ import {
   discardSpeculativeSwipes,
 } from '../generation/speculation.ts';
 import { requireBodyPrecondition, requireQueryPrecondition } from './shared/mutationGuard.ts';
-import {
-  collectConversationImages,
-  collectSiblingSubtreeImages,
-  deleteImageFiles,
-} from '../media/images.ts';
+import { collectConversationImages, collectSiblingSubtreeImages, deleteImageFiles } from '../media/images.ts';
 import { parseImageConfig } from '../media/mediaSettings.ts';
 import { startImageRender } from '../media/mediaImageAdapter.ts';
 import { createImageRecipe } from '../media/mediaRecipes.ts';
@@ -89,15 +82,7 @@ export function spawnAssistantReply(
   speakerName: string | null = conversation.speakerName,
   promptOverride?: BuiltPrompt,
 ): number {
-  const msg = appendMessage(
-    conversation.id,
-    'assistant',
-    '',
-    parentId,
-    'streaming',
-    null,
-    speakerName,
-  );
+  const msg = appendMessage(conversation.id, 'assistant', '', parentId, 'streaming', null, speakerName);
   touchConversation(conversation.id);
   startGeneration(getConversation(conversation.id), msg.id, undefined, {
     prompt: promptOverride,
@@ -124,21 +109,9 @@ export function spawnToolReply(
 ): number {
   const { id } =
     afterId === undefined
-      ? appendMessage(
-          conversation.id,
-          'tool',
-          '',
-          conversation.activeLeafId,
-          'streaming',
-          null,
-          label,
-        )
+      ? appendMessage(conversation.id, 'tool', '', conversation.activeLeafId, 'streaming', null, label)
       : insertMessageAfter(conversation.id, 'tool', '', afterId, 'streaming', null, label);
-  if (recipeId)
-    stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(
-      recipeId,
-      id,
-    );
+  if (recipeId) stmt('UPDATE messages SET image_pending = 1, render_recipe_id = ? WHERE id = ?').run(recipeId, id);
   touchConversation(conversation.id);
   startGeneration(getConversation(conversation.id), id, undefined, {
     prompt,
@@ -156,7 +129,7 @@ function derivedTitle(content: string): string {
 
 async function requestTitle(conv: Conversation, history: Message[]): Promise<string | null> {
   try {
-    const built = buildToolPrompt(conv, history, getSettings().titlePrompt);
+    const built = buildToolPrompt(conv, history, getSettingsPreferences().titlePrompt);
     const raw = await chatCompletionOnce(
       conv,
       built.messages,
@@ -185,9 +158,7 @@ const activeTitles = new Set<number>();
 /** Name the chat after its first user turn and completed reply, including character greetings. */
 function maybeAutoTitle(conversationId: number, assistantMessageId: number): void {
   if (activeTitles.has(conversationId)) return;
-  const pending = stmt('SELECT auto_title_pending FROM conversations WHERE id = ?').get(
-    conversationId,
-  );
+  const pending = stmt('SELECT auto_title_pending FROM conversations WHERE id = ?').get(conversationId);
   if (!pending?.auto_title_pending) return;
   const history = getPathToMessage(assistantMessageId);
   if (history.filter((message) => message.role === 'user').length !== 1) return;
@@ -221,17 +192,12 @@ function getAlternateGreetings(characterId: number): string[] {
 }
 
 route.get('/api/conversations', () => {
-  const rows = stmt('SELECT * FROM conversations ORDER BY updated_at DESC').all() as Record<
-    string,
-    unknown
-  >[];
+  const rows = stmt('SELECT * FROM conversations ORDER BY updated_at DESC').all() as Record<string, unknown>[];
   return rows.map(toConversation);
 });
 
 route.del('/api/conversations', () => {
-  const ids = (stmt('SELECT id FROM conversations').all() as unknown as { id: number }[]).map(
-    (row) => row.id,
-  );
+  const ids = (stmt('SELECT id FROM conversations').all() as unknown as { id: number }[]).map((row) => row.id);
   cancelSpeculativeRetries();
   for (const id of ids) stopConversationGenerations(id);
   const doomedImages = ids.flatMap(collectConversationImages);
@@ -245,7 +211,7 @@ route.del('/api/conversations', () => {
 route.post('/api/conversations', ({ body }) => {
   const b = objectBody(body);
   const characterId = optionalNullableId(b, 'characterId') ?? null;
-  const settings = getSettings();
+  const settings = getSettingsPreferences();
   const character = getCharacter(characterId);
   if (characterId != null && !character) throw new HttpError(400, 'characterId does not exist');
   // Settings are JSON rather than foreign-keyed rows, so tolerate and repair a stale default.
@@ -269,13 +235,11 @@ route.post('/api/conversations', ({ body }) => {
     );
     const convId = Number(result.lastInsertRowid);
     if (character?.firstMessage.trim()) {
-      const sub = (text: string) =>
-        substituteMacros(text, characterChatName(character), persona?.name ?? 'User');
+      const sub = (text: string) => substituteMacros(text, characterChatName(character), persona?.name ?? 'User');
       appendMessage(convId, 'assistant', sub(character.firstMessage), null);
       // Make alternate greetings swipeable while keeping the primary active.
       for (const alt of getAlternateGreetings(character.id)) {
-        if (alt.trim())
-          appendMessage(convId, 'assistant', sub(alt), null, 'done', null, null, false);
+        if (alt.trim()) appendMessage(convId, 'assistant', sub(alt), null, 'done', null, null, false);
       }
     }
     return convId;
@@ -352,12 +316,8 @@ route.del('/api/conversations/:id', ({ params, req }) => {
 route.post('/api/conversations/:id/duplicate', ({ params }) => {
   const id = positiveId(params.id);
   const conv = getConversation(id);
-  const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(
-    id,
-  ) as unknown as MessageRow[];
-  const liveMessages = mergeLiveBuffers(
-    rows.map((row) => toMessage(row as unknown as Record<string, unknown>)),
-  );
+  const rows = stmt('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id').all(id) as unknown as MessageRow[];
+  const liveMessages = mergeLiveBuffers(toMessages(rows as unknown as Record<string, unknown>[]));
   const sourceActivePath = getActivePath(id).map((message) => message.id);
   const newId = copyConversation(conv, ' (copy)', (newConvId, writtenImages) => {
     const idMap = new Map<number, number>();
@@ -368,8 +328,7 @@ route.post('/api/conversations/:id/duplicate', ({ params }) => {
     // Remap links after all rows exist: moves and insertions can put older rows under newer ones.
     for (const message of liveMessages) {
       const mappedParent = message.parentId != null ? (idMap.get(message.parentId) ?? null) : null;
-      const mappedChild =
-        message.activeChildId != null ? (idMap.get(message.activeChildId) ?? null) : null;
+      const mappedChild = message.activeChildId != null ? (idMap.get(message.activeChildId) ?? null) : null;
       stmt('UPDATE messages SET parent_id = ?, active_child_id = ? WHERE id = ?').run(
         mappedParent,
         mappedChild,
@@ -406,8 +365,7 @@ route.post('/api/messages/:id/branch-conversation', ({ params }) => {
   const conv = getConversation(target.conversationId);
   const path = getPathToMessage(messageId);
   const rows = path.map(
-    (message) =>
-      stmt('SELECT * FROM messages WHERE id = ?').get(message.id) as unknown as MessageRow,
+    (message) => stmt('SELECT * FROM messages WHERE id = ?').get(message.id) as unknown as MessageRow,
   );
   const liveMessages = mergeLiveBuffers(path);
   const newId = copyConversation(conv, ' (branch)', (newConvId, writtenImages) => {
@@ -448,17 +406,11 @@ route.post('/api/conversations/:id/tool', ({ params, body }) => {
   cancelBackgroundSwipe(id);
   // Tool streams can overlap: each snapshots history, which excludes tool output.
   // Assistant streams conflict because their incomplete replies enter that history.
-  if (hasActiveNonToolGeneration(id))
-    throw new HttpError(409, 'a generation is already running in this conversation');
+  if (hasActiveNonToolGeneration(id)) throw new HttpError(409, 'a generation is already running in this conversation');
 
   // Snapshot pre-tool history so retries use the same context.
   const built = buildToolPrompt(conv, getActivePath(id), prompt);
-  const mid = spawnToolReply(
-    conv,
-    built,
-    label?.trim() || null,
-    image ? createImageRecipe(image, '') : null,
-  );
+  const mid = spawnToolReply(conv, built, label?.trim() || null, image ? createImageRecipe(image, '') : null);
   return { toolMessageId: mid, activeLeafId: mid };
 });
 
@@ -470,10 +422,8 @@ route.get('/api/conversations/:id/trace', ({ params }) => {
   const liveTrace = streaming ? activePromptTrace(streaming.id) : null;
   if (liveTrace) return liveTrace;
   const built = buildChatMessages(conv, history);
-  const endpointId = conv.endpointId ?? getSettings().activeEndpointId;
-  const endpointRow = endpointId
-    ? stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId)
-    : undefined;
+  const endpointId = conv.endpointId ?? getSettingsPreferences().activeEndpointId;
+  const endpointRow = endpointId ? stmt('SELECT * FROM endpoints WHERE id = ?').get(endpointId) : undefined;
   const endpoint = endpointRow ? toEndpoint(endpointRow) : null;
   const prefillDisabled = endpoint ? !messagePrefillEnabled(endpoint) : false;
   const messages = endpoint ? withEndpointSystemPrompt(endpoint, built.messages) : built.messages;
@@ -555,15 +505,11 @@ route.post('/api/conversations/:id/messages', ({ params, body }) => {
   const content = requiredString(b, 'content');
   requireBodyPrecondition(id, b);
   cancelBackgroundSwipe(id);
-  if (hasActiveGeneration(id))
-    throw new HttpError(409, 'a generation is already running in this conversation');
+  if (hasActiveGeneration(id)) throw new HttpError(409, 'a generation is already running in this conversation');
 
   const userMsg = appendMessage(id, 'user', content, conv.activeLeafId);
   if (conv.title === 'New chat') {
-    stmt('UPDATE conversations SET title = ? WHERE id = ? AND auto_title_pending = 1').run(
-      derivedTitle(content),
-      id,
-    );
+    stmt('UPDATE conversations SET title = ? WHERE id = ? AND auto_title_pending = 1').run(derivedTitle(content), id);
   }
   const mid = spawnAssistantReply(conv, userMsg.id);
   invalidate('conversations');

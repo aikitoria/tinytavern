@@ -1,3 +1,4 @@
+import { attachImages, galleryFixture } from '../support/fixtures.ts';
 import { conversationFixture, messageFixture, insertFixture } from '../support/fixtures.ts';
 import assert from 'node:assert/strict';
 import { databaseCase } from '../support/database.ts';
@@ -5,8 +6,7 @@ import { databaseCase } from '../support/database.ts';
 databaseCase('media ownership', async () => {
   const { existsSync, readdirSync, writeFileSync } = await import('node:fs');
   const { join } = await import('node:path');
-  const { stmt, IMAGES_DIR, mediaAssetForPath, transaction } =
-    await import('../../server/src/db/db.ts');
+  const { stmt, IMAGES_DIR, mediaAssetForPath, transaction } = await import('../../server/src/db/db.ts');
   const { saveImage, copyImage, deleteImageFiles, sweepOrphanedImages, reserveMediaFile } =
     await import('../../server/src/media/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
@@ -16,7 +16,7 @@ databaseCase('media ownership', async () => {
   assert.equal(asset.mime, 'image/png');
   assert.ok(asset.byteSize! > 0);
   conversationFixture({ id: 1 });
-  messageFixture(1, { id: 1, role: 'tool', content: 'image', images_json: JSON.stringify([path]) });
+  messageFixture(1, { id: 1, role: 'tool', content: 'image', images: [path] });
   stmt("INSERT INTO media_owners VALUES (?, 'job', 'active', 'source')").run(asset.id);
   const assetCount = stmt('SELECT count(*) AS count FROM media_assets').get()!.count;
   const beforeFailedSave = readdirSync(IMAGES_DIR).sort();
@@ -56,24 +56,17 @@ databaseCase('media ownership', async () => {
   assert.equal(existsSync(join(IMAGES_DIR, path.slice(8))), false);
 
   const galleryPath = saveImage('.png', makePlaceholderPng());
-  stmt(
-    "INSERT INTO gallery_items(id, character_name, prompt, image, created_at, updated_at) VALUES (1, 'Test', 'prompt', ?, 1, 1)",
-  ).run(galleryPath);
+  galleryFixture(galleryPath, { id: 1, prompt: 'prompt' });
   const duplicate = copyImage(galleryPath)!;
   assert.notEqual(mediaAssetForPath(galleryPath)!.id, mediaAssetForPath(duplicate)!.id);
   stmt('DELETE FROM gallery_items WHERE id = 1').run();
   deleteImageFiles([galleryPath]);
-  assert.ok(
-    existsSync(join(IMAGES_DIR, duplicate.slice(8))),
-    'Copies retain independent file ownership',
-  );
+  assert.ok(existsSync(join(IMAGES_DIR, duplicate.slice(8))), 'Copies retain independent file ownership');
   const input = saveImage('.png', makePlaceholderPng());
   stmt(
     "INSERT INTO media_recipes(id, prompt, configuration_json, inputs_json, created_at) VALUES (901, 'prompt', '{}', '[]', 1)",
   ).run();
-  stmt("INSERT INTO media_owners VALUES (?, 'recipe', 901, 'source')").run(
-    mediaAssetForPath(input)!.id,
-  );
+  stmt("INSERT INTO media_owners VALUES (?, 'recipe', 901, 'source')").run(mediaAssetForPath(input)!.id);
   stmt('UPDATE media_assets SET recipe_id = 901 WHERE path = ?').run(duplicate);
   const { invalidateMediaAsset } = await import('../../server/src/db/db.ts');
   invalidateMediaAsset(duplicate);
@@ -92,24 +85,19 @@ databaseCase('media ownership', async () => {
 
 databaseCase('media attachment ownership', async () => {
   const { stmt } = await import('../../server/src/db/db.ts');
-  const { mediaCharacterIds, setMediaCharacters } =
-    await import('../../server/src/media/mediaCharacters.ts');
+  const { mediaCharacterIds, setMediaCharacters } = await import('../../server/src/media/mediaCharacters.ts');
   const cid = conversationFixture({ character_id: 1, title: 'Attachments' });
   const paths = ['/images/101.png', '/images/102.png', '/images/103.png'] as const;
   const mid = messageFixture(cid, {
     content: 'originalsearchword',
-    images_json: JSON.stringify(paths.slice(0, 2)),
+    images: paths.slice(0, 2),
   });
-  const asset = (path: string) =>
-    Number(stmt('SELECT id FROM media_assets WHERE path=?').get(path)!.id);
+  const asset = (path: string) => Number(stmt('SELECT id FROM media_assets WHERE path=?').get(path)!.id);
   const associations = (path: string) => mediaCharacterIds(asset(path));
   const owners = () =>
     stmt(`SELECT o.rowid, o.slot, a.path FROM media_owners o
-  JOIN media_assets a ON a.id=o.asset_id WHERE owner_type='message' AND owner_id=? ORDER BY slot`).all(
-      String(mid),
-    );
-  const update = (images: readonly string[]) =>
-    stmt('UPDATE messages SET images_json=? WHERE id=?').run(JSON.stringify(images), mid);
+  JOIN media_assets a ON a.id=o.asset_id WHERE owner_type='message' AND owner_id=? ORDER BY slot`).all(String(mid));
+  const update = (images: readonly string[]) => attachImages(mid, images);
   const changes = () => Number(stmt('SELECT total_changes() AS n').get()!.n);
   assert.deepEqual(paths.slice(0, 2).map(associations), [[1], [1]]);
   const initialOwner = owners()[0];
@@ -126,29 +114,22 @@ databaseCase('media attachment ownership', async () => {
       images.map((path, index) => [String(index), path]),
       `${name}: maintain ordered attachment owners`,
     );
-    if (name === 'remove alternative')
-      assert.deepEqual(owners(), [initialOwner], 'An unchanged owner keeps its row');
+    if (name === 'remove alternative') assert.deepEqual(owners(), [initialOwner], 'An unchanged owner keeps its row');
   }
   const stableOwners = owners();
   let before = changes();
   update([paths[2]!, paths[0]!, paths[0]!]);
-  assert.equal(changes() - before, 1, 'Identical attachment JSON performs only the message write');
-  stmt('UPDATE messages SET images_json=? WHERE id=?').run(
-    JSON.stringify([paths[2], paths[0], paths[0]], null, 2),
-    mid,
-  );
-  assert.deepEqual(owners(), stableOwners, 'JSON whitespace does not rebuild owners');
+  assert.equal(changes() - before, 1, 'Identical attachments perform only the selection write');
+  attachImages(mid, [paths[2], paths[0], paths[0]]);
+  assert.deepEqual(owners(), stableOwners, 'Repeated attachment updates do not rebuild owners');
   assert.deepEqual(associations(paths[0]!), []);
 
   // Another message introduces a new association; subsequent edits to either owner preserve removals.
-  const other = messageFixture(cid, { images_json: JSON.stringify([paths[0]]) });
+  const other = messageFixture(cid, { images: [paths[0]] });
   assert.deepEqual(associations(paths[0]!), [1]);
   setMediaCharacters(asset(paths[0]!), []);
   update([paths[0]!]);
-  stmt('UPDATE messages SET images_json=? WHERE id=?').run(
-    JSON.stringify([paths[0], paths[1]]),
-    other,
-  );
+  attachImages(other, [paths[0], paths[1]]);
   assert.deepEqual(associations(paths[0]!), [], 'Shared assets retain explicit organization');
   assert.deepEqual(associations(paths[1]!), [1]);
 
@@ -157,161 +138,134 @@ databaseCase('media attachment ownership', async () => {
   assert.equal(changes() - before, 1, 'Identical content does not rewrite FTS');
   stmt('UPDATE messages SET content=? WHERE id=?').run('replacementsearchword', mid);
   assert.equal(
-    stmt(
-      "SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'originalsearchword'",
-    ).get()!.n,
+    stmt("SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'originalsearchword'").get()!.n,
     0,
   );
   assert.equal(
-    stmt("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'replacementsearchword'").get()!
-      .rowid,
+    stmt("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'replacementsearchword'").get()!.rowid,
     mid,
   );
   stmt("INSERT INTO messages_fts(messages_fts,rank) VALUES ('integrity-check',1)").run();
   assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
 });
 
-databaseCase(
-  'last visible source deletion releases inactive pins and preserves active reads',
-  async () => {
-    const { newRequestId } = await import('@tinytavern/shared');
-    const { existsSync } = await import('node:fs');
-    const { basename, join } = await import('node:path');
-    const { stmt, mediaAssetForPath, IMAGES_DIR } = await import('../../server/src/db/db.ts');
-    const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
-    const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
-    const { saveMediaRecipe, getMediaRecipe, getMediaAssetInputs } =
-      await import('../../server/src/media/mediaRecipes.ts');
-    const { createMediaJob, createMediaJobFromAsset } =
-      await import('../../server/src/media/mediaJobs.ts');
-    const { updateMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
-    const { finishMediaJob } = await import('../../server/src/media/mediaJobResults.ts');
-    const { imageConfig } = await import('../support/imageConfig.ts');
-    const configuration = {
-      ...imageConfig(
-        '{"load":{"class_type":"LoadImage","inputs":{"a":"{{input1}}","b":"{{input2}}"}},"save":{"class_type":"SaveImage","inputs":{"images":["load",0]}}}',
-        'http://unused.invalid',
-      ),
-      timeoutSeconds: 60,
-    };
-    const sources = [0, 1].map(() => mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!);
-    const inputs = sources.map((asset, index) => ({
-      slot: index ? 'input2' : 'input1',
-      assetId: asset.id,
-      prompt: `Source ${index}`,
-    }));
-    const conversation = conversationFixture();
-    const message = messageFixture(conversation, {
-      images_json: JSON.stringify(sources.map((asset) => asset.url)),
-    });
-    const shared = messageFixture(conversation, { images_json: JSON.stringify([sources[0]!.url]) });
-    const gallery = insertFixture('gallery_items', {
-      character_name: 'Test',
-      prompt: '',
-      image: sources[0]!.url,
-      created_at: 1,
-      updated_at: 1,
-    });
-    const recipe = saveMediaRecipe(
-      {
-        comfyUrl: configuration.comfyUrl,
-        workflowId: configuration.workflow.id,
-        timeoutSeconds: configuration.timeoutSeconds,
-      },
-      inputs,
-      'Result',
-    );
-    const output = mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!;
-    stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipe, output.id);
-    insertFixture('gallery_items', {
-      character_name: 'Test',
-      prompt: 'Result',
-      image: output.url,
-      created_at: 1,
-      updated_at: 1,
-    });
-    const idle = createMediaJob({ requestKey: newRequestId(), inputs });
-    const active = createMediaJob({ requestKey: newRequestId(), inputs });
-    updateMediaJob(active.id, { state: 'rendering' });
-    const pins = (id: number) =>
-      stmt(`SELECT asset_id FROM media_owners
+databaseCase('last visible source deletion releases inactive pins and preserves active reads', async () => {
+  const { newRequestId } = await import('@tinytavern/shared');
+  const { existsSync } = await import('node:fs');
+  const { basename, join } = await import('node:path');
+  const { stmt, mediaAssetForPath, IMAGES_DIR } = await import('../../server/src/db/db.ts');
+  const { saveImage, deleteImageFiles } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const { saveMediaRecipe, getMediaRecipe, getMediaAssetInputs } =
+    await import('../../server/src/media/mediaRecipes.ts');
+  const { createMediaJob, createMediaJobFromAsset } = await import('../../server/src/media/mediaJobs.ts');
+  const { updateMediaJob } = await import('../../server/src/media/mediaJobStore.ts');
+  const { finishMediaJob } = await import('../../server/src/media/mediaJobResults.ts');
+  const { imageConfig } = await import('../support/imageConfig.ts');
+  const configuration = {
+    ...imageConfig(
+      '{"load":{"class_type":"LoadImage","inputs":{"a":"{{input1}}","b":"{{input2}}"}},"save":{"class_type":"SaveImage","inputs":{"images":["load",0]}}}',
+      'http://unused.invalid',
+    ),
+    timeoutSeconds: 60,
+  };
+  const sources = [0, 1].map(() => mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!);
+  const inputs = sources.map((asset, index) => ({
+    slot: index ? 'input2' : 'input1',
+    assetId: asset.id,
+    prompt: `Source ${index}`,
+  }));
+  const conversation = conversationFixture();
+  const message = messageFixture(conversation, {
+    images: sources.map((asset) => asset.url),
+  });
+  const shared = messageFixture(conversation, { images: [sources[0]!.url] });
+  const gallery = insertFixture('gallery_items', {
+    character_name: 'Test',
+    prompt: '',
+    image: sources[0]!.url,
+    created_at: 1,
+    updated_at: 1,
+  });
+  const recipe = saveMediaRecipe(
+    {
+      comfyUrl: configuration.comfyUrl,
+      workflowId: configuration.workflow.id,
+      timeoutSeconds: configuration.timeoutSeconds,
+    },
+    inputs,
+    'Result',
+  );
+  const output = mediaAssetForPath(saveImage('.png', makePlaceholderPng()))!;
+  stmt('UPDATE media_assets SET recipe_id = ? WHERE id = ?').run(recipe, output.id);
+  insertFixture('gallery_items', {
+    character_name: 'Test',
+    prompt: 'Result',
+    image: output.url,
+    created_at: 1,
+    updated_at: 1,
+  });
+  const idle = createMediaJob({ requestKey: newRequestId(), inputs });
+  const active = createMediaJob({ requestKey: newRequestId(), inputs });
+  updateMediaJob(active.id, { state: 'rendering' });
+  const pins = (id: number) =>
+    stmt(`SELECT asset_id FROM media_owners
     WHERE owner_type = 'job' AND owner_id = ? AND slot LIKE 'input:%' ORDER BY asset_id`).all(id);
 
-    stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(
-      JSON.stringify([sources[1]!.url, sources[0]!.url, sources[0]!.url]),
-      message,
-    );
-    assert.deepEqual(
-      getMediaRecipe(recipe).inputs,
-      inputs,
-      'Reordered and repeated attachments retain their references',
-    );
-    stmt('DELETE FROM messages WHERE id = ?').run(message);
-    assert.deepEqual(getMediaRecipe(recipe).inputs, [inputs[0], { ...inputs[1], assetId: null }]);
-    assert.deepEqual(
-      pins(idle.id),
-      [{ asset_id: sources[0]!.id }],
-      'Another message/gallery keeps its input available',
-    );
-    stmt('DELETE FROM gallery_items WHERE id = ?').run(gallery);
-    assert.deepEqual(
-      getMediaRecipe(recipe).inputs[0],
-      inputs[0],
-      'Deleting the gallery owner preserves the remaining chat source',
-    );
-    stmt("UPDATE messages SET images_json = '[]' WHERE id = ?").run(shared);
-    assert.deepEqual(
-      getMediaRecipe(recipe).inputs,
-      inputs.map((input) => ({ ...input, assetId: null })),
-    );
-    assert.deepEqual(
-      pins(idle.id),
-      [],
-      'Removing the final alternative releases idle job input pins',
-    );
-    assert.equal(pins(active.id).length, 2, 'Running work keeps both input files pinned');
-    assert.deepEqual(
-      getMediaAssetInputs(output.id),
-      inputs.map(({ slot }) => ({ slot, asset: null })),
-    );
-    assert.deepEqual(createMediaJobFromAsset(output.id, { requestKey: newRequestId() }).inputs, []);
-    deleteImageFiles(sources.map((asset) => asset.url));
-    assert(sources.every((asset) => existsSync(join(IMAGES_DIR, basename(asset.url)))));
-    finishMediaJob(active.id, 'failed', 'Test finished');
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    assert(
-      sources.every((asset) => !existsSync(join(IMAGES_DIR, basename(asset.url)))),
-      'Finishing active work releases deleted chat inputs',
-    );
-    assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
-  },
-);
+  attachImages(message, [sources[1]!.url, sources[0]!.url, sources[0]!.url]);
+  assert.deepEqual(getMediaRecipe(recipe).inputs, inputs, 'Reordered and repeated attachments retain their references');
+  stmt('DELETE FROM messages WHERE id = ?').run(message);
+  assert.deepEqual(getMediaRecipe(recipe).inputs, [inputs[0], { ...inputs[1], assetId: null }]);
+  assert.deepEqual(pins(idle.id), [{ asset_id: sources[0]!.id }], 'Another message/gallery keeps its input available');
+  stmt('DELETE FROM gallery_items WHERE id = ?').run(gallery);
+  assert.deepEqual(
+    getMediaRecipe(recipe).inputs[0],
+    inputs[0],
+    'Deleting the gallery owner preserves the remaining chat source',
+  );
+  attachImages(shared, []);
+  assert.deepEqual(
+    getMediaRecipe(recipe).inputs,
+    inputs.map((input) => ({ ...input, assetId: null })),
+  );
+  assert.deepEqual(pins(idle.id), [], 'Removing the final alternative releases idle job input pins');
+  assert.equal(pins(active.id).length, 2, 'Running work keeps both input files pinned');
+  assert.deepEqual(
+    getMediaAssetInputs(output.id),
+    inputs.map(({ slot }) => ({ slot, asset: null })),
+  );
+  assert.deepEqual(createMediaJobFromAsset(output.id, { requestKey: newRequestId() }).inputs, []);
+  deleteImageFiles(sources.map((asset) => asset.url));
+  assert(sources.every((asset) => existsSync(join(IMAGES_DIR, basename(asset.url)))));
+  finishMediaJob(active.id, 'failed', 'Test finished');
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  assert(
+    sources.every((asset) => !existsSync(join(IMAGES_DIR, basename(asset.url)))),
+    'Finishing active work releases deleted chat inputs',
+  );
+  assert.deepEqual(stmt('PRAGMA foreign_key_check').all(), []);
+});
 
 databaseCase('media characters', async () => {
   const { newRequestId } = await import('@tinytavern/shared');
   type MediaWorkflow = import('@tinytavern/shared').MediaWorkflow;
 
   const { stmt, mediaAssetForPath } = await import('../../server/src/db/db.ts');
-  const { saveImage, copyImage, reserveMediaFile } =
-    await import('../../server/src/media/images.ts');
+  const { saveImage, copyImage, reserveMediaFile } = await import('../../server/src/media/images.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { mediaCharacterIds, setMediaCharacters, captureMediaCharacters } =
     await import('../../server/src/media/mediaCharacters.ts');
-  const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
+  const { getSettings, putSettings } = await import('../support/settings.ts');
   const { createMediaJob, startMediaJob, createMediaJobFromAsset } =
     await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, mediaJobDto } = await import('../../server/src/media/mediaJobStore.ts');
   const { recordMediaResult } = await import('../../server/src/media/mediaJobResults.ts');
   const { getMediaRecipe } = await import('../../server/src/media/mediaRecipes.ts');
-  const characters = ['Ashina', 'Haeun'].map((name) =>
-    insertFixture('characters', { name, created_at: 1 }),
-  );
+  const characters = ['Ashina', 'Haeun'].map((name) => insertFixture('characters', { name, created_at: 1 }));
   const inputs = characters.map((characterId) => {
     const path = saveImage('.png', makePlaceholderPng());
     const asset = mediaAssetForPath(path)!;
-    stmt(
-      "INSERT INTO gallery_items(character_name, prompt, image, created_at, updated_at) VALUES ('Uploads', '', ?, 1, 1)",
-    ).run(path);
+    galleryFixture(path, { character_name: 'Uploads', prompt: '' });
     setMediaCharacters(asset.id, [characterId]);
     return asset;
   });
@@ -334,16 +288,9 @@ databaseCase('media characters', async () => {
       reviewBeforeSave: true,
       inputs: inputs.map((asset, index) => ({ slot: `input${index + 1}`, assetId: asset.id })),
     });
-    assert.deepEqual(
-      job.characterIds,
-      characters,
-      'Draft cards expose input character associations',
-    );
+    assert.deepEqual(job.characterIds, characters, 'Draft cards expose input character associations');
     startMediaJob(requireMediaJob(job.id), {}, false);
-    assert.deepEqual(
-      JSON.parse(requireMediaJob(job.id).configuration_json!).characterIds,
-      characters,
-    );
+    assert.deepEqual(JSON.parse(requireMediaJob(job.id).configuration_json!).characterIds, characters);
     return job;
   });
   setMediaCharacters(inputs[0]!.id, [characters[1]!]);
@@ -354,10 +301,7 @@ databaseCase('media characters', async () => {
     'Running cards retain the character associations captured by the job',
   );
   assert.deepEqual(
-    captureMediaCharacters(
-      requireMediaJob(jobs[0]!.id),
-      JSON.parse(requireMediaJob(jobs[0]!.id).configuration_json!),
-    ),
+    captureMediaCharacters(requireMediaJob(jobs[0]!.id), JSON.parse(requireMediaJob(jobs[0]!.id).configuration_json!)),
     [characters[1]!],
     'New variations recompute reference associations instead of accumulating old tags',
   );
@@ -382,10 +326,7 @@ databaseCase('media characters', async () => {
     );
     assert.deepEqual(getMediaRecipe(job.id).configuration.characterIds, characters);
     const rerun = createMediaJobFromAsset(assetId, { requestKey: newRequestId() });
-    assert.deepEqual(
-      JSON.parse(requireMediaJob(rerun.id).configuration_json!).characterIds,
-      characters,
-    );
+    assert.deepEqual(JSON.parse(requireMediaJob(rerun.id).configuration_json!).characterIds, characters);
   }
   const original = saveImage('.png', makePlaceholderPng());
   const originalAsset = mediaAssetForPath(original)!;
@@ -394,11 +335,7 @@ databaseCase('media characters', async () => {
   const copiedAsset = mediaAssetForPath(copy)!;
   assert.deepEqual(mediaCharacterIds(copiedAsset.id), characters);
   setMediaCharacters(copiedAsset.id, [characters[1]!]);
-  assert.deepEqual(
-    mediaCharacterIds(originalAsset.id),
-    characters,
-    'Copies can be organized independently',
-  );
+  assert.deepEqual(mediaCharacterIds(originalAsset.id), characters, 'Copies can be organized independently');
   stmt('DELETE FROM characters WHERE id = ?').run(characters[0]!);
   assert.deepEqual(mediaCharacterIds(originalAsset.id), [characters[1]!]);
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
@@ -424,11 +361,7 @@ databaseCase('temporary media job', async () => {
     files.set(id, join(IMAGES_DIR, basename(path)));
     const asset = mediaAssetForPath(path)!;
     stmt(`INSERT INTO media_jobs (id, state, configuration_json, outputs_json,
-    created_at, updated_at) VALUES (?, ?, '{"temporary":true}', ?, 1, 1)`).run(
-      id,
-      state,
-      JSON.stringify([asset.id]),
-    );
+    created_at, updated_at) VALUES (?, ?, '{"temporary":true}', ?, 1, 1)`).run(id, state, JSON.stringify([asset.id]));
     stmt("INSERT INTO media_owners VALUES (?, 'job', ?, 'output:1')").run(asset.id, id);
     return requireMediaJob(id);
   }
@@ -444,10 +377,7 @@ databaseCase('temporary media job', async () => {
     return 'bytes';
   });
   await Promise.resolve();
-  assert(
-    hasMediaJobObservers(completed.id),
-    'Worker cleanup must wait for asynchronous consumption',
-  );
+  assert(hasMediaJobObservers(completed.id), 'Worker cleanup must wait for asynchronous consumption');
   finishRead();
   assert.equal(await result, 'bytes');
   assert(!mediaJobRow(completed.id));
@@ -503,4 +433,27 @@ databaseCase('temporary media job', async () => {
   assert(!existsSync(files.get(4)!));
 
   assert.equal(stmt('PRAGMA foreign_key_check').all().length, 0);
+});
+
+databaseCase('attachment snapshots share invalidated metadata without caching ownership', async () => {
+  const { stmt, mediaAssetForPath, invalidateMediaAsset } = await import('../../server/src/db/db.ts');
+  const { getTreeMessages, getMessage } = await import('../../server/src/conversations/tree.ts');
+  const { saveImage } = await import('../../server/src/media/images.ts');
+  const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
+  const path = saveImage('.png', makePlaceholderPng());
+  const original = mediaAssetForPath(path)!;
+  const conversation = conversationFixture();
+  const first = messageFixture(conversation, { images: [path, path] });
+  const second = messageFixture(conversation, { images: [path] });
+  const before = getTreeMessages(conversation);
+  assert.equal(before[0]!.media[0], before[1]!.media[0], 'Repeated references reuse the same cached metadata');
+  stmt('UPDATE media_assets SET width = 42, thumbnail_revision = 3 WHERE id = ?').run(original.id);
+  invalidateMediaAsset(path);
+  const after = getTreeMessages(conversation);
+  assert.equal(after[0]!.media[0]!.width, 42);
+  assert.equal(after[0]!.media[1]!.thumbnailRevision, 3);
+  assert.equal(mediaAssetForPath(path), after[0]!.media[0]);
+  attachImages(first, []);
+  assert.deepEqual(getMessage(first)!.media, []);
+  assert.equal(getMessage(second)!.media[0]!.width, 42);
 });

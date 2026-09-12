@@ -1,4 +1,4 @@
-import { getSettings, putSettings } from '../../server/src/settings/settingsStore.ts';
+import { getSettings, putSettings } from './settings.ts';
 import type { MediaImageConfig } from '@tinytavern/shared';
 
 export function imageConfig(json: string, comfyUrl: string): MediaImageConfig {
@@ -19,10 +19,7 @@ export function imageConfig(json: string, comfyUrl: string): MediaImageConfig {
     ...settings,
     mediaRendering: {
       ...settings.mediaRendering,
-      workflows: [
-        ...settings.mediaRendering.workflows.filter((w) => w.id !== config.workflow.id),
-        config.workflow,
-      ],
+      workflows: [...settings.mediaRendering.workflows.filter((w) => w.id !== config.workflow.id), config.workflow],
     },
   });
   return config;

@@ -23,9 +23,7 @@ export default function MessageSelectionBar() {
     return selected ? selected.pathLength - selected.messages.length + 1 : 1;
   };
   const targetIsValid = () =>
-    Number.isSafeInteger(targetPosition()) &&
-    targetPosition() >= 1 &&
-    targetPosition() <= maxPosition();
+    Number.isSafeInteger(targetPosition()) && targetPosition() >= 1 && targetPosition() <= maxPosition();
 
   const openMove = () => {
     const selected = range();
@@ -37,8 +35,7 @@ export default function MessageSelectionBar() {
   const moveRangeOneStep = async (direction: 'up' | 'down') => {
     const selected = range();
     if (!selected) return;
-    const canMove =
-      direction === 'up' ? selected.start > 0 : selected.end < selected.pathLength - 1;
+    const canMove = direction === 'up' ? selected.start > 0 : selected.end < selected.pathLength - 1;
     if (!canMove) return;
     await navigateTree(() => api.moveMessageRange(selected.messageIds, direction, 1, state.tree));
   };
@@ -53,12 +50,7 @@ export default function MessageSelectionBar() {
       return;
     }
     const ok = await navigateTree(() =>
-      api.moveMessageRange(
-        selected.messageIds,
-        target < selected.start ? 'up' : 'down',
-        steps,
-        state.tree,
-      ),
+      api.moveMessageRange(selected.messageIds, target < selected.start ? 'up' : 'down', steps, state.tree),
     );
     if (ok) {
       setMoveOpen(false);
@@ -94,9 +86,7 @@ export default function MessageSelectionBar() {
         role="toolbar"
         aria-label="Selected messages"
       >
-        <span class="py-0 px-3 text-foreground truncate flex-1 min-w-0 text-label font-semibold">
-          {countLabel()}
-        </span>
+        <span class="py-0 px-3 text-foreground truncate flex-1 min-w-0 text-label font-semibold">{countLabel()}</span>
         <button
           type="button"
           class="icon-btn"
@@ -112,18 +102,12 @@ export default function MessageSelectionBar() {
           class="icon-btn"
           title="Move selected range down"
           aria-label="Move selected range down"
-          disabled={
-            (range()?.end ?? 0) >= (range()?.pathLength ?? 1) - 1 || state.treeNavigationPending
-          }
+          disabled={(range()?.end ?? 0) >= (range()?.pathLength ?? 1) - 1 || state.treeNavigationPending}
           onClick={() => void moveRangeOneStep('down')}
         >
           <FontAwesomeIcon icon={faArrowDown} size={14} />
         </button>
-        <button
-          type="button"
-          disabled={maxPosition() <= 1 || state.treeNavigationPending}
-          onClick={openMove}
-        >
+        <button type="button" disabled={maxPosition() <= 1 || state.treeNavigationPending} onClick={openMove}>
           Move
         </button>
         <button
@@ -172,8 +156,7 @@ export default function MessageSelectionBar() {
               </button>
             </div>
             <p class="hint">
-              The selected messages move as one piece. Their swipe alternatives and generated images
-              stay attached.
+              The selected messages move as one piece. Their swipe alternatives and generated images stay attached.
             </p>
             <div class="form-actions flex items-center gap-2 flex-wrap mt-4">
               <button

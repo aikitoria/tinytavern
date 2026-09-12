@@ -17,9 +17,7 @@ export function createMediaComparison(results: Accessor<ComparisonResult[]>, ini
   );
   const candidates = createMemo(() => {
     const pinned = reference();
-    return pinned
-      ? results().filter((result) => comparisonKey(result) !== comparisonKey(pinned))
-      : [];
+    return pinned ? results().filter((result) => comparisonKey(result) !== comparisonKey(pinned)) : [];
   });
   const index = createMemo(() =>
     Math.max(

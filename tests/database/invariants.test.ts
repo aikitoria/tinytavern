@@ -1,3 +1,4 @@
+import { attachImages } from '../support/fixtures.ts';
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import { restoreLegacyMediaSchema } from '../support/legacyMediaSchema.ts';
@@ -12,8 +13,7 @@ test('deep tree delete', async () => {
   const { requireTestIsolation } = await import('../support/isolation.ts');
 
   requireTestIsolation();
-  const { stmt, transaction, deleteMessageSubtrees, IMAGES_DIR } =
-    await import('../../server/src/db/db.ts');
+  const { stmt, transaction, deleteMessageSubtrees, IMAGES_DIR } = await import('../../server/src/db/db.ts');
   const { deleteMessage, spliceMessage, getMessage, getActiveLeafId, setActiveLeaf } =
     await import('../../server/src/conversations/tree.ts');
   const { saveImage } = await import('../../server/src/media/images.ts');
@@ -21,12 +21,7 @@ test('deep tree delete', async () => {
   await import('../../server/src/routes/conversations.ts');
   const { server, request: send } = await testApi();
   const conversation = () => conversationFixture({ title: 'Deep' });
-  function chain(
-    cid: number,
-    depth: number,
-    parent: number | null = null,
-    reverseIds = false,
-  ): number[] {
+  function chain(cid: number, depth: number, parent: number | null = null, reverseIds = false): number[] {
     return transaction(() => {
       const ids: number[] = [];
       for (let i = 0; i < depth; i++) {
@@ -40,8 +35,7 @@ test('deep tree delete', async () => {
           ids[i]!,
         );
       }
-      if (parent !== null)
-        stmt('UPDATE messages SET active_child_id=? WHERE id=?').run(ids[0]!, parent);
+      if (parent !== null) stmt('UPDATE messages SET active_child_id=? WHERE id=?').run(ids[0]!, parent);
       stmt('UPDATE conversations SET active_leaf_id=? WHERE id=?').run(ids.at(-1)!, cid);
       return ids;
     });
@@ -60,10 +54,7 @@ test('deep tree delete', async () => {
     const survivor = chain(cid, 1, parent)[0]!;
     setActiveLeaf(cid, doomed.at(-1)!);
     const image = saveImage('.png', makePlaceholderPng());
-    stmt('UPDATE messages SET images_json=? WHERE id=?').run(
-      JSON.stringify([image]),
-      doomed.at(-1)!,
-    );
+    attachImages(doomed.at(-1)!, [image]);
     stmt(`INSERT INTO media_jobs(id,state,destination,context_conversation_id,message_id,created_at,updated_at)
     VALUES (9001,'queued','chat',?,?,1,1)`).run(cid, doomed.at(-1)!);
     deleteMessage(doomed[0]!);
@@ -108,8 +99,7 @@ test('deep tree delete', async () => {
     const tailResult = await request('POST', `/api/conversations/${tailCid}/delete-tail`, {
       count: 1100,
       expectedMutationRevision: Number(
-        stmt('SELECT mutation_revision FROM conversations WHERE id=?').get(tailCid)!
-          .mutation_revision,
+        stmt('SELECT mutation_revision FROM conversations WHERE id=?').get(tailCid)!.mutation_revision,
       ),
       expectedActiveLeafId: tail.at(-1),
     });
@@ -129,9 +119,7 @@ test('deep tree delete', async () => {
     await request('DELETE', '/api/conversations');
     assert.equal(stmt('SELECT count(*) AS n FROM messages').get()!.n, 0);
     assert.equal(
-      stmt(
-        "SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'deepdeletiontoken'",
-      ).get()!.n,
+      stmt("SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'deepdeletiontoken'").get()!.n,
       0,
     );
     stmt("INSERT INTO messages_fts(messages_fts, rank) VALUES ('integrity-check', 1)").run();
@@ -171,15 +159,10 @@ test('foreign-key actions and ordered lists stay indexed', async () => {
       table,
     );
   }
-  assert.doesNotMatch(
-    plan('SELECT * FROM gallery_items ORDER BY updated_at DESC,id DESC'),
-    /TEMP B-TREE/,
-  );
+  assert.doesNotMatch(plan('SELECT * FROM gallery_items ORDER BY updated_at DESC,id DESC'), /TEMP B-TREE/);
   assert.doesNotMatch(plan('SELECT * FROM conversations ORDER BY updated_at DESC'), /TEMP B-TREE/);
   assert.match(
-    plan(
-      'SELECT id FROM messages WHERE parent_id IS NULL AND conversation_id=1 ORDER BY id DESC LIMIT 1',
-    ),
+    plan('SELECT id FROM messages WHERE parent_id IS NULL AND conversation_id=1 ORDER BY id DESC LIMIT 1'),
     /COVERING INDEX.*parent_id=\? AND conversation_id=\?/,
   );
   assert.match(
@@ -201,8 +184,7 @@ test('online backup preserves committed state and refuses replacement', async ()
   const cid = conversationFixture({ title: 'Backup' });
   const mid = messageFixture(cid, { role: 'user', content: 'backupftsprobe' });
   const target = join(DATA_DIR, 'backup.db');
-  const run = () =>
-    spawnSync(process.execPath, ['server/src/db/backup.ts', target], { encoding: 'utf8' });
+  const run = () => spawnSync(process.execPath, ['server/src/db/backup.ts', target], { encoding: 'utf8' });
   db.exec('BEGIN');
   try {
     stmt("UPDATE messages SET content='uncommitted' WHERE id=?").run(mid);
@@ -219,10 +201,9 @@ test('online backup preserves committed state and refuses replacement', async ()
   assert.deepEqual(copy.query('SELECT content FROM messages WHERE id=?').get(mid), {
     content: 'backupftsprobe',
   });
-  assert.deepEqual(
-    copy.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'backupftsprobe'").get(),
-    { rowid: mid },
-  );
+  assert.deepEqual(copy.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'backupftsprobe'").get(), {
+    rowid: mid,
+  });
   assert.equal(statSync(target).mode & 0o777, 0o600);
   const before = readFileSync(target);
   const again = run();
@@ -241,19 +222,15 @@ test('schema baseline initializes once and rejects unsupported versions', async 
   const directory = mkdtempSync(join(DATA_DIR, 'baseline-'));
   const path = join(directory, 'tinytavern.db');
   const start = () =>
-    spawnSync(
-      process.execPath,
-      ['-e', "const { db } = await import('./server/src/db/db.ts'); db.close(true);"],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          DATA_DIR: directory,
-          DB_PATH: path,
-          TINYTAVERN_TEST_DATA_DIR: directory,
-        },
+    spawnSync(process.execPath, ['-e', "const { db } = await import('./server/src/db/db.ts'); db.close(true);"], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DATA_DIR: directory,
+        DB_PATH: path,
+        TINYTAVERN_TEST_DATA_DIR: directory,
       },
-    );
+    });
   const fresh = start();
   assert.equal(fresh.status, 0, fresh.stderr);
   let settings: string;
@@ -263,9 +240,7 @@ test('schema baseline initializes once and rejects unsupported versions', async 
       user_version: SCHEMA_VERSION,
     });
     assert.deepEqual(initialized.query('SELECT count(*) AS n FROM characters').get(), { n: 1 });
-    const row = initialized
-      .query<{ value: string }, []>("SELECT value FROM settings WHERE key='app'")
-      .get()!;
+    const row = initialized.query<{ value: string }, []>("SELECT value FROM settings WHERE key='app'").get()!;
     settings = JSON.stringify({ ...JSON.parse(row.value), revision: 42 });
     initialized.query("UPDATE settings SET value=? WHERE key='app'").run(settings);
     initialized.exec('DELETE FROM characters');
@@ -307,19 +282,14 @@ test('schema baseline initializes once and rejects unsupported versions', async 
   assert.equal(upgraded.status, 0, upgraded.stderr);
   {
     using migrated = new Database(path);
-    const folder = migrated
-      .query<{ id: number }, []>("SELECT id FROM gallery_folders WHERE name = 'Uploads'")
-      .get()!;
+    const folder = migrated.query<{ id: number }, []>("SELECT id FROM gallery_folders WHERE name = 'Uploads'").get()!;
     assert(folder, 'Existing unfiled uploads receive a folder during migration');
-    assert.deepEqual(
-      migrated.query('SELECT id, folder_id, character_name FROM gallery_items ORDER BY id').all(),
-      [
-        { id: 101, folder_id: folder.id, character_name: '' },
-        { id: 102, folder_id: 1, character_name: '' },
-        { id: 103, folder_id: null, character_name: 'Uploads' },
-        { id: 104, folder_id: null, character_name: '' },
-      ],
-    );
+    assert.deepEqual(migrated.query('SELECT id, folder_id, character_name FROM gallery_items ORDER BY id').all(), [
+      { id: 101, folder_id: folder.id, character_name: '' },
+      { id: 102, folder_id: 1, character_name: '' },
+      { id: 103, folder_id: null, character_name: 'Uploads' },
+      { id: 104, folder_id: null, character_name: '' },
+    ]);
     assert.deepEqual(migrated.query('PRAGMA user_version').get(), { user_version: SCHEMA_VERSION });
     assert.deepEqual(migrated.query('PRAGMA foreign_key_check').all(), []);
   }

@@ -76,11 +76,7 @@ test('pending sends restore failed drafts only in their original mounted convers
         await operation;
         assert.equal(
           text(),
-          scenario === 'failure'
-            ? 'Message for conversation A'
-            : scenario === 'typing'
-              ? 'New draft'
-              : '',
+          scenario === 'failure' ? 'Message for conversation A' : scenario === 'typing' ? 'New draft' : '',
           scenario,
         );
       } finally {

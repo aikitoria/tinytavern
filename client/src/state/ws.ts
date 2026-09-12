@@ -9,9 +9,7 @@ function sendSubscriptions(resync?: number): void {
     return;
   }
   send({
-    subs: [
-      ...new Set([...(currentSub === null ? [] : [currentSub]), ...extraSubscriptions.values()]),
-    ],
+    subs: [...new Set([...(currentSub === null ? [] : [currentSub]), ...extraSubscriptions.values()])],
     resync,
   });
 }

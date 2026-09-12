@@ -11,15 +11,10 @@ export function afterTreeFrame<T extends SwipeOperationIdentity>(
   conversationId: number,
   activeLeafId: number | null,
 ): T | null {
-  return pending?.conversationId === conversationId && pending.sourceLeafId !== activeLeafId
-    ? null
-    : pending;
+  return pending?.conversationId === conversationId && pending.sourceLeafId !== activeLeafId ? null : pending;
 }
 
 /** Clear only the operation that installed a timeout/failure callback. */
-export function afterOperationEnd<T extends SwipeOperationIdentity>(
-  pending: T | null,
-  token: number,
-): T | null {
+export function afterOperationEnd<T extends SwipeOperationIdentity>(pending: T | null, token: number): T | null {
   return pending?.token === token ? null : pending;
 }

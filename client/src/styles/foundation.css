@@ -53,12 +53,8 @@
   --chat-rail-size: 38px;
   --chat-column-gap: var(--space-2);
   --composer-shell-inset: 5px; /* 1px border + 4px padding */
-  --chat-content-width: calc(
-    var(--chat-max-width) - var(--chat-inline-padding) - var(--chat-inline-padding)
-  );
-  --composer-max-width: calc(
-    var(--chat-content-width) + var(--composer-shell-inset) + var(--composer-shell-inset)
-  );
+  --chat-content-width: calc(var(--chat-max-width) - var(--chat-inline-padding) - var(--chat-inline-padding));
+  --composer-max-width: calc(var(--chat-content-width) + var(--composer-shell-inset) + var(--composer-shell-inset));
   --sidebar-w: 240px;
   --bar-h: 46px;
 }

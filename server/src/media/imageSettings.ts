@@ -3,31 +3,19 @@ import { imageRevisionTemplateError, importImagePromptSet } from '@tinytavern/sh
 import { HttpError } from '../http/router.ts';
 import { requireObject, requireString } from '../http/validation.ts';
 
-export function parseImageGenerationSettings(
-  value: unknown,
-): Partial<ImageGenerationSettings> | undefined {
+export function parseImageGenerationSettings(value: unknown): Partial<ImageGenerationSettings> | undefined {
   if (value === undefined) return undefined;
   const settings = { ...requireObject(value, 'imageGeneration') };
   for (const key of Object.keys(settings)) {
-    if (
-      ![
-        'promptPresets',
-        'promptRevisionTemplate',
-        'promptRevisionContext',
-        'promptRevisionOriginal',
-      ].includes(key)
-    ) {
+    if (!['promptPresets', 'promptRevisionTemplate', 'promptRevisionContext', 'promptRevisionOriginal'].includes(key)) {
       throw new HttpError(400, `Unknown image prompt setting: ${key}`);
     }
   }
   if (settings.promptPresets !== undefined) {
     try {
       const promptPresets: NonNullable<ImageGenerationSettings['promptPresets']> = {};
-      for (const [kind, set] of Object.entries(
-        requireObject(settings.promptPresets, 'promptPresets'),
-      )) {
-        if (kind !== 'avatar')
-          throw new Error('Media prompt presets are configured in the media prompt library');
+      for (const [kind, set] of Object.entries(requireObject(settings.promptPresets, 'promptPresets'))) {
+        if (kind !== 'avatar') throw new Error('Media prompt presets are configured in the media prompt library');
         const parsed = importImagePromptSet(set, { presets: [], active: '' }, true);
         const raw = requireObject(set, 'Avatar presets');
         const incoming = raw.presets as { id?: string; name: string }[];
@@ -42,8 +30,7 @@ export function parseImageGenerationSettings(
         if (
           raw.activeId !== undefined &&
           raw.activeId !== null &&
-          (typeof raw.activeId !== 'string' ||
-            !parsed.presets.some((item) => item.id === raw.activeId))
+          (typeof raw.activeId !== 'string' || !parsed.presets.some((item) => item.id === raw.activeId))
         ) {
           throw new Error('Invalid active avatar preset ID');
         }

@@ -1,11 +1,7 @@
 import { For, Show, createSignal } from 'solid-js';
 import SettingsSection from '../settings/SettingsSection.tsx';
 import type { CustomTemplate } from '@tinytavern/shared';
-import {
-  DEFAULT_PROMPT_TEMPLATE,
-  DEFAULT_STEER_TEMPLATE,
-  DEFAULT_SPEAKER_HANDOFF_TEMPLATE,
-} from '@tinytavern/shared';
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_STEER_TEMPLATE, DEFAULT_SPEAKER_HANDOFF_TEMPLATE } from '@tinytavern/shared';
 import FormField, { createFormFields, type FormFieldProps } from './FormFields.tsx';
 
 export interface TemplateFieldsHandle {
@@ -44,8 +40,7 @@ export default function TemplateFields(props: {
   };
   if (typeof props.ref === 'function') props.ref(handle);
   type Field = { key: keyof CustomTemplate } & FormFieldProps<string | boolean>;
-  const custom = (label: string) =>
-    props.inline ? `Custom template — ${label.toLowerCase()}` : label;
+  const custom = (label: string) => (props.inline ? `Custom template — ${label.toLowerCase()}` : label);
   const text = (key: keyof CustomTemplate, label: string, placeholder: string): Field => ({
     key,
     label,
@@ -114,14 +109,7 @@ export default function TemplateFields(props: {
   const Fields = (section: { fields: Field[]; hint?: string }) => (
     <>
       <For each={section.fields}>
-        {(field) => (
-          <FormField
-            kind="macro"
-            {...field}
-            field={form.fields[field.key]}
-            readOnly={props.readOnly}
-          />
-        )}
+        {(field) => <FormField kind="macro" {...field} field={form.fields[field.key]} readOnly={props.readOnly} />}
       </For>
       <Show when={section.hint}>
         <p class="hint">{section.hint}</p>

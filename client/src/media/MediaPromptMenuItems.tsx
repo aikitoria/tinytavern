@@ -1,11 +1,7 @@
 import { openMediaTool } from './navigation.ts';
 
 /** Text goes straight into the final prompt, independent of the workflow's asset types. */
-export default function MediaPromptMenuItems(props: {
-  text: string;
-  conversationId?: number;
-  onClose: () => void;
-}) {
+export default function MediaPromptMenuItems(props: { text: string; conversationId?: number; onClose: () => void }) {
   return (
     <button
       type="button"

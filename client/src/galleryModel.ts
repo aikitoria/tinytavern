@@ -1,14 +1,7 @@
 import type { GalleryItem } from '@tinytavern/shared';
 
-export function resolveGalleryFolder(
-  key: string,
-  folders: readonly { id: number }[],
-  loaded: boolean,
-): string {
-  return loaded &&
-    key !== 'all' &&
-    key !== 'root' &&
-    !folders.some((folder) => String(folder.id) === key)
+export function resolveGalleryFolder(key: string, folders: readonly { id: number }[], loaded: boolean): string {
+  return loaded && key !== 'all' && key !== 'root' && !folders.some((folder) => String(folder.id) === key)
     ? 'root'
     : key;
 }
@@ -20,10 +13,7 @@ export function adjacentGalleryIndex(
   direction: number,
   count: number,
 ): number {
-  const next =
-    position < 0
-      ? Math.min(previousPosition, count) + (direction < 0 ? -1 : 0)
-      : position + direction;
+  const next = position < 0 ? Math.min(previousPosition, count) + (direction < 0 ? -1 : 0) : position + direction;
   return next >= 0 && next < count ? next : -1;
 }
 
@@ -159,8 +149,8 @@ export function layoutGalleryFolders(
 }
 
 const aspectRatio = (item: GalleryItem) =>
-  item.imageWidth && item.imageHeight && item.imageWidth > 0 && item.imageHeight > 0
-    ? item.imageWidth / item.imageHeight
+  item.media.width && item.media.height && item.media.width > 0 && item.media.height > 0
+    ? item.media.width / item.media.height
     : 1;
 
 /** Greedy O(n) justified rows; keep sparse final rows near the requested size. */
@@ -221,10 +211,7 @@ export function layoutGallery(
 }
 
 /** First row whose bottom is below the given offset; shared by culling and anchoring. */
-export function galleryRowAt(
-  rows: readonly Pick<GalleryRow, 'top' | 'height'>[],
-  offset: number,
-): number {
+export function galleryRowAt(rows: readonly Pick<GalleryRow, 'top' | 'height'>[], offset: number): number {
   let low = 0;
   let high = rows.length;
   while (low < high) {

@@ -1,3 +1,5 @@
+import { setMessageMedia } from '../media/messageMedia.ts';
+import { mediaAssetForPath } from '../db/db.ts';
 import { publicMessage } from '../media/mediaUrls.ts';
 // Keep check-and-act synchronous: an await lets handlers and generation callbacks
 // interleave, reopening double-generation and active-leaf races.
@@ -44,11 +46,7 @@ import {
   prepareNextSwipe,
 } from '../generation/speculation.ts';
 import { parseImageConfig } from '../media/mediaSettings.ts';
-import {
-  buildSteeredPrompt,
-  buildSteeredToolPrompt,
-  resolveSteerTemplate,
-} from '../generation/prompt.ts';
+import { buildSteeredPrompt, buildSteeredToolPrompt, resolveSteerTemplate } from '../generation/prompt.ts';
 import { bumpConversationRevision } from '../conversations/conversationRevision.ts';
 import { deleteImageFiles } from '../media/images.ts';
 import { startMessageImageRender } from '../media/mediaImageAdapter.ts';
@@ -162,8 +160,7 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
   }
   const conv = getConversation(msg.conversationId);
   requireBodyPrecondition(msg.conversationId, body);
-  if (conv.activeLeafId !== msg.id)
-    throw new HttpError(400, 'only the last message on the branch can be resumed');
+  if (conv.activeLeafId !== msg.id) throw new HttpError(400, 'only the last message on the branch can be resumed');
   if (!supportsAssistantContinuation(conv)) {
     throw new HttpError(400, 'the active endpoint disables assistant prefills and continuation');
   }
@@ -179,8 +176,7 @@ route.post('/api/messages/:id/continue', ({ params, body }) => {
         if (hasConversationSubscribers(msg.conversationId)) prepareNextSwipe(msg.id);
       },
       onError: () => {
-        if (getActiveLeafId(msg.conversationId) === msg.id)
-          cancelBackgroundSwipe(msg.conversationId);
+        if (getActiveLeafId(msg.conversationId) === msg.id) cancelBackgroundSwipe(msg.conversationId);
       },
     },
   );
@@ -366,9 +362,11 @@ route.del('/api/messages/:id/swipe', ({ params, req }) => {
   let msg = requireMessage(positiveId(params.id));
   requireQueryPrecondition(msg.conversationId, req.url);
   const findAlternative = () =>
-    stmt(
-      'SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id != ? LIMIT 1',
-    ).get(msg.conversationId, msg.parentId, msg.id);
+    stmt('SELECT id FROM messages WHERE conversation_id = ? AND parent_id IS ? AND id != ? LIMIT 1').get(
+      msg.conversationId,
+      msg.parentId,
+      msg.id,
+    );
   // Reject a sole child before cleanup can cancel unrelated background work.
   if (!findAlternative()) throw new HttpError(400, 'message has no other swipe to activate');
   requireDeleteCompatible(msg.conversationId);
@@ -400,16 +398,13 @@ route.post('/api/message-ranges/move', ({ body }) => {
   requireBodyPrecondition(first.conversationId, body);
   const initialRange = requireActiveMessageRange(messageIds);
   const initialAvailableSteps =
-    direction === 'up'
-      ? initialRange.start
-      : initialRange.pathLength - initialRange.start - messageIds.length;
+    direction === 'up' ? initialRange.start : initialRange.pathLength - initialRange.start - messageIds.length;
   if ((steps as number) > initialAvailableSteps) {
     throw new HttpError(400, `selected range can only move ${initialAvailableSteps} more slots`);
   }
   requireIdle(first.conversationId);
   const range = requireActiveMessageRange(messageIds);
-  const availableSteps =
-    direction === 'up' ? range.start : range.pathLength - range.start - messageIds.length;
+  const availableSteps = direction === 'up' ? range.start : range.pathLength - range.start - messageIds.length;
   if ((steps as number) > availableSteps) {
     throw new HttpError(400, `selected range can only move ${availableSteps} more slots`);
   }
@@ -504,14 +499,13 @@ route.post('/api/messages/:id/duplicate', ({ params, body }) => {
       };
       stmt(
         `UPDATE messages
-         SET reasoning = ?, render_recipe_id = ?, images_json = ?, active_image = ?
+         SET reasoning = ?, render_recipe_id = ?
          WHERE id = ?`,
-      ).run(
-        msg.reasoning,
-        renderRow.render_recipe_id,
-        JSON.stringify(images),
-        activeImage,
+      ).run(msg.reasoning, renderRow.render_recipe_id, inserted.id);
+      setMessageMedia(
         inserted.id,
+        images.map((path) => mediaAssetForPath(path)!.id),
+        activeImage,
       );
       touchConversation(msg.conversationId);
       return inserted;
@@ -557,12 +551,7 @@ for (const action of ['active-image', 'delete-image'] as const) {
       throw new HttpError(409, 'an image render is running for this message');
     }
     const index = b.index;
-    if (
-      typeof index !== 'number' ||
-      !Number.isSafeInteger(index) ||
-      index < 0 ||
-      index >= msg.media.length
-    ) {
+    if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0 || index >= msg.media.length) {
       throw new HttpError(400, 'index out of range');
     }
     if (!deleting) {
@@ -572,20 +561,20 @@ for (const action of ['active-image', 'delete-image'] as const) {
       broadcastTree(msg.conversationId);
       return;
     }
-    const images = msg.media.map((asset) => asset.url);
+    const images = [...msg.media];
     const [removed] = images.splice(index, 1);
     const activeImage = images.length > 0 ? Math.min(index, images.length - 1) : 0;
     transaction(() => {
-      stmt('UPDATE messages SET images_json = ?, active_image = ? WHERE id = ?').run(
-        JSON.stringify(images),
-        activeImage,
+      setMessageMedia(
         msg.id,
+        images.map((asset) => asset.id),
+        activeImage,
       );
       bumpConversationRevision(msg.conversationId);
       touchConversation(msg.conversationId);
     });
     markMessageDirty(msg.conversationId, msg.id);
-    deleteImageFiles([removed!]);
+    deleteImageFiles([removed!.url]);
     broadcastTree(msg.conversationId);
     invalidate('conversations');
     return publicMessage(getMessage(msg.id));

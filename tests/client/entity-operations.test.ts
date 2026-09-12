@@ -12,8 +12,7 @@ Object.defineProperties(globalThis, {
 });
 let navigation = createSettingsNavigation();
 mock.module('../../client/src/components/settings/SettingsGuard.tsx', () => ({
-  useSettingsGuard: (actions: Parameters<typeof navigation.register>[0]) =>
-    navigation.register(actions),
+  useSettingsGuard: (actions: Parameters<typeof navigation.register>[0]) => navigation.register(actions),
   useSettingsNavigation: () => navigation.navigate,
 }));
 const modulePath = '../../client/src/util.ts';
@@ -80,11 +79,7 @@ test('imports guard dirty drafts and late entity operations cannot replace a new
     await Promise.resolve();
     assert.equal(editor.selectedId(), 'b');
     assert.equal(draft.name, 'Unsaved B');
-    assert.equal(
-      navigation.promptOpen(),
-      false,
-      'An old operation cannot prompt a different editor',
-    );
+    assert.equal(navigation.promptOpen(), false, 'An old operation cannot prompt a different editor');
 
     editor.discard();
     editor.select('a');
@@ -136,9 +131,7 @@ test('avatar updates preserve text drafts while actual text conflicts remain gua
       items,
       initialId: () => 1,
       snapshot: avatarEditorSnapshot,
-      load: (
-        item: { id: number; name: string; avatar: string; avatarThumbnail: string } | undefined,
-      ) => {
+      load: (item: { id: number; name: string; avatar: string; avatarThumbnail: string } | undefined) => {
         draft = { name: item?.name ?? '' };
       },
       data: () => ({ ...draft }),
@@ -157,9 +150,7 @@ test('avatar updates preserve text drafts while actual text conflicts remain gua
   });
   try {
     draft.name = 'Unsaved name';
-    setItems((current) => [
-      { ...current[0]!, avatar: 'new.png', avatarThumbnail: 'new-thumb.png' },
-    ]);
+    setItems((current) => [{ ...current[0]!, avatar: 'new.png', avatarThumbnail: 'new-thumb.png' }]);
     assert.equal(editor.status(), '');
     assert.equal(await editor.save(), true);
     assert.equal(draft.name, 'Unsaved name');

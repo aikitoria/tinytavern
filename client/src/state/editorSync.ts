@@ -55,10 +55,7 @@ export function mergeRemoteDraft<D extends RecordDraft>(
   const conflicts: (keyof D)[] = [];
   for (const key of Object.keys(remote) as (keyof D)[]) {
     const records = [base[key], draft[key], remote[key]];
-    if (
-      nested &&
-      records.every((value) => value !== null && typeof value === 'object' && !Array.isArray(value))
-    ) {
+    if (nested && records.every((value) => value !== null && typeof value === 'object' && !Array.isArray(value))) {
       const merged = mergeRemoteDraft(
         base[key] as RecordDraft,
         draft[key] as RecordDraft,

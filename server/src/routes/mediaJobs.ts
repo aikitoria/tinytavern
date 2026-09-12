@@ -1,17 +1,8 @@
-import {
-  startMediaConversation,
-  restartMediaConversation,
-  migrateMediaConversation,
-} from '../media/mediaConversations.ts';
+import { startMediaConversation, restartMediaConversation } from '../media/mediaConversations.ts';
 import { route, HttpError, type Ctx } from '../http/router.ts';
 import { objectBody, positiveId } from '../http/validation.ts';
 import { stmt } from '../db/db.ts';
-import {
-  activeMediaJobs,
-  mediaJobDto,
-  requireMediaJob,
-  type MediaJobRow,
-} from '../media/mediaJobStore.ts';
+import { activeMediaJobs, mediaJobDto, requireMediaJob, type MediaJobRow } from '../media/mediaJobStore.ts';
 import {
   createMediaJob,
   runMediaFavorite,
@@ -64,9 +55,7 @@ route.get('/api/media/jobs', ({ req }) => {
 
 route.get('/api/media/jobs/active', activeMediaJobs);
 
-route.get('/api/media/jobs/:id', ({ params }) =>
-  mediaJobDto(requireMediaJob(positiveId(params.id, 'job ID'))),
-);
+route.get('/api/media/jobs/:id', ({ params }) => mediaJobDto(requireMediaJob(positiveId(params.id, 'job ID'))));
 
 route.post('/api/media/favorites/:id/run', ({ params, body }) => {
   const result = runMediaFavorite(params.id!, objectBody(body));
@@ -92,10 +81,7 @@ route.get('/api/media/assets/:id/details', ({ params }) =>
 );
 
 /** All JSON job mutations validate the same revision before their synchronous action. */
-function mutateJob(
-  apply: (row: MediaJobRow, body: Record<string, unknown>) => unknown,
-  tick = false,
-) {
+function mutateJob(apply: (row: MediaJobRow, body: Record<string, unknown>) => unknown, tick = false) {
   return ({ params, body }: Ctx) => {
     const values = objectBody(body);
     const result = apply(jobForMutation(positiveId(params.id, 'job ID'), values), values);
@@ -106,12 +92,17 @@ function mutateJob(
 
 route.patch('/api/media/jobs/:id', mutateJob(editMediaJob));
 route.post('/api/media/jobs/:id/conversation', mutateJob(startMediaConversation));
-route.post('/api/media/jobs/:id/conversation/migrate', mutateJob(migrateMediaConversation));
 route.post('/api/media/jobs/:id/conversation/restart', mutateJob(restartMediaConversation));
 for (const action of ['prepare', 'render'] as const) {
   route.post(
     `/api/media/jobs/:id/${action}`,
-    mutateJob((row, body) => startMediaJob(row, body, action === 'prepare'), true),
+    mutateJob((row, body) => {
+      if (action === 'prepare' && row.draft_id !== null) {
+        startMediaConversation(row, body);
+        return mediaJobDto(requireMediaJob(row.id));
+      }
+      return startMediaJob(row, body, action === 'prepare');
+    }, true),
   );
 }
 route.post('/api/media/jobs/:id/cancel', mutateJob(cancelMediaVariation, true));

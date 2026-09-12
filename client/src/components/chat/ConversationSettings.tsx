@@ -26,10 +26,7 @@ import {
   type SettingsSectionActions,
 } from '../settings/SettingsGuard.tsx';
 
-type Draft = Pick<
-  Conversation,
-  'title' | 'personaId' | 'endpointId' | 'speakerName' | 'scenarioOverride'
->;
+type Draft = Pick<Conversation, 'title' | 'personaId' | 'endpointId' | 'speakerName' | 'scenarioOverride'>;
 const snapshot = (conv: Conversation): Draft => ({
   title: conv.title,
   personaId: conv.personaId,
@@ -71,9 +68,7 @@ function Editor(props: {
       setDraft(reconcile(merged.draft));
       setConflicts(merged.conflicts);
       if (merged.conflicts.length > 0) {
-        setError(
-          `Changed on another device: ${merged.conflicts.join(', ')}. Discard or resolve before saving.`,
-        );
+        setError(`Changed on another device: ${merged.conflicts.join(', ')}. Discard or resolve before saving.`);
       }
     });
   });
@@ -233,10 +228,7 @@ export default function ConversationSettings() {
     <>
       <Show when={selectedConversation()}>
         {(conv) => (
-          <Modal
-            title="Conversation settings"
-            onClose={() => navigation.navigate(() => openModal(null))}
-          >
+          <Modal title="Conversation settings" onClose={() => navigation.navigate(() => openModal(null))}>
             <Editor conv={conv()} register={navigation.register} navigate={navigation.navigate} />
           </Modal>
         )}

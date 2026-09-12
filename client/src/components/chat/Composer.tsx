@@ -33,8 +33,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
     {
       name: 'char',
       params: '<name>',
-      description:
-        'Set the assistant speaker name for this conversation (empty resets to the character)',
+      description: 'Set the assistant speaker name for this conversation (empty resets to the character)',
       run: async (args) => {
         if (state.selectedId == null) throw new Error('no conversation selected');
         await api.patchConversation(state.selectedId, state.tree, {
@@ -78,9 +77,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
     const seen = new Set<string>();
     for (const cmd of COMMANDS) {
       if (seen.has(cmd.name)) {
-        console.error(
-          `[composer] duplicate slash command /${cmd.name} — later registration is dead`,
-        );
+        console.error(`[composer] duplicate slash command /${cmd.name} — later registration is dead`);
       }
       seen.add(cmd.name);
     }
@@ -118,10 +115,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
     const m = text()
       .trim()
       .match(/^\/(\w+)(?:\s|$)/);
-    return m
-      ? COMMANDS.find((command) => command.name === m[1]!.toLowerCase())?.allowDuringGeneration ===
-          true
-      : false;
+    return m ? COMMANDS.find((command) => command.name === m[1]!.toLowerCase())?.allowDuringGeneration === true : false;
   };
 
   createEffect(() => {
@@ -195,8 +189,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
         .catch((err: unknown) => toast(errorMessage(err)));
       return;
     }
-    if (msg?.generationToken != null)
-      void api.stopGeneration(msg.id, msg.generationToken).catch(() => {});
+    if (msg?.generationToken != null) void api.stopGeneration(msg.id, msg.generationToken).catch(() => {});
   };
 
   const resumable = () => {
@@ -205,10 +198,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
     if (endpoint && !messagePrefillEnabled(endpoint)) return null;
     const path = activePath();
     const last = path[path.length - 1];
-    return last &&
-      last.role === 'assistant' &&
-      last.status !== 'streaming' &&
-      (last.content || last.reasoning)
+    return last && last.role === 'assistant' && last.status !== 'streaming' && (last.content || last.reasoning)
       ? last
       : null;
   };
@@ -392,9 +382,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
           }}
           class="composer-input"
           rows="1"
-          placeholder={
-            view.embedded ? 'Describe what to change…' : 'Type a message or / for commands…'
-          }
+          placeholder={view.embedded ? 'Describe what to change…' : 'Type a message or / for commands…'}
           value={text()}
           readOnly={draftCompletionActive()}
           onInput={(e) => {
@@ -429,11 +417,7 @@ export default function Composer(props: { text: string; onText: (text: string) =
           <Show when={text().trim() || resumable()}>
             <button
               class="send-btn rounded-circle flex items-center justify-center p-0 shrink-0 tools-btn resume-btn small-touch:text-base"
-              title={
-                text().trim()
-                  ? 'Continue writing this message'
-                  : 'Resume last reply (assistant prefill)'
-              }
+              title={text().trim() ? 'Continue writing this message' : 'Resume last reply (assistant prefill)'}
               onClick={continueTextOrReply}
             >
               <FontAwesomeIcon icon={faAnglesRight} />

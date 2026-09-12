@@ -1,3 +1,5 @@
+import { GALLERY_SELECT } from '../../server/src/media/galleryStore.ts';
+import { galleryFixture } from '../support/fixtures.ts';
 import { testApi } from '../support/http.ts';
 import { renderMediaFixture } from '../support/media.ts';
 import { insertFixture } from '../support/fixtures.ts';
@@ -10,8 +12,7 @@ databaseCase('media files', async () => {
   const { readFileSync, readdirSync, unlinkSync, writeFileSync } = await import('node:fs');
   const { basename, join } = await import('node:path');
   const { IMAGES_DIR, stmt } = await import('../../server/src/db/db.ts');
-  const { downloadMedia, InvalidMediaOutput } =
-    await import('../../server/src/media/mediaFiles.ts');
+  const { downloadMedia, InvalidMediaOutput } = await import('../../server/src/media/mediaFiles.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const runFile = promisify(execFile);
 
@@ -43,10 +44,7 @@ databaseCase('media files', async () => {
   assert.equal(image.mime, 'image/png');
   assert.deepEqual(readFileSync(join(IMAGES_DIR, basename(image.path))), png);
 
-  await assert.rejects(
-    downloadMedia(new Response(original), 'image', new AbortController().signal),
-    /invalid raster/,
-  );
+  await assert.rejects(downloadMedia(new Response(original), 'image', new AbortController().signal), /invalid raster/);
   await assert.rejects(
     downloadMedia(
       new Response(png, { headers: { 'content-length': String(2 ** 30 + 1) } }),
@@ -55,10 +53,7 @@ databaseCase('media files', async () => {
     ),
     /size limit/,
   );
-  assert(
-    !readdirSync(IMAGES_DIR).some((name) => name.endsWith('.part')),
-    'Rejected downloads leave no partial files',
-  );
+  assert(!readdirSync(IMAGES_DIR).some((name) => name.endsWith('.part')), 'Rejected downloads leave no partial files');
 
   const chunk = new Uint8Array(1024 * 1024);
   let chunksSent = 0;
@@ -103,8 +98,7 @@ databaseCase('media files', async () => {
 
   // Deterministic names must preserve unexpected files rather than overwrite or clean them up.
   for (const extension of ['.part', '.png']) {
-    const nextId =
-      Number(stmt("SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'").get()!.seq) + 1;
+    const nextId = Number(stmt("SELECT seq FROM sqlite_sequence WHERE name = 'media_assets'").get()!.seq) + 1;
     const collision = join(IMAGES_DIR, `media-${nextId}${extension}`);
     writeFileSync(collision, 'Unrelated bytes');
     await assert.rejects(downloadMedia(new Response(png), 'image', new AbortController().signal), {
@@ -128,18 +122,7 @@ databaseCase('gallery video uploads', async () => {
   const webm = join(IMAGES_DIR, 'upload-source.webm');
   const mp4 = join(IMAGES_DIR, 'upload-source.mp4');
   await renderMediaFixture(webm, 64, 48, true);
-  await promisify(execFile)('ffmpeg', [
-    '-v',
-    'error',
-    '-i',
-    webm,
-    '-c:v',
-    'libx264',
-    '-threads',
-    '1',
-    '-y',
-    mp4,
-  ]);
+  await promisify(execFile)('ffmpeg', ['-v', 'error', '-i', webm, '-c:v', 'libx264', '-threads', '1', '-y', mp4]);
   try {
     for (const [source, mime] of [
       [webm, 'video/webm'],
@@ -155,12 +138,10 @@ databaseCase('gallery video uploads', async () => {
       const item = (await response.json()) as import('@tinytavern/shared').GalleryItem;
       assert.equal(item.media?.kind, 'video');
       assert.equal(item.media?.mime, mime);
-      assert.equal(item.imageWidth, 64);
-      assert.equal(item.imageHeight, 48);
+      assert.equal(item.media.width, 64);
+      assert.equal(item.media.height, 48);
       assert(item.media!.duration! > 0);
-      const path = String(
-        stmt('SELECT path FROM media_assets WHERE id = ?').get(item.media!.id)!.path,
-      );
+      const path = String(stmt('SELECT path FROM media_assets WHERE id = ?').get(item.media!.id)!.path);
       const file = join(IMAGES_DIR, basename(path));
       assert.deepEqual(readFileSync(file), original, 'Uploads preserve the original video bytes');
       const copied = copyImage(path)!;
@@ -187,47 +168,34 @@ databaseCase('gallery video uploads', async () => {
 });
 
 databaseCase('media thumbnails', async () => {
-  const { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } =
-    await import('node:fs');
+  const { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } = await import('node:fs');
   const { basename, extname, join } = await import('node:path');
   const { setTimeout: sleep } = await import('node:timers/promises');
   const { DEFAULT_SETTINGS, GENERAL_TRANSFER_FIELDS } = await import('@tinytavern/shared');
   type GalleryItem = import('@tinytavern/shared').GalleryItem;
-  const { IMAGES_DIR, AVATAR_DIR, stmt, toGalleryItem, mediaAssetForPath } =
-    await import('../../server/src/db/db.ts');
+  const { IMAGES_DIR, AVATAR_DIR, stmt, toGalleryItem, mediaAssetForPath } = await import('../../server/src/db/db.ts');
   const { saveImage, deleteImageFiles, sweepOrphanedImages, rasterImageFormat } =
     await import('../../server/src/media/images.ts');
   const { imageDimensions } = await import('../../server/src/media/imageDimensions.ts');
   const { getSettings } = await import('../../server/src/settings/settingsStore.ts');
   const { invalidate } = await import('../../server/src/realtime/events.ts');
-  const { initMediaThumbnails, stopMediaThumbnails } =
-    await import('../../server/src/media/mediaThumbnails.ts');
+  const { initMediaThumbnails, stopMediaThumbnails } = await import('../../server/src/media/mediaThumbnails.ts');
   const { publicAvatar } = await import('../../server/src/media/mediaUrls.ts');
-  const { saveAvatar, deleteAvatarFiles, readAvatarFile } =
-    await import('../../server/src/characters/avatarStore.ts');
+  const { saveAvatar, deleteAvatarFiles, readAvatarFile } = await import('../../server/src/characters/avatarStore.ts');
   await import('../../server/src/routes/gallery.ts');
   await import('../../server/src/routes/settings.ts');
 
-  async function fixture(
-    name: string,
-    width: number,
-    height: number,
-    video = false,
-  ): Promise<GalleryItem> {
+  async function fixture(name: string, width: number, height: number, video = false): Promise<GalleryItem> {
     const file = join(IMAGES_DIR, name);
     await renderMediaFixture(file, width, height, video);
     const path = saveImage(extname(name), readFileSync(file));
     unlinkSync(file);
-    const result =
-      stmt(`INSERT INTO gallery_items(character_name, prompt, image, image_width, image_height, created_at, updated_at)
-    VALUES ('Uploads', 'Saved prompt', ?, ?, ?, 1, 1)`).run(path, width, height);
+    const id = galleryFixture(path, { prompt: 'Saved prompt' });
     invalidate('gallery');
-    return item(Number(result.lastInsertRowid));
+    return item(id);
   }
   function item(id: number): GalleryItem {
-    return toGalleryItem(
-      stmt("SELECT *, '[]' AS characters_json FROM gallery_items WHERE id = ?").get(id)!,
-    );
+    return toGalleryItem(stmt(`${GALLERY_SELECT} WHERE g.id = ?`).get(id)!);
   }
   function file(path: string): string {
     return join(IMAGES_DIR, basename(path));
@@ -238,11 +206,7 @@ databaseCase('media thumbnails', async () => {
     assert(condition(), 'Thumbnail work completed before the timeout');
   }
   async function ready(size: number) {
-    await until(
-      () =>
-        stmt('SELECT count(*) AS n FROM media_assets WHERE thumbnail_size IS NOT ?').get(size)!
-          .n === 0,
-    );
+    await until(() => stmt('SELECT count(*) AS n FROM media_assets WHERE thumbnail_size IS NOT ?').get(size)!.n === 0);
   }
   function checkThumbnail(gallery: GalleryItem, width: number, height: number) {
     const current = item(gallery.id);
@@ -275,7 +239,7 @@ databaseCase('media thumbnails', async () => {
     const portrait = await fixture('portrait.webp', 360, 640);
     const tiny = await fixture('tiny.jpg', 32, 20);
     const video = await fixture('video.webm', 1280, 720, true);
-    const avatarOriginal = readFileSync(file(landscape.image));
+    const avatarOriginal = readFileSync(file(landscape.media.url));
     const characterId = insertFixture('characters', { name: 'Avatar test', created_at: 1 });
     const avatar = saveAvatar('character', characterId, avatarOriginal);
     assert.match(avatar, /^\/avatars\/character-\d+\.png\?v=\d+$/);
@@ -283,23 +247,15 @@ databaseCase('media thumbnails', async () => {
     const personaId = insertFixture('personas', { name: 'Persona test', created_at: 1 });
     const personaAvatar = saveAvatar('persona', personaId, avatarOriginal);
     stmt('UPDATE personas SET avatar = ? WHERE id = ?').run(personaAvatar, personaId);
-    const originals = [landscape, portrait, tiny, video].map((gallery) =>
-      readFileSync(file(gallery.image)),
-    );
+    const originals = [landscape, portrait, tiny, video].map((gallery) => readFileSync(file(gallery.media.url)));
     assert.equal(landscape.media!.thumbnail, null);
     initMediaThumbnails();
     await ready(512);
     await until(
-      () =>
-        Number(
-          stmt('SELECT count(*) AS n FROM avatar_thumbnails WHERE thumbnail_size = 128').get()!.n,
-        ) === 2,
+      () => Number(stmt('SELECT count(*) AS n FROM avatar_thumbnails WHERE thumbnail_size = 128').get()!.n) === 2,
     );
     const avatarPreview = publicAvatar({ avatar }).avatarThumbnail!;
-    assert.equal(
-      avatarPreview,
-      `/avatars/thumb-character-${characterId}-${avatar.split('?v=')[1]}-1.jpg`,
-    );
+    assert.equal(avatarPreview, `/avatars/thumb-character-${characterId}-${avatar.split('?v=')[1]}-1.jpg`);
     assert.equal(
       publicAvatar({ avatar: personaAvatar }).avatarThumbnail,
       `/avatars/thumb-persona-${personaId}-${personaAvatar.split('?v=')[1]}-1.jpg`,
@@ -318,10 +274,7 @@ databaseCase('media thumbnails', async () => {
     stmt('UPDATE characters SET avatar = ? WHERE id = ?').run(replacement, characterId);
     invalidate('characters');
     await until(() => Boolean(publicAvatar({ avatar: replacement }).avatarThumbnail));
-    assert(
-      !existsSync(join(AVATAR_DIR, basename(avatarPreview))),
-      'Replacing an avatar removes its old thumbnail',
-    );
+    assert(!existsSync(join(AVATAR_DIR, basename(avatarPreview))), 'Replacing an avatar removes its old thumbnail');
     await stopMediaThumbnails();
     const replacedPreview = publicAvatar({ avatar: replacement }).avatarThumbnail!;
     unlinkSync(join(AVATAR_DIR, basename(replacedPreview)));
@@ -347,9 +300,7 @@ databaseCase('media thumbnails', async () => {
     checkThumbnail(portrait, 288, 512);
     checkThumbnail(tiny, 32, 20);
     checkThumbnail(video, 512, 288);
-    const thumbnails = [landscape, portrait, tiny, video].map(
-      (gallery) => item(gallery.id).media!.thumbnail!,
-    );
+    const thumbnails = [landscape, portrait, tiny, video].map((gallery) => item(gallery.id).media!.thumbnail!);
     deleteImageFiles(thumbnails);
     sweepOrphanedImages();
     assert(
@@ -361,10 +312,7 @@ databaseCase('media thumbnails', async () => {
     assert.equal(getSettings().galleryThumbnailSize, 512);
     await resize(256);
     for (const gallery of [landscape, portrait, tiny, video]) {
-      assert(
-        existsSync(file(item(gallery.id).media!.thumbnail!)),
-        'A rebuild always keeps a usable thumbnail',
-      );
+      assert(existsSync(file(item(gallery.id).media!.thumbnail!)), 'A rebuild always keeps a usable thumbnail');
     }
     await ready(256);
     checkThumbnail(landscape, 256, 144);
@@ -374,11 +322,7 @@ databaseCase('media thumbnails', async () => {
       'Replaced thumbnails are deleted',
     );
     for (const [index, gallery] of [landscape, portrait, tiny, video].entries()) {
-      assert.deepEqual(
-        readFileSync(file(gallery.image)),
-        originals[index],
-        'Original bytes stay unchanged',
-      );
+      assert.deepEqual(readFileSync(file(gallery.media.url)), originals[index], 'Original bytes stay unchanged');
     }
 
     await resize(128);
@@ -388,9 +332,7 @@ databaseCase('media thumbnails', async () => {
     checkThumbnail(video, 384, 216);
     const standalone = saveImage('.png', originals[0]!);
     const standaloneAsset = mediaAssetForPath(standalone)!;
-    stmt("INSERT INTO media_owners VALUES (?, 'job', 'draft-only', 'output:1')").run(
-      standaloneAsset.id,
-    );
+    stmt("INSERT INTO media_owners VALUES (?, 'job', 'draft-only', 'output:1')").run(standaloneAsset.id);
     await ready(384);
     const standaloneThumbnail = mediaAssetForPath(standalone)!.thumbnail!;
     assert(standaloneThumbnail, 'Media outside the gallery receives thumbnails');
@@ -407,7 +349,7 @@ databaseCase('media thumbnails', async () => {
     await ready(384);
     await stopMediaThumbnails();
     assert(
-      !stmt('SELECT id FROM media_assets WHERE path = ?').get(doomed.image),
+      !stmt('SELECT id FROM media_assets WHERE path = ?').get(doomed.media.url),
       'Deletion during generation leaves no late thumbnail',
     );
 
@@ -420,20 +362,13 @@ databaseCase('media thumbnails', async () => {
     assert(!existsSync(join(IMAGES_DIR, 'old-poster.jpg')));
     initMediaThumbnails();
     await ready(384);
-    assert.notEqual(
-      item(added.id).media!.thumbnail,
-      missing,
-      'Startup repairs missing thumbnail files',
-    );
+    assert.notEqual(item(added.id).media!.thumbnail, missing, 'Startup repairs missing thumbnail files');
     checkThumbnail(added, 384, 288);
     const saved = [landscape, portrait, tiny, video, added].map((gallery) => item(gallery.id));
     for (const gallery of saved) {
       await remove(gallery.id);
-      assert(!existsSync(file(gallery.image)));
-      assert(
-        !existsSync(file(gallery.media!.thumbnail!)),
-        'Deleting gallery media also deletes its thumbnail',
-      );
+      assert(!existsSync(file(gallery.media.url)));
+      assert(!existsSync(file(gallery.media!.thumbnail!)), 'Deleting gallery media also deletes its thumbnail');
     }
     await stopMediaThumbnails();
     assert.deepEqual(readdirSync(IMAGES_DIR), []);

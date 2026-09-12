@@ -14,8 +14,7 @@ export function transferDocument(type: string, data: unknown): SettingsTransferD
   return { format: 'tinytavern-settings', version: 1, type, data };
 }
 export function transferObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('Expected a JSON object');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a JSON object');
   return value as Record<string, unknown>;
 }
 export function transferData(value: unknown, type: string): unknown {
@@ -30,16 +29,12 @@ export function transferString(value: unknown, label: string): string {
   return value;
 }
 export function transferArray(value: unknown, maximum = 500): Record<string, unknown>[] {
-  if (!Array.isArray(value) || value.length > maximum)
-    throw new Error(`Expected a list of at most ${maximum} items`);
+  if (!Array.isArray(value) || value.length > maximum) throw new Error(`Expected a list of at most ${maximum} items`);
   return value.map(transferObject);
 }
 
 /** A unique exact name wins; otherwise accept a unique case-insensitive match. */
-export function namedItem<T extends { name: string }>(
-  items: readonly T[],
-  name: unknown,
-): T | undefined {
+export function namedItem<T extends { name: string }>(items: readonly T[], name: unknown): T | undefined {
   if (typeof name !== 'string') return undefined;
   const exact = items.filter((item) => item.name === name);
   if (exact.length) return exact.length === 1 ? exact[0] : undefined;
@@ -56,9 +51,7 @@ export function takeNamedCollectionItem<T extends { name: string }>(
   const available = (candidate: T) => remaining.has(candidate);
   const existing =
     current.find((candidate) => available(candidate) && candidate.name === name) ??
-    current.find(
-      (candidate) => available(candidate) && candidate.name.toLowerCase() === name.toLowerCase(),
-    );
+    current.find((candidate) => available(candidate) && candidate.name.toLowerCase() === name.toLowerCase());
   if (existing) remaining.delete(existing);
   return existing;
 }
@@ -94,17 +87,11 @@ export function entityTransferData(type: TransferEntity, value: unknown): Record
   }
   if (typeof result.name !== 'string' || !result.name.trim()) throw new Error('Enter an item name');
   for (const [key, value] of Object.entries(result)) {
-    if (
-      ['prefixNames', 'usesPersonas', 'allowReasoningPrefill', 'allowMessagePrefill'].includes(key)
-    ) {
+    if (['prefixNames', 'usesPersonas', 'allowReasoningPrefill', 'allowMessagePrefill'].includes(key)) {
       if (typeof value !== 'boolean') throw new Error(`${key} must be true or false`);
     } else if (key === 'genParams') {
       const params = transferObject(value);
-      if (
-        Object.values(params).some(
-          (value) => typeof value !== 'number' && typeof value !== 'string',
-        )
-      )
+      if (Object.values(params).some((value) => typeof value !== 'number' && typeof value !== 'string'))
         throw new Error('Invalid generation parameters');
     } else if ((key === 'model' || key === 'avatarData' || key === 'folderId') && value === null) {
       continue;
@@ -121,34 +108,36 @@ export const GENERAL_TRANSFER_FIELDS = [
   'titlePrompt',
   'draftCompletionPrompt',
 ] as const;
-function exportCollectionFolders<K extends string, N extends string>(
-  folders: MediaCollectionFolder<K>[],
-  items: { id: string; name: string }[],
-  memberKey: K,
+function exportCollectionFolders<N extends string>(
+  folders: MediaCollectionFolder[],
+  items: { id: string; name: string; folderId?: string | null }[],
   namesKey: N,
 ) {
-  const names = new Map(items.map((item) => [item.id, item.name]));
-  return folders.map((folder) => ({
-    name: folder.name,
-    [namesKey]: folder[memberKey].map((id) => names.get(id)!),
-  })) as ({ name: string } & Record<N, string[]>)[];
+  const members = new Map<string, string[]>();
+  for (const item of items) {
+    if (item.folderId == null) continue;
+    const names = members.get(item.folderId) ?? [];
+    names.push(item.name);
+    members.set(item.folderId, names);
+  }
+  return folders.map((folder) => ({ name: folder.name, [namesKey]: members.get(folder.id) ?? [] })) as ({
+    name: string;
+  } & Record<N, string[]>)[];
 }
 
-function importCollectionFolders<K extends string>(
+function importCollectionFolders(
   value: unknown,
-  current: MediaCollectionFolder<K>[],
-  items: { id: string; name: string }[],
+  current: MediaCollectionFolder[],
+  items: { id: string; name: string; folderId?: string | null }[],
   importedNames: Set<string>,
-  memberKey: K,
   namesKey: string,
-): MediaCollectionFolder<K>[] {
-  const importedIds = new Set(
-    items.filter((item) => importedNames.has(item.name.toLowerCase())).map((item) => item.id),
-  );
-  const folders = current.map((folder) => ({
-    ...folder,
-    [memberKey]: folder[memberKey].filter((id) => value === undefined || !importedIds.has(id)),
-  }));
+): MediaCollectionFolder[] {
+  const folders = current.map((folder) => ({ ...folder }));
+  if (value !== undefined) {
+    for (const item of items) {
+      if (importedNames.has(item.name.toLowerCase())) item.folderId = null;
+    }
+  }
   const seen = new Set<string>();
   const assigned = new Set<string>();
   for (const item of transferArray(value ?? [])) {
@@ -157,35 +146,26 @@ function importCollectionFolders<K extends string>(
     if (!name || seen.has(name.toLowerCase()) || !Array.isArray(members))
       throw new Error('Invalid or duplicate folders');
     seen.add(name.toLowerCase());
-    const existing = namedItem(folders, name);
-    const ids: string[] = existing ? [...existing[memberKey]] : [];
+    let folder = namedItem(folders, name);
+    if (!folder) {
+      folder = { id: nextCollectionId(folders), name };
+      folders.push(folder);
+    }
     for (const requested of members) {
       const entity = namedItem(items, requested);
       if (!entity || assigned.has(entity.id))
         throw new Error('Folder members must exist and belong to only one folder');
       assigned.add(entity.id);
-      for (const previous of folders)
-        previous[memberKey] = previous[memberKey].filter(
-          (id) => id !== entity.id,
-        ) as MediaCollectionFolder<K>[K];
-      if (!ids.includes(entity.id)) ids.push(entity.id);
+      entity.folderId = folder.id;
     }
-    const folder = {
-      id: existing?.id ?? nextCollectionId(folders),
-      name,
-      [memberKey]: ids,
-    } as MediaCollectionFolder<K>;
-    const index = folders.findIndex((item) => item.id === folder.id);
-    if (index === -1) folders.push(folder);
-    else folders[index] = folder;
   }
   return folders;
 }
 
 export function exportPromptCollection(value: Settings['mediaChatPrompts']) {
   return {
-    presets: value.presets.map(({ id, ...preset }) => preset),
-    folders: exportCollectionFolders(value.folders, value.presets, 'presetIds', 'presets'),
+    presets: value.presets.map(({ id, folderId, revision, ...preset }) => preset),
+    folders: exportCollectionFolders(value.folders, value.presets, 'presets'),
     defaultPreset: value.presets.find((item) => item.id === value.defaultPresetId)?.name ?? null,
   };
 }
@@ -199,85 +179,59 @@ export function importPromptCollection(
   const seen = new Set<string>();
   for (const item of transferArray(source.presets, MAX_MEDIA_PRESETS)) {
     const name = transferString(item.name, 'Preset name');
-    if (!name.trim() || seen.has(name.toLowerCase()))
-      throw new Error('Preset names must be nonempty and unique');
+    if (!name.trim() || seen.has(name.toLowerCase())) throw new Error('Preset names must be nonempty and unique');
     seen.add(name.toLowerCase());
     const existing = namedItem(presets, name);
-    const fields = chat
-      ? ['chatPrompt']
-      : ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill'];
+    const fields = chat ? ['chatPrompt'] : ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill'];
     const text = Object.fromEntries(fields.map((key) => [key, transferString(item[key], key)]));
     const preset = {
       ...text,
       id: existing?.id ?? nextCollectionId(presets),
       name,
+      folderId: existing?.folderId ?? null,
     } as MediaPromptPreset;
     if (existing) presets[presets.indexOf(existing)] = preset;
     else presets.push(preset);
   }
   return {
     presets,
-    folders: importCollectionFolders(
-      source.folders,
-      current.folders,
-      presets,
-      seen,
-      'presetIds',
-      'presets',
-    ),
+    folders: importCollectionFolders(source.folders, current.folders, presets, seen, 'presets'),
     defaultPresetId:
-      source.defaultPreset === null
-        ? null
-        : (namedItem(presets, source.defaultPreset)?.id ?? current.defaultPresetId),
+      source.defaultPreset === null ? null : (namedItem(presets, source.defaultPreset)?.id ?? current.defaultPresetId),
   };
 }
 
 export function exportWorkflow(workflow: MediaWorkflow, settings: Settings) {
-  const { id, standalonePromptPresetId, chatPromptPresetId, ...fields } = workflow;
+  const { id, folderId, revision, standalonePromptPresetId, chatPromptPresetId, ...fields } = workflow;
   return {
     ...fields,
     standalonePromptPreset:
-      settings.mediaStandalonePrompts.presets.find((item) => item.id === standalonePromptPresetId)
-        ?.name ?? null,
-    chatPromptPreset:
-      settings.mediaChatPrompts.presets.find((item) => item.id === chatPromptPresetId)?.name ??
-      null,
+      settings.mediaStandalonePrompts.presets.find((item) => item.id === standalonePromptPresetId)?.name ?? null,
+    chatPromptPreset: settings.mediaChatPrompts.presets.find((item) => item.id === chatPromptPresetId)?.name ?? null,
   };
 }
 
-export function importWorkflow(
-  value: unknown,
-  workflows: MediaWorkflow[],
-  settings: Settings,
-): MediaWorkflow {
+export function importWorkflow(value: unknown, workflows: MediaWorkflow[], settings: Settings): MediaWorkflow {
   const item = transferObject(value);
   const name = transferString(item.name, 'Workflow name');
   if (!name.trim()) throw new Error('Enter a workflow name');
   const existing = namedItem(workflows, name);
-  const resolve = (
-    field: 'standalonePromptPreset' | 'chatPromptPreset',
-    previous: string | null,
-  ) => {
+  const resolve = (field: 'standalonePromptPreset' | 'chatPromptPreset', previous: string | null) => {
     const requested = item[field];
     if (requested === null) return null;
-    const presets = (
-      field === 'chatPromptPreset' ? settings.mediaChatPrompts : settings.mediaStandalonePrompts
-    ).presets;
+    const presets = (field === 'chatPromptPreset' ? settings.mediaChatPrompts : settings.mediaStandalonePrompts)
+      .presets;
     return namedItem(presets, requested)?.id ?? previous;
   };
   const workflow: MediaWorkflow = {
     id: existing?.id ?? nextCollectionId(workflows),
+    folderId: existing?.folderId ?? null,
     name,
     json: transferString(item.json, 'Workflow JSON'),
     inputBindings: structuredClone(item.inputBindings ?? {}) as MediaWorkflow['inputBindings'],
     textOutputNodeId:
-      item.textOutputNodeId == null
-        ? null
-        : transferString(item.textOutputNodeId, 'Text output node ID'),
-    standalonePromptPresetId: resolve(
-      'standalonePromptPreset',
-      existing?.standalonePromptPresetId ?? null,
-    ),
+      item.textOutputNodeId == null ? null : transferString(item.textOutputNodeId, 'Text output node ID'),
+    standalonePromptPresetId: resolve('standalonePromptPreset', existing?.standalonePromptPresetId ?? null),
     chatPromptPresetId: resolve('chatPromptPreset', existing?.chatPromptPresetId ?? null),
   };
   const error = workflow.json.trim() ? mediaWorkflowError(workflow) : null;
@@ -288,7 +242,7 @@ export function exportWorkflowLibrary(settings: Settings) {
   const value = settings.mediaRendering;
   return {
     workflows: value.workflows.map((item) => exportWorkflow(item, settings)),
-    folders: exportCollectionFolders(value.folders, value.workflows, 'workflowIds', 'workflows'),
+    folders: exportCollectionFolders(value.folders, value.workflows, 'workflows'),
   };
 }
 
@@ -302,28 +256,19 @@ export function importWorkflowLibrary(
   const seen = new Set<string>();
   for (const item of transferArray(source.workflows)) {
     const workflow = importWorkflow(item, workflows, settings);
-    if (seen.has(workflow.name.toLowerCase()))
-      throw new Error('Duplicate workflow names in the import');
+    if (seen.has(workflow.name.toLowerCase())) throw new Error('Duplicate workflow names in the import');
     seen.add(workflow.name.toLowerCase());
     const index = workflows.findIndex((item) => item.id === workflow.id);
     if (index === -1) workflows.push(workflow);
     else workflows[index] = workflow;
   }
-  const folders = importCollectionFolders(
-    source.folders,
-    current.folders,
-    workflows,
-    seen,
-    'workflowIds',
-    'workflows',
-  );
+  const folders = importCollectionFolders(source.folders, current.folders, workflows, seen, 'workflows');
   return { workflows, folders };
 }
 
 export function exportRendering(settings: Settings) {
   const value = settings.mediaRendering;
-  const workflowName = (id: string | null) =>
-    value.workflows.find((item) => item.id === id)?.name ?? null;
+  const workflowName = (id: string | null) => value.workflows.find((item) => item.id === id)?.name ?? null;
   return {
     ...exportWorkflowLibrary(settings),
     comfyUrl: value.comfyUrl,
@@ -373,34 +318,23 @@ export function importRendering(value: unknown, settings: Settings): Settings['m
 export function exportMediaFavorites(settings: Settings) {
   return settings.mediaFavorites.map((favorite) => ({
     name: favorite.name,
-    promptPreset:
-      settings.mediaChatPrompts.presets.find((item) => item.id === favorite.presetId)?.name ?? null,
-    workflow:
-      settings.mediaRendering.workflows.find((item) => item.id === favorite.workflowId)?.name ??
-      null,
+    promptPreset: settings.mediaChatPrompts.presets.find((item) => item.id === favorite.presetId)?.name ?? null,
+    workflow: settings.mediaRendering.workflows.find((item) => item.id === favorite.workflowId)?.name ?? null,
   }));
 }
-export function importMediaFavorites(
-  value: unknown,
-  settings: Settings,
-): Settings['mediaFavorites'] {
-  return importNamedCollection(
-    transferArray(value, MAX_MEDIA_PRESETS),
-    settings.mediaFavorites,
-    (item, existing) => {
-      const name = transferString(item.name, 'Favorite name');
-      const preset = namedItem(settings.mediaChatPrompts.presets, item.promptPreset);
-      const workflow = namedItem(settings.mediaRendering.workflows, item.workflow);
-      if (!preset || !workflow)
-        throw new Error(`Choose the prompt preset and workflow for ${name}`);
-      return {
-        id: existing?.id ?? nextCollectionId(settings.mediaFavorites),
-        name,
-        presetId: preset.id,
-        workflowId: workflow.id,
-      };
-    },
-  );
+export function importMediaFavorites(value: unknown, settings: Settings): Settings['mediaFavorites'] {
+  return importNamedCollection(transferArray(value, MAX_MEDIA_PRESETS), settings.mediaFavorites, (item, existing) => {
+    const name = transferString(item.name, 'Favorite name');
+    const preset = namedItem(settings.mediaChatPrompts.presets, item.promptPreset);
+    const workflow = namedItem(settings.mediaRendering.workflows, item.workflow);
+    if (!preset || !workflow) throw new Error(`Choose the prompt preset and workflow for ${name}`);
+    return {
+      id: existing?.id ?? nextCollectionId(settings.mediaFavorites),
+      name,
+      presetId: preset.id,
+      workflowId: workflow.id,
+    };
+  });
 }
 
 const IMAGE_PROMPT_TRANSFER_FIELDS = [
@@ -494,8 +428,7 @@ export function importImagePromptSet(
       prompt: transferString(item.prompt, 'Prompt'),
       ...(avatar ? { context: transferString(item.context, 'Context') } : {}),
     };
-    if (avatar && !preset.context!.trim())
-      throw new Error('Avatar presets require a context template.');
+    if (avatar && !preset.context!.trim()) throw new Error('Avatar presets require a context template.');
     const existing = namedItem(presets, name);
     if (existing)
       presets[presets.indexOf(existing)] = {
@@ -504,7 +437,6 @@ export function importImagePromptSet(
       };
     else presets.push(preset);
   }
-  const active =
-    source.active === '' ? '' : (namedItem(presets, source.active)?.name ?? current.active);
+  const active = source.active === '' ? '' : (namedItem(presets, source.active)?.name ?? current.active);
   return { presets, active };
 }

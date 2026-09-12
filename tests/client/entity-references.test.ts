@@ -54,11 +54,14 @@ test('entity reference edits target the precise editor without changing the sele
   assert.equal(option.value, '', 'Editing never selects or activates an entity');
 
   settings.mediaRendering.folders = [
-    { id: '10', name: 'Folder 10', workflowIds: ['workflow-10', 'filtered-out'] },
-    { id: '2', name: 'Folder 2', workflowIds: ['workflow-2'] },
-    { id: 'empty', name: 'Empty', workflowIds: [] },
+    { id: '10', name: 'Folder 10' },
+    { id: '2', name: 'Folder 2' },
+    { id: 'empty', name: 'Empty' },
   ];
-  const grouped = entityOptions('workflows', [...items, { id: 'root', name: 'Root item' }]);
+  const grouped = entityOptions('workflows', [
+    ...items.map((item) => ({ ...item, folderId: item.id === 'workflow-2' ? '2' : '10' })),
+    { id: 'root', name: 'Root item' },
+  ]);
   assert.deepEqual(
     grouped.map(({ value, group }: Option) => [value, group]),
     [
@@ -71,15 +74,23 @@ test('entity reference edits target the precise editor without changing the sele
   grouped[1]!.edit!();
   assert.equal(opened.pop()!.settingsEntity, 'workflow-2');
   for (const kind of ['mediaChatPrompts', 'mediaStandalonePrompts'] as const) {
-    settings[kind].folders = [{ id: 'prompts', name: 'Prompts', presetIds: ['workflow-2'] }];
-    assert.equal(entityOptions(kind, items).at(-1)!.group, 'Prompts');
+    settings[kind].folders = [{ id: 'prompts', name: 'Prompts' }];
+    assert.equal(
+      entityOptions(
+        kind,
+        items.map((item) => ({ ...item, folderId: item.id === 'workflow-2' ? 'prompts' : null })),
+      ).at(-1)!.group,
+      'Prompts',
+    );
     settings[kind].folders = [];
-    assert(entityOptions(kind, items).every((option: Option) => option.group === undefined));
+    assert(
+      entityOptions(
+        kind,
+        items.map((item) => ({ ...item, folderId: item.id === 'workflow-2' ? 'prompts' : null })),
+      ).every((option: Option) => option.group === undefined),
+    );
   }
-  assert.equal(
-    entityOptions('presets', [{ id: 42, name: 'Style', folderId: 3 }])[0]!.group,
-    'Writing styles',
-  );
+  assert.equal(entityOptions('presets', [{ id: 42, name: 'Style', folderId: 3 }])[0]!.group, 'Writing styles');
   assert.deepEqual(
     entityOptions('characters', [
       { id: 1, name: 'Member', folderId: 1 },

@@ -3,12 +3,9 @@ import { InvalidMediaOutput } from '../mediaFiles.ts';
 /** Text nodes (including PreviewAny) expose history.outputs[node].text. */
 export function comfyTextOutput(outputs: Record<string, unknown>, nodeId?: string): string {
   const candidates =
-    nodeId === undefined
-      ? Object.values(outputs)
-      : [Object.hasOwn(outputs, nodeId) ? outputs[nodeId] : null];
+    nodeId === undefined ? Object.values(outputs) : [Object.hasOwn(outputs, nodeId) ? outputs[nodeId] : null];
   const textOutputs = candidates.filter(
-    (output): output is { text: unknown } =>
-      output !== null && typeof output === 'object' && 'text' in output,
+    (output): output is { text: unknown } => output !== null && typeof output === 'object' && 'text' in output,
   );
   if (textOutputs.length !== 1) {
     throw new InvalidMediaOutput('The selected output node must return text');

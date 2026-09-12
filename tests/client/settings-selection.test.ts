@@ -79,10 +79,7 @@ test('entity activation coalesces pending selections and never retries a superse
   (await nextRequest()).accept();
   const lastPrompt = await nextRequest();
   assert.equal(lastPrompt.patch.mediaChatPrompts!.defaultPresetId, 'a');
-  assert.deepEqual(
-    lastPrompt.patch.mediaChatPrompts!.presets,
-    state.settings.mediaChatPrompts.presets,
-  );
+  assert.deepEqual(lastPrompt.patch.mediaChatPrompts!.presets, state.settings.mediaChatPrompts.presets);
   lastPrompt.accept();
   await Promise.all([prompt, backToDefault]);
   assert.equal(state.settings.mediaChatPrompts.defaultPresetId, 'a');

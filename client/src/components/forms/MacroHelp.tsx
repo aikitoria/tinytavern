@@ -13,10 +13,7 @@ const BASIC: [string, string][] = [
 ];
 
 const TEMPLATE: [string, string][] = [
-  [
-    '{{system}}',
-    'Resolved system prompt: character custom → character preset → global default preset',
-  ],
+  ['{{system}}', 'Resolved system prompt: character custom → character preset → global default preset'],
   ['{{personality}}', "The character's personality text"],
   ['{{persona}}', "The persona's description text"],
   ['{{scenario}}', "The conversation override, otherwise the character's scenario text"],
@@ -38,8 +35,7 @@ export default function MacroHelp(props: {
   let root: HTMLSpanElement | undefined;
   let trigger: HTMLButtonElement | undefined;
 
-  const rows = () =>
-    props.rows ?? [...(props.template ? [...BASIC, ...TEMPLATE] : BASIC), ...(props.extra ?? [])];
+  const rows = () => props.rows ?? [...(props.template ? [...BASIC, ...TEMPLATE] : BASIC), ...(props.extra ?? [])];
 
   return (
     <span class="align-text-bottom ml-2 inline-flex relative" ref={root}>
@@ -67,9 +63,7 @@ export default function MacroHelp(props: {
         anchorInset={-VIEWPORT_GUTTER}
         gap={CARD_GAP}
       >
-        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">
-          Available macros
-        </div>
+        <div class="text-foreground mb-0.5 col-span-full font-semibold text-caption">Available macros</div>
         <For each={rows()}>
           {([macro, description]) => (
             <div class="contents text-dim text-caption [&_code]:font-code [&_code]:text-xs [&_code]:text-accent [&_code]:whitespace-nowrap [&_span]:text-caption [&_span]:text-dim [&_span]:leading-hint">

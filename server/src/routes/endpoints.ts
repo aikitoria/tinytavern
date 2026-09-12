@@ -9,14 +9,7 @@ import { rowById } from './shared/entityUtils.ts';
 
 const PREFILL_MODES = new Set<Endpoint['prefillMode']>(['disabled', 'none', 'vllm', 'deepseek']);
 
-const REASONING_EFFORTS = new Set<ReasoningEffort>([
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'max',
-]);
+const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'max']);
 
 function publicEndpoint(endpoint: Endpoint): Endpoint {
   return { ...endpoint, apiKey: '', hasApiKey: endpoint.apiKey.length > 0 };
@@ -37,10 +30,7 @@ function baseUrl(value: string | undefined, current?: string): string {
   return text;
 }
 
-function endpointApiKey(
-  body: Record<string, unknown>,
-  current?: typeof ENTITY_FIELDS.endpoints,
-): string {
+function endpointApiKey(body: Record<string, unknown>, current?: typeof ENTITY_FIELDS.endpoints): string {
   const supplied = optionalString(body, 'apiKey');
   if (supplied !== undefined) return supplied;
   if (!current) return '';
@@ -69,8 +59,7 @@ function genParams(value: unknown, current: GenParams = {}, replace = false): Ge
     const value = numbers[i];
     if (value === undefined) continue;
     if (key === 'maxTokens') {
-      if (!Number.isInteger(value) || value < 1)
-        throw new HttpError(400, 'maxTokens must be a positive integer');
+      if (!Number.isInteger(value) || value < 1) throw new HttpError(400, 'maxTokens must be a positive integer');
     } else if (value < min || value > max) {
       throw new HttpError(400, `${key} must be between ${min} and ${max}`);
     }
@@ -78,10 +67,7 @@ function genParams(value: unknown, current: GenParams = {}, replace = false): Ge
   }
   const reasoningEffort = b.reasoningEffort;
   if (reasoningEffort !== undefined) {
-    if (
-      typeof reasoningEffort !== 'string' ||
-      !REASONING_EFFORTS.has(reasoningEffort as ReasoningEffort)
-    ) {
+    if (typeof reasoningEffort !== 'string' || !REASONING_EFFORTS.has(reasoningEffort as ReasoningEffort)) {
       throw new HttpError(400, 'reasoningEffort must be none, minimal, low, medium, high or max');
     }
     next.reasoningEffort = reasoningEffort as ReasoningEffort;
@@ -105,8 +91,7 @@ defineEntityRoutes<Endpoint>({
     folderId: referenceValue('folderId', 'endpoint_folders'),
     baseUrl: (b, cur) => baseUrl(optionalString(b, 'baseUrl'), cur?.baseUrl),
     apiKey: endpointApiKey,
-    genParams: (b, cur) =>
-      JSON.stringify(genParams(b.genParams, cur?.genParams, b.replaceGenParams === true)),
+    genParams: (b, cur) => JSON.stringify(genParams(b.genParams, cur?.genParams, b.replaceGenParams === true)),
     prefillMode: (b, cur) => prefillMode(b.prefillMode, cur?.prefillMode ?? 'none'),
   }),
   settingsRef: 'activeEndpointId',
@@ -139,10 +124,7 @@ route.get('/api/endpoints/:id/models', async ({ params }) => {
     .map((model) => (model && typeof model === 'object' ? (model as { id?: unknown }).id : null))
     .filter((id): id is string => typeof id === 'string')
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  stmt('UPDATE endpoints SET models_json = ? WHERE id = ?').run(
-    JSON.stringify(models),
-    endpoint.id,
-  );
+  stmt('UPDATE endpoints SET models_json = ? WHERE id = ?').run(JSON.stringify(models), endpoint.id);
   invalidate('endpoints');
   return models;
 });

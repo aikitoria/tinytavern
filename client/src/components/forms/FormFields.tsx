@@ -46,8 +46,7 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
     (field.ref as (value: typeof el) => void)(el);
   };
   const change = (value: Value) => props.onChange?.(value as T);
-  const inputChange = (el: HTMLInputElement) =>
-    change(typeof props.value === 'number' ? el.valueAsNumber : el.value);
+  const inputChange = (el: HTMLInputElement) => change(typeof props.value === 'number' ? el.valueAsNumber : el.value);
   let control: JSX.Element;
   if (check)
     control = (
@@ -142,10 +141,7 @@ export default function FormField<T extends Value>(props: FormFieldProps<T>) {
         {inlineControl}
         {props.label}
         <Show when={props.help}>
-          <MacroHelp
-            template={props.help === 'template'}
-            rows={Array.isArray(props.help) ? props.help : undefined}
-          />
+          <MacroHelp template={props.help === 'template'} rows={Array.isArray(props.help) ? props.help : undefined} />
         </Show>
       </SettingLabel>
       {afterControl}
@@ -162,9 +158,7 @@ export function createFormFields<D extends Record<string, string | boolean>>(def
   const fields = Object.fromEntries(
     Object.entries(defaults).map(([key, value]) => [
       key,
-      typeof value === 'boolean'
-        ? createDefaultField(() => value)
-        : createDefaultField(() => value),
+      typeof value === 'boolean' ? createDefaultField(() => value) : createDefaultField(() => value),
     ]),
   ) as { [K in keyof D]: DefaultField<D[K] extends boolean ? boolean : string> };
   return {
@@ -172,9 +166,6 @@ export function createFormFields<D extends Record<string, string | boolean>>(def
     load(value?: { [K in keyof D]?: Values[K] | null } | null) {
       for (const key in defaults) fields[key].value = (value?.[key] ?? defaults[key]) as never;
     },
-    value: () =>
-      Object.fromEntries(
-        Object.entries(fields).map(([key, field]) => [key, field.value]),
-      ) as Values,
+    value: () => Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.value])) as Values,
   };
 }

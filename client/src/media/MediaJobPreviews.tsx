@@ -10,12 +10,7 @@ const tileClass =
 const captionClass =
   'media-job-preview-label absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 py-0.5 px-1 text-white text-micro';
 
-function PendingPreview(props: {
-  job: MediaJob;
-  active: boolean;
-  disabled: boolean;
-  onOpen: () => void;
-}) {
+function PendingPreview(props: { job: MediaJob; active: boolean; disabled: boolean; onOpen: () => void }) {
   const video = createMemo(() => {
     const preview = props.job.progress?.videoPreview;
     return preview && Object.values(preview.frames).some(Boolean) ? preview : undefined;
@@ -36,10 +31,7 @@ function PendingPreview(props: {
           <Show
             when={props.active && image()}
             fallback={
-              <FontAwesomeIcon
-                icon={Boolean(props.job.progress?.videoPreview) ? faVideo : faImage}
-                size={24}
-              />
+              <FontAwesomeIcon icon={Boolean(props.job.progress?.videoPreview) ? faVideo : faImage} size={24} />
             }
           >
             {(src) => <img src={src()} alt="Live preview" decoding="async" />}
@@ -95,20 +87,10 @@ export default function MediaJobPreviews(props: {
             aria-label={`Open job for variation ${index() + 1}`}
           >
             <Show
-              when={
-                result.asset.thumbnail ??
-                (result.asset.kind === 'image' ? result.asset.url : undefined)
-              }
-              fallback={
-                <FontAwesomeIcon
-                  icon={result.asset.kind === 'video' ? faVideo : faImage}
-                  size={24}
-                />
-              }
+              when={result.asset.thumbnail ?? (result.asset.kind === 'image' ? result.asset.url : undefined)}
+              fallback={<FontAwesomeIcon icon={result.asset.kind === 'video' ? faVideo : faImage} size={24} />}
             >
-              {(src) => (
-                <img src={src()} alt={`Variation ${index() + 1}`} loading="lazy" decoding="async" />
-              )}
+              {(src) => <img src={src()} alt={`Variation ${index() + 1}`} loading="lazy" decoding="async" />}
             </Show>
             <span class={captionClass}>Variation {index() + 1}</span>
           </button>
@@ -116,12 +98,7 @@ export default function MediaJobPreviews(props: {
       </For>
       <For each={props.pending}>
         {(job) => (
-          <PendingPreview
-            job={job}
-            active={props.active}
-            disabled={props.disabled}
-            onOpen={() => props.onOpen(job)}
-          />
+          <PendingPreview job={job} active={props.active} disabled={props.disabled} onOpen={() => props.onOpen(job)} />
         )}
       </For>
       <Show when={!props.results.length && !props.pending.length}>

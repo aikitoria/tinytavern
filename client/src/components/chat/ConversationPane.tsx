@@ -48,10 +48,7 @@ export default function ConversationPane(props: ConversationView & { showViewCon
         <Show
           when={props.session.state.viewMode === 'map'}
           fallback={
-            <Show
-              when={props.session.messageSelectionActive()}
-              fallback={<Composer text={text()} onText={setText} />}
-            >
+            <Show when={props.session.messageSelectionActive()} fallback={<Composer text={text()} onText={setText} />}>
               <MessageSelectionBar />
             </Show>
           }

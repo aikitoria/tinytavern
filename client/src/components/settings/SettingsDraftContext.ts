@@ -6,9 +6,7 @@ export interface SettingsDraft {
   read: () => Record<string, unknown>;
   /** Changes even when leaving and reopening the same entity or new draft. */
   identity?: () => unknown;
-  exportRead?: (
-    fields: readonly string[],
-  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  exportRead?: (fields: readonly string[]) => Record<string, unknown> | Promise<Record<string, unknown>>;
   write: (value: Record<string, unknown>) => void;
   onError: (message: string) => void;
 }

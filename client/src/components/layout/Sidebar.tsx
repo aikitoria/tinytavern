@@ -42,9 +42,7 @@ interface ConvGroup {
 export default function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = createSignal(false);
   const [newChatQuery, setNewChatQuery] = createSignal('');
-  const [collapsedCharacterFolders, setCollapsedCharacterFolders] = createSignal<
-    ReadonlySet<number>
-  >(new Set());
+  const [collapsedCharacterFolders, setCollapsedCharacterFolders] = createSignal<ReadonlySet<number>>(new Set());
   const [query, setQuery] = createSignal('');
   const [results, setResults] = createSignal<SearchResult[] | null>(null);
   const [conversationMenu, setConversationMenu] = createSignal<Conversation | null>(null);
@@ -164,12 +162,7 @@ export default function Sidebar() {
     return groups;
   });
 
-  const ConvItem = (props: {
-    conv: Conversation;
-    snippet?: string | null;
-    expanded?: boolean;
-    grouped?: boolean;
-  }) => {
+  const ConvItem = (props: { conv: Conversation; snippet?: string | null; expanded?: boolean; grouped?: boolean }) => {
     let menuButton: HTMLButtonElement | undefined;
     onCleanup(() => {
       if (conversationMenuButton === menuButton) setConversationMenu(null);
@@ -189,10 +182,7 @@ export default function Sidebar() {
           aria-current={props.conv.id === state.selectedId ? 'page' : undefined}
         >
           <Show when={!props.grouped}>
-            <Show
-              when={characterOf(props.conv.characterId)}
-              fallback={<span class="avatar avatar-fallback">A</span>}
-            >
+            <Show when={characterOf(props.conv.characterId)} fallback={<span class="avatar avatar-fallback">A</span>}>
               {(character) => <Avatar src={character().avatarThumbnail} name={character().name} />}
             </Show>
           </Show>
@@ -239,12 +229,8 @@ export default function Sidebar() {
 
   const CharacterChoice = (props: { character: Character; child?: boolean }) => (
     <div class="flex items-center gap-1 [&>button:first-child]:flex-1 [&>button:first-child]:min-w-0">
-      <button
-        classList={{ 'new-chat-folder-child': props.child }}
-        onClick={() => create(props.character.id)}
-      >
-        <Avatar src={props.character.avatarThumbnail} name={props.character.name} />{' '}
-        {props.character.name}
+      <button classList={{ 'new-chat-folder-child': props.child }} onClick={() => create(props.character.id)}>
+        <Avatar src={props.character.avatarThumbnail} name={props.character.name} /> {props.character.name}
       </button>
       <ReferenceEditButton
         label={props.character.name}
@@ -376,9 +362,7 @@ export default function Sidebar() {
             </Show>
           )}
         </For>
-        <For each={rootCharacters()}>
-          {(character) => <CharacterChoice character={character} />}
-        </For>
+        <For each={rootCharacters()}>{(character) => <CharacterChoice character={character} />}</For>
         <Show when={searchActive() && matchingCharacterCount() === 0}>
           <p class="hint py-1 px-2">No matches.</p>
         </Show>
@@ -400,21 +384,14 @@ export default function Sidebar() {
                 {(group) => (
                   <section class="conv-group [&:first-child_.conv-group-head]:mt-0 [&_.conv-item]:ml-3 [&_.conv-item]:pl-5 [&_.conv-item]:relative [&_.conv-item::before]:absolute [&_.conv-item::before]:left-1.5 [&_.conv-item::before]:h-2 [&_.conv-item::before]:top-[calc(50%_-_7px)] [&_.conv-item::before]:w-[7px]">
                     <div class="conv-group-head select-none flex items-center gap-2 mt-2 p-2 pb-1">
-                      <Show
-                        when={group.character}
-                        fallback={<span class="avatar avatar-fallback">A</span>}
-                      >
-                        {(character) => (
-                          <Avatar src={character().avatarThumbnail} name={character().name} />
-                        )}
+                      <Show when={group.character} fallback={<span class="avatar avatar-fallback">A</span>}>
+                        {(character) => <Avatar src={character().avatarThumbnail} name={character().name} />}
                       </Show>
                       <span class="truncate text-dim text-xs font-semibold">
                         {group.character?.name ?? 'No character'}
                       </span>
                     </div>
-                    <For each={group.conversations}>
-                      {(conv) => <ConvItem conv={conv} grouped />}
-                    </For>
+                    <For each={group.conversations}>{(conv) => <ConvItem conv={conv} grouped />}</For>
                   </section>
                 )}
               </For>
@@ -426,9 +403,7 @@ export default function Sidebar() {
               <Show when={found().length === 0}>
                 <p class="hint py-1 px-2">No matches.</p>
               </Show>
-              <For each={found()}>
-                {(r) => <ConvItem conv={r.conversation} snippet={r.snippet} expanded />}
-              </For>
+              <For each={found()}>{(r) => <ConvItem conv={r.conversation} snippet={r.snippet} expanded />}</For>
             </>
           )}
         </Show>

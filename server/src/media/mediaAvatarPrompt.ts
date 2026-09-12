@@ -14,8 +14,7 @@ import { getSettings } from '../settings/settingsStore.ts';
 export function parseAvatarContext(value: unknown): MediaAvatarContext | null {
   if (value === null) return null;
   const raw = requireObject(value, 'avatar context');
-  if (raw.kind !== 'character' && raw.kind !== 'persona')
-    throw new HttpError(400, 'Invalid avatar context');
+  if (raw.kind !== 'character' && raw.kind !== 'persona') throw new HttpError(400, 'Invalid avatar context');
   const context: MediaAvatarContext = {
     kind: raw.kind,
     id: positiveId(String(raw.id), 'avatar ID'),
@@ -39,9 +38,7 @@ export function avatarPrompt(context: MediaAvatarContext): {
   const row = avatarEntity(context);
   const settings = getSettings();
   const selection = settings.imageGeneration.promptPresets?.avatar;
-  const preset = selection?.active
-    ? selection.presets.find((item) => item.name === selection.active)
-    : undefined;
+  const preset = selection?.active ? selection.presets.find((item) => item.name === selection.active) : undefined;
   if (selection?.active && !preset?.context?.trim())
     throw new HttpError(400, 'Select an avatar preset with a user message template');
   return {

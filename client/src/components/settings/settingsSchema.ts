@@ -43,9 +43,7 @@ export function entitySettingsSchema(type: keyof typeof ENTITY_FIELDS): Settings
     }),
     ...(type === 'personas' ? { avatarData: settingsNullable(settingsText) } : {}),
     ...(type === 'characters'
-      ? Object.fromEntries(
-          Object.entries(template).map(([key, codec]) => [`customTemplate.${key}`, codec]),
-        )
+      ? Object.fromEntries(Object.entries(template).map(([key, codec]) => [`customTemplate.${key}`, codec]))
       : {}),
   };
 }
@@ -54,9 +52,7 @@ export function entitySettingsSchema(type: keyof typeof ENTITY_FIELDS): Settings
 export function exportEntityDraft(type: TransferEntity, data: Record<string, unknown>) {
   return entityTransferData(type, {
     ...data,
-    ...(data.folderId === undefined
-      ? {}
-      : { folderId: entitySettingsSchema(type).folderId!.encode(data.folderId) }),
+    ...(data.folderId === undefined ? {} : { folderId: entitySettingsSchema(type).folderId!.encode(data.folderId) }),
   });
 }
 export function importEntityDraft(type: TransferEntity, data: unknown) {

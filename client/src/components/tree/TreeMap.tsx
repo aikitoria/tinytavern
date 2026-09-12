@@ -3,16 +3,7 @@ import { createPanZoom } from '../../panZoom.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
 import { faCrosshairs, faExpand, faMinus, faPlus } from '@fortawesome/free-solid-svg-icons';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
-import {
-  For,
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  onMount,
-} from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from 'solid-js';
 import type { Message } from '@tinytavern/shared';
 import { api } from '../../state/api.ts';
 
@@ -121,9 +112,7 @@ export default function TreeMap(props: { active?: boolean }) {
         .map((message) => message.id),
     );
     // Token updates within an existing match must not reset the user's camera.
-    return previous &&
-      previous.size === matches.size &&
-      [...matches].every((id) => previous.has(id))
+    return previous && previous.size === matches.size && [...matches].every((id) => previous.has(id))
       ? previous
       : matches;
   });
@@ -206,12 +195,7 @@ export default function TreeMap(props: { active?: boolean }) {
     return ordered().filter((message) => {
       const p = pos.get(message.id);
       if (!p) return false;
-      return (
-        p.x + CARD_W >= rect.x0 - mx &&
-        p.x <= rect.x1 + mx &&
-        p.y + CARD_H >= rect.y0 - my &&
-        p.y <= rect.y1 + my
-      );
+      return p.x + CARD_W >= rect.x0 - mx && p.x <= rect.x1 + mx && p.y + CARD_H >= rect.y0 - my && p.y <= rect.y1 + my;
     });
   });
 
@@ -308,10 +292,7 @@ export default function TreeMap(props: { active?: boolean }) {
     const vp = viewport();
     if (!vp.w || !vp.h || !w || !h) return;
     const pad = 40;
-    camera.scale = Math.min(
-      maxScale,
-      Math.max(FIT_MIN_SCALE, Math.min((vp.w - 2 * pad) / w, (vp.h - 2 * pad) / h)),
-    );
+    camera.scale = Math.min(maxScale, Math.max(FIT_MIN_SCALE, Math.min((vp.w - 2 * pad) / w, (vp.h - 2 * pad) / h)));
     camera.x = (vp.w - w * camera.scale) / 2 - left * camera.scale;
     camera.y = (vp.h - h * camera.scale) / 2 - top * camera.scale;
     apply();
@@ -329,15 +310,11 @@ export default function TreeMap(props: { active?: boolean }) {
   };
 
   const centerActive = () => {
-    const p =
-      state.tree.activeLeafId != null ? positions().get(state.tree.activeLeafId) : undefined;
+    const p = state.tree.activeLeafId != null ? positions().get(state.tree.activeLeafId) : undefined;
     const vp = viewport();
     if (!p || !vp.w || !vp.h) return;
     // A followed stream must show the full card, including its scrolling body.
-    if (
-      camera.scale < MINI_SCALE &&
-      state.tree.messages[state.tree.activeLeafId!]?.status === 'streaming'
-    ) {
+    if (camera.scale < MINI_SCALE && state.tree.messages[state.tree.activeLeafId!]?.status === 'streaming') {
       fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
       return;
     }
@@ -364,8 +341,7 @@ export default function TreeMap(props: { active?: boolean }) {
     void activate(message).then((ok) => {
       if (ok) {
         setState('viewMode', 'chat');
-        if (!conversationView.embedded)
-          writePageLocation({ ...readPageLocation(), viewMode: undefined });
+        if (!conversationView.embedded) writePageLocation({ ...readPageLocation(), viewMode: undefined });
       }
     });
   };
@@ -487,12 +463,7 @@ export default function TreeMap(props: { active?: boolean }) {
 
   const onWheel = (e: WheelEvent) => {
     // Keep ordinary wheel gestures inside full cards; background/modifier gestures zoom.
-    if (
-      !e.ctrlKey &&
-      !e.metaKey &&
-      (e.target as Element).closest('.treemap-card:not(.treemap-card-mini)')
-    )
-      return;
+    if (!e.ctrlKey && !e.metaKey && (e.target as Element).closest('.treemap-card:not(.treemap-card-mini)')) return;
     e.preventDefault();
     zoomAt(e.clientX, e.clientY, camera.scale * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
   };
@@ -527,11 +498,7 @@ export default function TreeMap(props: { active?: boolean }) {
       fitBounds(p.x, p.y, CARD_W, CARD_H, 1);
       return;
     }
-    if (
-      !active ||
-      ordered().length <= 8 ||
-      Math.min((vp.w - 80) / b.w, (vp.h - 80) / b.h) >= MINI_SCALE
-    ) {
+    if (!active || ordered().length <= 8 || Math.min((vp.w - 80) / b.w, (vp.h - 80) / b.h) >= MINI_SCALE) {
       fitBounds(0, 0, b.w, b.h, 1);
       return;
     }
@@ -623,11 +590,7 @@ export default function TreeMap(props: { active?: boolean }) {
       on:touchend={onTouchEnd}
       on:touchcancel={onTouchEnd}
     >
-      <canvas
-        ref={edgesCanvas}
-        class="inset-0 pointer-events-none size-full absolute"
-        aria-hidden="true"
-      />
+      <canvas ref={edgesCanvas} class="inset-0 pointer-events-none size-full absolute" aria-hidden="true" />
       <div ref={content} class="top-0 left-0 origin-top-left absolute">
         <For each={visibleMessages()}>
           {(message) => (
@@ -638,9 +601,7 @@ export default function TreeMap(props: { active?: boolean }) {
                 'treemap-card-mini': view().scale < MINI_SCALE,
                 'treemap-search-match': searchMatches()?.has(message.id) ?? false,
                 'treemap-search-dimmed':
-                  searchMatches() !== null &&
-                  !searchMatches()!.has(message.id) &&
-                  message.id !== searchParent(),
+                  searchMatches() !== null && !searchMatches()!.has(message.id) && message.id !== searchParent(),
                 'treemap-on-path': activeIds().has(message.id),
                 'treemap-active-leaf': message.id === state.tree.activeLeafId,
               }}
@@ -659,9 +620,7 @@ export default function TreeMap(props: { active?: boolean }) {
                     class="overflow-hidden h-full leading-snippet p-[0.66em]"
                     style={{ 'font-size': `${Math.min(12 / view().scale, 240)}px` }}
                   >
-                    <span class="treemap-mini-snippet text-dim line-clamp-2">
-                      {snippet(message, mapSearchQuery())}
-                    </span>
+                    <span class="treemap-mini-snippet text-dim line-clamp-2">{snippet(message, mapSearchQuery())}</span>
                   </div>
                 }
               >
@@ -678,12 +637,7 @@ export default function TreeMap(props: { active?: boolean }) {
         <button class="icon-btn" title="Zoom in" aria-label="Zoom in" onClick={() => zoomStep(1.3)}>
           <FontAwesomeIcon icon={faPlus} size={12} />
         </button>
-        <button
-          class="icon-btn"
-          title="Zoom out"
-          aria-label="Zoom out"
-          onClick={() => zoomStep(1 / 1.3)}
-        >
+        <button class="icon-btn" title="Zoom out" aria-label="Zoom out" onClick={() => zoomStep(1 / 1.3)}>
           <FontAwesomeIcon icon={faMinus} size={12} />
         </button>
         <button
@@ -694,12 +648,7 @@ export default function TreeMap(props: { active?: boolean }) {
         >
           {Math.round(view().scale * 100)}%
         </button>
-        <button
-          class="icon-btn"
-          title="Fit the whole tree"
-          aria-label="Fit whole tree"
-          onClick={fit}
-        >
+        <button class="icon-btn" title="Fit the whole tree" aria-label="Fit whole tree" onClick={fit}>
           <FontAwesomeIcon icon={faExpand} size={16} />
         </button>
         <button
