@@ -44,6 +44,8 @@ Keep one direct regression per meaningful invariant; use feature tests for combi
 
 Only for a requested deployment or new installation:
 
+Use `./scripts/deploy.sh` for both stacks: concurrent builds, sequential deployment and HTTPS health checks. It reads the local certificate identity; `DEPLOY_HOST` can override it. For an individual stack:
+
 ```sh
 ./scripts/init-caddy.sh --media-dirs
 # Production
