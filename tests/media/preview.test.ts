@@ -145,7 +145,10 @@ test('media latency', async () => {
     for (const mode of ['render', 'prepare-and-render', 'prepare-then-render', 'video']) {
       const job = createMediaJob({
         requestKey: testRequestKey(mode),
-        workflowId: mode === 'video' ? 'video' : workflow.id,
+        workflowId:
+          mode === 'video'
+            ? getSettings().mediaRendering.workflows.find((item) => item.name === 'Video')!.id
+            : workflow.id,
         prompt: 'Image prompt',
         instruction: 'Create an image',
         destination: 'gallery',

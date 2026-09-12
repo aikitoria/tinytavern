@@ -28,7 +28,31 @@ export function parseImageGenerationSettings(
       )) {
         if (kind !== 'avatar')
           throw new Error('Media prompt presets are configured in the media prompt library');
-        promptPresets[kind] = importImagePromptSet(set, { presets: [], active: '' }, true);
+        const parsed = importImagePromptSet(set, { presets: [], active: '' }, true);
+        const raw = requireObject(set, 'Avatar presets');
+        const incoming = raw.presets as { id?: string; name: string }[];
+        for (const preset of parsed.presets) {
+          const id = incoming.find((item) => item.name === preset.name)?.id;
+          if (id !== undefined) {
+            if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id))
+              throw new Error('Invalid avatar preset ID');
+            preset.id = id;
+          }
+        }
+        if (
+          raw.activeId !== undefined &&
+          raw.activeId !== null &&
+          (typeof raw.activeId !== 'string' ||
+            !parsed.presets.some((item) => item.id === raw.activeId))
+        ) {
+          throw new Error('Invalid active avatar preset ID');
+        }
+        const ids = parsed.presets.flatMap((item) => (item.id ? [item.id] : []));
+        if (new Set(ids).size !== ids.length) throw new Error('Duplicate avatar preset ID');
+        promptPresets[kind] = {
+          ...parsed,
+          ...(Object.hasOwn(raw, 'activeId') ? { activeId: raw.activeId as string | null } : {}),
+        };
       }
       settings.promptPresets = promptPresets;
     } catch (err) {

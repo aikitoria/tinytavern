@@ -11,6 +11,7 @@ export default function MediaResultDetails(props: {
   onCopy: (text: string) => void;
   onUseInstruction?: () => void;
   onUsePrompt?: () => void;
+  onUseSeed?: () => void;
   onClose: () => void;
 }) {
   const fields = [
@@ -19,9 +20,7 @@ export default function MediaResultDetails(props: {
   ];
   return (
     <Modal
-      title={
-        props.variation === undefined ? 'Result details' : `Variation ${props.variation} details`
-      }
+      title={props.variation === undefined ? 'Details' : `Variation ${props.variation} details`}
       class="h-auto overflow-hidden [&_.modal-head]:flex-none [&_.modal-body]:flex [&_.modal-body]:flex-col [&_.modal-body]:gap-3 [&_.modal-body]:min-h-0 [&_.hint]:m-0 phone:[&_.modal-body]:p-2 w-full max-w-190 max-h-[min(calc(100dvh_-_40px),_900px)]"
       onClose={props.onClose}
     >
@@ -33,7 +32,17 @@ export default function MediaResultDetails(props: {
           <dt>Workflow</dt>
           <dd>{props.workflow.name}</dd>
           <dt>Seed</dt>
-          <dd>{props.workflow.seed ?? 'Unavailable'}</dd>
+          <dd class="flex items-center gap-2 flex-wrap">
+            <span>{props.workflow.seed ?? 'Unavailable'}</span>
+            <Show when={props.workflow.seed != null}>
+              <button onClick={() => props.onCopy(String(props.workflow.seed))}>Copy</button>
+              <Show when={props.onUseSeed}>
+                <button disabled={props.disabled} onClick={() => props.onUseSeed?.()}>
+                  Use in editor
+                </button>
+              </Show>
+            </Show>
+          </dd>
           <For each={props.workflow.parameters}>
             {(parameter) => (
               <>

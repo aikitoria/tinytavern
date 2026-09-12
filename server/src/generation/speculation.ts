@@ -39,13 +39,13 @@ export function cancelBackgroundSwipe(conversationId: number): boolean {
   return true;
 }
 
-/** Ensures the active assistant reply has one unread sibling ready or in progress. */
+/** Main chats keep one unread sibling ready; media prompt replies are generated on demand. */
 export function prepareNextSwipe(messageId: number, retryAttempt = 0): void {
   const message = getMessage(messageId);
   if (!message || message.role !== 'assistant') return;
   if (!hasConversationSubscribers(message.conversationId)) return;
   const conversation = getConversation(message.conversationId);
-  if (conversation.activeLeafId !== message.id) return;
+  if (conversation.promptMode === 'media' || conversation.activeLeafId !== message.id) return;
   const settings = getSettings();
   if (!settings.backgroundSwipeGeneration) return;
   const parallel =

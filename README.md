@@ -32,7 +32,11 @@ To require sign-in, set a password under **Settings → General**.
 Set your ComfyUI address under **Settings → Generation settings**, then add a workflow
 exported in API format under **Settings → Workflows**.
 Open **Gallery → Tools → Generate media**, choose a workflow, and add any input images.
-Prepare a prompt or write your own, then click **Generate**. Review the variations and **Save** your favorites.
+Prepare a prompt or write your own, then click **Render**. Review the variations and **Save** your favorites.
+Under **Render settings**, leave **Seed** blank for a fresh random seed or enter a fixed seed.
+**Details** shows the seed saved with a result; copy it or use it in the editor for another render.
+Once two media results are ready, **Compare** opens them side by side. Pin a reference, browse the
+other candidates, and save either result. Videos share playback and seeking over their common duration.
 
 Text workflows return text you can copy or reuse as a prompt. When generating from a chat,
 **Add** saves the text as a message. Avatar generation uses the same model connection settings

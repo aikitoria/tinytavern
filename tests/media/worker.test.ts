@@ -325,8 +325,24 @@ test('media jobs', async () => {
         workflows: [imageWorkflow, { ...editWorkflow, json: JSON.stringify(enhancedGraph) }],
       },
     });
+    const replacement = getSettings().mediaRendering.workflows.find(
+      (item) => item.name === editWorkflow.name,
+    )!;
+    assert.notEqual(
+      replacement.id,
+      editWorkflow.id,
+      'Recreating a workflow cannot revive its deleted identity',
+    );
+    assert.throws(
+      () =>
+        createMediaJobFromAsset(edited.outputs[0]!.id, {
+          requestKey: testRequestKey('still-deleted-workflow'),
+        }),
+      /workflow no longer exists/,
+    );
     const restored = createMediaJobFromAsset(edited.outputs[0]!.id, {
       requestKey: testRequestKey('recipe-rerun'),
+      workflowId: replacement.id,
     });
     assert.equal(restored.inputs.length, 3);
     assert.equal(
@@ -334,7 +350,7 @@ test('media jobs', async () => {
       editInstruction,
       'Rerun restores the instruction after job deletion',
     );
-    assert.equal(restored.workflowId, editWorkflow.id);
+    assert.equal(restored.workflowId, replacement.id);
     editMediaJob(requireMediaJob(restored.id), { prompt: 'A changed edit prompt' });
     startMediaJob(requireMediaJob(restored.id), {}, false);
     const restoredResult = await waitFor(restored.id, 'succeeded');
@@ -382,7 +398,7 @@ test('media jobs', async () => {
       'done',
     );
     stmt('UPDATE messages SET images_json = ? WHERE id = ?').run(
-      JSON.stringify([edited.outputs[0]!.url]),
+      JSON.stringify([restoredResult.outputs[0]!.url]),
       message.id,
     );
     const uploadsBeforeSwipe = uploads.length;

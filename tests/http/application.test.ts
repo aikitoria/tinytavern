@@ -591,6 +591,13 @@ test('application HTTP and WebSocket contracts', async () => {
             workflows: [...previous.mediaRendering.workflows, avatarWorkflow, textWorkflow],
           },
         });
+        const stored = await request<Settings>('GET', '/api/settings');
+        avatarWorkflow.id = stored.mediaRendering.workflows.find(
+          (item) => item.name === avatarWorkflow.name,
+        )!.id;
+        textWorkflow.id = stored.mediaRendering.workflows.find(
+          (item) => item.name === textWorkflow.name,
+        )!.id;
         const character = await request<{ id: number }>('POST', '/api/characters', {
           name: 'Avatar HTTP subject',
           personality: 'Authoritative avatar description',
@@ -720,6 +727,13 @@ test('application HTTP and WebSocket contracts', async () => {
             ],
           },
         });
+        const stored = await request<Settings>('GET', '/api/settings');
+        workflow.id = stored.mediaRendering.workflows.find(
+          (item) => item.name === workflow.name,
+        )!.id;
+        const restartPresetId = stored.mediaStandalonePrompts.presets.find(
+          (item) => item.name === 'Restart discussion',
+        )!.id;
         const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
         const uploadReference = async (prompt: string) => {
           const response = await fetch(base + '/api/gallery/upload', {
@@ -850,7 +864,7 @@ test('application HTTP and WebSocket contracts', async () => {
         job = await request<MediaJob>('PATCH', `/api/media/jobs/${job.id}`, {
           expectedRevision: job.revision,
           instruction: 'Use the new image',
-          presetId: 'restart-discussion',
+          presetId: restartPresetId,
           inputs: [{ slot: 'input1', assetId: nextReference.media.id }],
         });
         const beforeRestart = await tree(media.id);
@@ -1156,7 +1170,28 @@ test('application HTTP and WebSocket contracts', async () => {
     const reset = await request<Settings>('PUT', '/api/settings', resetBody);
     assert.deepEqual(reset, {
       ...DEFAULT_SETTINGS,
-      imageGeneration: resetBody.imageGeneration,
+      imageGeneration: {
+        ...resetBody.imageGeneration,
+        promptPresets: { avatar: { presets: [], active: '', activeId: null } },
+      },
+      mediaChatPrompts: {
+        ...DEFAULT_SETTINGS.mediaChatPrompts,
+        presets: DEFAULT_SETTINGS.mediaChatPrompts.presets.map((preset) => ({
+          ...preset,
+          id: reset.mediaChatPrompts.presets.find((item) => item.name === preset.name)!.id,
+          folderId: null,
+          revision: 0,
+        })),
+      },
+      mediaStandalonePrompts: {
+        ...DEFAULT_SETTINGS.mediaStandalonePrompts,
+        presets: DEFAULT_SETTINGS.mediaStandalonePrompts.presets.map((preset) => ({
+          ...preset,
+          id: reset.mediaStandalonePrompts.presets.find((item) => item.name === preset.name)!.id,
+          folderId: null,
+          revision: 0,
+        })),
+      },
       revision: previous.revision + 1,
       hasPassword: true,
     });

@@ -20,6 +20,15 @@ import {
 import type { GalleryCell, GalleryLayout, GalleryFolderGroup } from '../../galleryModel.ts';
 import FontAwesomeIcon from '../ui/FontAwesomeIcon.tsx';
 
+const savedTime = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const durationSeconds = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
 function GalleryVideoPreview(props: { url: string }) {
   let player!: HTMLVideoElement;
   const [playing, setPlaying] = createSignal(false);
@@ -55,6 +64,7 @@ function GalleryVideoPreview(props: { url: string }) {
 }
 
 function GalleryTile(props: {
+  workflowName?: string;
   cell: GalleryCell;
   top: number;
   height: number;
@@ -71,6 +81,20 @@ function GalleryTile(props: {
   const [failed, setFailed] = createSignal(false);
   const video = () => props.cell.item.media?.kind === 'video';
   const kind = () => (video() ? 'video' : 'image');
+  const summary = createMemo(() => {
+    const item = props.cell.item;
+    const width = item.media?.width ?? item.imageWidth;
+    const height = item.media?.height ?? item.imageHeight;
+    const duration = video() ? item.media?.duration : null;
+    return [
+      props.workflowName,
+      width && height ? `${width}×${height}` : null,
+      duration != null && duration > 0 ? `${durationSeconds.format(duration)}s` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  });
+  const saved = createMemo(() => savedTime.format(props.cell.item.createdAt));
   createEffect(() => {
     props.cell.item.media?.thumbnail;
     setFailed(false);
@@ -140,10 +164,21 @@ function GalleryTile(props: {
           </span>
         </Show>
         <span
-          class="gallery-tile-caption bottom-0 left-0 right-0 text-white opacity-0 pointer-events-none truncate absolute text-xs text-left p-2 pt-5"
+          class="gallery-tile-caption bottom-0 left-0 right-0 text-white opacity-0 pointer-events-none absolute text-xs text-left p-2 pt-5"
           aria-hidden="true"
         >
-          {props.cell.item.characterName}
+          <Show when={props.cell.item.characterName}>
+            <span class="block truncate font-semibold">{props.cell.item.characterName}</span>
+          </Show>
+          <Show when={summary()}>
+            <span class="block truncate">{summary()}</span>
+          </Show>
+          <span
+            class="block truncate text-white/70"
+            classList={{ 'pr-20': Boolean(props.onInspect) }}
+          >
+            {saved()}
+          </span>
         </span>
       </button>
       <Show when={props.onInspect}>
@@ -459,6 +494,7 @@ export default function GalleryGrid(props: {
             const cell = () => position().cell;
             return (
               <GalleryTile
+                workflowName={cell().item.workflowName ?? undefined}
                 top={position().top}
                 height={position().height}
                 cell={cell()}

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
+import { restoreLegacyMediaSchema } from '../support/legacyMediaSchema.ts';
 import { testApi } from '../support/http.ts';
 import { conversationFixture, messageFixture } from '../support/fixtures.ts';
 
@@ -282,6 +283,7 @@ test('schema baseline initializes once and rejects unsupported versions', async 
   }
   {
     using legacy = new Database(path);
+    restoreLegacyMediaSchema(legacy);
     legacy.exec(`DROP INDEX media_drafts_conversation; DROP INDEX media_jobs_prompt_message;
       ALTER TABLE media_jobs DROP COLUMN prompt_message_id;
       ALTER TABLE media_drafts DROP COLUMN conversation_id;

@@ -139,6 +139,7 @@ test('media source images', async () => {
           instruction: 'Original instruction',
           prompt: 'Saved prompt',
           workflowId: workflows[index]!.id,
+          workflowName: null,
           workflowValues: {},
           seed: index === 0 ? 0 : null,
         },

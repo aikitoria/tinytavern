@@ -97,7 +97,7 @@ async function invoke(
     }
     let body: unknown = null;
     let raw: Buffer | null = null;
-    if (req.method !== 'GET' && req.method !== 'DELETE') {
+    if (req.method !== 'GET') {
       const bytes = await readBody(req, matched.maxBodyBytes);
       if (matched.rawBody) raw = bytes;
       else if (bytes.length) {

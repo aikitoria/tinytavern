@@ -10,7 +10,7 @@ import { getConversation } from '../conversations/conversationStore.ts';
 import { appendMessage, setActiveLeaf } from '../conversations/tree.ts';
 import { requireExpectedActiveLeaf } from '../conversations/concurrency.ts';
 import { startGeneration, stopConversationGenerations } from '../generation/generation.ts';
-import { cancelSpeculativeRetries, prepareNextSwipe } from '../generation/speculation.ts';
+import { cancelSpeculativeRetries } from '../generation/speculation.ts';
 import { collectConversationImages, deleteImageFiles } from './images.ts';
 import { broadcastTree } from '../realtime/sync.ts';
 import { invalidate } from '../realtime/events.ts';
@@ -119,10 +119,7 @@ export function startMediaConversation(
   if (restart) mediaLive.delete(row.id);
   deleteImageFiles(oldImages);
   if (assistantId !== null) {
-    const mid = assistantId;
-    startGeneration(getConversation(conversationId), mid, undefined, {
-      onDone: () => prepareNextSwipe(mid),
-    });
+    startGeneration(getConversation(conversationId), assistantId);
   }
   broadcastTree(conversationId);
   publishMediaJob(row.id);

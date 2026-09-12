@@ -18,6 +18,9 @@ import type { ChatMessage } from '../generation/prompt.ts';
 import { captureMediaCharacters } from './mediaCharacters.ts';
 
 export interface MediaJobConfiguration {
+  workflowName?: string | null;
+  workflowParameters?: { label: string; value: string | number | boolean }[];
+  seedOverride?: number | null;
   avatarContext?: MediaAvatarContext | null;
   characterIds?: number[];
   sourceCharacterIds?: number[];
@@ -52,6 +55,8 @@ export interface MediaJobRow {
   state: MediaJobState;
   workflow_id: string | null;
   preset_id: string | null;
+  chat_preset_id: number | null;
+  standalone_preset_id: number | null;
   instruction: string;
   prompt: string;
   result_text: string | null;
@@ -211,6 +216,9 @@ export function mediaJobDto(row: MediaJobRow): MediaJob {
     : null;
 
   return publicMediaJob({
+    workflowName: configuration?.workflowName ?? null,
+    workflowParameters: configuration?.workflowParameters,
+    seedOverride: configuration?.seedOverride ?? null,
     avatarContext: configuration?.avatarContext ?? null,
     characterIds: configuration?.characterIds ?? captureMediaCharacters(row, configuration ?? {}),
     workflowValues: configuration?.workflowValues ?? {},
@@ -287,6 +295,18 @@ type JobPatch = Partial<Pick<MediaJobRow, (typeof PATCH_COLUMNS)[number]>>;
 const patchColumns: ReadonlySet<string> = new Set(PATCH_COLUMNS);
 export function updateMediaJob(id: number, patch: JobPatch): MediaJobRow {
   const entries = Object.entries(patch).filter(([key]) => patchColumns.has(key));
+  const preset = entries.findIndex(([key]) => key === 'preset_id');
+  if (preset >= 0) {
+    const row = requireMediaJob(id);
+    const value = entries[preset]![1];
+    const chat = row.context_conversation_id !== null || row.chat_preset_id !== null;
+    entries.splice(
+      preset,
+      1,
+      ['chat_preset_id', chat ? value : null],
+      ['standalone_preset_id', chat ? null : value],
+    );
+  }
   if (entries.length > 0) {
     const assignments = entries.map(([key]) => `${key} = ?`).join(', ');
     const values = entries.map(([, value]) => value);

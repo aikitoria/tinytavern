@@ -93,7 +93,7 @@ function normalizePromptPresets(
       typeof raw.active === 'string' && presets.some((preset) => preset.name === raw.active)
         ? raw.active
         : '';
-    return { presets, active };
+    return { presets, active, activeId: raw.activeId };
   }
 
   return { presets: [], active: '' };
@@ -184,14 +184,18 @@ function PromptPresetEditor(props: {
   const handle: PromptPresetEditorHandle = {
     get value() {
       return {
-        presets: presets().map(({ id, ...preset }) => preset),
+        presets: presets().map((preset) => ({ ...preset })),
         active: current()?.name ?? '',
+        activeId: current()?.id ?? null,
       };
     },
     set value(next: ImagePromptPresetSet) {
-      const items = next.presets.map((preset) => ({ ...preset, id: nextCollectionId([]) }));
+      const items = next.presets.map((preset) => ({
+        ...preset,
+        id: preset.id ?? nextCollectionId([]),
+      }));
       setPresets(items);
-      setSelected(items.find((preset) => preset.name === next.active)?.id ?? '');
+      setSelected(next.activeId ?? items.find((preset) => preset.name === next.active)?.id ?? '');
       collection.closeRename();
     },
   };

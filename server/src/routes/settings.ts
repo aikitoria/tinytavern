@@ -3,8 +3,6 @@ import {
   DEFAULT_SETTINGS,
   MEDIA_PROMPT_SETTINGS_KEYS,
   mediaPromptSettingsKey,
-  mediaInputSlots,
-  compileMediaWorkflow,
 } from '@tinytavern/shared';
 import { route, HttpError } from '../http/router.ts';
 import {
@@ -37,6 +35,7 @@ import {
   parseMediaRendering,
   parseMediaPrompts,
   parseMediaFavorites,
+  supportsMediaFavorite,
 } from '../media/mediaSettings.ts';
 
 route.get('/api/settings', () => getSettings());
@@ -143,15 +142,7 @@ route.put('/api/settings', ({ req, headers, body }) => {
     if (!preset && 'mediaChatPrompts' in mediaPrompts && b.mediaFavorites === undefined)
       return false;
     if (!workflow && mediaRendering !== undefined && b.mediaFavorites === undefined) return false;
-    if (
-      !preset ||
-      !('chatPrompt' in preset) ||
-      !workflow ||
-      !workflow.json.trim() ||
-      workflow.textOutputNodeId !== null ||
-      mediaInputSlots(workflow).length ||
-      !compileMediaWorkflow(workflow.json).slots.has('prompt')
-    ) {
+    if (!preset || !('chatPrompt' in preset) || !supportsMediaFavorite(workflow)) {
       throw new HttpError(
         400,
         `${favorite.name}: favorites require a chat prompt preset and a configured workflow with a prompt and no media inputs`,

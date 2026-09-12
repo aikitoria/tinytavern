@@ -36,10 +36,10 @@ export function saveMediaRecipe(
   }));
   const { comfyUrl, workflowId, timeoutSeconds, workflowValues, characterIds } = configuration;
   const inserted = stmt(`
-    INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO media_recipes(id, prompt, instruction, configuration_json, inputs_json, created_at, workflow_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET prompt = excluded.prompt, instruction = excluded.instruction,
-      configuration_json = excluded.configuration_json, inputs_json = excluded.inputs_json
+      configuration_json = excluded.configuration_json, inputs_json = excluded.inputs_json, workflow_id = excluded.workflow_id
   `).run(
     options.id ?? null,
     prompt,
@@ -47,13 +47,17 @@ export function saveMediaRecipe(
     JSON.stringify({
       comfyUrl,
       workflowId,
+      workflowName: configuration.workflowName ?? null,
+      workflowParameters: configuration.workflowParameters,
       timeoutSeconds,
       workflowValues,
       characterIds,
+      seedOverride: configuration.seedOverride,
       seed: options.seed ?? null,
     }),
     JSON.stringify(inputs),
     Date.now(),
+    workflowId,
   );
   const id = options.id ?? Number(inserted.lastInsertRowid);
   stmt("DELETE FROM media_owners WHERE owner_type = 'recipe' AND owner_id = ?").run(id);
@@ -112,6 +116,8 @@ export function getMediaAssetResultDetails(assetId: number): MediaResultDetails 
     instruction: recipe.instruction,
     prompt: recipe.prompt,
     workflowId: recipe.configuration.workflowId,
+    workflowName: recipe.configuration.workflowName ?? null,
+    workflowParameters: recipe.configuration.workflowParameters,
     workflowValues: recipe.configuration.workflowValues ?? {},
     seed: mediaRecipeSeed(recipe),
   };

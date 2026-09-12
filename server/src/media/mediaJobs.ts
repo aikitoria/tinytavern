@@ -181,11 +181,19 @@ function draftConfiguration(
   configurationJson: string | null,
   values: unknown,
   avatarContext: unknown,
+  seedOverride: unknown,
 ): string | null {
-  if (values === undefined && avatarContext === undefined && configurationJson === null)
+  if (seedOverride != null && (!Number.isSafeInteger(seedOverride) || (seedOverride as number) < 0))
+    throw new HttpError(400, 'Seed must be a whole number from 0 to 9007199254740991');
+  if (
+    values === undefined &&
+    avatarContext === undefined &&
+    seedOverride === undefined &&
+    configurationJson === null
+  )
     return null;
   const resolved = resolveJobConfiguration(workflowId, configurationJson);
-  if (values === undefined && avatarContext === undefined)
+  if (values === undefined && avatarContext === undefined && seedOverride === undefined)
     return resolved?.captured ? configurationJson : null;
   try {
     if (!resolved) {
@@ -204,7 +212,12 @@ function draftConfiguration(
         : parseAvatarContext(avatarContext);
     if (avatar && resolved.workflow.textOutputNodeId !== null)
       throw new HttpError(400, 'Avatar workflows must produce images');
-    return JSON.stringify({ ...resolved.configuration, workflowValues, avatarContext: avatar });
+    return JSON.stringify({
+      ...resolved.configuration,
+      workflowValues,
+      avatarContext: avatar,
+      seedOverride: seedOverride === undefined ? resolved.configuration.seedOverride : seedOverride,
+    });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }
@@ -227,6 +240,7 @@ export function createMediaJob(
       characterIds,
       sourceCharacterIds,
       avatarContext,
+      seedOverride,
     } = JSON.parse(configurationJson) as MediaJobConfiguration;
     configurationJson = JSON.stringify({
       comfyUrl,
@@ -236,6 +250,7 @@ export function createMediaJob(
       characterIds,
       sourceCharacterIds,
       avatarContext,
+      seedOverride,
     });
   }
   const requestKey = optionalString(body, 'requestKey');
@@ -291,7 +306,14 @@ export function createMediaJob(
     requestedWorkflow === undefined ? (source?.workflow_id ?? null) : requestedWorkflow;
   if (workflowId !== null) requireMediaWorkflow(workflowId);
   const requestedPreset = optionalNullableString(body, 'presetId');
-  const presetId = requestedPreset === undefined ? (source?.preset_id ?? null) : requestedPreset;
+  const sourceUsesChatPreset = source?.chat_preset_id != null;
+  const samePromptScope = sourceUsesChatPreset === (conversationId !== null);
+  const inheritedPreset = samePromptScope ? (source?.preset_id ?? null) : null;
+  const presetId = resolvePresetReference(
+    requestedPreset,
+    inheritedPreset,
+    conversationId !== null,
+  );
   const instruction = validateText(
     optionalString(body, 'instruction') ?? source?.instruction ?? '',
     'Instruction',
@@ -302,6 +324,7 @@ export function createMediaJob(
     configurationJson,
     body.workflowValues,
     body.avatarContext,
+    body.seedOverride,
   );
   const sourceDraft = source?.draft_id ? mediaDraft(source.draft_id) : null;
   const review = body.reviewBeforeSave === true || sourceDraft?.state === 'open';
@@ -319,13 +342,14 @@ export function createMediaJob(
       id = Number(
         stmt(`
       INSERT INTO media_jobs (
-        workflow_id, preset_id, instruction, prompt,
+        workflow_id, chat_preset_id, standalone_preset_id, instruction, prompt,
         context_conversation_id, destination, source_job_id, request_key, created_at, updated_at,
         configuration_json, draft_id, gallery_folder_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
           workflowId,
-          presetId,
+          conversationId == null ? null : presetId,
+          conversationId == null ? presetId : null,
           instruction,
           prompt,
           conversationId,
@@ -406,6 +430,26 @@ export function runMediaFavorite(favoriteId: string, body: JobBody) {
   });
 }
 
+function resolvePresetReference(
+  requested: string | null | undefined,
+  inherited: string | null,
+  chat: boolean,
+): string | null {
+  const id = requested === undefined ? inherited : requested;
+  if (id === null) {
+    return null;
+  }
+  const table = chat ? 'media_chat_prompts' : 'media_standalone_prompts';
+  if (stmt(`SELECT id FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(id)) {
+    return id;
+  }
+  // An unchanged historical selection must not block editing or rerunning its saved prompt.
+  if (id === inherited) {
+    return null;
+  }
+  throw new HttpError(400, 'The selected prompt preset is unavailable');
+}
+
 export function editMediaJob(row: MediaJobRow, body: JobBody) {
   requireEditable(row);
   const inputs =
@@ -413,11 +457,18 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
   const requestedWorkflow = optionalNullableString(body, 'workflowId');
   const workflowId = requestedWorkflow === undefined ? row.workflow_id : requestedWorkflow;
   const sameWorkflow = workflowId === row.workflow_id;
+  const requestedPreset = optionalNullableString(body, 'presetId');
+  const presetId = resolvePresetReference(
+    requestedPreset,
+    row.preset_id,
+    row.context_conversation_id !== null,
+  );
   const configurationJson = draftConfiguration(
     workflowId,
     sameWorkflow ? row.configuration_json : null,
     body.workflowValues,
     body.avatarContext,
+    body.seedOverride,
   );
   const previousPaths = stmt(`
     SELECT a.path FROM media_assets a JOIN media_owners o ON o.asset_id = a.id
@@ -431,10 +482,7 @@ export function editMediaJob(row: MediaJobRow, body: JobBody) {
     transaction(() => {
       updateMediaJob(row.id, {
         workflow_id: workflowId,
-        preset_id:
-          optionalNullableString(body, 'presetId') === undefined
-            ? row.preset_id
-            : (body.presetId as string | null),
+        preset_id: presetId,
         instruction: validateText(
           optionalString(body, 'instruction') ?? row.instruction,
           'Instruction',
@@ -706,6 +754,11 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : String(err));
   }
+  configuration.workflowName = workflow.name;
+  configuration.workflowParameters = compiled.controls.map((control) => ({
+    label: control.label,
+    value: configuration.workflowValues?.[control.key] ?? control.value,
+  }));
   configuration.characterIds = captureMediaCharacters(row, configuration);
   const context = prepare ? prepareContext(row, configuration, workflow) : {};
   const now = Date.now();
@@ -746,7 +799,7 @@ export function startMediaJob(row: MediaJobRow, body: JobBody, prepare: boolean)
         prepare || configuration.timeoutSeconds === 0
           ? null
           : now + configuration.timeoutSeconds * 1000,
-      seed: Math.floor(Math.random() * 0xffff_ffff),
+      seed: configuration.seedOverride ?? Math.floor(Math.random() * 0xffff_ffff),
     });
     syncMediaJobMessage(requireMediaJob(row.id));
   });

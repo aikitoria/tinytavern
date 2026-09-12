@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'bun:test';
 import { requireTestIsolation } from './isolation.ts';
+import { invalidateSettingsCache } from '../../server/src/settings/settingsStore.ts';
 
 requireTestIsolation();
 const { db, stmt, transaction, invalidateMediaAsset, DATA_DIR } =
@@ -41,6 +42,8 @@ function reset(): void {
   } finally {
     db.exec('PRAGMA foreign_keys = ON');
   }
+  // Fixture restoration bypasses entity writes and can restore the same settings revision.
+  invalidateSettingsCache();
   for (const entry of readdirSync(DATA_DIR)) {
     if (entry !== 'tinytavern.db') rmSync(join(DATA_DIR, entry), { recursive: true, force: true });
   }

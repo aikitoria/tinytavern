@@ -35,7 +35,7 @@ export default function MediaAssetResultDetails(props: { assetId: number; onClos
       when={result()?.details ? result() : undefined}
       fallback={
         <Modal
-          title="Result details"
+          title="Details"
           class="h-auto overflow-hidden [&_.modal-head]:flex-none [&_.modal-body]:flex [&_.modal-body]:flex-col [&_.modal-body]:gap-3 [&_.modal-body]:min-h-0 [&_.hint]:m-0 phone:[&_.modal-body]:p-2 w-full max-w-190 max-h-[min(calc(100dvh_-_40px),_900px)]"
           onClose={props.onClose}
         >
@@ -43,7 +43,7 @@ export default function MediaAssetResultDetails(props: { assetId: number; onClos
             when={result()?.error}
             fallback={
               <p class="hint" role="status">
-                Loading result details…
+                Loading details…
               </p>
             }
           >

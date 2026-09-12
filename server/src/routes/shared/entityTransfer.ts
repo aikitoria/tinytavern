@@ -214,7 +214,7 @@ export function defineEntityTransfer<T extends { id: number }>(
         if (item.avatar === null) deleteAvatarFiles('persona', id);
         else if (item.avatar !== undefined) deleteObsoleteAvatarFiles('persona', id);
       }
-      invalidate(cfg.table);
+      invalidate(type);
       invalidate(folderConfig.state);
       invalidate('settings');
       discardSpeculativeSwipes();

@@ -10,6 +10,11 @@ databaseCase('variations distinguish explicit defaults from inherited selections
   const settings = getSettings();
   putSettings({
     ...settings,
+    mediaChatPrompts: {
+      presets: [{ id: 'original-preset', name: 'Original', chatPrompt: 'Prompt' }],
+      folders: [],
+      defaultPresetId: null,
+    },
     mediaRendering: {
       ...settings.mediaRendering,
       workflows: ['original-workflow', 'new-workflow'].map((id) => ({
@@ -23,11 +28,18 @@ databaseCase('variations distinguish explicit defaults from inherited selections
       })),
     },
   });
+  const stored = getSettings();
+  const originalWorkflowId = stored.mediaRendering.workflows.find(
+    (item) => item.name === 'original-workflow',
+  )!.id;
+  const newWorkflowId = stored.mediaRendering.workflows.find(
+    (item) => item.name === 'new-workflow',
+  )!.id;
   const conversationId = conversationFixture();
   const original = createMediaJob({
     requestKey: newRequestId(),
-    workflowId: 'original-workflow',
-    presetId: 'original-preset',
+    workflowId: originalWorkflowId,
+    presetId: stored.mediaChatPrompts.presets[0]!.id,
     contextConversationId: conversationId,
     destination: 'chat',
     reviewBeforeSave: true,
@@ -52,11 +64,11 @@ databaseCase('variations distinguish explicit defaults from inherited selections
   const switched = createMediaJob(
     {
       requestKey: newRequestId(),
-      workflowId: 'new-workflow',
+      workflowId: newWorkflowId,
       presetId: null,
     },
     requireMediaJob(original.id),
   );
-  assert.equal(switched.workflowId, 'new-workflow');
+  assert.equal(switched.workflowId, newWorkflowId);
   assert.equal(switched.presetId, null);
 });

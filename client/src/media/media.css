@@ -193,3 +193,123 @@
   box-shadow: none;
   transform: none;
 }
+
+.modal.fullscreen-page.media-comparison-modal {
+  display: flex;
+  overflow: hidden;
+}
+
+.media-comparison-modal > .modal-head {
+  flex: none;
+}
+
+.media-comparison-modal > .modal-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+.media-comparison-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  flex: 1 0 16rem;
+  min-height: 16rem;
+}
+
+.media-comparison-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.media-comparison-side-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  font-size: 13px;
+}
+
+.media-comparison-side-head strong {
+  margin-right: auto;
+}
+
+.media-comparison-picture {
+  container-type: size;
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.media-comparison-picture > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.media-comparison-controls {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.media-comparison-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.media-comparison-transport input {
+  flex: 1;
+  min-width: 0;
+}
+
+.media-comparison-details {
+  flex: 0 1 35%;
+  min-height: 8rem;
+  overflow: auto;
+}
+
+.media-comparison-details table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.media-comparison-details :is(th, td) {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.media-comparison-details th:first-child {
+  width: 20%;
+}
+
+.media-comparison-details .comparison-different {
+  background: var(--bg-raised);
+}
+
+@media (max-width: 767px) {
+  .media-comparison-pair {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(12rem, 1fr));
+    flex-basis: 60dvh;
+  }
+}

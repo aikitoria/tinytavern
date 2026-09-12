@@ -500,6 +500,11 @@ async function submit(row: MediaJobRow, signal: AbortSignal): Promise<void> {
   const submissionId = randomUUID();
   const workflow = requireMediaWorkflow(config.workflowId);
   const graph = compileMediaWorkflow(workflow.json);
+  config.workflowName = workflow.name;
+  config.workflowParameters = graph.controls.map((control) => ({
+    label: control.label,
+    value: config.workflowValues?.[control.key] ?? control.value,
+  }));
   const prompt = expandMediaWorkflow(
     graph,
     {

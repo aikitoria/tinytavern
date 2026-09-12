@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'bun:test';
 import { createRoot, untrack } from 'solid-js';
+import type { ComparisonResult } from '../../client/src/media/mediaComparison.ts';
 import {
   type Conversation,
   type MediaAsset,
@@ -65,6 +66,9 @@ test('media drafts retain edits across settings, generation and ordered job snap
     cancelAnimationFrame: { configurable: true, value: () => {} },
   });
   type Control = {
+    isSaved?: (result: ComparisonResult) => boolean;
+    onSave?: (result: ComparisonResult) => Promise<void>;
+    onClose?: () => void;
     renderPrompt?: (message: Message, text?: string) => void;
     session?: { state: { selectedId: number | null; tree: { conversationId: number | null } } };
     disabled?: boolean;
@@ -88,6 +92,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
       if (props.children === 'Render') controls.set('render-media', props as Control);
       if (props.controls && props.values) controls.set('workflow-values', props as Control);
       if (props.embedded && props.session) controls.set('prompt-conversation', props as Control);
+      if (props.results && props.isSaved) controls.set('comparison', props as Control);
       return null;
     },
   }));
@@ -394,6 +399,9 @@ test('media drafts retain edits across settings, generation and ordered job snap
       value: number,
     ) => void;
     changeValue('duration', 9);
+    controls.get('media-seed')!.onInput!({
+      currentTarget: { value: '0', validity: { badInput: false } },
+    });
     controls.get('media-instruction')!.onInput!({ currentTarget: { value: 'Next instruction' } });
     controls.get('media-prompt')!.onInput!({ currentTarget: { value: 'Next prompt' } });
     applyMediaJob({ ...rendering, revision: 2 });
@@ -404,6 +412,7 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.equal(second.draft!.id, rendering.draft!.id);
     assert.equal(submitted!.workflowId, 'a');
     assert.deepEqual(submitted!.workflowValues, { duration: 9 });
+    assert.equal(submitted!.seedOverride, 0, 'Seed edits survive incoming job snapshots');
     assert.equal(submitted!.instruction, 'Next instruction');
     assert.equal(submitted!.prompt, 'Next prompt');
     assert.equal(state.mediaJobs[300]!.prompt, 'Original prompt');
@@ -413,12 +422,16 @@ test('media drafts retain edits across settings, generation and ordered job snap
     await Promise.resolve();
     await Promise.resolve();
     changeValue('duration', 12);
+    controls.get('media-seed')!.onInput!({
+      currentTarget: { value: '', validity: { badInput: false } },
+    });
     controls.get('media-prompt')!.onInput!({ currentTarget: { value: 'Third prompt' } });
     applyMediaJob({ ...rendering, revision: 3, state: 'succeeded' });
     const queueAgain = nextAction();
     controls.get('Queue another variation')!.onClick!();
     assert.equal((await queueAgain).id, 302);
     assert.deepEqual(submitted!.workflowValues, { duration: 12 });
+    assert.equal(submitted!.seedOverride, null, 'Clearing the seed restores random renders');
     assert.equal(
       submitted!.prompt,
       'Third prompt',
@@ -447,6 +460,31 @@ test('media drafts retain edits across settings, generation and ordered job snap
     assert.equal(restoredPreview.media!.jobId, 302, 'Preview navigation retains the editor anchor');
     assert.equal(restoredPreview.media!.previewJobId, 301);
     assert.equal(restoredPreview.media!.assetId, 802);
+    controls.get('Compare')!.onClick!();
+    const comparison = controls.get('comparison')!;
+    let acceptedAsset: number | undefined;
+    api.acceptMediaVariation = async (job: MediaJob, assetId: number) => {
+      acceptedAsset = assetId;
+      return {
+        ...job,
+        revision: job.revision + 1,
+        draft: { ...job.draft!, revision: job.draft!.revision + 1, savedAssetIds: [assetId] },
+      };
+    };
+    const comparedResult = {
+      job: state.mediaJobs[301]!,
+      asset: state.mediaJobs[301]!.outputs[0]!,
+      variation: 1,
+    };
+    await comparison.onSave!(comparedResult);
+    assert.equal(acceptedAsset, 801, 'Comparison saves its chosen side, not the normal preview');
+    assert(comparison.isSaved!(comparedResult));
+    comparison.onClose!();
+    assert.deepEqual(
+      parsePageLocation(location.hash),
+      restoredPreview,
+      'Closing comparison preserves the editor and normal preview',
+    );
     const retainedEditor = dialogStack.top();
     openMediaTool('a', { jobId: 301, assetId: 801 });
     assert.equal(dialogStack.top(), retainedEditor, 'Opening an output retains the working editor');

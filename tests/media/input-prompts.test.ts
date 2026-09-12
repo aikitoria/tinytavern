@@ -36,6 +36,7 @@ test('media input prompts', async () => {
   const workflows: MediaWorkflow[] = operations.map((operation) => ({
     ...imageWorkflow,
     id: operation,
+    name: operation,
     standalonePromptPresetId: operation,
     chatPromptPresetId: operation,
     json: JSON.stringify({
@@ -92,7 +93,7 @@ test('media input prompts', async () => {
     let recipeId: number | null = null;
     if (prompt !== null) {
       recipeId = saveMediaRecipe(
-        { comfyUrl: 'http://unused.invalid', workflowId: imageWorkflow.id, timeoutSeconds: 60 },
+        { comfyUrl: 'http://unused.invalid', workflowId: workflows[0]!.id, timeoutSeconds: 60 },
         [],
         prompt,
       );
@@ -136,7 +137,7 @@ test('media input prompts', async () => {
   const job = (operation: string, inputs: unknown[], contextConversationId: number | null = null) =>
     createMediaJob({
       requestKey: newRequestId(),
-      workflowId: operation,
+      workflowId: workflows.find((item) => item.name === operation)!.id,
       inputs,
       contextConversationId,
     });

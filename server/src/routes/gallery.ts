@@ -28,12 +28,16 @@ observeInvalidation((entity) => {
 });
 
 const GALLERY_SELECT = `SELECT g.*,
+  json_extract(r.configuration_json, '$.workflowId') AS workflow_id,
+  json_extract(r.configuration_json, '$.workflowName') AS workflow_name,
   (SELECT json_group_array(json_object('id', id, 'name', name)) FROM (
     SELECT c.id, c.name FROM media_assets a
     JOIN media_characters mc ON mc.asset_id = a.id
     JOIN characters c ON c.id = mc.character_id
     WHERE a.path = g.image ORDER BY c.name COLLATE NOCASE, c.id
-  )) AS characters_json FROM gallery_items g`;
+  )) AS characters_json FROM gallery_items g
+  LEFT JOIN media_assets asset ON asset.path = g.image
+  LEFT JOIN media_recipes r ON r.id = asset.recipe_id`;
 
 type GalleryRow = Record<string, unknown> & {
   image: string;

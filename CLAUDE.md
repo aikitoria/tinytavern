@@ -3,6 +3,12 @@
 `AGENTS.md` links to this file. Keep it focused on constraints and commands; read implementation details from the code.
 TinyTavern uses Bun, SQLite, SolidJS and Vite. Prioritize performance and low latency.
 
+## Code style
+
+- Write readable, idiomatic code. Do not compress multiple statements or control flow onto one line.
+- Use descriptive names, named intermediate values and focused helpers. Break up dense expressions and nested ternaries; make validation, state changes and error handling easy to follow.
+- Deduplicate shared behavior without hiding it behind overly generic abstractions. Performance optimizations must remain understandable; brevity is not a performance optimization.
+
 ## Protect live sessions
 
 - Everything runs in Docker. Never run Bun or Node on the host or install host dependencies.
@@ -59,17 +65,18 @@ Database backup: `docker compose exec tinytavern bun server/src/db/backup.ts /da
 - Server modules are grouped under `server/src/`: `db/`, `http/`, `realtime/`, `conversations/`, `generation/`, `media/` (with `comfy/` integration), `characters/` and `settings/`. HTTP endpoints live in `routes/`; reusable route helpers live in `routes/shared/`. Keep direct module imports and register routes in the root `index.ts`.
 - Shared contracts start in `shared/src/index.ts`; media contracts are in `shared/src/media.ts`. Persistent state is server-authoritative; clients retain drafts and navigation only.
 - All application SQL uses memoized `stmt()` in `server/src/db/db.ts`. Keep SQLite writes synchronous. An `await` between validation and mutation breaks guard-and-act atomicity; revalidate every precondition after unavoidable awaits.
-- Schema lives in `server/src/db/schema.ts`. Baseline version is 81; current version is 84. Add future upgrades through `migrate()` in `db.ts` and update the fresh schema, including persisted JSON, file references and ownership. Never replay seeds on existing data.
+- Schema lives in `server/src/db/schema.ts`. Baseline version is 81; current version is 85. Add future upgrades through `migrate()` in `db.ts` and update the fresh schema, including persisted JSON, file references and ownership. Never replay seeds on existing data.
 - New route modules must be imported for side effects by `server/src/index.ts`. Entity CRUD uses `defineEntityRoutes`/`createEntityWriter`; extend their field specs rather than duplicating handlers.
 - Preserve conversation active-leaf/mutation-revision guards and settings/job/draft revision guards. Protected default prompts/templates are read-only. Settings transfer excludes credentials and resolves references by name, never imported IDs.
 - Use `deleteMessageSubtrees`/`deleteConversationRows` for deletion; direct recursive cascades fail on deep trees. Repair the active path inside the transaction. `setActiveLeaf` repoints every ancestor's active child without touching conversation recency.
 - Block deletion splices children upward and removes sibling swipes; swipe deletion removes that sibling's subtree. Copies own independent media files. Read `server/src/conversations/tree.ts` before changing these operations.
 - Endpoint reasoning and assistant-message prefill capabilities are independent. When a speaker name cannot be prefilled, `/char` uses the template handoff instruction even with history name prefixes disabled. Reconstruct historical handoffs at speaker changes from saved message names.
-- Streaming buffers stay in memory and persist at completion/cancellation/failure or graceful shutdown. Guard callbacks by generation identity because continuation reuses message IDs. Preserve speculative-generation limits and cancellation on context/subscription changes.
+- Streaming buffers stay in memory and persist at completion/cancellation/failure or graceful shutdown. Guard callbacks by generation identity because continuation reuses message IDs. Speculative swipes belong only to main chats, never media conversations. Preserve speculative-generation limits and cancellation on context/subscription changes.
 - `treePatch` includes all node structure but only changed message bodies; apply parent changes too. Ordered `Message.media` is the sole live attachment array. Sign outgoing media DTOs only, never DB/export paths.
 - Reusable conversation UI reads `ConversationContext`; `conversationSession.ts` owns each view’s tree, swipes, selection, draft completion and map search. Keep session operations independent of main-chat navigation. One socket multiplexes mounted conversation subscriptions.
 - Client components are grouped under `client/src/components/`: `chat/`, `tree/`, `gallery/`, `layout/`, `settings/` (including `tabs/`), `forms/` and `ui/`. Media-specific components live in `client/src/media/`.
 - Client editors use imperative ref `.value`/`.checked`; custom Select/MacroTextarea honor that contract. Reuse shared controls, `DropdownSurface`, settings submission and Save/Discard/Cancel guards.
+- Media libraries use SQLite rows and server-assigned AUTOINCREMENT IDs. Settings DTOs project those rows for compatibility; settings JSON stores scalar preferences only. Deleted workflows and prompts retain their identities for history. Render details use captured names and parameter values.
 - Entity sidebars share `createFolderBrowser` through `EntityEditorPane`. Native folder collections use `ENTITY_FOLDERS`, validated `folderId` references and name-based transfers. Deleting a folder moves its members to the root.
 - Settings sections use `SettingsSection` and the shared field schema; editable tables use `SettingsCollectionTable`. Entity reference controls navigate through `entityReferences.ts` to a single settings pane with draft guards.
 - Routed panes stay mounted beneath child panes to retain edits and scroll. Preserve leave guards, socket identity checks, reconnect resync and authoritative swipe completion. See `state/dialogStack.ts`, `pageLocation.ts`, `uiBack.ts`, `ws.ts` and `store.ts`.

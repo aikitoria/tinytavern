@@ -161,7 +161,8 @@ test('media prompts', async () => {
     const favorite = {
       id: 'quick',
       name: 'Quick scene',
-      presetId: 'formatted',
+      presetId: getSettings().mediaChatPrompts.presets.find((item) => item.name === 'Formatted')!
+        .id,
       workflowId: workflow.id,
     };
     putSettings({ ...getSettings(), mediaFavorites: [favorite] });
@@ -176,7 +177,7 @@ test('media prompts', async () => {
     };
     const quick = runMediaFavorite(favorite.id, favoriteBody);
     assert.equal(quick.workflowId, workflow.id);
-    assert.equal(quick.presetId, 'formatted');
+    assert.equal(quick.presetId, favorite.presetId);
     assert.equal(quick.state, 'preparing');
     assert.equal(requireMediaJob(quick.id).auto_render, 1);
     const quickContext = JSON.parse(requireMediaJob(quick.id).context_json!);
@@ -214,7 +215,7 @@ test('media prompts', async () => {
     );
     const job = createMediaJob({
       requestKey: testRequestKey('snapshot'),
-      workflowId: 'video',
+      workflowId: workflow.id,
       instruction: 'Use literal {{context}} in the title',
       contextConversationId: conversationId,
       destination: 'chat',
@@ -309,7 +310,7 @@ test('media prompts', async () => {
     finishReason = 'length';
     const truncated = createMediaJob({
       requestKey: testRequestKey('truncated'),
-      workflowId: 'video',
+      workflowId: workflow.id,
       instruction: 'Move slowly',
     });
     startMediaJob(requireMediaJob(truncated.id), { autoRender: true }, true);
@@ -329,7 +330,7 @@ test('media prompts', async () => {
     holdStream = true;
     const interrupted = createMediaJob({
       requestKey: testRequestKey('cancel-prompt'),
-      workflowId: 'video',
+      workflowId: workflow.id,
       instruction: 'Move slowly',
       contextConversationId: conversationId,
       destination: 'chat',
@@ -399,6 +400,7 @@ test('media prompts', async () => {
     };
     putSettings({
       ...getSettings(),
+      mediaFavorites: [],
       mediaChatPrompts: {
         folders: [],
         defaultPresetId: null,
@@ -451,7 +453,7 @@ test('media prompts', async () => {
       },
     });
     const portrait = getSettings().mediaChatPrompts.presets.find(
-      (preset) => preset.id === 'portrait',
+      (preset) => preset.name === 'My portrait',
     )!;
     const prepareImage = async (
       key: string,
@@ -520,15 +522,15 @@ test('media prompts', async () => {
       ['wrong-instruction-type', conversationId, 'chat-image/describe'],
       ['wrong-gallery-preset', null, portrait.id],
     ] as const) {
-      const invalid = createMediaJob({
-        requestKey: testRequestKey(key),
-        contextConversationId: context,
-        reviewBeforeSave: true,
-        instruction: 'Test',
-        presetId,
-      });
       assert.throws(
-        () => startMediaJob(requireMediaJob(invalid.id), {}, true),
+        () =>
+          createMediaJob({
+            requestKey: testRequestKey(key),
+            contextConversationId: context,
+            reviewBeforeSave: true,
+            instruction: 'Test',
+            presetId,
+          }),
         { status: 400 },
         'Chat and gallery preset selections cannot cross modes',
       );
@@ -546,7 +548,7 @@ test('media prompts', async () => {
       instruction: 'Change the lighting',
     });
     editMediaJob(requireMediaJob(edit.id), {
-      workflowId: 'edit',
+      workflowId: editWorkflow.id,
       presetId: null,
       inputs: [{ assetId: sourceId, slot: 'input1' }],
     });
@@ -564,11 +566,11 @@ test('media prompts', async () => {
     );
     assert.equal(JSON.parse(editReady.context_json!).template.reasoningPrefill, 'Chat reasoning');
     assert(
-      getSettings().mediaChatPrompts.presets.some((preset) => preset.id === 'reference-style'),
+      getSettings().mediaChatPrompts.presets.some((preset) => preset.name === 'Reference style'),
     );
     const standaloneEdit = createMediaJob({
       requestKey: testRequestKey('edit-with-gallery-destination'),
-      workflowId: 'edit',
+      workflowId: editWorkflow.id,
       reviewBeforeSave: true,
       instruction: 'Change the lighting',
       inputs: [{ assetId: sourceId, slot: 'input1' }],
@@ -590,6 +592,7 @@ test('media prompts', async () => {
         workflows: [{ ...workflow, chatPromptPresetId: null }],
       },
     });
+    workflow.id = getSettings().mediaRendering.workflows[0]!.id;
     pauseReasoning = true;
     const thinking = createMediaJob({
       requestKey: testRequestKey('thinking-preview'),

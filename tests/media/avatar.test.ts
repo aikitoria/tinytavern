@@ -35,7 +35,7 @@ databaseCase('avatar workflows without a prompt do not require a text endpoint',
   });
   const job = createMediaJob({
     requestKey: newRequestId(),
-    workflowId: workflow.id,
+    workflowId: getSettings().mediaRendering.workflows[0]!.id,
     avatarContext: { kind: 'persona', id },
     reviewBeforeSave: true,
   });

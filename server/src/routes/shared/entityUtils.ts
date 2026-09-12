@@ -1,9 +1,13 @@
 import type { ENTITY_FOLDERS, FolderEntity } from '@tinytavern/shared';
 import { stmt } from '../../db/db.ts';
 import { HttpError } from '../../http/router.ts';
+import type { MediaEntityTable, MediaFolderTable } from '../../settings/mediaEntities.ts';
 
 export type EntityTable =
-  Exclude<FolderEntity, 'gallery'> | (typeof ENTITY_FOLDERS)[FolderEntity]['table'];
+  | Exclude<FolderEntity, 'gallery'>
+  | (typeof ENTITY_FOLDERS)[FolderEntity]['table']
+  | MediaEntityTable
+  | MediaFolderTable;
 
 export function rows(table: EntityTable): Record<string, unknown>[] {
   return stmt(`SELECT * FROM ${table} ORDER BY name COLLATE NOCASE, id`).all() as Record<

@@ -497,7 +497,11 @@ export function importImagePromptSet(
     if (avatar && !preset.context!.trim())
       throw new Error('Avatar presets require a context template.');
     const existing = namedItem(presets, name);
-    if (existing) presets[presets.indexOf(existing)] = preset;
+    if (existing)
+      presets[presets.indexOf(existing)] = {
+        ...preset,
+        ...(existing.id === undefined ? {} : { id: existing.id }),
+      };
     else presets.push(preset);
   }
   const active =

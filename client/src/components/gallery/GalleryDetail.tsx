@@ -213,7 +213,7 @@ export default function GalleryDetail(props: {
         <div class="flex flex-wrap justify-center gap-2 flex-none p-0 [&_button]:inline-flex [&_button]:items-center [&_button]:justify-center [&_button]:gap-1 [&_button]:h-control [&_button]:py-1 [&_button]:px-2 [&_button]:text-dim [&_button]:bg-clear [&_button]:border-transparent [&_button]:text-xs">
           <Show when={props.item.media?.recipeId}>
             <button type="button" onClick={() => setResultDetailsOpen(true)}>
-              <FontAwesomeIcon icon={faCircleInfo} size={14} /> Result details
+              <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
             </button>
           </Show>
           <button type="button" onClick={() => download(props.item.image)}>

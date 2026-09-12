@@ -8,6 +8,8 @@ export default function MediaPlayer(props: {
   active?: boolean;
   autoPlay?: boolean;
   loop?: boolean;
+  controls?: boolean;
+  muted?: boolean;
   ref?: (player: HTMLVideoElement | undefined) => void;
 }) {
   let player: HTMLVideoElement | undefined;
@@ -31,7 +33,7 @@ export default function MediaPlayer(props: {
       }
       player.load();
       if (active && props.autoPlay) {
-        player.muted = false;
+        player.muted = props.muted ?? false;
         void player.play().catch(() => {
           // Keep the native play control available if the browser blocks autoplay.
         });
@@ -68,7 +70,8 @@ export default function MediaPlayer(props: {
           width={props.asset.width ?? undefined}
           height={props.asset.height ?? undefined}
           src={props.active === false ? undefined : props.asset.url}
-          controls
+          controls={props.controls !== false}
+          muted={props.muted}
           autoplay={props.autoPlay && props.active !== false}
           loop={props.loop}
           playsinline

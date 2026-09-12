@@ -7,6 +7,8 @@ import { canFillMediaInputs } from './automaticInputs.ts';
 import { orderedMediaInputs, reconcileMediaInputSelection } from './inputSelection.ts';
 import { mergeRemoteDraft, sameValue } from '../state/editorSync.ts';
 import MediaResultDetails from './MediaResultDetails.tsx';
+import MediaComparison from './MediaComparison.tsx';
+import { comparisonKey, type ComparisonResult } from './mediaComparison.ts';
 import { resultWorkflowDetails } from './resultWorkflowDetails.ts';
 import { createStreamScroll } from '../streamScroll.ts';
 import { prepareTextareaResize } from '../textareaResize.ts';
@@ -92,6 +94,7 @@ import {
   mediaVariations,
   mediaVariationIndex,
   MEDIA_JOB_STATUS as STATUS_LABELS,
+  type MediaVariation,
 } from './jobCards.ts';
 
 const selectRowClass =
@@ -106,6 +109,7 @@ interface ToolDraft extends MediaJobDraft {
 
 function draftFromJob(job: MediaJob): ToolDraft {
   return {
+    seedOverride: job.seedOverride ?? null,
     avatarContext: job.avatarContext ?? null,
     workflowValues: { ...job.workflowValues },
     reviewBeforeSave: true,
@@ -142,6 +146,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     Object.fromEntries(session.assets.map((asset) => [asset.id, asset])),
   );
   const [draft, setDraft] = createStore<ToolDraft>({
+    seedOverride: null,
     workflowValues: {},
     reviewBeforeSave: true,
     workflowId: session.workflowId,
@@ -211,6 +216,13 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     return video && Object.values(video.frames).some(Boolean) ? video : undefined;
   };
   const candidates = createMemo(() => mediaVariations(variations()));
+  const comparisonResults = createMemo<ComparisonResult[]>(() =>
+    candidates().flatMap((item, index) =>
+      item.asset ? [{ job: item.job, asset: item.asset, variation: index + 1 }] : [],
+    ),
+  );
+  const [comparisonInitial, setComparisonInitial] = createSignal<string | null>(null);
+  const comparing = () => comparisonInitial() !== null;
   const completedCount = () =>
     candidates().filter((item) => item.asset || item.job.textResult).length;
   const pendingCount = () => variations().filter((item) => mediaJobActive(item.state)).length;
@@ -283,16 +295,18 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
   });
   const selectedWorkflow = () => workflowView().id;
   const workflowControls = createMediaWorkflowControls(() => workflowView().workflow?.json);
+  const renderSeed = () => (frozen() && job() ? (job()!.seedOverride ?? null) : draft.seedOverride);
   const renderSettingsSummary = createMemo(() =>
-    workflowControls()
-      .controls.flatMap((control) => {
+    [
+      renderSeed() == null ? 'Random' : `Seed ${renderSeed()}`,
+      ...workflowControls().controls.flatMap((control) => {
         const value = workflowView().values[control.key] ?? control.value;
         if (control.type === 'boolean') return value === true ? [control.label] : [];
         if (control.input === 'aspect_ratio') return [String(value).split(' ')[0]!];
         if (control.unit) return [`${value} ${control.unit}`];
         return [`${control.label}: ${String(value).replace(/\s+/g, ' ').slice(0, 80)}`];
-      })
-      .join(' · '),
+      }),
+    ].join(' · '),
   );
   const workflowInterface = createMemo(() => {
     try {
@@ -377,6 +391,9 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
     ),
   );
   const workflowError = createMemo(() => {
+    const seed = renderSeed();
+    if (seed != null && (!Number.isSafeInteger(seed) || seed < 0))
+      return 'Seed must be a whole number from 0 to 9007199254740991';
     if (workflowControls().error) return workflowControls().error;
     for (const control of workflowControls().controls) {
       const error = workflowInputError(
@@ -953,14 +970,14 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       ? variation
       : undefined;
   };
-  const selectedSaved = () => {
-    const variation = acceptableVariation();
+  const variationSaved = (variation: MediaVariation | undefined) => {
     return variation
       ? variation.asset
         ? savedAssetIds().includes(variation.asset.id)
         : variation.job.messageId !== null
       : false;
   };
+  const selectedSaved = () => variationSaved(acceptableVariation());
   const hasSavedResults = () =>
     savedAssetIds().length > 0 ||
     variations().some((item) => item.textResult !== null && item.messageId !== null);
@@ -971,9 +988,8 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
       toast(errorMessage(err));
     }
   };
-  const accept = async () => {
-    const variation = acceptableVariation();
-    if (!variation || selectedSaved() || !reviewing() || busy()) {
+  const accept = async (variation = acceptableVariation()) => {
+    if (!variation || variationSaved(variation) || !reviewing() || busy()) {
       return;
     }
     await perform(async () => {
@@ -1042,94 +1058,58 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
               class="gallery-detail-stage items-center flex flex-col min-w-0 min-h-0 flex-1 justify-center relative overflow-hidden gap-gallery-image p-gallery-image mobile:flex-none mobile:min-h-55 mobile:h-[calc(100dvh_-_60px)]"
               aria-label="Media preview"
             >
-              <Show when={selectedVariation()?.job.textResult}>
-                {(text) => (
-                  <div class="form-stack w-full min-h-0 overflow-auto">
-                    <pre class="whitespace-pre-wrap">{text()}</pre>
-                    <button onClick={() => void copyResultText(text())}>Copy text</button>
-                    <button
-                      disabled={
-                        busy() ||
-                        (conversationId() != null &&
-                          (!currentPromptMessage() ||
-                            currentPromptMessage()?.status === 'streaming'))
-                      }
-                      onClick={() => void usePromptText(text())}
-                    >
-                      Use as prompt
-                    </button>
-                  </div>
-                )}
-              </Show>
-              <div class="media-preview-content grid place-items-center flex-1 min-h-0 overflow-hidden w-full">
-                <Show
-                  when={hasResults()}
-                  fallback={
-                    <Show
-                      when={selectedVariation() ? undefined : sourcePreview()}
-                      fallback={
-                        <div class="m-auto p-4 text-center">
-                          <h3>Media preview</h3>
-                          <p class="hint">
-                            {selectedVariation()
-                              ? STATUS_LABELS[selectedVariation()!.job.state]
-                              : 'Your result will appear here.'}
-                          </p>
-                        </div>
-                      }
-                    >
-                      {(asset) => (
-                        <Show
-                          when={asset().kind === 'video'}
-                          fallback={
-                            <img
-                              class="media-result block object-contain w-full max-h-[100cqh]"
-                              src={asset().url}
-                              alt={sourcePreviewLabel()}
-                            />
-                          }
-                        >
-                          <MediaPlayer
-                            asset={asset()}
-                            class="media-result block object-contain w-full max-h-[100cqh]"
-                            active={paneActive() && picker() === null}
-                          />
-                        </Show>
-                      )}
-                    </Show>
-                  }
-                >
+              <Show when={!comparing()}>
+                <Show when={selectedVariation()?.job.textResult}>
+                  {(text) => (
+                    <div class="form-stack w-full min-h-0 overflow-auto">
+                      <pre class="whitespace-pre-wrap">{text()}</pre>
+                      <button onClick={() => void copyResultText(text())}>Copy text</button>
+                      <button
+                        disabled={
+                          busy() ||
+                          (conversationId() != null &&
+                            (!currentPromptMessage() ||
+                              currentPromptMessage()?.status === 'streaming'))
+                        }
+                        onClick={() => void usePromptText(text())}
+                      >
+                        Use as prompt
+                      </button>
+                    </div>
+                  )}
+                </Show>
+                <div class="media-preview-content grid place-items-center flex-1 min-h-0 overflow-hidden w-full">
                   <Show
-                    when={videoPreview() || preview()}
+                    when={hasResults()}
                     fallback={
-                      <Show when={selected()} keyed>
-                        {(candidate) => (
+                      <Show
+                        when={selectedVariation() ? undefined : sourcePreview()}
+                        fallback={
+                          <div class="m-auto p-4 text-center">
+                            <h3>Media preview</h3>
+                            <p class="hint">
+                              {selectedVariation()
+                                ? STATUS_LABELS[selectedVariation()!.job.state]
+                                : 'Your result will appear here.'}
+                            </p>
+                          </div>
+                        }
+                      >
+                        {(asset) => (
                           <Show
-                            when={candidate.asset.kind === 'video'}
+                            when={asset().kind === 'video'}
                             fallback={
-                              <button
-                                type="button"
-                                class="grid place-items-center w-full min-h-0 overflow-hidden p-0 border-0 rounded-none bg-clear cursor-zoom-in [&:hover:not(:disabled)]:bg-clear"
-                                aria-label="Open full-size image; zoom and pan"
-                                onClick={() => setFullSizeImage(candidate.asset.url)}
-                              >
-                                <img
-                                  class="media-result block object-contain w-full max-h-[100cqh]"
-                                  src={candidate.asset.url}
-                                  alt="Generated image"
-                                />
-                              </button>
+                              <img
+                                class="media-result block object-contain w-full max-h-[100cqh]"
+                                src={asset().url}
+                                alt={sourcePreviewLabel()}
+                              />
                             }
                           >
                             <MediaPlayer
-                              ref={(player) => {
-                                videoPlayer = player;
-                              }}
-                              asset={candidate.asset}
+                              asset={asset()}
                               class="media-result block object-contain w-full max-h-[100cqh]"
                               active={paneActive() && picker() === null}
-                              autoPlay
-                              loop
                             />
                           </Show>
                         )}
@@ -1137,25 +1117,63 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     }
                   >
                     <Show
-                      when={videoPreview()}
+                      when={videoPreview() || preview()}
                       fallback={
-                        <img
-                          class="media-result block object-contain w-full max-h-[100cqh]"
-                          src={preview()}
-                          alt="Generation preview"
-                        />
+                        <Show when={selected()} keyed>
+                          {(candidate) => (
+                            <Show
+                              when={candidate.asset.kind === 'video'}
+                              fallback={
+                                <button
+                                  type="button"
+                                  class="grid place-items-center w-full min-h-0 overflow-hidden p-0 border-0 rounded-none bg-clear cursor-zoom-in [&:hover:not(:disabled)]:bg-clear"
+                                  aria-label="Open full-size image; zoom and pan"
+                                  onClick={() => setFullSizeImage(candidate.asset.url)}
+                                >
+                                  <img
+                                    class="media-result block object-contain w-full max-h-[100cqh]"
+                                    src={candidate.asset.url}
+                                    alt="Generated image"
+                                  />
+                                </button>
+                              }
+                            >
+                              <MediaPlayer
+                                ref={(player) => {
+                                  videoPlayer = player;
+                                }}
+                                asset={candidate.asset}
+                                class="media-result block object-contain w-full max-h-[100cqh]"
+                                active={paneActive() && picker() === null}
+                                autoPlay
+                                loop
+                              />
+                            </Show>
+                          )}
+                        </Show>
                       }
                     >
-                      {(video) => (
-                        <VideoPreview
-                          preview={video()}
-                          active={paneActive() && picker() === null}
-                        />
-                      )}
+                      <Show
+                        when={videoPreview()}
+                        fallback={
+                          <img
+                            class="media-result block object-contain w-full max-h-[100cqh]"
+                            src={preview()}
+                            alt="Generation preview"
+                          />
+                        }
+                      >
+                        {(video) => (
+                          <VideoPreview
+                            preview={video()}
+                            active={paneActive() && picker() === null}
+                          />
+                        )}
+                      </Show>
                     </Show>
                   </Show>
-                </Show>
-              </div>
+                </div>
+              </Show>
               <Show when={selectedVariation() || (!hasResults() && sourcePreview())}>
                 <div class="flex flex-col items-center flex-none gap-2 w-full">
                   <Show when={!selectedVariation() && !hasResults() && sourcePreview()}>
@@ -1175,7 +1193,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                             })
                           }
                         >
-                          <FontAwesomeIcon icon={faCircleInfo} size={14} /> Result details
+                          <FontAwesomeIcon icon={faCircleInfo} size={14} /> Details
                         </button>
                         <button type="button" onClick={() => download(candidate().asset.url)}>
                           <FontAwesomeIcon icon={faDownload} size={14} /> Download
@@ -1233,6 +1251,16 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                         onClick={() => chooseCandidate(selectedIndex() + 1)}
                       >
                         <FontAwesomeIcon icon={faChevronRight} size={14} />
+                      </button>
+                      <button
+                        disabled={busy() || comparisonResults().length < 2}
+                        onClick={() => {
+                          const initial = selected() ?? comparisonResults().at(-1);
+                          if (initial && comparisonResults().length >= 2)
+                            setComparisonInitial(comparisonKey(initial));
+                        }}
+                      >
+                        Compare
                       </button>
                     </div>
                   </Show>
@@ -1395,7 +1423,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                     </div>
                   )}
                 </For>
-                <Show when={workflowControls().controls.length > 0}>
+                <Show when={selectedWorkflow()}>
                   <details
                     class="media-form-section media-render-settings"
                     open={renderSettingsOpen()}
@@ -1426,6 +1454,30 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       role="group"
                       aria-label="Workflow inputs"
                     >
+                      <div class="workflow-input items-center grid min-w-0 gap-y-2 gap-x-3 grid-cols-subgrid narrow-panel:grid-cols-1 [&>*]:min-w-0">
+                        <label for="media-seed">Seed</label>
+                        <input
+                          id="media-seed"
+                          type="number"
+                          min="0"
+                          max={Number.MAX_SAFE_INTEGER}
+                          step="1"
+                          placeholder="Random"
+                          value={renderSeed() ?? ''}
+                          disabled={busy() || frozen()}
+                          onInput={(event) => {
+                            const input = event.currentTarget;
+                            setDraft(
+                              'seedOverride',
+                              input.validity.badInput
+                                ? NaN
+                                : input.value === ''
+                                  ? null
+                                  : Number(input.value),
+                            );
+                          }}
+                        />
+                      </div>
                       <WorkflowInputs
                         controls={workflowControls().controls}
                         values={workflowView().values}
@@ -1562,7 +1614,7 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
                       >
                         <ConversationPane
                           session={promptSession}
-                          active={paneActive}
+                          active={() => paneActive() && !comparing()}
                           embedded
                           showViewControls={false}
                           showAvatarRail={false}
@@ -1709,6 +1761,20 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
           </div>
         </div>
       </Modal>
+      <Show when={comparing()}>
+        <MediaComparison
+          results={comparisonResults()}
+          initial={comparisonInitial() ?? undefined}
+          active={paneActive()}
+          busy={busy()}
+          error={error()}
+          workflows={workflows()}
+          isSaved={variationSaved}
+          canSave={() => reviewing()}
+          onSave={accept}
+          onClose={() => setComparisonInitial(null)}
+        />
+      </Show>
       <Show when={fullSizeImage()}>
         {(url) => <ImageViewer src={url()} onClose={() => setFullSizeImage(null)} />}
       </Show>
@@ -1721,6 +1787,11 @@ export default function MediaToolsModal(props: { session: MediaToolSession }) {
             workflow={details().workflow}
             disabled={busy() || frozen()}
             onCopy={(text) => void copyResultText(text)}
+            onUseSeed={() => {
+              setDraft('seedOverride', details().workflow.seed);
+              setRenderSettingsOpen(true);
+              setResultDetails(null);
+            }}
             onUseInstruction={
               conversationId() == null
                 ? () => {

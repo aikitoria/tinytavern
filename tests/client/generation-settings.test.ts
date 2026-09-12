@@ -100,6 +100,8 @@ test('generation sections share validation, revision guards and edits made durin
           {
             id: 'workflow',
             name: 'Edited in child',
+            revision: 0,
+            folderId: null,
             json: '{}',
             inputBindings: {},
             textOutputNodeId: null,
@@ -116,6 +118,13 @@ test('generation sections share validation, revision guards and edits made durin
     assert.equal(await guard.save(), false);
     assert.equal(request == null, true, 'Any invalid section prevents the entire submission');
     invalid = false;
+    form.setDraft((current: Settings['mediaRendering']) => ({
+      ...current,
+      workflows: current.workflows.map((item) => ({
+        ...item,
+        name: 'Renamed by generation import',
+      })),
+    }));
     const saving = guard.save();
     assert.equal(request!.mediaRendering!.jobTimeoutSeconds, 120);
     assert.equal(request!.mediaRendering!.comfyUrl, 'http://imported');
@@ -123,10 +132,39 @@ test('generation sections share validation, revision guards and edits made durin
     assert.equal(request!.imageGeneration!.promptRevisionTemplate, fields.promptRevisionTemplate);
     assert.equal(submittedRevision, settings().revision);
     fields = { ...fields, promptRevisionTemplate: 'Edited during save: {{instruction}}' };
-    resolve({ ...settings(), ...request, revision: settings().revision + 1 });
+    resolve({
+      ...settings(),
+      ...request,
+      revision: settings().revision + 1,
+      mediaRendering: {
+        ...request!.mediaRendering!,
+        workflows: request!.mediaRendering!.workflows.map((item) => ({
+          ...item,
+          revision: 1,
+          folderId: null,
+        })),
+      },
+    });
     assert.equal(await saving, false, 'New edits keep the page guarded after the response');
     assert.equal(guard.isDirty(), true);
     assert.match(fields.promptRevisionTemplate, /Edited during save/);
+    setSettings((current) => ({
+      ...current,
+      revision: current.revision + 1,
+      mediaRendering: {
+        ...current.mediaRendering,
+        workflows: current.mediaRendering.workflows.map((item) => ({
+          ...item,
+          name: 'Renamed in child',
+          revision: 2,
+        })),
+      },
+    }));
+    assert.equal(
+      form.draft().workflows[0]!.name,
+      'Renamed in child',
+      'A remote workflow rename must merge with unrelated edits made during saving',
+    );
     guard.discard();
     assert.equal(guard.isDirty(), false);
     assert.match(fields.promptRevisionTemplate, /Before saving/);

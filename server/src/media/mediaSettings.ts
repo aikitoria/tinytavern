@@ -1,5 +1,6 @@
 import {
   mediaInputSlots,
+  compileMediaWorkflow,
   mediaWorkflowError,
   NUMBERED_MEDIA_INPUT,
   MAX_MEDIA_INPUTS,
@@ -104,6 +105,18 @@ export function parseImageConfig(raw: unknown): MediaImageConfig {
   return { workflow, comfyUrl };
 }
 
+export function validateWorkflowSelection(
+  workflow: MediaWorkflow | undefined,
+  purpose: 'default' | 'avatar' | 'description' | 'shortcut',
+): void {
+  if (!workflow?.json.trim()) {
+    throw new HttpError(400, `Choose a configured ${purpose} workflow`);
+  }
+  if (purpose === 'description' && !workflow.textOutputNodeId) {
+    throw new HttpError(400, 'The description workflow needs a text output binding');
+  }
+}
+
 export function parseMediaRendering(value: unknown): MediaRenderingSettings | undefined {
   if (value === undefined) return undefined;
   const raw = object(value, 'mediaRendering');
@@ -114,20 +127,17 @@ export function parseMediaRendering(value: unknown): MediaRenderingSettings | un
   const workflows = raw.workflows.map((entry) => parseMediaWorkflow(entry, ids));
   if (new Set(workflows.map((workflow) => workflow.name.toLowerCase())).size !== workflows.length)
     throw new HttpError(400, 'Workflow names must be unique');
-  const select = (value: unknown, label: string) => {
-    const selected = nullableId(value, label);
-    if (selected && !workflows.some((item) => item.id === selected && item.json.trim()))
-      throw new HttpError(400, `Choose a configured ${label}`);
+  const workflowsById = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+  const select = (value: unknown, purpose: Parameters<typeof validateWorkflowSelection>[1]) => {
+    const selected = nullableId(value, `${purpose} workflow`);
+    if (selected) {
+      validateWorkflowSelection(workflowsById.get(selected), purpose);
+    }
     return selected;
   };
-  const defaultWorkflowId = select(raw.defaultWorkflowId, 'default workflow');
-  const avatarWorkflowId = select(raw.avatarWorkflowId, 'avatar workflow');
-  const descriptionWorkflowId = select(raw.descriptionWorkflowId, 'description workflow');
-  if (
-    descriptionWorkflowId &&
-    !workflows.find((item) => item.id === descriptionWorkflowId)?.textOutputNodeId
-  )
-    throw new HttpError(400, 'The description workflow needs a text output binding');
+  const defaultWorkflowId = select(raw.defaultWorkflowId, 'default');
+  const avatarWorkflowId = select(raw.avatarWorkflowId, 'avatar');
+  const descriptionWorkflowId = select(raw.descriptionWorkflowId, 'description');
   if (!Array.isArray(raw.shortcuts) || raw.shortcuts.length > 500)
     throw new HttpError(400, 'Invalid workflow shortcuts');
   const shortcutIds = new Set<string>();
@@ -136,7 +146,7 @@ export function parseMediaRendering(value: unknown): MediaRenderingSettings | un
     const shortcut = {
       id: id(item.id, 'shortcut ID'),
       name: string(item.name, 'shortcut name').trim(),
-      workflowId: select(item.workflowId, 'shortcut workflow'),
+      workflowId: select(item.workflowId, 'shortcut'),
     };
     if (
       !shortcut.name ||
@@ -225,7 +235,7 @@ export function parseMediaPrompts(
       ? ['chatPrompt']
       : ['systemPrompt', 'userMessage', 'reasoningPrefill', 'messagePrefill'];
     for (const field of Object.keys(item)) {
-      if (!['id', 'name', ...fields].includes(field))
+      if (!['id', 'name', 'folderId', 'revision', ...fields].includes(field))
         throw new HttpError(400, `Unexpected prompt field: ${field}`);
     }
     for (const field of fields) {
@@ -281,4 +291,11 @@ export function parseMediaFavorites(value: unknown): MediaFavorite[] | undefined
     ids.add(favorite.id);
     return favorite;
   });
+}
+
+/** Shared by whole-page settings writes and individual workflow/favorite edits. */
+export function supportsMediaFavorite(workflow: MediaWorkflow | undefined): boolean {
+  if (!workflow || !workflow.json.trim() || workflow.textOutputNodeId !== null) return false;
+  const compiled = compileMediaWorkflow(workflow.json);
+  return compiled.mediaInputs.length === 0 && compiled.slots.has('prompt');
 }

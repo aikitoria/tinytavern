@@ -429,8 +429,11 @@ databaseCase('media transfer', async () => {
         comfyUrl: 'http://private-user:private-secret@source-only:8588',
         timeoutSeconds: 1234,
         workflowId: workflow.id,
-        workflowValues: workflow.id === 'saved-edit' ? { strength: 0.8 } : {},
-        seed: workflow.id === 'saved-edit' ? 4294967295 : 0,
+        workflowName: 'Captured workflow name',
+        workflowParameters: [{ label: 'Captured setting', value: 42 }],
+        workflowValues: workflow.name === 'Edit with references' ? { strength: 0.8 } : {},
+        seed: workflow.name === 'Edit with references' ? 4294967295 : 0,
+        seedOverride: workflow.name === 'Edit with references' ? 4294967295 : null,
         temporary: true,
         executionSecret: 'must-not-export',
       }),
@@ -482,6 +485,10 @@ databaseCase('media transfer', async () => {
     'Repeated source/reference slots embed each raster only once',
   );
   assert.equal(portable.recipes!.length, 2, 'Export follows recipes on referenced images');
+  assert.equal(portable.recipes![0]!.workflowName, 'Captured workflow name');
+  assert.deepEqual(portable.recipes![0]!.workflowParameters, [
+    { label: 'Captured setting', value: 42 },
+  ]);
   assert.deepEqual(
     portable.recipes!.map((recipe) => recipe.seed),
     [4294967295, 0],
@@ -571,6 +578,7 @@ databaseCase('media transfer', async () => {
   );
   assert.equal(rerun.inputs.length, 3);
   assert.deepEqual(rerun.workflowValues, { strength: 0.8 });
+  assert.equal(rerun.seedOverride, 4294967295, 'Transfers retain the fixed seed setting');
   assert.equal(
     requireMediaWorkflow(rerun.workflowId!).json,
     requireMediaWorkflow(configuration.workflowId).json,
@@ -602,6 +610,11 @@ databaseCase('media transfer', async () => {
     ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map(
       (seed) => (value: typeof portable) => {
         Object.assign(value.recipes![0]!, { seed });
+      },
+    ),
+    ...[-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '123', false].map(
+      (seedOverride) => (value: typeof portable) => {
+        Object.assign(value.recipes![0]!, { seedOverride });
       },
     ),
   ];
@@ -673,6 +686,7 @@ databaseCase('media transfer', async () => {
   const missingReferences = structuredClone(portable);
   const editedRecipe = missingReferences.recipes![0]!;
   delete editedRecipe.seed;
+  delete editedRecipe.seedOverride;
   for (const input of editedRecipe.inputs) input.assetId = null;
   missingReferences.recipes = [editedRecipe];
   missingReferences.assets = missingReferences.assets.filter(

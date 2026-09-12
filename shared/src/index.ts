@@ -76,6 +76,8 @@ export interface Message {
 
 /** Gallery-owned image copy; source links are metadata, so source deletion preserves it. */
 export interface GalleryItem {
+  workflowName?: string | null;
+  workflowId?: string | null;
   id: number;
   folderId: number | null;
   characters: { id: number; name: string }[];
@@ -138,8 +140,9 @@ export interface ImageGenerationSettings {
   promptPresets?: Record<
     string,
     {
-      presets: { name: string; prompt: string; context?: string }[];
+      presets: { id?: string; name: string; prompt: string; context?: string }[];
       active: string;
+      activeId?: string | null;
     }
   >;
 }

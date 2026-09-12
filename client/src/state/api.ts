@@ -196,6 +196,12 @@ function avatarEntity<T>(name: string) {
 }
 
 export const api = {
+  mediaEntity: <T>(
+    table: string,
+    method: 'POST' | 'PATCH' | 'DELETE',
+    id: string | null,
+    body?: Record<string, unknown>,
+  ) => request<T>(method, `/api/${table}${id == null ? '' : `/${id}`}`, body),
   exportEntityPage: (type: TransferEntity) =>
     request<{ document: SettingsTransferDocument; snapshot: string }>(
       'GET',

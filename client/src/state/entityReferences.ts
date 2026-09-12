@@ -39,7 +39,7 @@ export function entityOption(
 
 export function entityOptions(
   kind: SettingsEntityKind,
-  items: readonly { id: number | string; name: string; folderId?: number | null }[],
+  items: readonly { id: number | string; name: string; folderId?: number | string | null }[],
 ): SelectOption[] {
   const sorted = collectionByName(items);
   const groups = new Map<number | string, { name: string; options: SelectOption[] }>();

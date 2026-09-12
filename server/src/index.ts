@@ -37,6 +37,7 @@ import './routes/characters.ts';
 import './routes/entityFolders.ts';
 import './routes/endpoints.ts';
 import './routes/settings.ts';
+import './routes/mediaEntities.ts';
 import './routes/conversationTransfer.ts';
 import './routes/draftCompletion.ts';
 import './routes/auth.ts';

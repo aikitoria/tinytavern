@@ -18,6 +18,8 @@ export type MediaInputBindings = Partial<
 >;
 
 export interface MediaWorkflow {
+  folderId?: string | null;
+  revision?: number;
   id: string;
   name: string;
   json: string;
@@ -29,16 +31,15 @@ export interface MediaWorkflow {
 }
 
 export interface MediaWorkflowShortcut {
+  revision?: number;
+  position?: number;
   id: string;
   name: string;
   workflowId: string;
 }
 
-export interface MediaFavorite {
-  id: string;
-  name: string;
+export interface MediaFavorite extends MediaWorkflowShortcut {
   presetId: string;
-  workflowId: string;
 }
 
 export type MediaCollectionFolder<K extends string> = { id: string; name: string } & Record<
@@ -61,6 +62,8 @@ export interface MediaRenderingSettings {
 }
 
 interface MediaPromptIdentity {
+  folderId?: string | null;
+  revision?: number;
   id: string;
   name: string;
 }
@@ -158,6 +161,8 @@ export interface MediaAssetInput {
 
 /** Original render metadata, independent of editable gallery annotations. */
 export interface MediaResultDetails {
+  workflowName?: string | null;
+  workflowParameters?: { label: string; value: string | number | boolean }[];
   workflowId: string | null;
   instruction: string;
   prompt: string;
@@ -186,6 +191,8 @@ export interface MediaInputFillContext {
 }
 
 export interface MediaJobDraft {
+  /** Null selects a fresh random seed for each render. */
+  seedOverride?: number | null;
   avatarContext?: MediaAvatarContext | null;
   fillInputs?: MediaInputFillContext;
   workflowValues?: MediaWorkflowValues;
@@ -261,6 +268,9 @@ export function mergeMediaProgress(
 }
 
 export interface MediaJob {
+  workflowName?: string | null;
+  workflowParameters?: { label: string; value: string | number | boolean }[];
+  seedOverride?: number | null;
   promptMessageId?: number | null;
   avatarContext?: MediaAvatarContext | null;
   /** Captured render associations, or current input/chat associations before capture. */

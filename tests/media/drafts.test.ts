@@ -14,7 +14,7 @@ test('media drafts', async () => {
   const { stmt, IMAGES_DIR, mediaAssetForPath } = await import('../../server/src/db/db.ts');
   const { makePlaceholderPng } = await import('../../server/src/characters/pngCard.ts');
   const { getSettings, putSettings } = await import('../../server/src/settings/settingsStore.ts');
-  const { createMediaJob, createMediaJobFromAsset, startMediaJob, deleteMediaJob } =
+  const { createMediaJob, createMediaJobFromAsset, editMediaJob, startMediaJob, deleteMediaJob } =
     await import('../../server/src/media/mediaJobs.ts');
   const { requireMediaJob, updateMediaJob, mediaJobDto, mediaDraft } =
     await import('../../server/src/media/mediaJobStore.ts');
@@ -84,6 +84,18 @@ test('media drafts', async () => {
     prompt: 'Typed but never generated',
     reviewBeforeSave: true,
   });
+  for (const seedOverride of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '42', true, {}, Infinity]) {
+    assert.throws(() => job({ seedOverride }), { status: 400 });
+    assert.throws(() => editMediaJob(requireMediaJob(unused.id), { seedOverride }), {
+      status: 400,
+    });
+  }
+  assert.equal(
+    editMediaJob(requireMediaJob(unused.id), { seedOverride: Number.MAX_SAFE_INTEGER })
+      .seedOverride,
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(editMediaJob(requireMediaJob(unused.id), { seedOverride: null }).seedOverride, null);
   discard(unused.id, { onlyUnstarted: true });
   assert.equal(stmt('SELECT id FROM media_jobs WHERE id = ?').get(unused.id), null);
   assert.equal(stmt('SELECT id FROM media_drafts WHERE id = ?').get(unused.draft!.id), null);
@@ -110,6 +122,7 @@ test('media drafts', async () => {
   discard(restarted.id);
 
   const first = job({
+    seedOverride: 0,
     prompt: 'First prompt',
     instruction: 'First instruction',
     contextConversationId: 1,
@@ -124,6 +137,7 @@ test('media drafts', async () => {
     { id: first.id },
   );
   start(first.id);
+  assert.equal(requireMediaJob(first.id).seed, 0, 'Zero is a fixed seed, not random');
   assert.throws(
     () => discard(first.id, { onlyUnstarted: true }),
     { status: 409 },
@@ -175,6 +189,7 @@ test('media drafts', async () => {
   assert.equal(firstResultDetails.seed, requireMediaJob(first.id).seed);
   assert.equal(firstResultDetails.instruction, 'First instruction');
   const second = job({ prompt: 'Second prompt', instruction: 'Second instruction' }, first.id);
+  assert.equal(second.seedOverride, 0, 'Variations inherit the requested seed');
   const accept = (assetId: number, options: Parameters<typeof acceptMediaVariation>[1] = {}) =>
     acceptMediaVariation(requireMediaJob(second.id), {
       assetId,
@@ -236,7 +251,19 @@ test('media drafts', async () => {
     firstAssets[0],
     'A fresh process recovers the unsaved selection',
   );
-  start(second.id);
+  editMediaJob(requireMediaJob(second.id), { seedOverride: null });
+  const random = Math.random;
+  Math.random = () => 0.5;
+  try {
+    start(second.id);
+  } finally {
+    Math.random = random;
+  }
+  assert.equal(
+    requireMediaJob(second.id).seed,
+    Math.floor(0.5 * 0xffff_ffff),
+    'Clearing an inherited fixed seed restores random generation',
+  );
   const runningSecond = requireMediaJob(second.id);
   const request = {
     assetId: firstAssets[0],
@@ -324,6 +351,11 @@ test('media drafts', async () => {
   );
 
   const acceptedRerun = createMediaJobFromAsset(firstAssets[0]!, { requestKey: newRequestId() });
+  assert.equal(
+    acceptedRerun.seedOverride,
+    0,
+    'Saved media retains the fixed seed setting after job deletion',
+  );
   assert.equal(
     acceptedRerun.instruction,
     'First instruction',
@@ -470,6 +502,7 @@ test('media drafts', async () => {
   const editWorkflow = {
     ...workflow,
     id: 'edit',
+    name: 'Edit',
     inputBindings: {},
     textOutputNodeId: null,
     json: '{"output":{"inputs":{"text":"{{prompt}}","image":"{{input1}}"}}}',

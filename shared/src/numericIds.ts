@@ -5,7 +5,7 @@ export function newRequestId(): string {
 }
 
 let collectionId = 0;
-/** Settings collections live in revision-guarded JSON drafts, rather than database entity rows. */
+/** Request-local draft IDs are replaced by server-assigned database IDs when saved. */
 export function nextCollectionId(items: readonly { id: string }[]): string {
   let next = Math.max(Date.now(), collectionId + 1);
   for (const item of items) {

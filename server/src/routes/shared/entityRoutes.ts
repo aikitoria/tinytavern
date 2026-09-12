@@ -1,7 +1,7 @@
 import { defineEntityTransfer } from './entityTransfer.ts';
 import { createEntityWriter } from './entityWriter.ts';
 import type { InvalidateEntity } from '@tinytavern/shared';
-import { stmt } from '../../db/db.ts';
+import { stmt, transaction } from '../../db/db.ts';
 import { invalidate } from '../../realtime/events.ts';
 import { route, HttpError } from '../../http/router.ts';
 import { clearSettingReference } from '../../settings/settingsStore.ts';
@@ -33,7 +33,15 @@ export interface EntityField<T> {
 
 export interface EntityConfig<T extends { id: number }> {
   /** Table name; also the /api/<table> route prefix and the invalidate entity. */
-  table: EntityTable & InvalidateEntity;
+  table: EntityTable;
+  invalidateEntity?: InvalidateEntity;
+  softDelete?: boolean;
+  revisionColumn?: string;
+  prepare?: (body: JsonObject, current: T | undefined) => JsonObject;
+  guard?: (body: JsonObject, current: T | undefined) => void;
+  afterWrite?: () => void;
+  prepareDelete?: (id: number) => void;
+  affectsGeneration?: boolean;
   toDto: (row: Record<string, unknown>) => T;
   /** Applied to every DTO leaving the API (e.g. strip secrets). */
   toPublic?: (dto: T) => T;
@@ -98,46 +106,84 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
   const writer = createEntityWriter(cfg);
   defineEntityTransfer(cfg, writer);
   const publish = (dto: T): T => (cfg.toPublic ? cfg.toPublic(dto) : dto);
+  const topic = cfg.invalidateEntity ?? (cfg.table as InvalidateEntity);
+  const row = (id: number) => {
+    const value = rowById(cfg.table, id);
+    if (cfg.softDelete && value.deleted_at != null)
+      throw new HttpError(404, 'This entity was deleted');
+    return value;
+  };
+  const write = <R>(
+    body: JsonObject,
+    current: Record<string, unknown> | undefined,
+    action: () => R,
+  ): R =>
+    transaction(() => {
+      cfg.guard?.(body, current ? cfg.toDto(current) : undefined);
+      const result = action();
+      cfg.afterWrite?.();
+      return result;
+    });
 
-  route.get(`/api/${cfg.table}`, () => rows(cfg.table).map(cfg.toDto).map(publish));
+  route.get(`/api/${cfg.table}`, () => {
+    const items = cfg.softDelete
+      ? stmt(
+          `SELECT * FROM ${cfg.table} WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id`,
+        ).all()
+      : rows(cfg.table);
+    return items.map(cfg.toDto).map(publish);
+  });
 
   route.post(`/api/${cfg.table}`, ({ body }) => {
     const b = objectBody(body);
-    const id = writer.insert(writer.values(b));
-    invalidate(cfg.table);
+    const id = write(b, undefined, () => writer.insert(writer.values(b)));
+    invalidate(topic);
     return publish(cfg.toDto(rowById(cfg.table, id)));
   });
 
   // Include noneditable columns (api_key, card_json); the unreferenced copy cannot affect prompts.
-  route.post(`/api/${cfg.table}/:id/duplicate`, ({ params }) => {
+  route.post(`/api/${cfg.table}/:id/duplicate`, ({ params, body }) => {
     const id = positiveId(params.id);
-    const row = rowById(cfg.table, id);
-    const copyColumns = Object.keys(row).filter(
-      (c) => c !== 'id' && c !== 'created_at' && c !== cfg.readOnlyColumn,
+    const source = row(id);
+    const copyColumns = Object.keys(source).filter(
+      (c) =>
+        c !== 'id' && c !== 'created_at' && c !== cfg.readOnlyColumn && c !== cfg.revisionColumn,
     );
-    const values = copyColumns.map((c) =>
-      c === 'name' ? `${String(row.name)} (copy)` : (row[c] as string | number | null),
+    const originalName = String(source.name);
+    let name = `${originalName} (copy)`;
+    let suffix = 2;
+    while (
+      stmt(
+        `SELECT id FROM ${cfg.table} WHERE name = ? COLLATE NOCASE${cfg.softDelete ? ' AND deleted_at IS NULL' : ''}`,
+      ).get(name)
+    ) {
+      name = `${originalName} (copy ${suffix++})`;
+    }
+    const values = copyColumns.map((column) =>
+      column === 'name' ? name : (source[column] as string | number | null),
     );
-    const result = stmt(
-      `INSERT INTO ${cfg.table} (${copyColumns.join(', ')}, created_at)
+    const result = write(body == null ? {} : objectBody(body), source, () =>
+      stmt(
+        `INSERT INTO ${cfg.table} (${copyColumns.join(', ')}, created_at)
        VALUES (${copyColumns.map(() => '?').join(', ')}, ?)`,
-    ).run(...values, Date.now());
+      ).run(...values, Date.now()),
+    );
     const newId = Number(result.lastInsertRowid);
     cfg.onDuplicate?.(id, newId);
-    invalidate(cfg.table);
+    invalidate(topic);
     return publish(cfg.toDto(rowById(cfg.table, newId)));
   });
 
   route.patch(`/api/${cfg.table}/:id`, ({ params, body }) => {
     const id = positiveId(params.id);
-    const row = rowById(cfg.table, id);
-    if (cfg.readOnlyColumn && row[cfg.readOnlyColumn] === 1) {
+    const current = row(id);
+    if (cfg.readOnlyColumn && current[cfg.readOnlyColumn] === 1) {
       throw new HttpError(403, 'This default is read-only. Duplicate it to make changes.');
     }
     const b = objectBody(body);
-    writer.update(id, writer.values(b, row));
-    invalidate(cfg.table);
-    if (Object.keys(b).some((key) => key !== 'folderId')) {
+    write(b, current, () => writer.update(id, writer.values(b, current)));
+    invalidate(topic);
+    if (cfg.affectsGeneration !== false && Object.keys(b).some((key) => key !== 'folderId')) {
       discardSpeculativeSwipes();
       bumpAllConversationRevisions();
       for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
@@ -146,10 +192,12 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
   });
 
   const afterDelete = (ids: number[]) => {
-    discardSpeculativeSwipes();
-    bumpAllConversationRevisions();
-    for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
-    invalidate(cfg.table);
+    if (cfg.affectsGeneration !== false) {
+      discardSpeculativeSwipes();
+      bumpAllConversationRevisions();
+      for (const conversationId of subscribedConversationIds()) broadcastTree(conversationId);
+    }
+    invalidate(topic);
     for (const entity of cfg.invalidateOnDelete ?? []) invalidate(entity);
     for (const id of ids) {
       if (cfg.settingsRef && clearSettingReference(cfg.settingsRef, id)) invalidate('settings');
@@ -167,13 +215,21 @@ export function defineEntityRoutes<T extends { id: number }>(cfg: EntityConfig<T
       return { deleted: ids.length };
     });
   }
-  route.del(`/api/${cfg.table}/:id`, ({ params }) => {
+  route.del(`/api/${cfg.table}/:id`, ({ params, body }) => {
     const id = positiveId(params.id);
-    const row = rowById(cfg.table, id);
-    if (cfg.readOnlyColumn && row[cfg.readOnlyColumn] === 1) {
+    const current = row(id);
+    if (cfg.readOnlyColumn && current[cfg.readOnlyColumn] === 1) {
       throw new HttpError(403, 'This default is read-only and cannot be deleted.');
     }
-    stmt(`DELETE FROM ${cfg.table} WHERE id = ?`).run(id);
+    write(body == null ? {} : objectBody(body), current, () => {
+      cfg.prepareDelete?.(id);
+      if (cfg.softDelete)
+        stmt(`UPDATE ${cfg.table} SET deleted_at = ?, revision = revision + 1 WHERE id = ?`).run(
+          Date.now(),
+          id,
+        );
+      else stmt(`DELETE FROM ${cfg.table} WHERE id = ?`).run(id);
+    });
     afterDelete([id]);
   });
 }

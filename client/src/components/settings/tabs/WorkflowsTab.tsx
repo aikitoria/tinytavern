@@ -2,12 +2,10 @@ import SettingsSection from '../SettingsSection.tsx';
 import { createMemo, createSignal } from 'solid-js';
 import { unwrap } from 'solid-js/store';
 import {
-  nextCollectionId,
   exportWorkflow,
   importWorkflow,
   exportWorkflowLibrary,
   importWorkflowLibrary,
-  namedItem,
   settingsFields,
   settingsReference,
   settingsDictionary,
@@ -15,6 +13,7 @@ import {
   type MediaWorkflow,
 } from '@tinytavern/shared';
 import { state } from '../../../state/store.ts';
+import { mediaEntityEditor } from '../../../state/mediaEntityEditor.ts';
 import { settingsCollection } from './settingsCollection.ts';
 import { createEntityEditor } from '../../../util.ts';
 import { useSettingsNavigation } from '../SettingsGuard.tsx';
@@ -53,40 +52,7 @@ export default function WorkflowsTab() {
     })),
   );
   const update = settingsCollection('mediaRendering');
-  const write = async (
-    id: string,
-    data: Partial<WorkflowItem>,
-    creating = false,
-  ): Promise<WorkflowItem> => {
-    const next = await update((current) => {
-      const existing = current.workflows.find((item) => item.id === id);
-      if (!creating && !existing)
-        throw new Error('This workflow was deleted. Discard to continue.');
-      const { folderId: _unused, ...empty } = blank();
-      const { folderId, ...fields } = data;
-      const workflow = { ...empty, ...existing, ...fields, id };
-      const workflows = creating
-        ? [...current.workflows, workflow]
-        : current.workflows.map((item) => (item.id === id ? workflow : item));
-      if (folderId && !current.folders.some((folder) => folder.id === folderId))
-        throw new Error('The selected folder no longer exists');
-      const folders =
-        folderId === undefined
-          ? current.folders
-          : current.folders.map((folder) => ({
-              ...folder,
-              workflowIds:
-                folder.id === folderId
-                  ? [...folder.workflowIds.filter((value) => value !== id), id]
-                  : folder.workflowIds.filter((value) => value !== id),
-            }));
-      return { ...current, workflows, folders };
-    });
-    return {
-      ...next.workflows.find((item) => item.id === id)!,
-      folderId: next.folders.find((folder) => folder.workflowIds.includes(id))?.id ?? null,
-    };
-  };
+  const entity = mediaEntityEditor<WorkflowItem>('workflows', items);
   const editor = createEntityEditor({
     items,
     initialId: () => state.settings.mediaRendering.defaultWorkflowId,
@@ -95,31 +61,7 @@ export default function WorkflowsTab() {
       const { id, ...fields } = draft();
       return fields;
     },
-    create: (data) => write(nextCollectionId(state.settings.mediaRendering.workflows), data, true),
-    patch: (id, data) => write(id, data),
-    duplicate: async (id) => {
-      const source = items().find((item) => item.id === id);
-      if (!source) throw new Error('The workflow no longer exists');
-      let name = `${source.name} (copy)`;
-      for (let index = 2; namedItem(items(), name); index++)
-        name = `${source.name} (copy ${index})`;
-      return write(nextCollectionId(items()), { ...source, name }, true);
-    },
-    remove: async (id) => {
-      await update((current) => ({
-        ...current,
-        workflows: current.workflows.filter((item) => item.id !== id),
-        folders: current.folders.map((folder) => ({
-          ...folder,
-          workflowIds: folder.workflowIds.filter((value) => value !== id),
-        })),
-        defaultWorkflowId: current.defaultWorkflowId === id ? null : current.defaultWorkflowId,
-        avatarWorkflowId: current.avatarWorkflowId === id ? null : current.avatarWorkflowId,
-        descriptionWorkflowId:
-          current.descriptionWorkflowId === id ? null : current.descriptionWorkflowId,
-        shortcuts: current.shortcuts.filter((item) => item.workflowId !== id),
-      }));
-    },
+    ...entity,
     deletePrompt: 'Delete this workflow?',
   });
   const folders = createFolderBrowser({
@@ -130,24 +72,7 @@ export default function WorkflowsTab() {
     select: editor.select,
     label: (item) => item.name,
     noun: 'workflows',
-    create: (name) =>
-      update((current) => ({
-        ...current,
-        folders: [
-          ...current.folders,
-          { id: nextCollectionId(current.folders), name, workflowIds: [] },
-        ],
-      })),
-    rename: (id, name) =>
-      update((current) => ({
-        ...current,
-        folders: current.folders.map((folder) => (folder.id === id ? { ...folder, name } : folder)),
-      })),
-    remove: (id) =>
-      update((current) => ({
-        ...current,
-        folders: current.folders.filter((folder) => folder.id !== id),
-      })),
+    ...entity.folders,
     onError: editor.setStatus,
   });
   const navigate = useSettingsNavigation();

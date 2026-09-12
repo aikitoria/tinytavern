@@ -12,7 +12,8 @@ import { api } from '../../../state/api.ts';
 import { createSavedFlash } from '../../../util.ts';
 import { useSettingsGuard } from '../SettingsGuard.tsx';
 import { createSettingsSubmission } from '../../../state/settingsSubmission.ts';
-import { mergeRemoteDraft } from '../../../state/editorSync.ts';
+import { mergeRemoteDraft, sameValue } from '../../../state/editorSync.ts';
+import { reconcileMediaDraft } from '../../../state/mediaDraftIds.ts';
 
 import type { ImageGenerationSettingsHandle } from '../../../images/imageGeneration.tsx';
 
@@ -41,12 +42,12 @@ export function mediaSettingsDraft() {
   };
   const rendering = createMemo(() => draft().mediaRendering);
   const favorites = createMemo(() => draft().mediaFavorites);
-  const [baseline, setBaseline] = createSignal(JSON.stringify(draft()));
+  const [baseline, setBaseline] = createSignal(snapshot());
   const [error, setError] = createSignal('');
   const [saved, flashSaved] = createSavedFlash();
   const submission = createSettingsSubmission({
     revision: () => state.settings.revision,
-    isDirty: () => JSON.stringify(readDraft()) !== baseline(),
+    isDirty: () => !sameValue(readDraft(), baseline()),
     snapshot: () => {
       imageFields?.validate();
       return readDraft();
@@ -56,25 +57,26 @@ export function mediaSettingsDraft() {
       const latest = snapshot();
       const merged = mergeRemoteDraft(remoteBase, readDraft(), latest, true);
       if (merged.conflicts.length) return false;
-      const clean = mergeRemoteDraft(remoteBase, JSON.parse(baseline()) as Draft, latest, true);
-      setDraft(merged.draft);
-      if (imageFields) imageFields.value = merged.draft.imageGeneration;
-      setBaseline(JSON.stringify(clean.draft));
+      const clean = mergeRemoteDraft(remoteBase, baseline(), latest, true);
+      writeDraft(merged.draft);
+      setBaseline(clean.draft);
       remoteBase = latest;
       return true;
     },
     accepted: (value, next) => {
+      const accepted = snapshot(next);
+      const current = reconcileMediaDraft(readDraft(), value, accepted);
       applySettings(next);
-      remoteBase = snapshot(next);
-      setBaseline(JSON.stringify(value));
+      remoteBase = accepted;
+      writeDraft(current);
+      setBaseline(accepted);
       flashSaved();
     },
     discard: () => {
       const next = snapshot();
       remoteBase = next;
-      setDraft(next);
-      if (imageFields) imageFields.value = next.imageGeneration;
-      setBaseline(JSON.stringify(readDraft()));
+      writeDraft(next);
+      setBaseline(structuredClone(readDraft()));
     },
     onError: setError,
   });

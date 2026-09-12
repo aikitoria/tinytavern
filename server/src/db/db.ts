@@ -5,6 +5,9 @@ type PreparedStatement = Statement<SqlRow, SQLQueryBindings[]>;
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
+import { MEDIA_ENTITY_SCHEMA, MEDIA_REFERENCE_INDEXES } from './mediaEntitySchema.ts';
+import { scalarSettings, writeMediaLibraries } from '../settings/mediaEntities.ts';
+import { migrateMediaEntities } from './mediaEntityMigration.ts';
 import type {
   Character,
   EntityFolder,
@@ -97,13 +100,13 @@ if (version === 0) {
       ).lastInsertRowid,
     );
     stmt('INSERT INTO characters (name, created_at) VALUES (?, ?)').run('Assistant', now);
-    stmt("INSERT INTO settings (key, value) VALUES ('app', ?)").run(
-      JSON.stringify({
-        ...DEFAULT_SETTINGS,
-        defaultPresetId: presetId,
-        defaultTemplateId: templateId,
-      }),
-    );
+    const settings = structuredClone({
+      ...DEFAULT_SETTINGS,
+      defaultPresetId: presetId,
+      defaultTemplateId: templateId,
+    });
+    writeMediaLibraries(settings);
+    stmt("INSERT INTO settings (key, value) VALUES ('app', ?)").run(scalarSettings(settings));
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   });
   version = SCHEMA_VERSION;
@@ -146,6 +149,15 @@ migrate(84, () => {
     ALTER TABLE media_jobs ADD COLUMN prompt_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL;
     CREATE UNIQUE INDEX media_drafts_conversation ON media_drafts(conversation_id) WHERE conversation_id IS NOT NULL;
     CREATE INDEX media_jobs_prompt_message ON media_jobs(prompt_message_id) WHERE prompt_message_id IS NOT NULL;`);
+});
+
+migrate(85, () => {
+  db.exec(MEDIA_ENTITY_SCHEMA);
+  db.exec(
+    'ALTER TABLE media_recipes ADD COLUMN workflow_id INTEGER REFERENCES media_workflows(id)',
+  );
+  migrateMediaEntities();
+  db.exec(MEDIA_REFERENCE_INDEXES);
 });
 
 // Text generations cannot resume after a restart; submitted media jobs recover separately.
@@ -301,6 +313,8 @@ export function toMessage(r: Row): Message {
 export function toGalleryItem(r: Row): GalleryItem {
   const characters = JSON.parse(String(r.characters_json)) as GalleryItem['characters'];
   return {
+    workflowId: (r.workflow_id as string | null) ?? null,
+    workflowName: (r.workflow_name as string | null) ?? null,
     id: r.id as number,
     folderId: (r.folder_id as number | null) ?? null,
     characters,

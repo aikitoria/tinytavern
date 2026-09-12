@@ -15,10 +15,11 @@ export function createEntityWriter<T extends { id: number }>(cfg: EntityConfig<T
   const columns = cfg.fields.map((field) => field.column);
   const insertSql = `INSERT INTO ${cfg.table} (${columns.join(', ')}, created_at)
     VALUES (${columns.map(() => '?').join(', ')}, ?)`;
-  const updateSql = `UPDATE ${cfg.table} SET ${columns.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`;
+  const updateSql = `UPDATE ${cfg.table} SET ${columns.map((column) => `${column} = ?`).join(', ')}${cfg.revisionColumn ? `, ${cfg.revisionColumn} = ${cfg.revisionColumn} + 1` : ''} WHERE id = ?`;
   return {
     values(body, current) {
       const dto = current ? cfg.toDto(current) : undefined;
+      body = cfg.prepare?.(body, dto) ?? body;
       return cfg.fields.map((field) => field.value(body, dto));
     },
     insert(values) {

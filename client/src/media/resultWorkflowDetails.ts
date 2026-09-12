@@ -1,26 +1,19 @@
-import { compileMediaWorkflow, type MediaJob, type MediaWorkflow } from '@tinytavern/shared';
+import type { MediaJob, MediaWorkflow } from '@tinytavern/shared';
 
-/** Resolve labels from the saved workflow and values from the result. */
+/** Historical details never infer labels or values from a mutable workflow. */
 export function resultWorkflowDetails(
-  job: Pick<MediaJob, 'workflowId' | 'workflowValues' | 'seed'>,
-  workflows: MediaWorkflow[],
+  job: Pick<
+    MediaJob,
+    'workflowId' | 'workflowValues' | 'seed' | 'workflowName' | 'workflowParameters'
+  >,
+  _workflows?: MediaWorkflow[],
 ) {
-  const workflow = workflows.find((workflow) => workflow.id === job.workflowId);
-  let available = false;
-  let parameters = Object.entries(job.workflowValues).map(([label, value]) => ({ label, value }));
-  if (workflow) {
-    try {
-      parameters = compileMediaWorkflow(workflow.json).controls.map((control) => ({
-        label: control.label,
-        value: job.workflowValues[control.key] ?? control.value,
-      }));
-      available = true;
-    } catch {
-      // Keep saved overrides readable if the current workflow cannot compile.
-    }
-  }
+  const available = job.workflowParameters !== undefined;
+  const parameters =
+    job.workflowParameters ??
+    Object.entries(job.workflowValues).map(([label, value]) => ({ label, value }));
   return {
-    name: workflow?.name ?? 'Unavailable',
+    name: job.workflowName ?? 'Unavailable',
     seed: job.seed,
     available,
     parameters: parameters.map(({ label, value }) => ({

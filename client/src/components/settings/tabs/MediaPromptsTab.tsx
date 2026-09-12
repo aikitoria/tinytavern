@@ -2,8 +2,6 @@ import { For, Show, createMemo, createSignal } from 'solid-js';
 import SettingsSection from '../SettingsSection.tsx';
 import { unwrap } from 'solid-js/store';
 import {
-  nextCollectionId,
-  namedItem,
   settingsFields,
   settingsReference,
   exportPromptCollection,
@@ -17,6 +15,7 @@ import {
   type StandalonePromptTemplate,
 } from '@tinytavern/shared';
 import { state } from '../../../state/store.ts';
+import { mediaEntityEditor } from '../../../state/mediaEntityEditor.ts';
 import { selectMediaPromptPreset } from '../../../state/settingsSelection.ts';
 import { createEntityEditor } from '../../../util.ts';
 import FormField from '../../forms/FormFields.tsx';
@@ -55,42 +54,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
       folderId: folderMap().get(preset.id) ?? null,
     })),
   );
-  const write = async (
-    id: string,
-    data: Partial<PromptItem>,
-    creating = false,
-  ): Promise<PromptItem> => {
-    const next = await update((current) => {
-      const existing = current.presets.find((item) => item.id === id);
-      if (!creating && !existing) throw new Error('This preset was deleted. Discard to continue.');
-      const { folderId: _unused, ...empty } = blank();
-      const { folderId, ...fields } = data;
-      const preset = { ...empty, ...existing, ...fields, id } as MediaPromptPreset;
-      if (folderId && !current.folders.some((folder) => folder.id === folderId))
-        throw new Error('The selected folder no longer exists');
-      return {
-        ...current,
-        presets: creating
-          ? [...current.presets, preset]
-          : current.presets.map((item) => (item.id === id ? preset : item)),
-        defaultPresetId: creating ? id : current.defaultPresetId,
-        folders:
-          folderId === undefined
-            ? current.folders
-            : current.folders.map((folder) => ({
-                ...folder,
-                presetIds:
-                  folder.id === folderId
-                    ? [...folder.presetIds.filter((value) => value !== id), id]
-                    : folder.presetIds.filter((value) => value !== id),
-              })),
-      };
-    });
-    return {
-      ...next.presets.find((item) => item.id === id)!,
-      folderId: next.folders.find((folder) => folder.presetIds.includes(id))?.id ?? null,
-    };
-  };
+  const entity = mediaEntityEditor<PromptItem>(key, items);
   const editor = createEntityEditor({
     items,
     initialId: () => collection().defaultPresetId,
@@ -99,27 +63,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
       const { id, ...fields } = draft();
       return fields;
     },
-    create: (data) => write(nextCollectionId(collection().presets), data, true),
-    patch: (id, data) => write(id, data),
-    duplicate: async (id) => {
-      const source = items().find((item) => item.id === id);
-      if (!source) throw new Error('The preset no longer exists');
-      let name = `${source.name} (copy)`;
-      for (let index = 2; namedItem(items(), name); index++)
-        name = `${source.name} (copy ${index})`;
-      return write(nextCollectionId(items()), { ...source, name }, true);
-    },
-    remove: async (id) => {
-      await update((current) => ({
-        ...current,
-        presets: current.presets.filter((item) => item.id !== id),
-        defaultPresetId: current.defaultPresetId === id ? null : current.defaultPresetId,
-        folders: current.folders.map((folder) => ({
-          ...folder,
-          presetIds: folder.presetIds.filter((value) => value !== id),
-        })),
-      }));
-    },
+    ...entity,
     activate: (id) => selectMediaPromptPreset(key, id),
     deletePrompt: 'Delete this preset?',
   });
@@ -132,24 +76,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
     activeId: () => collection().defaultPresetId,
     label: (item) => item.name,
     noun: 'presets',
-    create: (name) =>
-      update((current) => ({
-        ...current,
-        folders: [
-          ...current.folders,
-          { id: nextCollectionId(current.folders), name, presetIds: [] },
-        ],
-      })),
-    rename: (id, name) =>
-      update((current) => ({
-        ...current,
-        folders: current.folders.map((folder) => (folder.id === id ? { ...folder, name } : folder)),
-      })),
-    remove: (id) =>
-      update((current) => ({
-        ...current,
-        folders: current.folders.filter((folder) => folder.id !== id),
-      })),
+    ...entity.folders,
     onError: editor.setStatus,
   });
   const navigate = useSettingsNavigation();
@@ -253,7 +180,7 @@ function MediaPromptsPage(props: { chat: boolean }) {
       type={`media-prompt:${props.chat ? 'chat' : 'standalone'}`}
       onError={editor.setStatus}
       exportData={() => {
-        const { id, folderId, ...value } = draft();
+        const { id, folderId, revision, ...value } = draft();
         return { ...value, name: value.name || 'Default (imported)' };
       }}
       importData={(data) => {

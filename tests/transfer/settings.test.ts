@@ -39,6 +39,22 @@ test('settings transfer', async () => {
   const portrait = { name: 'Portrait', prompt: 'Paint a portrait', context: '{{description}}' };
   const imageSet = { presets: [portrait], active: portrait.name };
   assert.deepEqual(importImagePromptSet(imageSet, { presets: [], active: '' }, true), imageSet);
+  const identified = { presets: [{ ...portrait, id: '7' }], active: portrait.name, activeId: '7' };
+  const importedAvatar = importImagePromptSet(
+    {
+      presets: [{ ...portrait, id: 'foreign-id', prompt: 'Imported portrait' }],
+      active: portrait.name,
+    },
+    identified,
+    true,
+  );
+  assert.equal(
+    importedAvatar.presets[0]!.id,
+    '7',
+    'Name-based imports retain local IDs and ignore imported identities',
+  );
+  assert.equal(importedAvatar.presets[0]!.prompt, 'Imported portrait');
+
   const references = {
     presets: [{ name: 'Reference style', prompt: '{{instruction}}: {{input1_prompt}}' }],
     active: 'Reference style',
@@ -284,12 +300,23 @@ test('settings transfer', async () => {
         promptPresets: { avatar: { presets: [portrait], active: 'portrait' } },
       },
     });
-    assert.deepEqual(saved.imageGeneration.promptPresets.avatar, imageSet);
+    const avatarId = saved.imageGeneration.promptPresets.avatar.presets[0].id;
+    assert.match(avatarId, /^[1-9][0-9]*$/);
+    assert.deepEqual(
+      saved.imageGeneration.promptPresets.avatar.presets.map(
+        ({ id, folderId, revision, ...preset }: any) => preset,
+      ),
+      imageSet.presets,
+    );
+    assert.equal(saved.imageGeneration.promptPresets.avatar.activeId, avatarId);
     assert.deepEqual(
       getSettings().imageGeneration.promptPresets?.avatar,
-      imageSet,
-      'The server persists the canonical avatar preset selection returned by validation',
+      saved.imageGeneration.promptPresets.avatar,
     );
+    settings.mediaRendering = saved.mediaRendering;
+    settings.mediaChatPrompts = saved.mediaChatPrompts;
+    settings.mediaStandalonePrompts = saved.mediaStandalonePrompts;
+    Object.assign(workflow, saved.mediaRendering.workflows[0]);
     for (const key of ['mediaChatPrompts', 'mediaStandalonePrompts'] as const) {
       const before = saved[key];
       saved = await request('PUT', '/api/settings', {
@@ -297,8 +324,8 @@ test('settings transfer', async () => {
         [key]: { ...before, folders: [] },
       });
       assert.deepEqual(
-        saved[key].presets,
-        before.presets,
+        saved[key].presets.map(({ folderId, revision, ...item }: any) => item),
+        before.presets.map(({ folderId, revision, ...item }: any) => item),
         'Deleting a folder preserves its prompts',
       );
       assert.equal(saved[key].defaultPresetId, before.defaultPresetId);
@@ -311,13 +338,17 @@ test('settings transfer', async () => {
         expectedRevision: saved.revision,
         [key]: before,
       });
+      settings[key] = saved[key];
     }
     saved = await request('PUT', '/api/settings', {
       expectedRevision: saved.revision,
-      mediaChatPrompts: chat,
+      mediaChatPrompts: importPromptCollection(promptFile, saved.mediaChatPrompts, true),
     });
     assert.deepEqual(saved.mediaStandalonePrompts, settings.mediaStandalonePrompts);
-    assert.equal(saved.mediaRendering.workflows[0].standalonePromptPresetId, 'gallery-local');
+    assert.equal(
+      saved.mediaRendering.workflows[0].standalonePromptPresetId,
+      settings.mediaStandalonePrompts.presets[0]!.id,
+    );
     await request(
       'PUT',
       '/api/settings',
@@ -328,13 +359,14 @@ test('settings transfer', async () => {
     const favorite = {
       id: 'favorite',
       name: 'Favorite',
-      presetId: 'chat-local',
+      presetId: saved.mediaChatPrompts.presets[0].id,
       workflowId: workflow.id,
     };
     saved = await request('PUT', '/api/settings', {
       expectedRevision: saved.revision,
       mediaFavorites: [favorite],
     });
+    favorite.id = saved.mediaFavorites[0].id;
     const { exportMediaFavorites, importMediaFavorites } = await import('@tinytavern/shared');
     const portableFavorites = exportMediaFavorites(getSettings());
     assert.deepEqual(portableFavorites, [

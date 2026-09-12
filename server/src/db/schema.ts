@@ -1,8 +1,10 @@
 /** Fresh databases are created directly at this version. Keep it aligned with db.ts migrations. */
-export const SCHEMA_VERSION = 84;
+import { MEDIA_ENTITY_SCHEMA, MEDIA_REFERENCE_INDEXES } from './mediaEntitySchema.ts';
+export const SCHEMA_VERSION = 85;
 
 /** Current schema only; SQLite creates the FTS shadow tables itself. */
 export const SCHEMA_SQL = `
+${MEDIA_ENTITY_SCHEMA}
 -- Tables
 
 CREATE TABLE settings (
@@ -179,6 +181,7 @@ CREATE TABLE gallery_items (
 
 CREATE TABLE media_recipes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id INTEGER REFERENCES media_workflows(id),
   prompt TEXT NOT NULL,
   configuration_json TEXT NOT NULL,
   inputs_json TEXT NOT NULL DEFAULT '[]',
@@ -217,8 +220,10 @@ CREATE TABLE media_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   revision INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'draft',
-  workflow_id TEXT,
-  preset_id TEXT,
+  workflow_id TEXT REFERENCES media_workflows(id),
+  chat_preset_id INTEGER REFERENCES media_chat_prompts(id),
+  standalone_preset_id INTEGER REFERENCES media_standalone_prompts(id),
+  preset_id TEXT GENERATED ALWAYS AS (COALESCE(CAST(chat_preset_id AS TEXT), CAST(standalone_preset_id AS TEXT))) VIRTUAL,
   instruction TEXT NOT NULL DEFAULT '',
   prompt TEXT NOT NULL DEFAULT '',
   result_text TEXT,
@@ -285,6 +290,8 @@ CREATE TABLE media_characters (
 );
 
 -- Indexes
+
+${MEDIA_REFERENCE_INDEXES}
 
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
 

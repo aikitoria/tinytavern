@@ -2,7 +2,6 @@ import { requireMediaWorkflow } from '../media/mediaWorkflows.ts';
 import { invalidate } from '../realtime/events.ts';
 import { setMediaCharacters } from '../media/mediaCharacters.ts';
 import {
-  nextCollectionId,
   namedItem,
   mediaInputSlots,
   compileMediaWorkflow,
@@ -10,13 +9,15 @@ import {
   type MediaWorkflowValues,
   type MediaInputSlot,
   type MediaWorkflow,
+  type MediaResultDetails,
 } from '@tinytavern/shared';
 import { invalidateMediaAsset, mediaAssetForPath, stmt } from '../db/db.ts';
 import { copyImage, saveImage } from '../media/images.ts';
 import { HttpError } from '../http/router.ts';
 import { parseMediaWorkflow } from '../media/mediaSettings.ts';
 import { requireString } from '../http/validation.ts';
-import { getSettings, putSettings } from '../settings/settingsStore.ts';
+import { getSettings, touchMediaSettings } from '../settings/settingsStore.ts';
+import { insertMediaEntity } from '../settings/mediaEntities.ts';
 import {
   mediaRecipeSeed,
   saveMediaRecipe,
@@ -24,9 +25,13 @@ import {
   type MediaRecipeInput,
 } from '../media/mediaRecipes.ts';
 
-export interface TransferImageRecipe {
+export interface TransferImageRecipe extends Pick<
+  MediaResultDetails,
+  'workflowName' | 'workflowParameters'
+> {
   workflowValues?: MediaWorkflowValues;
   seed?: number | null;
+  seedOverride?: number | null;
   id: string;
   prompt: string;
   instruction: string;
@@ -59,11 +64,14 @@ export function exportImageRecipes(
       const configuration = JSON.parse(
         String(row.configuration_json),
       ) as MediaRecipe['configuration'];
-      const workflow = requireMediaWorkflow(configuration.workflowId);
+      const workflow = requireMediaWorkflow(configuration.workflowId, true);
       const inputs = JSON.parse(String(row.inputs_json)) as MediaRecipeInput[];
       recipe = {
         workflowValues: configuration.workflowValues,
+        workflowName: configuration.workflowName,
+        workflowParameters: configuration.workflowParameters,
         seed: mediaRecipeSeed({ id: recipeId, configuration }),
+        seedOverride: configuration.seedOverride ?? null,
         id: `recipe-${recipes.size + 1}`,
         prompt: String(row.prompt),
         instruction: String(row.instruction),
@@ -187,6 +195,36 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
     if (seed !== null && (typeof seed !== 'number' || !Number.isSafeInteger(seed) || seed < 0)) {
       throw new HttpError(400, 'Image recipe seed must be a non-negative safe integer or null');
     }
+    const seedOverride = source.seedOverride ?? null;
+    if (
+      seedOverride !== null &&
+      (typeof seedOverride !== 'number' || !Number.isSafeInteger(seedOverride) || seedOverride < 0)
+    ) {
+      throw new HttpError(
+        400,
+        'Image recipe seed override must be a non-negative safe integer or null',
+      );
+    }
+    const workflowName =
+      source.workflowName == null ? undefined : text(source.workflowName, 'workflow name', 1000);
+    let workflowParameters: MediaResultDetails['workflowParameters'];
+    if (source.workflowParameters !== undefined) {
+      if (!Array.isArray(source.workflowParameters) || source.workflowParameters.length > 1024) {
+        throw new HttpError(400, 'Invalid saved workflow parameters');
+      }
+      workflowParameters = source.workflowParameters.map((raw) => {
+        const parameter = object(raw);
+        const value = parameter.value;
+        if (
+          typeof value !== 'string' &&
+          typeof value !== 'boolean' &&
+          !(typeof value === 'number' && Number.isFinite(value))
+        ) {
+          throw new HttpError(400, 'Invalid saved workflow parameter value');
+        }
+        return { label: text(parameter.label, 'parameter label', 1000), value };
+      });
+    }
     recipes.set(id, {
       id,
       prompt: text(source.prompt, 'prompt'),
@@ -194,7 +232,10 @@ export function parseImageRecipes(raw: unknown): Map<string, TransferImageRecipe
       workflow,
       inputs,
       workflowValues,
+      workflowName,
+      workflowParameters,
       seed,
+      seedOverride,
     });
   }
   return recipes;
@@ -291,7 +332,10 @@ export function importRecipeImages(
     }));
     let workflow = namedItem(rendering.workflows, recipe.workflow.name);
     if (!workflow) {
-      workflow = { ...recipe.workflow, id: nextCollectionId(rendering.workflows) };
+      workflow = {
+        ...recipe.workflow,
+        id: insertMediaEntity('media_workflows', { ...recipe.workflow }),
+      };
       rendering.workflows.push(workflow);
       addedWorkflow = true;
     }
@@ -301,6 +345,9 @@ export function importRecipeImages(
         timeoutSeconds: rendering.jobTimeoutSeconds,
         workflowId: workflow.id,
         workflowValues: recipe.workflowValues,
+        workflowName: recipe.workflowName,
+        workflowParameters: recipe.workflowParameters,
+        seedOverride: recipe.seedOverride,
       },
       inputs,
       recipe.prompt,
@@ -309,7 +356,7 @@ export function importRecipeImages(
     recipeIds.set(recipe.id, id);
   }
   if (addedWorkflow) {
-    putSettings({ ...settings, revision: settings.revision + 1 });
+    touchMediaSettings();
     invalidate('settings');
   }
   for (const [id, asset] of assets) {
