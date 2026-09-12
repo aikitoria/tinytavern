@@ -14,14 +14,24 @@ const savedTime = new Intl.DateTimeFormat(undefined, {
 });
 const durationSeconds = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 
-function GalleryVideoPreview(props: { url: string }) {
+function GalleryVideoPreview(props: { url: string; audible: boolean }) {
   let player!: HTMLVideoElement;
   const [playing, setPlaying] = createSignal(false);
 
-  onMount(() => {
-    player.muted = true;
+  createEffect(() => {
+    const audible = props.audible;
+    let current = true;
+    player.muted = !audible;
     void player.play().catch(() => {
-      // Leave the poster visible when playback is unavailable.
+      if (!current || !audible) return;
+      // Hover may not grant audio permission. Keep the preview playing silently.
+      player.muted = true;
+      void player.play().catch(() => {
+        // Leave the poster visible when playback is unavailable.
+      });
+    });
+    onCleanup(() => {
+      current = false;
     });
   });
   onCleanup(() => {
@@ -64,6 +74,7 @@ function GalleryTile(props: {
   selectionNumber?: number;
 }) {
   const [failed, setFailed] = createSignal(false);
+  const [hovered, setHovered] = createSignal(false);
   const video = () => props.cell.item.media?.kind === 'video';
   const kind = () => (video() ? 'video' : 'image');
   const summary = createMemo(() => {
@@ -88,6 +99,9 @@ function GalleryTile(props: {
     <div
       class="gallery-tile overflow-hidden absolute bg-panel rounded-tight [&::after]:absolute [&::after]:inset-0 [&::after]:rounded-[inherit] [&::after]:pointer-events-none [&.selected::after]:border-2 [&.selected::after]:border-solid [&.selected::after]:border-accent [&:focus-within::after]:border-2 [&:focus-within::after]:border-solid [&:focus-within::after]:border-accent [&.selecting_.gallery-image-button]:cursor-pointer [&.selecting_.gallery-image-button:disabled]:opacity-45 [&.selecting_.gallery-image-button:disabled]:cursor-wait [&:hover_.gallery-tile-caption]:opacity-100 [&:focus-within_.gallery-tile-caption]:opacity-100 [&.selected_.gallery-selection-check]:border-accent [&.selected_.gallery-selection-check]:bg-accent"
       classList={{ selected: props.selected, selecting: props.selecting }}
+      onPointerEnter={(event) => setHovered(event.pointerType !== 'touch')}
+      onPointerLeave={() => setHovered(false)}
+      onPointerCancel={() => setHovered(false)}
       role="listitem"
       style={{
         top: `${props.top}px`,
@@ -122,7 +136,7 @@ function GalleryTile(props: {
           />
         </Show>
         <Show when={props.preview && video()}>
-          <GalleryVideoPreview url={props.cell.item.media!.url} />
+          <GalleryVideoPreview url={props.cell.item.media!.url} audible={hovered()} />
         </Show>
         <Show when={video()}>
           <span
