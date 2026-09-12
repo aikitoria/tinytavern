@@ -1,6 +1,6 @@
-import { useDialogActive, useDialogNavigationGuard, useDialogPage } from '../../state/dialogContext.ts';
+import { useDialogNavigationGuard, useDialogPage } from '../../state/dialogContext.ts';
 import { readPageLocation, writePageLocation } from '../../state/pageLocation.ts';
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
@@ -54,22 +54,6 @@ const TABS: { key: string; label: string; group: string; component: Component }[
   },
 ];
 
-const canScroll = (element: HTMLElement, deltaY: number) =>
-  deltaY < 0 ? element.scrollTop > 1 : element.scrollTop + element.clientHeight < element.scrollHeight - 1;
-
-/** Scroll ownership varies by tab: modal body or detail form. */
-function settingsScrollOwner(area: HTMLTextAreaElement): HTMLElement | null {
-  const modal = area.closest<HTMLElement>('.settings-modal');
-  for (let element = area.parentElement; element; element = element.parentElement) {
-    const overflow = getComputedStyle(element).overflowY;
-    if ((overflow === 'auto' || overflow === 'scroll') && element.scrollHeight > element.clientHeight) {
-      return element;
-    }
-    if (element === modal) break;
-  }
-  return null;
-}
-
 export default function SettingsModal() {
   const [actionsTarget, setActionsTarget] = createSignal<HTMLElement>();
   const page = useDialogPage()();
@@ -77,32 +61,10 @@ export default function SettingsModal() {
   const [tab, setTab] = createSignal(TABS.some((item) => item.key === initialTab) ? initialTab! : 'general');
   const navigation = createSettingsNavigation();
   useDialogNavigationGuard(navigation.navigate);
-  const paneActive = useDialogActive();
   const activeTab = () => TABS.find((item) => item.key === tab()) ?? TABS.find((item) => item.key === 'general')!;
   let sectionPicker!: SelectHandle;
   let contentEl!: HTMLDivElement;
   const leaveSettings = () => navigation.navigate(() => openModal(null));
-
-  const onWheel = (event: WheelEvent) => {
-    if (!paneActive()) return;
-    if (!event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const area = target.closest<HTMLTextAreaElement>('.settings-modal textarea');
-    if (!area) return;
-    // Focus opts into native textarea scrolling, including boundary behavior.
-    if (document.activeElement === area) return;
-    const owner = settingsScrollOwner(area);
-    if (!owner || !canScroll(owner, event.deltaY)) return;
-
-    // Hover alone should never trap settings scroll.
-    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? owner.clientHeight : 1;
-    event.preventDefault();
-    owner.scrollTop += event.deltaY * scale;
-  };
-
-  onMount(() => document.addEventListener('wheel', onWheel, { capture: true, passive: false }));
-  onCleanup(() => document.removeEventListener('wheel', onWheel, true));
 
   const chooseTab = (key: string, after?: () => void) => {
     if (key !== tab())

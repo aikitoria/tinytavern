@@ -1,5 +1,14 @@
 /* Settings layout uses the same page shell and controls as Gallery. */
 
+.settings-modal textarea {
+  field-sizing: content;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  flex-shrink: 0;
+  resize: none;
+}
+
 .settings-table {
   @apply border-collapse text-label;
 }
