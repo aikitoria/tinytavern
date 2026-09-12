@@ -97,8 +97,8 @@ markdownRenderer.html = (token) => {
 markdownRenderer.image = ({ text }) =>
   `<span class="text-muted italic text-[0.9em]">${escapeHtml(text.trim() || 'Media omitted')}</span>`;
 
-/** Hide angle-bracket model instructions, preserving code and multiline text. */
-function hideAngleInstructions(src: string): string {
+/** Hide model instructions in chat or display them literally, preserving code and multiline text. */
+function formatAngleInstructions(src: string, preserve: boolean): string {
   let out = '';
   let i = 0;
   let fenceTicks = 0;
@@ -139,6 +139,9 @@ function hideAngleInstructions(src: string): string {
       const newline = src.indexOf('\n', i + 1);
       const nestedOpen = src.indexOf('<', i + 1);
       if (close !== -1 && (newline === -1 || close < newline) && (nestedOpen === -1 || close < nestedOpen)) {
+        if (preserve) {
+          out += escapeHtml(src.slice(i, close + 1));
+        }
         i = close + 1;
         continue;
       }
@@ -188,6 +191,7 @@ export default function Markdown(props: {
   selectedPromptText?: string;
   promptSelectionDisabled?: boolean;
   showMediaMenu?: boolean;
+  preserveAngleInstructions?: boolean;
 }) {
   const [html, setHtml] = createSignal('');
   const [menuAnchor, setMenuAnchor] = createSignal<HTMLButtonElement>();
@@ -232,7 +236,10 @@ export default function Markdown(props: {
 
   const render = () => {
     closeMenu();
-    const src = hideAngleInstructions(props.streaming ? autoclose(props.content) : props.content);
+    const src = formatAngleInstructions(
+      props.streaming ? autoclose(props.content) : props.content,
+      props.preserveAngleInstructions === true,
+    );
     hasCodeBlocks = false;
     const parsed = marked.parse(markQuotes(src), { async: false, renderer: markdownRenderer });
     setHtml(DOMPurify.sanitize(parsed, { FORBID_TAGS: FORBIDDEN_MEDIA_TAGS }));

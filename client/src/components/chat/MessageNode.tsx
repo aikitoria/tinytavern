@@ -670,6 +670,7 @@ export default function MessageNode(props: { message: Message; inMap?: boolean; 
                     view.promptSelectionDisabled?.() || !['done', 'stopped'].includes(props.message.status)
                   }
                   showMediaMenu={!view.embedded}
+                  preserveAngleInstructions={view.embedded}
                 />
               </div>
             )}
